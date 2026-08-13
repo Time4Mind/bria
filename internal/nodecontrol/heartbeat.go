@@ -74,7 +74,7 @@ func (c *ConsensusHeartbeatCommitter) CommitHeartbeat(
 		clusterstate.PublishNodeHeartbeat{
 			NodeID: domain.NodeID(report.NodeID), BootID: report.BootID,
 			Version: report.Version, OS: report.OS, Arch: report.Arch,
-			CertificateFingerprint: report.CertificateFingerprint,
+			CertificateFingerprint:         report.CertificateFingerprint,
 			PreviousCertificateFingerprint: report.PreviousCertificateFingerprint,
 			Backends:                       report.Backends,
 			Archives:                       report.Archives, Interactive: report.Interactive,
