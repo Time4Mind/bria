@@ -79,7 +79,7 @@ func TestHeartbeatAndOfflineTimeoutPreserveLastEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	seenAt := time.Unix(100, 0).UTC()
-	plan, err := state.PublishNodeHeartbeat("node", "boot", "v1", "", "", nil, nil, nil, nil, seenAt)
+	plan, err := state.PublishNodeHeartbeat("node", "boot", "v1", "", "", "", "", nil, nil, nil, nil, seenAt)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +107,7 @@ func TestHeartbeatPinsAndRotatesNodeCertificateFingerprint(t *testing.T) {
 	second := strings.Repeat("b", 64)
 	at := time.Unix(100, 0).UTC()
 	if _, err := state.PublishNodeHeartbeat(
-		"node", "boot", "v1", first, "", nil, nil, nil, nil, at,
+		"node", "boot", "v1", "", "", first, "", nil, nil, nil, nil, at,
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +115,7 @@ func TestHeartbeatPinsAndRotatesNodeCertificateFingerprint(t *testing.T) {
 		t.Fatalf("pinned fingerprint=%q", got)
 	}
 	if _, err := state.PublishNodeHeartbeat(
-		"node", "boot", "v1", second, strings.Repeat("c", 64), nil, nil, nil, nil,
+		"node", "boot", "v1", "", "", second, strings.Repeat("c", 64), nil, nil, nil, nil,
 		at.Add(time.Second),
 	); err == nil {
 		t.Fatal("unlinked certificate rotation accepted")
@@ -124,7 +124,7 @@ func TestHeartbeatPinsAndRotatesNodeCertificateFingerprint(t *testing.T) {
 		t.Fatalf("rejected rotation changed fingerprint=%q", got)
 	}
 	if _, err := state.PublishNodeHeartbeat(
-		"node", "boot", "v1", second, first, nil, nil, nil, nil, at.Add(2*time.Second),
+		"node", "boot", "v1", "", "", second, first, nil, nil, nil, nil, at.Add(2*time.Second),
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +154,7 @@ func TestHeartbeatPublishesAndClearsBoundedInteractivePrompt(t *testing.T) {
 		Kind: "codex_approval", Hash: "0123456789abcdef0123456789abcdef",
 	}
 	if _, err := state.PublishNodeHeartbeat(
-		"node", "boot", "v1", "", "", nil, nil, []domain.InteractivePromptReport{report}, nil, created,
+		"node", "boot", "v1", "", "", "", "", nil, nil, []domain.InteractivePromptReport{report}, nil, created,
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +165,7 @@ func TestHeartbeatPublishesAndClearsBoundedInteractivePrompt(t *testing.T) {
 	}
 	report.Present, report.Kind, report.Hash = false, "", ""
 	if _, err := state.PublishNodeHeartbeat(
-		"node", "boot", "v1", "", "", nil, nil, []domain.InteractivePromptReport{report}, nil, created.Add(time.Second),
+		"node", "boot", "v1", "", "", "", "", nil, nil, []domain.InteractivePromptReport{report}, nil, created.Add(time.Second),
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -182,7 +182,7 @@ func TestInvalidInteractiveHeartbeatDoesNotPartiallyMutateNode(t *testing.T) {
 	}
 	before := state.Nodes["node"]
 	_, err := state.PublishNodeHeartbeat(
-		"node", "boot", "changed", "", "", nil, nil, []domain.InteractivePromptReport{{
+		"node", "boot", "changed", "", "", "", "", nil, nil, []domain.InteractivePromptReport{{
 			SessionID: "session", Generation: 1, Present: true, Kind: "permission", Hash: "bad",
 		}}, nil, time.Unix(100, 0).UTC(),
 	)
@@ -214,7 +214,7 @@ func TestHeartbeatReconcilesMissedTranscriptFinalWithoutTranscriptBody(t *testin
 		Digest: strings.Repeat("a", 64),
 	}
 	if _, err := state.PublishNodeHeartbeat(
-		"node", "boot", "v1", "", "", nil, nil, nil, []domain.TranscriptFinalReport{report},
+		"node", "boot", "v1", "", "", "", "", nil, nil, nil, []domain.TranscriptFinalReport{report},
 		finalAt.Add(time.Second),
 	); err != nil {
 		t.Fatal(err)
@@ -224,7 +224,7 @@ func TestHeartbeatReconcilesMissedTranscriptFinalWithoutTranscriptBody(t *testin
 		t.Fatalf("settled session=%#v", session)
 	}
 	if _, err := state.PublishNodeHeartbeat(
-		"node", "boot", "v1", "", "", nil, nil, nil, []domain.TranscriptFinalReport{report},
+		"node", "boot", "v1", "", "", "", "", nil, nil, nil, []domain.TranscriptFinalReport{report},
 		finalAt.Add(2*time.Second),
 	); err != nil {
 		t.Fatal(err)
@@ -241,7 +241,7 @@ func TestHeartbeatIgnoresTranscriptFinalForWrongGenerationOrOldTimestamp(t *test
 	} {
 		state := transcriptFinalState(t)
 		if _, err := state.PublishNodeHeartbeat(
-			"node", "boot", "v1", "", "", nil, nil, nil, []domain.TranscriptFinalReport{report},
+			"node", "boot", "v1", "", "", "", "", nil, nil, nil, []domain.TranscriptFinalReport{report},
 			time.Unix(210, 0).UTC(),
 		); err != nil {
 			t.Fatal(err)
