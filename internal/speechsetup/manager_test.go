@@ -4,18 +4,32 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 )
 
 type runnerStub struct {
+	mu    sync.Mutex
 	calls [][]string
 	err   error
 }
 
 func (r *runnerStub) Run(_ context.Context, command string, args ...string) ([]byte, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.calls = append(r.calls, append([]string{command}, args...))
 	return nil, r.err
+}
+
+func (r *runnerStub) Calls() [][]string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	result := make([][]string, len(r.calls))
+	for index, call := range r.calls {
+		result[index] = append([]string(nil), call...)
+	}
+	return result
 }
 
 func TestManagerNeverStartsInstallationDuringConstructionOrStatus(t *testing.T) {
@@ -29,8 +43,8 @@ func TestManagerNeverStartsInstallationDuringConstructionOrStatus(t *testing.T) 
 		t.Fatal(err)
 	}
 	status, err := manager.Status(context.Background(), Request{NodeID: "n"})
-	if err != nil || status.Phase != PhaseMissing || len(runner.calls) != 0 {
-		t.Fatalf("status=%#v err=%v calls=%#v", status, err, runner.calls)
+	if err != nil || status.Phase != PhaseMissing || len(runner.Calls()) != 0 {
+		t.Fatalf("status=%#v err=%v calls=%#v", status, err, runner.Calls())
 	}
 }
 
@@ -50,7 +64,7 @@ func TestAppleSetupRequestsAuthorizationOnlyAfterExplicitStart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(runner.calls) != 0 {
+	if len(runner.Calls()) != 0 {
 		t.Fatal("construction requested macOS permission")
 	}
 	status, err := manager.Start(context.Background(), Request{NodeID: "mac"})
@@ -59,12 +73,13 @@ func TestAppleSetupRequestsAuthorizationOnlyAfterExplicitStart(t *testing.T) {
 	}
 	deadline := time.Now().Add(time.Second)
 	for time.Now().Before(deadline) {
-		if len(runner.calls) > 0 {
+		if len(runner.Calls()) > 0 {
 			break
 		}
 		time.Sleep(time.Millisecond)
 	}
-	if len(runner.calls) != 1 || runner.calls[0][0] != helper || runner.calls[0][1] != "--authorize" {
-		t.Fatalf("authorization calls=%#v", runner.calls)
+	calls := runner.Calls()
+	if len(calls) != 1 || calls[0][0] != helper || calls[0][1] != "--authorize" {
+		t.Fatalf("authorization calls=%#v", calls)
 	}
 }

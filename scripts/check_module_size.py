@@ -12,17 +12,39 @@ def source_files(root: Path, suffix: str) -> list[Path]:
     )
 
 
+def load_baseline(path: Path | None) -> dict[str, int]:
+    if path is None:
+        return {}
+    result: dict[str, int] = {}
+    for number, raw_line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        name, separator, count = line.rpartition(" ")
+        if not separator or not name or not count.isdigit():
+            raise ValueError(f"{path}:{number}: expected PATH COUNT")
+        result[name] = int(count)
+    return result
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Enforce focused Python modules")
     parser.add_argument("--root", type=Path, default=Path("src"))
     parser.add_argument("--max-lines", type=int, default=320)
     parser.add_argument("--suffix", choices=(".py", ".go"), default=".py")
+    parser.add_argument(
+        "--baseline",
+        type=Path,
+        help="grandfather exact existing oversize modules while rejecting growth",
+    )
     args = parser.parse_args()
 
+    baseline = load_baseline(args.baseline)
     failures: list[tuple[Path, int]] = []
     for path in source_files(args.root, args.suffix):
         count = len(path.read_text(encoding="utf-8").splitlines())
-        if count > args.max_lines:
+        limit = max(args.max_lines, baseline.get(path.as_posix(), 0))
+        if count > limit:
             failures.append((path, count))
 
     if not failures:

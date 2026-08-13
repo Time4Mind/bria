@@ -8,7 +8,7 @@ require (
 	github.com/hashicorp/raft v1.7.3
 	github.com/hashicorp/raft-boltdb/v2 v2.3.1
 	go.etcd.io/bbolt v1.3.5
-	golang.org/x/image v0.30.0
+	golang.org/x/image v0.39.0
 )
 
 require (
@@ -22,5 +22,5 @@ require (
 	github.com/mattn/go-colorable v0.1.12 // indirect
 	github.com/mattn/go-isatty v0.0.14 // indirect
 	golang.org/x/sys v0.13.0 // indirect
-	golang.org/x/text v0.28.0 // indirect
+	golang.org/x/text v0.36.0 // indirect
 )

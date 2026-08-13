@@ -157,8 +157,10 @@ election logic.
 
 ## Go engineering standard
 
-- Production source files are capped at 320 physical lines; small cohesive
-  packages and narrow interfaces are preferred over multipurpose modules.
+- New production source files are capped at 320 physical lines; small cohesive
+  packages and narrow interfaces are preferred over multipurpose modules. CI
+  carries an explicit publication-time baseline for older oversized modules:
+  they may shrink but cannot grow.
 - `gofmt`, `go vet`, package tests, race tests on Linux, and supported-target
   cross-builds are release gates.
 - Code follows the Go specification, Effective Go and standard Go review

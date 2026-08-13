@@ -4,7 +4,23 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version: 1.26.5
+          cache: true
+      - run: go run github.com/zricethezav/gitleaks/v8@v8.28.0 git --no-banner --redact .
+      - run: go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
+
   go:
     runs-on: ubuntu-latest
     steps:
@@ -35,7 +51,7 @@ jobs:
       - run: uv run pyright
       - run: uv run python scripts/check_architecture.py
       - run: uv run python scripts/check_module_size.py
-      - run: uv run python scripts/check_module_size.py --root . --suffix .go
+      - run: uv run python scripts/check_module_size.py --root . --suffix .go --baseline scripts/go_module_size_baseline.txt
       - run: uv run pytest
 
   apple-speech:

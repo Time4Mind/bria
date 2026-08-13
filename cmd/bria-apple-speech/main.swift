@@ -156,7 +156,7 @@ private func recognize(options: Options) {
     print(output)
 }
 
-let options = parseArguments()
+private let options = parseArguments()
 if options.authorize {
     requireAuthorization(requestIfNeeded: true)
     print("authorized")
