@@ -475,7 +475,7 @@ func TestNewSessionDirectoryPaginationWrapsAndHasCancel(t *testing.T) {
 	invokeCreateAction(t, fixture, 89, origin, telegramui.ActionNewSession, "")
 	first := lastEdited(t, fixture)
 	grid := telegramui.CanonicalGrid(first.Grid)
-	if !strings.Contains(grid, "[Cancel -> sessions] | [.. -> new_up] |") ||
+	if !strings.Contains(grid, "[.. -> new_up] | [Select -> new_pick] | [≡ Menu -> menu]\n[Cancel -> sessions]") ||
 		!strings.Contains(grid, "[1/2 -> new_dfirst]") {
 		t.Fatalf("directory controls=%s", grid)
 	}

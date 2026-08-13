@@ -39,10 +39,12 @@ func RenderInteractiveCard(input InteractiveInput) Screen {
 	} else {
 		input.Text += "\n\n" + input.Copy.Text(i18n.CardViewOnly)
 	}
-	rows = append(rows, Row{
-		button(input.Copy.Text(i18n.ButtonBack), ActionKeyBack, input.Tokens[ActionKeyBack]),
-		button(input.Copy.Text(i18n.ButtonNewShort), ActionNewSession, ""),
-		button(input.Copy.Text(i18n.ButtonMenu), ActionMenu, ""),
-	})
+	rows = append(rows,
+		Row{
+			button(input.Copy.Text(i18n.ButtonNewShort), ActionNewSession, ""),
+			button(input.Copy.Text(i18n.ButtonMenu), ActionMenu, ""),
+		},
+		Row{button(input.Copy.Text(i18n.ButtonBack), ActionKeyBack, input.Tokens[ActionKeyBack])},
+	)
 	return Screen{Name: ScreenSessionCard, Text: input.Text, Grid: rows}
 }

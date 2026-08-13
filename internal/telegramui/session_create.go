@@ -102,10 +102,12 @@ func RenderCreateDirectories(
 		})
 	}
 	rows = append(rows,
-		Row{button(copy.Text(i18n.ButtonCancel), ActionSessions, ""),
+		Row{
 			button("..", ActionNewDirectoryUp, ""),
-			button(copy.Text(i18n.NewUseDirectory), ActionNewDirectoryPick, "")},
-		Row{button(copy.Text(i18n.ButtonMenu), ActionMenu, "")},
+			button(copy.Text(i18n.NewUseDirectory), ActionNewDirectoryPick, ""),
+			button(copy.Text(i18n.ButtonMenu), ActionMenu, ""),
+		},
+		Row{button(copy.Text(i18n.ButtonCancel), ActionSessions, "")},
 	)
 	return Screen{
 		Name: ScreenSessions, Text: copy.Format(i18n.NewSelectDirectory, filepath.Clean(path)), Grid: rows,
@@ -136,9 +138,11 @@ func RenderCreateResumePage(
 		})
 	}
 	rows = append(rows,
-		Row{button(copy.Text(i18n.NewStartFresh), ActionNewFresh, "")},
-		Row{button(copy.Text(i18n.ButtonBack), ActionNewDirectoryBack, ""),
-			button(copy.Text(i18n.ButtonMenu), ActionMenu, "")},
+		Row{
+			button(copy.Text(i18n.NewStartFresh), ActionNewFresh, ""),
+			button(copy.Text(i18n.ButtonMenu), ActionMenu, ""),
+		},
+		Row{button(copy.Text(i18n.ButtonBack), ActionNewDirectoryBack, "")},
 	)
 	return Screen{Name: ScreenSessions, Text: copy.Format(i18n.NewSelectResume, workdir), Grid: rows}
 }
