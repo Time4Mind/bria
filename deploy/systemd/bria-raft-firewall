@@ -31,14 +31,32 @@ for port in $BRIA_PRIVATE_PORTS; do
   # hop ahead of the private-network DROP rule without opening the port on
   # any non-loopback interface.
   loopback_comment="bria-loopback-${port}"
+  # Insert DROP first; the loopback ACCEPT inserted afterwards then occupies
+  # the earlier rule. This is intentionally ordered for fresh installations.
+  if ! "$iptables_bin" -w -C INPUT -p tcp --dport "$port" \
+    ! -s "$BRIA_RAFT_CIDR" -m comment --comment "$comment" -j DROP 2>/dev/null; then
+    "$iptables_bin" -w -I INPUT 1 -p tcp --dport "$port" \
+      ! -s "$BRIA_RAFT_CIDR" -m comment --comment "$comment" -j DROP
+  fi
   if ! "$iptables_bin" -w -C INPUT -i lo -p tcp --dport "$port" \
     -m comment --comment "$loopback_comment" -j ACCEPT 2>/dev/null; then
     "$iptables_bin" -w -I INPUT 1 -i lo -p tcp --dport "$port" \
       -m comment --comment "$loopback_comment" -j ACCEPT
   fi
-  if ! "$iptables_bin" -w -C INPUT -p tcp --dport "$port" \
-    ! -s "$BRIA_RAFT_CIDR" -m comment --comment "$comment" -j DROP 2>/dev/null; then
-    "$iptables_bin" -w -I INPUT 1 -p tcp --dport "$port" \
-      ! -s "$BRIA_RAFT_CIDR" -m comment --comment "$comment" -j DROP
+
+  accept_position=$(
+    "$iptables_bin" -w -S INPUT | awk -v marker="$loopback_comment" \
+      'index($0, marker) { print NR; exit }'
+  )
+  drop_position=$(
+    "$iptables_bin" -w -S INPUT | awk -v marker="$comment" \
+      'index($0, marker) { print NR; exit }'
+  )
+  if [ -n "$accept_position" ] && [ -n "$drop_position" ] && \
+    [ "$accept_position" -gt "$drop_position" ]; then
+    "$iptables_bin" -w -D INPUT -i lo -p tcp --dport "$port" \
+      -m comment --comment "$loopback_comment" -j ACCEPT
+    "$iptables_bin" -w -I INPUT 1 -i lo -p tcp --dport "$port" \
+      -m comment --comment "$loopback_comment" -j ACCEPT
   fi
 done

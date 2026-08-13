@@ -18,18 +18,26 @@ func controlResolver(
 		return nil, err
 	}
 	addresses := map[string]string{nodeConfig.NodeID: self}
+	overrides := make(map[string]string)
 	for _, peer := range nodeConfig.RaftPeers {
 		address, err := peer.EffectiveControlAddress()
 		if err != nil {
 			return nil, err
 		}
 		addresses[peer.NodeID] = address
+		if peer.ControlDialAddress != "" {
+			overrides[peer.NodeID] = peer.ControlDialAddress
+		}
 	}
 	local, err := localControlAddress(nodeConfig)
 	if err != nil {
 		return nil, err
 	}
-	stateResolver := nodecontrol.NewStateResolver(reader, nodecontrol.NewStaticResolver(addresses))
+	stateResolver := nodecontrol.NewStateResolver(
+		reader,
+		nodecontrol.NewStaticResolver(addresses),
+		nodecontrol.NewStaticResolver(overrides),
+	)
 	return nodecontrol.NewLocalResolver(nodeConfig.NodeID, local, stateResolver), nil
 }
 

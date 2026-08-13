@@ -7,6 +7,12 @@ binary under `~/.local/opt/bria/current`. If `~/.bria/config.json` already
 exists it also loads the LaunchAgent; otherwise it prints the remaining
 cluster init/join step and exits successfully.
 
+The generated service PATH includes the user-local bin directory, Homebrew on
+Apple Silicon and Intel, and the standard macOS system paths. Commands such as
+`tmux`, `claude`, and `codex` are therefore resolved consistently under
+launchd's otherwise minimal environment. Prefer absolute command paths in the
+node config when a backend is installed elsewhere.
+
 The installer writes a user LaunchAgent, validates it with `plutil`, and uses
 `launchctl bootstrap`. It does not modify routes, DNS, firewall, proxy, system
 daemons, or another user's files. It deliberately preserves the real `HOME`

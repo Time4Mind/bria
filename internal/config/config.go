@@ -12,10 +12,12 @@ import (
 )
 
 type RaftPeer struct {
-	NodeID         string `json:"node_id"`
-	NodeName       string `json:"node_name"`
-	Address        string `json:"address"`
-	ControlAddress string `json:"control_address,omitempty"`
+	NodeID             string `json:"node_id"`
+	NodeName           string `json:"node_name"`
+	Address            string `json:"address"`
+	ControlAddress     string `json:"control_address,omitempty"`
+	DialAddress        string `json:"dial_address,omitempty"`
+	ControlDialAddress string `json:"control_dial_address,omitempty"`
 }
 
 type Config struct {
@@ -216,6 +218,12 @@ func (c Config) Validate() error {
 	if c.HTTPProxy != "" && c.SOCKS5Proxy != "" {
 		return errors.New("configure either http_proxy or socks5_proxy, not both")
 	}
+	if err := validateProxyURL("http_proxy", c.HTTPProxy, "http", "https"); err != nil {
+		return err
+	}
+	if err := validateProxyURL("socks5_proxy", c.SOCKS5Proxy, "socks5", "socks5h"); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -248,6 +256,13 @@ func (c Config) EffectiveCodexFlags() []string {
 		}
 	}
 	return append([]string(nil), c.CodexFlags...)
+}
+
+func (c Config) TelegramProxyURL() string {
+	if c.HTTPProxy != "" {
+		return c.HTTPProxy
+	}
+	return c.SOCKS5Proxy
 }
 
 func (c *Config) expandPaths() {

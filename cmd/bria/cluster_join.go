@@ -20,16 +20,17 @@ import (
 )
 
 type joinOptions struct {
-	Invitation       string
-	NodeID           string
-	NodeName         string
-	DataDir          string
-	ConfigPath       string
-	RaftBind         string
-	RaftAdvertise    string
-	ControlBind      string
-	ControlAdvertise string
-	Wait             time.Duration
+	Invitation            string
+	NodeID                string
+	NodeName              string
+	DataDir               string
+	ConfigPath            string
+	RaftBind              string
+	RaftAdvertise         string
+	ControlBind           string
+	ControlAdvertise      string
+	EnrollmentDialAddress string
+	Wait                  time.Duration
 }
 
 func joinCluster(arguments []string) error {
@@ -49,6 +50,7 @@ func joinCluster(arguments []string) error {
 	flags.StringVar(&options.RaftAdvertise, "raft-advertise", "", "routable raft address")
 	flags.StringVar(&options.ControlBind, "control-bind", "", "control listen address")
 	flags.StringVar(&options.ControlAdvertise, "control-advertise", "", "routable control address")
+	flags.StringVar(&options.EnrollmentDialAddress, "enrollment-dial-address", "", "node-local enrollment tunnel endpoint")
 	flags.DurationVar(&options.Wait, "wait", 24*time.Hour, "approval wait limit")
 	if err := flags.Parse(arguments); err != nil {
 		return err
@@ -104,7 +106,7 @@ func performClusterJoin(options joinOptions) error {
 	if err != nil {
 		return err
 	}
-	client, err := enrollment.NewClient(invitation, 10*time.Second)
+	client, err := enrollment.NewClientAt(invitation, options.EnrollmentDialAddress, 10*time.Second)
 	if err != nil {
 		return err
 	}

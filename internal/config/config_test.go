@@ -1,6 +1,7 @@
 package config_test
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -192,6 +193,81 @@ func TestExplicitControlAddressesAllowNonAdjacentPorts(t *testing.T) {
 	}}
 	if err := candidate.Validate(); err != nil {
 		t.Fatalf("explicit control addresses rejected: %v", err)
+	}
+}
+
+func TestPeerDialOverridesAreLocalAndValidated(t *testing.T) {
+	candidate := validConfig(t)
+	peer := config.RaftPeer{
+		NodeID: "node", NodeName: "Node", Address: candidate.RaftAdvertise,
+		ControlAddress: "node.internal:7947", DialAddress: "127.0.0.1:19046",
+		ControlDialAddress: "127.0.0.1:19047",
+	}
+	candidate.RaftPeers = []config.RaftPeer{peer}
+	if err := candidate.Validate(); err != nil {
+		t.Fatalf("valid dial overrides rejected: %v", err)
+	}
+	if peer.EffectiveDialAddress() != "127.0.0.1:19046" {
+		t.Fatalf("raft dial address=%q", peer.EffectiveDialAddress())
+	}
+	control, err := peer.EffectiveControlDialAddress()
+	if err != nil || control != "127.0.0.1:19047" {
+		t.Fatalf("control dial address=%q/%v", control, err)
+	}
+
+	for _, field := range []string{"raft", "control"} {
+		broken := candidate
+		broken.RaftPeers = append([]config.RaftPeer(nil), candidate.RaftPeers...)
+		if field == "raft" {
+			broken.RaftPeers[0].DialAddress = "0.0.0.0:19046"
+		} else {
+			broken.RaftPeers[0].ControlDialAddress = "not-an-address"
+		}
+		if err := broken.Validate(); err == nil {
+			t.Fatalf("invalid %s dial override accepted", field)
+		}
+	}
+}
+
+func TestLoadParsesPeerDialOverrides(t *testing.T) {
+	candidate := validConfig(t)
+	candidate.RaftPeers = []config.RaftPeer{{
+		NodeID: "node", NodeName: "Node", Address: candidate.RaftAdvertise,
+		DialAddress: "127.0.0.1:19046", ControlDialAddress: "127.0.0.1:19047",
+	}}
+	encoded, err := json.Marshal(candidate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, encoded, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := loaded.RaftPeers[0]; got.DialAddress != "127.0.0.1:19046" ||
+		got.ControlDialAddress != "127.0.0.1:19047" {
+		t.Fatalf("loaded overrides=%#v", got)
+	}
+}
+
+func TestTelegramProxyConfigurationIsTyped(t *testing.T) {
+	candidate := validConfig(t)
+	candidate.HTTPProxy = "http://127.0.0.1:1081"
+	if err := candidate.Validate(); err != nil || candidate.TelegramProxyURL() != candidate.HTTPProxy {
+		t.Fatalf("HTTP proxy rejected: %v", err)
+	}
+	candidate.HTTPProxy = ""
+	candidate.SOCKS5Proxy = "socks5://127.0.0.1:1080"
+	if err := candidate.Validate(); err != nil || candidate.TelegramProxyURL() != candidate.SOCKS5Proxy {
+		t.Fatalf("SOCKS proxy rejected: %v", err)
+	}
+	candidate.SOCKS5Proxy = ""
+	candidate.HTTPProxy = "file:///tmp/socket"
+	if err := candidate.Validate(); err == nil {
+		t.Fatal("unsupported proxy URL accepted")
 	}
 }
 

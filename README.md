@@ -232,6 +232,46 @@ the displayed claim to the agent with
 `bria cluster claim --claim 'bria-claim1.…' --state /secure/path/node-contract.json`.
 The owner-only staging file is removed after a successful claim.
 
+### Nodes reached through local tunnels
+
+Stable cluster addresses and machine-local tunnel endpoints are deliberately
+separate. In a node's private `config.json`, a peer may define
+`dial_address` and `control_dial_address` alongside its replicated `address`
+and `control_address`:
+
+```json
+{
+  "node_id": "peer-a",
+  "node_name": "Peer A",
+  "address": "peer-a.bria.internal:7946",
+  "control_address": "peer-a.bria.internal:7947",
+  "dial_address": "127.0.0.1:19046",
+  "control_dial_address": "127.0.0.1:19047"
+}
+```
+
+Only the stable addresses enter Raft and replicated node metadata. Dial
+overrides stay in that one host's config, survive peer relocation by node ID,
+and do not weaken certificate identity, fingerprint, lifecycle, or tombstone
+checks. Omit either override when the stable address is directly reachable.
+
+For reverse enrollment, bring up the SSH forward before requesting approval
+and pass its local endpoint with `--enrollment-dial-address`. The invitation or
+claim retains the stable issuer endpoint for identity while the enrollment
+client connects through the loopback tunnel. A reverse-connected node should
+use loopback `--raft-bind`/`--control-bind` and stable relay-facing
+`--raft-advertise`/`--control-advertise` values from the start; never advertise
+a temporary Wi-Fi address. The Android supervisor also supports
+`BRIA_TUNNEL_REVERSE_ENROLLMENT` and forwards the conventional enrollment port
+in addition to Raft and node control.
+
+Telegram proxying is also node-local. Set exactly one of `http_proxy` or
+`socks5_proxy` in the private node config. It applies only to Telegram Bot API
+traffic; Raft and node-control transports remain direct mTLS connections. If
+both settings are omitted, Bria connects to Telegram directly, so a node whose
+network resolves and reaches Telegram works without a VPN. A configured proxy
+is strict: Bria does not silently bypass it when that proxy is unavailable.
+
 ## Status
 
 Bria is feature-complete for the current single-owner scope and passes unit,

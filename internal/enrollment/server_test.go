@@ -87,10 +87,10 @@ func TestInvitationEnrollmentWaitsForApprovalBeforeIssuingCertificate(t *testing
 	})
 	clusterInvite := security.ClusterInvitation{
 		Version: 1, ClusterID: "cluster", IssuerNodeID: "alpha",
-		Endpoint: listener.Addr().String(), TokenID: invite.ID, Secret: secret,
+		Endpoint: "issuer.bria.internal:7948", TokenID: invite.ID, Secret: secret,
 		CACertificate: string(caPEM), ExpiresAt: invite.ExpiresAt,
 	}
-	client, err := enrollment.NewClient(clusterInvite, time.Second)
+	client, err := enrollment.NewClientAt(clusterInvite, listener.Addr().String(), time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}

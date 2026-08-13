@@ -17,14 +17,11 @@ import (
 
 const defaultBaseURL = "https://api.telegram.org"
 
-type HTTPDoer interface {
-	Do(*http.Request) (*http.Response, error)
-}
-
 type ClientConfig struct {
 	Token              string
 	BaseURL            string
 	HTTPClient         HTTPDoer
+	ProxyURL           string
 	RequestTimeout     time.Duration
 	RichRequestTimeout time.Duration
 	FileRequestTimeout time.Duration
@@ -79,9 +76,9 @@ func NewClient(config ClientConfig) (*Client, error) {
 		!(config.AllowInsecureHTTP && parsed.Scheme == "http")) {
 		return nil, errors.New("telegram base URL must be an absolute HTTPS URL")
 	}
-	httpClient := config.HTTPClient
-	if httpClient == nil {
-		httpClient = &http.Client{}
+	httpClient, err := configuredHTTPClient(config.HTTPClient, config.ProxyURL)
+	if err != nil {
+		return nil, err
 	}
 	requestTimeout := config.RequestTimeout
 	if requestTimeout <= 0 {

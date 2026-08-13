@@ -12,8 +12,9 @@ type StaticResolver struct {
 }
 
 type StateResolver struct {
-	reader   StateReader
-	fallback *StaticResolver
+	reader    StateReader
+	fallback  *StaticResolver
+	overrides *StaticResolver
 }
 
 // LocalResolver keeps a node's own control traffic on its listener address.
@@ -50,8 +51,16 @@ func (r *LocalResolver) NodeFingerprint(nodeID string) (string, bool) {
 	return delegate.NodeFingerprint(nodeID)
 }
 
-func NewStateResolver(reader StateReader, fallback *StaticResolver) *StateResolver {
-	return &StateResolver{reader: reader, fallback: fallback}
+func NewStateResolver(
+	reader StateReader,
+	fallback *StaticResolver,
+	overrides ...*StaticResolver,
+) *StateResolver {
+	resolver := &StateResolver{reader: reader, fallback: fallback}
+	if len(overrides) > 0 {
+		resolver.overrides = overrides[0]
+	}
+	return resolver
 }
 
 func (r *StateResolver) ControlAddress(nodeID string) (string, bool) {
@@ -61,6 +70,11 @@ func (r *StateResolver) ControlAddress(nodeID string) (string, bool) {
 			if node, ok := state.Nodes[domain.NodeID(nodeID)]; ok {
 				if !node.Enabled() {
 					return "", false
+				}
+				if r.overrides != nil {
+					if address, exists := r.overrides.ControlAddress(nodeID); exists {
+						return address, true
+					}
 				}
 				if node.Network.ControlAddress != "" {
 					return node.Network.ControlAddress, true
@@ -78,7 +92,15 @@ func (r *StateResolver) ControlAddress(nodeID string) (string, bool) {
 			}
 		}
 	}
-	if r == nil || r.fallback == nil {
+	if r == nil {
+		return "", false
+	}
+	if r.overrides != nil {
+		if address, exists := r.overrides.ControlAddress(nodeID); exists {
+			return address, true
+		}
+	}
+	if r.fallback == nil {
 		return "", false
 	}
 	return r.fallback.ControlAddress(nodeID)

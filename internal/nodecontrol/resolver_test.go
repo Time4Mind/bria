@@ -31,6 +31,34 @@ func TestStateResolverDoesNotFallbackForDisabledOrDeletedNode(t *testing.T) {
 	}
 }
 
+func TestStateResolverUsesLocalOverrideButKeepsReplicatedFingerprint(t *testing.T) {
+	state := domain.NewState()
+	state.Nodes["peer"] = domain.Node{
+		ID: "peer", Lifecycle: domain.NodeActive, Fingerprint: "replicated-fingerprint",
+		Network: domain.NodeNetwork{ControlAddress: "peer.bria.internal:7947"},
+	}
+	overrides := NewStaticResolver(map[string]string{"peer": "127.0.0.1:19047"})
+	resolver := NewStateResolver(resolverState{state: state}, nil, overrides)
+	if address, ok := resolver.ControlAddress("peer"); !ok || address != "127.0.0.1:19047" {
+		t.Fatalf("control override=%q/%v", address, ok)
+	}
+	if fingerprint, ok := resolver.NodeFingerprint("peer"); !ok || fingerprint != "replicated-fingerprint" {
+		t.Fatalf("replicated fingerprint=%q/%v", fingerprint, ok)
+	}
+
+	disabled := state.Nodes["peer"]
+	disabled.Lifecycle = domain.NodeDisabled
+	state.Nodes["peer"] = disabled
+	if address, ok := resolver.ControlAddress("peer"); ok {
+		t.Fatalf("disabled peer reached through override %q", address)
+	}
+	delete(state.Nodes, "peer")
+	state.NodeTombstones["peer"] = domain.NodeTombstone{NodeID: "peer"}
+	if address, ok := resolver.ControlAddress("peer"); ok {
+		t.Fatalf("tombstoned peer reached through override %q", address)
+	}
+}
+
 func TestStateResolverFallsBackForEnabledLegacyNodeWithoutControlAddress(t *testing.T) {
 	state := domain.NewState()
 	state.Nodes["legacy"] = domain.Node{

@@ -41,6 +41,7 @@ func createNodeContract(arguments []string) error {
 	flags.StringVar(&options.RaftAdvertise, "raft-advertise", "", "routable raft address")
 	flags.StringVar(&options.ControlBind, "control-bind", "", "control listen address")
 	flags.StringVar(&options.ControlAdvertise, "control-advertise", "", "routable control address")
+	flags.StringVar(&options.EnrollmentDialAddress, "enrollment-dial-address", "", "node-local enrollment tunnel endpoint")
 	flags.StringVar(&statePath, "state", "", "private contract state path")
 	if err := flags.Parse(arguments); err != nil {
 		return err

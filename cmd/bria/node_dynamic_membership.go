@@ -22,6 +22,13 @@ func maintainDynamicMembership(
 	ticker := time.NewTicker(membershipReconcileInterval)
 	defer ticker.Stop()
 	knownAddresses := make(map[domain.NodeID]string)
+	// configurePeerResolver seeds these mappings before the replicated state is
+	// available. Track them from the first pass so a relocated voter can retire
+	// a stale bootstrap address after restart without losing its node-local dial
+	// override (the override is keyed by node ID, not address).
+	for _, peer := range nodeConfig.RaftPeers {
+		knownAddresses[domain.NodeID(peer.NodeID)] = peer.Address
+	}
 	for {
 		state := node.State().State()
 		configured, err := configuredVoterAddresses(node)
@@ -51,8 +58,10 @@ func syncMembershipResolver(
 ) {
 	for nodeID, address := range known {
 		nodeState, exists := state.Nodes[nodeID]
-		_, stillVoter := configured[string(nodeID)]
-		if (!exists || !nodeState.Enabled()) && !stillVoter {
+		configuredAddress, stillVoter := configured[string(nodeID)]
+		moved := exists && nodeState.Enabled() &&
+			nodeState.Network.RaftAddress != address && configuredAddress != address
+		if ((!exists || !nodeState.Enabled()) && !stillVoter) || moved {
 			resolver.DeleteAddress(address)
 			resolver.RevokeNodeID(string(nodeID))
 			delete(known, nodeID)
@@ -78,7 +87,10 @@ func syncMembershipResolver(
 		setPeerResolverAddresses(resolver, nodeState.Network.RaftAddress, string(nodeID))
 		resolver.ApproveNodeID(string(nodeID))
 		resolver.SetNodeFingerprint(string(nodeID), nodeState.Fingerprint)
-		known[nodeID] = nodeState.Network.RaftAddress
+		if tracked, exists := known[nodeID]; !exists || tracked == nodeState.Network.RaftAddress ||
+			configured[string(nodeID)] != tracked {
+			known[nodeID] = nodeState.Network.RaftAddress
+		}
 	}
 }
 

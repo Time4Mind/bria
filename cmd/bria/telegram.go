@@ -38,7 +38,9 @@ func startTelegram(
 	if err != nil {
 		return nil, err
 	}
-	client, err := telegrambot.NewClient(telegrambot.ClientConfig{Token: token})
+	client, err := telegrambot.NewClient(telegrambot.ClientConfig{
+		Token: token, ProxyURL: nodeConfig.TelegramProxyURL(),
+	})
 	if err != nil {
 		return nil, err
 	}

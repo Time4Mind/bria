@@ -57,6 +57,9 @@ func configurePeerResolver(resolver *consensus.StaticPeerResolver, nodeConfig co
 	resolver.ApproveNodeID(nodeConfig.NodeID)
 	for _, peer := range nodeConfig.RaftPeers {
 		setPeerResolverAddresses(resolver, peer.Address, peer.NodeID)
+		if peer.DialAddress != "" {
+			resolver.SetDialAddress(peer.NodeID, peer.DialAddress)
+		}
 		resolver.ApproveNodeID(peer.NodeID)
 	}
 }
@@ -88,28 +91,48 @@ func reconcileConfiguredVoters(
 	if len(nodeConfig.RaftPeers) == 0 {
 		return nil
 	}
-	for _, peer := range orderedPeers(nodeConfig) {
+	configuration, err := node.Configuration()
+	if err != nil {
+		return fmt.Errorf("read Raft configuration: %w", err)
+	}
+	for _, peer := range missingConfiguredVoters(configuration, nodeConfig) {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
 		}
+		// Static peers bootstrap a fresh cluster. Once a voter exists, replicated
+		// dynamic membership owns its address and may have relocated it.
 		if err := node.EnsureVoter(peer.NodeID, peer.Address, membershipChangeTimeout); err != nil {
 			return fmt.Errorf("ensure Raft voter %s: %w", peer.NodeID, err)
 		}
 		fmt.Printf("Raft voter ready: %s at %s\n", peer.NodeID, peer.Address)
 	}
-	configuration, err := node.Configuration()
+	configuration, err = node.Configuration()
 	if err != nil {
 		return fmt.Errorf("read reconciled Raft configuration: %w", err)
 	}
-	if len(configuration.Servers) != len(nodeConfig.RaftPeers) {
-		return fmt.Errorf(
-			"Raft voter count is %d, want %d", len(configuration.Servers), len(nodeConfig.RaftPeers),
-		)
-	}
+	// Additional voters are expected after invitation-based enrollment. Static
+	// bootstrap peers are seeds, not an exact assertion over durable Raft state.
 	fmt.Printf("Raft membership ready: %d voters\n", len(configuration.Servers))
 	return nil
+}
+
+func missingConfiguredVoters(
+	configuration raft.Configuration,
+	nodeConfig config.Config,
+) []config.RaftPeer {
+	existing := make(map[string]bool, len(configuration.Servers))
+	for _, server := range configuration.Servers {
+		existing[string(server.ID)] = true
+	}
+	missing := make([]config.RaftPeer, 0, len(nodeConfig.RaftPeers))
+	for _, peer := range orderedPeers(nodeConfig) {
+		if !existing[peer.NodeID] {
+			missing = append(missing, peer)
+		}
+	}
+	return missing
 }
 
 func orderedPeers(nodeConfig config.Config) []config.RaftPeer {
@@ -133,23 +156,23 @@ func registerConfiguredNodes(
 	nodeConfig config.Config,
 ) error {
 	for _, peer := range nodeConfig.RaftPeers {
+		_, exists := node.State().State().Nodes[domain.NodeID(peer.NodeID)]
+		if exists {
+			// Replicated metadata is authoritative after first registration. A
+			// stale bootstrap JSON must not undo relocation on process restart.
+			continue
+		}
 		desired, err := configuredDomainNode(nodeConfig, peer)
 		if err != nil {
 			return err
 		}
-		existing, exists := node.State().State().Nodes[domain.NodeID(peer.NodeID)]
 		operationID, err := newOperationID()
 		if err != nil {
 			return err
 		}
-		kind := clusterstate.CommandAddNode
-		if exists {
-			if existing.Network == desired.Network {
-				continue
-			}
-			kind = clusterstate.CommandUpdateNodeMetadata
-		}
-		command, err := clusterstate.NewCommand(operationID, kind, time.Now(), desired)
+		command, err := clusterstate.NewCommand(
+			operationID, clusterstate.CommandAddNode, time.Now(), desired,
+		)
 		if err != nil {
 			return err
 		}

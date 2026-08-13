@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/url"
 	"strconv"
 	"strings"
 )
@@ -43,6 +44,16 @@ func (c Config) validateRaftPeers() error {
 			return fmt.Errorf("duplicate control address %q", controlAddress)
 		}
 		controlAddresses[controlAddress] = struct{}{}
+		if peer.DialAddress != "" {
+			if err := validateHostPort(prefix+".dial_address", peer.DialAddress, false); err != nil {
+				return err
+			}
+		}
+		if peer.ControlDialAddress != "" {
+			if err := validateHostPort(prefix+".control_dial_address", peer.ControlDialAddress, false); err != nil {
+				return err
+			}
+		}
 		if peer.NodeID == c.NodeID {
 			selfAddress = peer.Address
 		}
@@ -77,6 +88,20 @@ func (p RaftPeer) EffectiveControlAddress() (string, error) {
 		return p.ControlAddress, nil
 	}
 	return adjacentPort(p.Address)
+}
+
+func (p RaftPeer) EffectiveDialAddress() string {
+	if p.DialAddress != "" {
+		return p.DialAddress
+	}
+	return p.Address
+}
+
+func (p RaftPeer) EffectiveControlDialAddress() (string, error) {
+	if p.ControlDialAddress != "" {
+		return p.ControlDialAddress, nil
+	}
+	return p.EffectiveControlAddress()
 }
 
 func adjacentPort(address string) (string, error) {
@@ -146,4 +171,21 @@ func validateHostPort(label, address string, allowWildcard bool) error {
 func unspecifiedIP(host string) bool {
 	ip := net.ParseIP(host)
 	return ip != nil && ip.IsUnspecified()
+}
+
+func validateProxyURL(label, value string, schemes ...string) error {
+	if value == "" {
+		return nil
+	}
+	parsed, err := url.Parse(value)
+	if err != nil || parsed.Host == "" || parsed.RawQuery != "" || parsed.Fragment != "" ||
+		parsed.Path != "" {
+		return fmt.Errorf("%s must be an absolute proxy URL without path, query, or fragment", label)
+	}
+	for _, scheme := range schemes {
+		if parsed.Scheme == scheme {
+			return nil
+		}
+	}
+	return fmt.Errorf("%s uses an unsupported proxy scheme", label)
 }

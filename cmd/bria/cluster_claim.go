@@ -23,6 +23,7 @@ func claimNodeContract(arguments []string) error {
 	claimValue := flags.String("claim", "", "approved enrollment claim")
 	statePath := flags.String("state", "", "private contract state path")
 	wait := flags.Duration("wait", 24*time.Hour, "claim wait limit")
+	enrollmentDial := flags.String("enrollment-dial-address", "", "node-local enrollment tunnel endpoint")
 	if err := flags.Parse(arguments); err != nil {
 		return err
 	}
@@ -41,7 +42,11 @@ func claimNodeContract(arguments []string) error {
 	if state.RequestID != claim.RequestID {
 		return errors.New("claim does not match private contract state")
 	}
-	client, err := enrollment.NewClaimClient(claim, 10*time.Second)
+	dialAddress := *enrollmentDial
+	if dialAddress == "" {
+		dialAddress = state.Options.EnrollmentDialAddress
+	}
+	client, err := enrollment.NewClaimClientAt(claim, dialAddress, 10*time.Second)
 	if err != nil {
 		return err
 	}

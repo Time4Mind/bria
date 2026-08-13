@@ -10,6 +10,11 @@
     <string>--config</string><string>__BRIA_CONFIG__</string>
   </array>
   <key>WorkingDirectory</key><string>__BRIA_HOME__</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HOME</key><string>__USER_HOME__</string>
+    <key>PATH</key><string>__USER_HOME__/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
   <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
   <key>ThrottleInterval</key><integer>5</integer>
   <key>ProcessType</key><string>Background</string>

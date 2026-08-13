@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"time"
 
@@ -22,16 +23,51 @@ type Client struct {
 }
 
 func NewClient(invitation security.ClusterInvitation, timeout time.Duration) (*Client, error) {
-	return newClient(invitation.Endpoint, invitation.ClusterID, invitation.IssuerNodeID,
+	return NewClientAt(invitation, "", timeout)
+}
+
+// NewClientAt dials a node-local tunnel endpoint while authenticating the
+// issuer and cluster embedded in the invitation. The override is never sent to
+// the cluster or persisted in replicated state.
+func NewClientAt(
+	invitation security.ClusterInvitation,
+	dialAddress string,
+	timeout time.Duration,
+) (*Client, error) {
+	return newClient(invitation.Endpoint, dialAddress, invitation.ClusterID, invitation.IssuerNodeID,
 		invitation.CACertificate, timeout)
 }
 
 func NewClaimClient(claim security.EnrollmentClaim, timeout time.Duration) (*Client, error) {
-	return newClient(claim.Endpoint, claim.ClusterID, claim.IssuerNodeID,
+	return NewClaimClientAt(claim, "", timeout)
+}
+
+func NewClaimClientAt(
+	claim security.EnrollmentClaim,
+	dialAddress string,
+	timeout time.Duration,
+) (*Client, error) {
+	return newClient(claim.Endpoint, dialAddress, claim.ClusterID, claim.IssuerNodeID,
 		claim.CACertificate, timeout)
 }
 
-func newClient(endpoint, clusterID, issuerNodeID, caCertificate string, timeout time.Duration) (*Client, error) {
+func newClient(
+	endpoint,
+	dialAddress,
+	clusterID,
+	issuerNodeID,
+	caCertificate string,
+	timeout time.Duration,
+) (*Client, error) {
+	if _, _, err := net.SplitHostPort(endpoint); err != nil {
+		return nil, errors.New("enrollment endpoint must be host:port")
+	}
+	if dialAddress == "" {
+		dialAddress = endpoint
+	}
+	if _, _, err := net.SplitHostPort(dialAddress); err != nil {
+		return nil, errors.New("enrollment dial address must be host:port")
+	}
 	roots, err := security.CertificatePool([]byte(caCertificate))
 	if err != nil {
 		return nil, err
@@ -48,7 +84,7 @@ func newClient(endpoint, clusterID, issuerNodeID, caCertificate string, timeout 
 		timeout = 10 * time.Second
 	}
 	transport := &http.Transport{TLSClientConfig: tlsConfig, TLSHandshakeTimeout: timeout}
-	return &Client{endpoint: "https://" + endpoint,
+	return &Client{endpoint: "https://" + dialAddress,
 		http: &http.Client{Transport: transport, Timeout: timeout}}, nil
 }
 

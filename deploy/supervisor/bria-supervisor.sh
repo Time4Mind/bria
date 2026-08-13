@@ -20,6 +20,7 @@ peer_two_control="${BRIA_TUNNEL_PEER_TWO_CONTROL:-}"
 peer_three_control="${BRIA_TUNNEL_PEER_THREE_CONTROL:-}"
 reverse_raft="${BRIA_TUNNEL_REVERSE_RAFT:-127.0.0.1:17946:127.0.0.1:7946}"
 reverse_control="${BRIA_TUNNEL_REVERSE_CONTROL:-127.0.0.1:17947:127.0.0.1:7947}"
+reverse_enrollment="${BRIA_TUNNEL_REVERSE_ENROLLMENT:-127.0.0.1:17948:127.0.0.1:7948}"
 
 mkdir -p "$state_dir/logs"
 chmod 700 "$state_dir" "$state_dir/logs"
@@ -84,6 +85,7 @@ ssh_options=(
     -o TCPKeepAlive=yes
     -R "$reverse_raft"
     -R "$reverse_control"
+    -R "$reverse_enrollment"
 )
 local_forwards=()
 for forward in "$peer_one" "$peer_two" "$peer_three" \
