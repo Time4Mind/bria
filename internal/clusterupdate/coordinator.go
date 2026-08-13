@@ -60,6 +60,16 @@ func (c *Coordinator) Start(ctx context.Context) (domain.ClusterUpdate, error) {
 	if err != nil {
 		return domain.ClusterUpdate{}, err
 	}
+	current := true
+	for _, nodeID := range order {
+		if state.Nodes[nodeID].Version != manifest.Version {
+			current = false
+			break
+		}
+	}
+	if current {
+		return domain.ClusterUpdate{}, fmt.Errorf("cluster already runs %s", manifest.Version)
+	}
 	for _, nodeID := range order {
 		if _, err := c.nodes.Status(ctx, Request{NodeID: string(nodeID)}); err != nil {
 			return domain.ClusterUpdate{}, fmt.Errorf(

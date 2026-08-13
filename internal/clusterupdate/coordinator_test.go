@@ -72,6 +72,32 @@ func TestCoordinatorPreflightDoesNotCommitWhenUpdaterIsUnavailable(t *testing.T)
 	}
 }
 
+func TestCoordinatorDoesNotReinstallCurrentRelease(t *testing.T) {
+	state := domain.NewState()
+	if err := state.AddNode(domain.Node{
+		ID: "leader", Name: "leader", Status: domain.NodeOnline, Lifecycle: domain.NodeActive,
+		Version: "v2", OS: "linux", Arch: "amd64", CreatedAt: time.Unix(1, 0),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	machine := clusterstate.NewMachine(state)
+	consensus := &coordinatorConsensus{machine: machine, leader: "leader", local: "leader"}
+	nodes := &coordinatorNodes{manifest: VerifiedManifest{
+		Manifest: Manifest{Version: "v2", Artifacts: []Artifact{{OS: "linux", Arch: "amd64"}}},
+		SHA256:   "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+	}}
+	coordinator, err := NewCoordinator("leader", machine, consensus, nodes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := coordinator.Start(context.Background()); err == nil {
+		t.Fatal("current release was scheduled again")
+	}
+	if machine.State().ClusterUpdate != nil || len(nodes.started) != 0 {
+		t.Fatal("no-op update changed cluster state")
+	}
+}
+
 func TestCoordinatorUpdatesFollowersThenTransfersLeadership(t *testing.T) {
 	state := domain.NewState()
 	for index, id := range []domain.NodeID{"leader", "follower-a", "follower-b"} {
