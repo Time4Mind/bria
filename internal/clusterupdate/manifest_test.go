@@ -56,3 +56,11 @@ func TestManifestRejectsDuplicatePlatformAndInsecureArtifact(t *testing.T) {
 		t.Fatal("unsafe manifest was accepted")
 	}
 }
+
+func TestCompatibleArtifactUsesLinuxARM64ForAndroid(t *testing.T) {
+	manifest := Manifest{Artifacts: []Artifact{{OS: "linux", Arch: "arm64", URL: "linux"}}}
+	artifact, ok := manifest.CompatibleArtifact(" Android ", "ARM64")
+	if !ok || artifact.URL != "linux" {
+		t.Fatalf("Android artifact = %#v, %t", artifact, ok)
+	}
+}

@@ -101,7 +101,7 @@ func updateOrder(
 		if node.Status != domain.NodeOnline {
 			return nil, fmt.Errorf("node %s is offline", node.Name)
 		}
-		if _, ok := manifest.Artifact(node.OS, node.Arch); !ok {
+		if _, ok := manifest.CompatibleArtifact(node.OS, node.Arch); !ok {
 			return nil, fmt.Errorf("release does not support %s (%s/%s)", node.Name, node.OS, node.Arch)
 		}
 		nodes = append(nodes, node)

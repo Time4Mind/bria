@@ -88,7 +88,7 @@ func collectArtifacts(directory, version, baseURL string) ([]clusterupdate.Artif
 		return nil, errors.New("release artifacts are unavailable")
 	}
 	sort.Strings(paths)
-	artifacts := make([]clusterupdate.Artifact, 0, len(paths))
+	artifacts := make([]clusterupdate.Artifact, 0, len(paths)+1)
 	prefix := "bria_" + version + "_"
 	for _, path := range paths {
 		name := filepath.Base(path)
@@ -102,10 +102,19 @@ func collectArtifacts(directory, version, baseURL string) ([]clusterupdate.Artif
 			return nil, err
 		}
 		digest := sha256Sum(data)
-		artifacts = append(artifacts, clusterupdate.Artifact{
+		artifact := clusterupdate.Artifact{
 			OS: parts[0], Arch: parts[1], URL: strings.TrimRight(baseURL, "/") + "/" + name,
 			SHA256: digest, Size: int64(len(data)),
-		})
+		}
+		artifacts = append(artifacts, artifact)
+		// Older coordinators compare the node's advertised Android identity
+		// literally. Keep this signed alias so they can bootstrap to a version
+		// that understands Android's Linux userspace directly.
+		if artifact.OS == "linux" && artifact.Arch == "arm64" {
+			android := artifact
+			android.OS = "android"
+			artifacts = append(artifacts, android)
+		}
 	}
 	return artifacts, nil
 }

@@ -168,3 +168,15 @@ func (m Manifest) Artifact(osName, arch string) (Artifact, bool) {
 	}
 	return Artifact{}, false
 }
+
+// CompatibleArtifact resolves release artifacts for the platform identity stored
+// in cluster state. Android nodes run Bria in a Linux userspace, so they consume
+// the regular Linux ARM64 release rather than requiring a separate binary.
+func (m Manifest) CompatibleArtifact(osName, arch string) (Artifact, bool) {
+	osName = strings.ToLower(strings.TrimSpace(osName))
+	arch = strings.ToLower(strings.TrimSpace(arch))
+	if osName == "android" {
+		osName = "linux"
+	}
+	return m.Artifact(osName, arch)
+}
