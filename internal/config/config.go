@@ -2,6 +2,7 @@
 package config
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +10,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+)
+
+const (
+	OfficialUpdateManifestURL = "https://github.com/Time4Mind/bria/releases/latest/download/release-manifest.json"
+	OfficialUpdatePublicKey   = "yuK6610b5dA8jVTCUsG8GslvNtvsL7MEGY9/Yab5Sb4="
 )
 
 type RaftPeer struct {
@@ -57,6 +63,9 @@ type Config struct {
 	AppleSpeechCommand  string     `json:"apple_speech_command,omitempty"`
 	HTTPProxy           string     `json:"http_proxy,omitempty"`
 	SOCKS5Proxy         string     `json:"socks5_proxy,omitempty"`
+	UpdateManifestURL   string     `json:"update_manifest_url,omitempty"`
+	UpdatePublicKey     string     `json:"update_public_key,omitempty"`
+	UpdateInstallRoot   string     `json:"update_install_root,omitempty"`
 }
 
 func Default() (Config, error) {
@@ -86,6 +95,8 @@ func Default() (Config, error) {
 		WhisperLanguage:    "auto",
 		WhisperThreads:     4,
 		AppleSpeechCommand: "bria-apple-speech",
+		UpdateManifestURL:  OfficialUpdateManifestURL,
+		UpdatePublicKey:    OfficialUpdatePublicKey,
 	}, nil
 }
 
@@ -224,6 +235,21 @@ func (c Config) Validate() error {
 	if err := validateProxyURL("socks5_proxy", c.SOCKS5Proxy, "socks5", "socks5h"); err != nil {
 		return err
 	}
+	if (c.UpdateManifestURL == "") != (c.UpdatePublicKey == "") {
+		return errors.New("update_manifest_url and update_public_key must be configured together")
+	}
+	if c.UpdateManifestURL != "" {
+		if err := validateUpdateManifestURL(c.UpdateManifestURL); err != nil {
+			return err
+		}
+		key, err := base64.StdEncoding.DecodeString(strings.TrimSpace(c.UpdatePublicKey))
+		if err != nil || len(key) != 32 {
+			return errors.New("update_public_key must be a base64 Ed25519 public key")
+		}
+	}
+	if c.UpdateInstallRoot != "" && !filepath.IsAbs(c.UpdateInstallRoot) {
+		return errors.New("update_install_root must be absolute")
+	}
 	return nil
 }
 
@@ -278,4 +304,14 @@ func (c *Config) expandPaths() {
 	if c.WhisperModelPath != "" {
 		c.WhisperModelPath = filepath.Clean(c.WhisperModelPath)
 	}
+	if c.UpdateInstallRoot != "" {
+		c.UpdateInstallRoot = filepath.Clean(c.UpdateInstallRoot)
+	}
+}
+
+func (c Config) EffectiveUpdateInstallRoot() string {
+	if c.UpdateInstallRoot != "" {
+		return c.UpdateInstallRoot
+	}
+	return filepath.Join(c.DataDir, "software")
 }

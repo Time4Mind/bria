@@ -85,7 +85,9 @@ func startEnrollmentRuntime(
 		ClusterID: nodeConfig.ClusterID, IssuerNodeID: nodeConfig.NodeID,
 		EnrollmentAddress: address, Certificate: certificate, CA: ca,
 		CAPEM: caPEM, CallbackKey: callbackKey, State: node.State(),
-		Submit: enrollmentRoute{node: node, local: committer, remote: client},
+		UpdateManifestURL: nodeConfig.UpdateManifestURL,
+		UpdatePublicKey:   nodeConfig.UpdatePublicKey,
+		Submit:            enrollmentRoute{node: node, local: committer, remote: client},
 	})
 	if err != nil {
 		return nil, err

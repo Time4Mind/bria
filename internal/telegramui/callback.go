@@ -29,6 +29,9 @@ const (
 	ActionClusterAdd           Action = "cluster_add"
 	ActionClusterInvite        Action = "cluster_invite"
 	ActionClusterContract      Action = "cluster_contract"
+	ActionClusterUpdate        Action = "cluster_update"
+	ActionClusterUpdateYes     Action = "update_yes"
+	ActionClusterUpdateRefresh Action = "update_refresh"
 	ActionEnrollmentOpen       Action = "enroll_open"
 	ActionEnrollmentApprove    Action = "enroll_approve"
 	ActionEnrollmentReject     Action = "enroll_reject"
@@ -164,6 +167,7 @@ func knownAction(action Action) bool {
 		ActionStatusRefresh, ActionStatusMode, ActionStatusLeaderNode,
 		ActionStatusSettingsNode, ActionNodeSettings, ActionConfirmLeader,
 		ActionClusterAdd, ActionClusterInvite, ActionClusterContract,
+		ActionClusterUpdate, ActionClusterUpdateYes, ActionClusterUpdateRefresh,
 		ActionEnrollmentOpen, ActionEnrollmentApprove, ActionEnrollmentReject,
 		ActionNodeDisable, ActionNodeDisableYes, ActionNodeEnable,
 		ActionNodeDelete, ActionNodeDeleteYes,

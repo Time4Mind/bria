@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/Time4Mind/bria/internal/clusterstate"
+	"github.com/Time4Mind/bria/internal/clusterupdate"
 	"github.com/Time4Mind/bria/internal/domain"
 	"github.com/Time4Mind/bria/internal/providerauth"
 	"github.com/Time4Mind/bria/internal/runtimehost"
@@ -41,6 +42,7 @@ type ServerConfig struct {
 	Starts       sessionstart.Service
 	ProviderAuth providerauth.Service
 	SpeechSetup  speechsetup.Service
+	Updates      clusterupdate.Service
 	Enrollments  EnrollmentCommitter
 	// EnrollmentIssuerID is the only member allowed to forward a contract
 	// validated by the public enrollment endpoint.
@@ -64,6 +66,7 @@ type Server struct {
 	starts             sessionstart.Service
 	providerAuth       providerauth.Service
 	speechSetup        speechsetup.Service
+	updates            clusterupdate.Service
 	enrollments        EnrollmentCommitter
 	enrollmentIssuerID string
 	tlsConfig          *tls.Config
@@ -91,31 +94,11 @@ func NewServer(config ServerConfig) (*Server, error) {
 		transcripts: config.Transcripts, sessionFiles: config.SessionFiles, starts: config.Starts,
 		providerAuth: config.ProviderAuth, tlsConfig: tlsConfig,
 		speechSetup: config.SpeechSetup,
+		updates:     config.Updates,
 		enrollments: config.Enrollments, enrollmentIssuerID: config.EnrollmentIssuerID,
 	}
 	mux := http.NewServeMux()
-	mux.HandleFunc(executePath, server.handleExecute)
-	mux.HandleFunc(lookupPath, server.handleLookup)
-	mux.HandleFunc(heartbeatPath, server.handleHeartbeat)
-	mux.HandleFunc(recoveryPath, server.handleRecovery)
-	mux.HandleFunc(transcriptPath, server.handleTranscript)
-	mux.HandleFunc(sessionFilePath, server.handleSessionFile)
-	mux.HandleFunc(startBrowsePath, server.handleStartBrowse)
-	mux.HandleFunc(startDiscoverPath, server.handleStartDiscover)
-	mux.HandleFunc(startProvisionPath, server.handleStartProvision)
-	mux.HandleFunc(providerAuthStartPath, server.handleProviderAuthStart)
-	mux.HandleFunc(providerAuthSubmitPath, server.handleProviderAuthSubmit)
-	mux.HandleFunc(providerAuthStatusPath, server.handleProviderAuthStatus)
-	mux.HandleFunc(providerAuthCancelPath, server.handleProviderAuthCancel)
-	mux.HandleFunc(speechSetupStartPath, server.handleSpeechSetupStart)
-	mux.HandleFunc(speechSetupStatusPath, server.handleSpeechSetupStatus)
-	mux.HandleFunc(enrollmentReportPath, server.handleEnrollment)
-	mux.HandleFunc(healthPath, server.handleHealth)
-	mux.HandleFunc(readinessPath, server.handleReadiness)
-	mux.HandleFunc(metricsPath, server.handleMetrics)
-	mux.HandleFunc(backupPath, server.handleBackup)
-	mux.HandleFunc(membershipAdminPath, server.handleMembershipAdmin)
-	mux.HandleFunc(membershipMovePath, server.handleMembershipRelocation)
+	server.registerHandlers(mux)
 	server.httpServer = &http.Server{
 		Handler: mux, ReadHeaderTimeout: 2 * time.Second, ReadTimeout: 3 * time.Second,
 		WriteTimeout: 30 * time.Second, IdleTimeout: 30 * time.Second,

@@ -119,6 +119,8 @@ func joinedNodeConfig(
 	configured.NodePrivateKey = filepath.Join(options.DataDir, "pki", "node.key")
 	configured.TelegramTokenFile = filepath.Join(options.DataDir, "secrets", "telegram.token")
 	configured.CallbackKeyFile = filepath.Join(options.DataDir, "secrets", "callback.key")
+	configured.UpdateManifestURL = bundle.UpdateManifestURL
+	configured.UpdatePublicKey = bundle.UpdatePublicKey
 	configured.WhisperModelPath = filepath.Join(options.DataDir, "models", filepath.Base(defaults.WhisperModelPath))
 	if err := configured.Validate(); err != nil {
 		return config.Config{}, err

@@ -92,6 +92,9 @@ the pragmatic Go engineering contract in [CONTRIBUTING.md](CONTRIBUTING.md).
 - authenticated health/readiness probes that distinguish a live process from
   a node with a current Raft leader, an mTLS-only Prometheus metrics endpoint,
   plus process-level disk/mTLS failover chaos coverage;
+- owner-initiated signed rolling updates with per-node HTTPS downloads,
+  followers-first ordering, leadership transfer, replicated progress, and a
+  detached automatic rollback watchdog;
 - bootstrap CLI and a persistent single-node daemon vertical slice.
 
 ## Build and verify
@@ -265,12 +268,13 @@ a temporary Wi-Fi address. The Android supervisor also supports
 `BRIA_TUNNEL_REVERSE_ENROLLMENT` and forwards the conventional enrollment port
 in addition to Raft and node control.
 
-Telegram proxying is also node-local. Set exactly one of `http_proxy` or
-`socks5_proxy` in the private node config. It applies only to Telegram Bot API
-traffic; Raft and node-control transports remain direct mTLS connections. If
-both settings are omitted, Bria connects to Telegram directly, so a node whose
-network resolves and reaches Telegram works without a VPN. A configured proxy
-is strict: Bria does not silently bypass it when that proxy is unavailable.
+Internet proxying is also node-local. Set exactly one of `http_proxy` or
+`socks5_proxy` in the private node config. It applies to Telegram Bot API and
+signed release downloads; Raft and node-control transports remain direct mTLS
+connections. If both settings are omitted, Bria connects directly, so a node
+whose network resolves and reaches Telegram works without a VPN. A configured
+proxy is strict: Bria does not silently bypass it when that proxy is
+unavailable.
 
 ## Status
 

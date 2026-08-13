@@ -51,6 +51,7 @@ type Handler struct {
 	providerAliasFlows map[domain.UserID]providerAliasFlow
 	providerAuth       providerauth.Service
 	speechSetup        speechsetup.Service
+	clusterUpdater     clusterUpdater
 	providerAuthFlows  map[domain.UserID]providerAuthFlow
 	nodeSettingsBack   map[domain.UserID]settingsReturn
 	speechMu           sync.Mutex
@@ -92,22 +93,6 @@ func NewHandler(
 		cardPages:          make(map[cardPageKey]cardPageState),
 		clusterEventLogs:   make(map[int64]clusterEventLog),
 	}, nil
-}
-
-func (h *Handler) SetProviderAuth(service providerauth.Service) error {
-	if service == nil {
-		return errors.New("provider authentication service is required")
-	}
-	h.providerAuth = service
-	return nil
-}
-
-func (h *Handler) SetSpeechSetup(service speechsetup.Service) error {
-	if service == nil {
-		return errors.New("speech setup service is required")
-	}
-	h.speechSetup = service
-	return nil
 }
 
 func NewHandlerWithControls(
@@ -251,7 +236,7 @@ func (h *Handler) handleCallback(
 		callback.Action == telegramui.ActionSelectNode ||
 		isStatusAction(callback.Action) ||
 		isArchiveContentAction(callback.Action) ||
-		isEnrollmentAction(callback.Action) ||
+		isEnrollmentAction(callback.Action) || isClusterUpdateAction(callback.Action) ||
 		callback.Action == telegramui.ActionPagePrevious ||
 		callback.Action == telegramui.ActionPageLatest ||
 		callback.Action == telegramui.ActionPageNext || isListPageAction(callback.Action)
@@ -313,6 +298,9 @@ func (h *Handler) handleCallback(
 		screen, err = h.createEnrollmentInvitation(ctx, actor)
 	case telegramui.ActionClusterContract:
 		screen = h.beginNodeContract(actor)
+	case telegramui.ActionClusterUpdate, telegramui.ActionClusterUpdateYes,
+		telegramui.ActionClusterUpdateRefresh:
+		screen, err = h.handleClusterUpdate(ctx, actor, callback.Action)
 	case telegramui.ActionEnrollmentOpen:
 		screen, err = h.openEnrollment(actor, telegramui.ActionEnrollmentOpen, callback.Token)
 	case telegramui.ActionEnrollmentApprove, telegramui.ActionEnrollmentReject:

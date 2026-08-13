@@ -47,6 +47,11 @@ Official release archives can be installed atomically with
 verifies that the extracted binary starts, creates an immutable release
 directory, and switches `/opt/bria/current` without deleting the previous
 release. Rollback is an explicit symlink switch to that retained directory.
+The installer gives the unprivileged `bria` service account ownership only of
+`/opt/bria`; the unit allows writes only there and in `/var/lib/bria`. This is
+required for signed self-updates and does not grant host administration. Hosts
+installed with an older unit need this one-time ownership and unit migration
+before Telegram rolling updates can activate a release.
 
 Do not create the configured Telegram token file until this node is intended
 to be the only poller for that bot token. Telegram permits only one active

@@ -32,6 +32,8 @@ type ServerConfig struct {
 	CA                security.CertificateAuthority
 	CAPEM             []byte
 	CallbackKey       []byte
+	UpdateManifestURL string
+	UpdatePublicKey   string
 	State             StateReader
 	Submit            Submitter
 	Now               func() time.Time
@@ -178,6 +180,7 @@ func (s *Server) approvedBundle(
 		EnrollmentAddress: s.config.EnrollmentAddress,
 		Certificate:       string(certificate), CACertificate: string(s.config.CAPEM),
 		CallbackKey: base64.RawURLEncoding.EncodeToString(s.config.CallbackKey), Peers: peers,
+		UpdateManifestURL: s.config.UpdateManifestURL, UpdatePublicKey: s.config.UpdatePublicKey,
 	}, nil
 }
 

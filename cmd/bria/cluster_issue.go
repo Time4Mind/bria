@@ -132,6 +132,8 @@ func issuedNodeConfig(
 		WhisperLanguage:    source.WhisperLanguage,
 		WhisperThreads:     source.WhisperThreads,
 		AppleSpeechCommand: source.AppleSpeechCommand,
+		UpdateManifestURL:  source.UpdateManifestURL,
+		UpdatePublicKey:    source.UpdatePublicKey,
 	}
 	if err := target.Validate(); err != nil {
 		return config.Config{}, err

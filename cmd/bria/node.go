@@ -44,10 +44,12 @@ func runNode(arguments []string) error {
 			return installCertificateRenewal(arguments[1:])
 		case "cert-rollback":
 			return rollbackCertificateRenewal(arguments[1:])
+		case "update-watchdog":
+			return runUpdateWatchdog(arguments[1:])
 		}
 	}
 	if len(arguments) == 0 || arguments[0] != "run" {
-		return errors.New("usage: bria node <run|probe|metrics|cert-request|cert-install|cert-rollback>")
+		return errors.New("usage: bria node <run|probe|metrics|cert-request|cert-install|cert-rollback|update-watchdog>")
 	}
 	flags := flag.NewFlagSet("node run", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
@@ -159,29 +161,17 @@ func runNode(arguments []string) error {
 	}
 	defer runtimeControl.Close()
 	go maintainTemporaryLeader(ctx, node)
+	updateCoordinator, err := startUpdateCoordinator(ctx, node, nodeConfig, runtimeControl)
+	if err != nil {
+		return fmt.Errorf("start cluster update coordinator: %w", err)
+	}
 	fmt.Fprintf(os.Stderr, "bria node %s running at %s\n", nodeConfig.NodeID, nodeConfig.RaftAdvertise)
-	telegramErrors, err := startTelegram(ctx, node, nodeConfig, runtimeControl)
+	telegramErrors, err := startTelegram(ctx, node, nodeConfig, runtimeControl, updateCoordinator)
 	if err != nil {
 		return fmt.Errorf("start Telegram adapter: %w", err)
 	}
-	if telegramErrors == nil {
-		<-ctx.Done()
-		return nil
-	}
-	select {
-	case <-ctx.Done():
-		return nil
-	case err := <-runtimeControl.errors:
-		if err == nil || errors.Is(err, context.Canceled) {
-			return nil
-		}
-		return fmt.Errorf("node runtime control stopped: %w", err)
-	case err := <-telegramErrors:
-		if errors.Is(err, context.Canceled) {
-			return nil
-		}
-		return fmt.Errorf("Telegram adapter stopped: %w", err)
-	}
+	confirmRunningUpdate(nodeConfig)
+	return waitForNodeRuntime(ctx, runtimeControl, telegramErrors)
 }
 
 func loadNodeTLS(nodeConfig config.Config) (tls.Certificate, *x509.CertPool, error) {

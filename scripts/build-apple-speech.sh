@@ -16,7 +16,13 @@ staging=$(mktemp -d "${TMPDIR:-/tmp}/bria-apple-speech.XXXXXX")
 trap 'rm -rf "$staging"' EXIT HUP INT TERM
 
 mkdir -p "$target_dir"
-xcrun swiftc -O -framework Speech -framework Foundation \
+target_flags=""
+if [ -n "${BRIA_APPLE_ARCH:-}" ]; then
+    case "$BRIA_APPLE_ARCH" in arm64|x86_64) ;; *) echo "unsupported Apple architecture" >&2; exit 2;; esac
+    target_flags="-target ${BRIA_APPLE_ARCH}-apple-macosx13.0"
+fi
+# shellcheck disable=SC2086
+xcrun swiftc -O $target_flags -framework Speech -framework Foundation \
     -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker "$plist_file" \
     "$source_file" -o "$staging/bria-apple-speech"
 codesign --force --sign - "$staging/bria-apple-speech"

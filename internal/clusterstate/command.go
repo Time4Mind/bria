@@ -60,6 +60,9 @@ const (
 	CommandSetNodeBackend         CommandKind = "set_node_backend"
 	CommandQueueDeferredInput     CommandKind = "queue_deferred_input"
 	CommandResolveDeferredInput   CommandKind = "resolve_deferred_input"
+	CommandBeginClusterUpdate     CommandKind = "begin_cluster_update"
+	CommandSetClusterUpdateNode   CommandKind = "set_cluster_update_node"
+	CommandFinishClusterUpdate    CommandKind = "finish_cluster_update"
 )
 
 type Command struct {
@@ -276,6 +279,19 @@ type SetNodeBackend struct {
 	NodeID    domain.NodeID `json:"node_id"`
 	Backend   string        `json:"backend"`
 	Connected bool          `json:"connected"`
+}
+
+type SetClusterUpdateNode struct {
+	UpdateID string                 `json:"update_id"`
+	NodeID   domain.NodeID          `json:"node_id"`
+	Phase    domain.NodeUpdatePhase `json:"phase"`
+	Error    string                 `json:"error,omitempty"`
+}
+
+type FinishClusterUpdate struct {
+	UpdateID string `json:"update_id"`
+	Failed   bool   `json:"failed,omitempty"`
+	Error    string `json:"error,omitempty"`
 }
 
 type QueueDeferredInput struct {

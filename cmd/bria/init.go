@@ -34,6 +34,8 @@ func initCluster(arguments []string) error {
 	configPath := flags.String("config", "", "config file path")
 	bind := flags.String("raft-bind", defaults.RaftBind, "raft listen address")
 	advertise := flags.String("raft-advertise", defaults.RaftAdvertise, "raft advertised address")
+	updateManifest := flags.String("update-manifest-url", defaults.UpdateManifestURL, "signed release manifest URL")
+	updatePublicKey := flags.String("update-public-key", defaults.UpdatePublicKey, "base64 Ed25519 release public key")
 	if err := flags.Parse(arguments[1:]); err != nil {
 		return err
 	}
@@ -84,6 +86,8 @@ func initCluster(arguments []string) error {
 		WhisperLanguage:    "auto",
 		WhisperThreads:     4,
 		AppleSpeechCommand: "bria-apple-speech",
+		UpdateManifestURL:  *updateManifest,
+		UpdatePublicKey:    *updatePublicKey,
 	}
 	if err := nodeConfig.Validate(); err != nil {
 		return err

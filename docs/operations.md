@@ -141,7 +141,36 @@ remain origin-local and must be restored separately if those files were lost.
 
 ## Rolling binary update
 
-Use this sequence for every administrator-initiated update:
+The normal path is **Settings → Cluster → Update cluster** in Telegram. Bria
+fetches the official HTTPS manifest, verifies its pinned Ed25519 signature,
+commits one update job to Raft, and updates nodes sequentially. Every node
+downloads its own platform archive and verifies the manifest digest, archive
+size, SHA-256, safe tar paths, and embedded `bria version`. Followers are
+updated first. Bria waits for each heartbeat to report the target version,
+transfers leadership to an updated healthy follower, and updates the former
+leader last. Progress is one refreshable Telegram card, not one message per
+node.
+
+The activation symlink and previous target are retained locally. A detached
+watchdog requires the new daemon to start its authenticated control endpoint
+and Telegram adapter within 90 seconds; otherwise it restores the previous
+target and terminates the failed process so its supervisor restarts the
+rollback. The update job and per-node phases are replicated, so a newly elected
+leader resumes the same rollout rather than starting another one.
+
+Nodes installed before the updater endpoint existed require one normal manual
+rolling installation of an updater-capable bridge release. That bootstrap is
+unavoidable: an old process cannot accept the new authenticated update command.
+After every enabled node runs the bridge release, subsequent compatible tagged
+releases use the Telegram rolling-update flow above.
+
+Official tagged releases are produced by `.github/workflows/release.yml`.
+`BRIA_RELEASE_SIGNING_KEY` is a repository secret; only its public key is in
+the node defaults and public repository. Never store the private release key
+in a node config, release archive, log, or Git commit.
+
+Use this manual sequence only as a recovery fallback when the signed updater
+is unavailable:
 
 1. Confirm every intended voter is reachable and ready with authenticated
    `bria node probe`; record the current leader and build versions.
@@ -160,10 +189,11 @@ Use this sequence for every administrator-initiated update:
    harmless session round trip. Keep the previous binary and config available
    until this succeeds.
 
-A single-node cluster necessarily has an update outage. A two-voter cluster
-cannot make progress while either voter is down; do not mistake process health
-for quorum readiness. Do not force-bootstrap or rewrite Raft storage during a
-normal update.
+A single-node cluster necessarily has a short Telegram outage. A two-voter
+cluster cannot commit while either voter is restarting; Bria commits the next
+phase before stopping a node and continues only after quorum returns. Do not
+mistake process health for quorum readiness, force-bootstrap, or rewrite Raft
+storage during a normal update.
 
 ## External canary without Telegram UI automation
 

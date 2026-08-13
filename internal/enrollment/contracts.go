@@ -49,6 +49,8 @@ type ApprovedBundle struct {
 	Certificate       string `json:"certificate"`
 	CACertificate     string `json:"ca_certificate"`
 	CallbackKey       string `json:"callback_key"`
+	UpdateManifestURL string `json:"update_manifest_url,omitempty"`
+	UpdatePublicKey   string `json:"update_public_key,omitempty"`
 	Peers             []Peer `json:"peers"`
 }
 

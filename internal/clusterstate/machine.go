@@ -207,7 +207,8 @@ func apply(state *domain.State, command Command) (json.RawMessage, error) {
 		CommandIssueEnrollmentInvite, CommandSubmitEnrollment, CommandDecideEnrollment,
 		CommandSubmitNodeContract, CommandMarkEnrollmentNotified,
 		CommandRenameNode, CommandUpdateNodeMetadata,
-		CommandSetNodeLifecycle, CommandDeleteNode:
+		CommandSetNodeLifecycle, CommandDeleteNode,
+		CommandBeginClusterUpdate, CommandSetClusterUpdateNode, CommandFinishClusterUpdate:
 		return applyClusterControl(state, command)
 	case CommandUpdateNodeRuntime:
 		var payload UpdateNodeRuntime

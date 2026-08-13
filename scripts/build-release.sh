@@ -17,12 +17,16 @@ link_flags="-s -w -X github.com/Time4Mind/bria/internal/buildinfo.Version=$versi
 
 rm -f "$output_root/SHA256SUMS"
 
-targets=(
-  "linux amd64"
-  "linux arm64"
-  "darwin arm64"
-  "windows amd64"
-)
+if [ -n "${BRIA_TARGETS:-}" ]; then
+  IFS=';' read -r -a targets <<<"$BRIA_TARGETS"
+else
+  targets=(
+    "linux amd64"
+    "linux arm64"
+    "darwin arm64"
+    "windows amd64"
+  )
+fi
 
 for target in "${targets[@]}"; do
   read -r target_os target_arch <<<"$target"

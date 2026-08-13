@@ -115,7 +115,8 @@ func TestClusterSettingsExposeGlobalSortAndPollingGolden(t *testing.T) {
 	if !strings.Contains(screen.Text, input.ClusterAccounts) {
 		t.Fatalf("cluster account summary missing: %q", screen.Text)
 	}
-	assertGoldenGrid(t, screen, `[＋ Подключить ноду -> cluster_add]
+	assertGoldenGrid(t, screen, `[⬆ Обновить кластер -> cluster_update]
+[＋ Подключить ноду -> cluster_add]
 [Сортировка серверов: По времени -> setting@node_sort]
 [Опрос лимитов: 10 мин -> setting@quota_poll]
 [← Назад -> settings]`)

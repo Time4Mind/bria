@@ -32,6 +32,7 @@ type State struct {
 	EnrollmentRequests      map[string]EnrollmentRequest      `json:"enrollment_requests,omitempty"`
 	NodeTombstones          map[NodeID]NodeTombstone          `json:"node_tombstones,omitempty"`
 	DeferredInputs          map[string][]DeferredSessionInput `json:"deferred_inputs,omitempty"`
+	ClusterUpdate           *ClusterUpdate                    `json:"cluster_update,omitempty"`
 }
 
 func NewState() *State {
@@ -59,6 +60,9 @@ func NewState() *State {
 }
 
 func (s *State) AddNode(node Node) error {
+	if s.ClusterUpdate != nil && s.ClusterUpdate.Active() {
+		return fmt.Errorf("%w: cluster membership is locked during update", ErrInvalidState)
+	}
 	if err := validateIdentifier("node id", string(node.ID)); err != nil {
 		return err
 	}
@@ -209,6 +213,10 @@ func (s *State) Clone() *State {
 	}
 	clone.QuotaRefreshRequestedAt = s.QuotaRefreshRequestedAt
 	clone.TemporaryLeader = s.TemporaryLeader
+	if s.ClusterUpdate != nil {
+		update := cloneClusterUpdate(*s.ClusterUpdate)
+		clone.ClusterUpdate = &update
+	}
 	s.cloneMembership(clone)
 	for id, node := range s.Nodes {
 		node.Backends = cloneBackendDescriptors(node.Backends)

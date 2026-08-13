@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"runtime"
@@ -60,6 +61,14 @@ func main() {
 		}
 	case "node":
 		if err := runNode(os.Args[2:]); err != nil {
+			var replacement *processReplacement
+			if errors.As(err, &replacement) {
+				if replaceErr := replaceProcess(replacement.binary); replaceErr == nil {
+					return
+				} else {
+					err = fmt.Errorf("activate update: %w", replaceErr)
+				}
+			}
 			fmt.Fprintf(os.Stderr, "bria node: %v\n", err)
 			os.Exit(1)
 		}
@@ -72,6 +81,10 @@ func main() {
 		usage()
 	}
 }
+
+type processReplacement struct{ binary string }
+
+func (r *processReplacement) Error() string { return "restart into staged Bria release" }
 
 func usage() {
 	fmt.Fprintln(os.Stderr, "usage: bria <version|doctor|cluster|node>")

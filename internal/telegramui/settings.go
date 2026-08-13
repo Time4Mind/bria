@@ -105,10 +105,7 @@ func RenderSettingsCategory(input SettingsInput, category SettingsCategory) (Scr
 	copy := input.Copy
 	rows := make(Grid, 0, len(settingsIn(category))+1)
 	if category == CategoryCluster {
-		rows = append(rows, Row{button(copy.Text(i18n.ClusterAddNode), ActionClusterAdd, "")})
-		for _, pending := range input.PendingEnrollments {
-			rows = append(rows, Row{button("⏳ "+pending.Name, ActionEnrollmentOpen, pending.Token)})
-		}
+		rows = append(rows, clusterSettingsActions(input)...)
 	}
 	for _, descriptor := range settingsIn(category) {
 		label := copy.Text(descriptor.label) + ": " + settingValue(input, descriptor.id)

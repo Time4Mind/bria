@@ -13,6 +13,7 @@ import (
 
 	"github.com/Time4Mind/bria/internal/application"
 	"github.com/Time4Mind/bria/internal/callbacktoken"
+	"github.com/Time4Mind/bria/internal/clusterupdate"
 	"github.com/Time4Mind/bria/internal/config"
 	"github.com/Time4Mind/bria/internal/consensus"
 	"github.com/Time4Mind/bria/internal/domain"
@@ -29,6 +30,7 @@ func startTelegram(
 	node *consensus.Node,
 	nodeConfig config.Config,
 	runtimeControl *nodeRuntimeControl,
+	updateCoordinator *clusterupdate.Coordinator,
 ) (<-chan error, error) {
 	token, enabled, err := loadOptionalTelegramToken(nodeConfig.TelegramTokenFile)
 	if err != nil || !enabled {
@@ -98,6 +100,11 @@ func startTelegram(
 	}
 	if err := handler.SetSpeechSetup(runtimeControl.speechSetup); err != nil {
 		return nil, err
+	}
+	if updateCoordinator != nil {
+		if err := handler.SetClusterUpdater(updateCoordinator); err != nil {
+			return nil, err
+		}
 	}
 	go handler.RunInteractiveNotifications(ctx, 500*time.Millisecond)
 	go handler.RunBackgroundNotifications(ctx, 1200*time.Millisecond)

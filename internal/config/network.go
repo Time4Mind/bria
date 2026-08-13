@@ -189,3 +189,12 @@ func validateProxyURL(label, value string, schemes ...string) error {
 	}
 	return fmt.Errorf("%s uses an unsupported proxy scheme", label)
 }
+
+func validateUpdateManifestURL(value string) error {
+	parsed, err := url.Parse(value)
+	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil ||
+		parsed.RawQuery != "" || parsed.Fragment != "" || parsed.Path == "" {
+		return errors.New("update_manifest_url must be an absolute HTTPS URL without credentials, query, or fragment")
+	}
+	return nil
+}

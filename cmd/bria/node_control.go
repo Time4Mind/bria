@@ -19,29 +19,11 @@ import (
 	"github.com/Time4Mind/bria/internal/localarchive"
 	"github.com/Time4Mind/bria/internal/nodecontrol"
 	"github.com/Time4Mind/bria/internal/platform"
-	"github.com/Time4Mind/bria/internal/providerauth"
 	"github.com/Time4Mind/bria/internal/runtimehost"
 	"github.com/Time4Mind/bria/internal/sessionname"
 	"github.com/Time4Mind/bria/internal/speechsetup"
 	"github.com/Time4Mind/bria/internal/transcript"
 )
-
-type nodeRuntimeControl struct {
-	router            *nodecontrol.Router
-	transcripts       *nodecontrol.TranscriptRouter
-	sessionFiles      *nodecontrol.SessionFileRouter
-	starts            *nodecontrol.StartRouter
-	providerAuth      *nodecontrol.ProviderAuthRouter
-	speechSetup       *nodecontrol.SpeechSetupRouter
-	localProviderAuth *providerauth.Manager
-	executor          *runtimehost.LocalExecutor
-	store             *runtimehost.BoltOperationStore
-	client            *nodecontrol.Client
-	server            *nodecontrol.Server
-	enrollment        *enrollmentRuntime
-	listener          net.Listener
-	errors            chan error
-}
 
 func startNodeRuntimeControl(
 	ctx context.Context,
@@ -137,6 +119,10 @@ func startNodeRuntimeControl(
 		Certificate: certificate, Roots: roots, ClusterID: nodeConfig.ClusterID,
 		Resolver: resolver, Timeout: 750 * time.Millisecond,
 	})
+	if err != nil {
+		return closeFailedRuntime(executor, store, err)
+	}
+	updates, err := prepareNodeUpdates(nodeConfig, client)
 	if err != nil {
 		return closeFailedRuntime(executor, store, err)
 	}
@@ -243,6 +229,7 @@ func startNodeRuntimeControl(
 		Transcripts: localTranscripts, SessionFiles: localSessionFiles, Starts: localStarts,
 		ProviderAuth: localProviderAuth,
 		SpeechSetup:  localSpeechSetup,
+		Updates:      updates.local,
 		Enrollments:  enrollments, EnrollmentIssuerID: nodeConfig.EffectiveEnrollmentIssuerID(),
 	})
 	if err != nil {
@@ -261,6 +248,7 @@ func startNodeRuntimeControl(
 		starts:       startRouter,
 		providerAuth: providerAuthRouter, localProviderAuth: localProviderAuth,
 		speechSetup: speechSetupRouter,
+		updates:     updates,
 		executor:    executor, store: store, client: client,
 		server: server, listener: listener, errors: make(chan error, 1),
 	}

@@ -70,6 +70,23 @@ func applyClusterControl(
 		return nil, decodeAnd(command.Payload, &payload, func() error {
 			return state.DeleteDisabledNode(payload.NodeID, command.IssuedAt)
 		})
+	case CommandBeginClusterUpdate:
+		var payload domain.ClusterUpdate
+		return nil, decodeAnd(command.Payload, &payload, func() error {
+			return state.BeginClusterUpdate(payload, command.IssuedAt)
+		})
+	case CommandSetClusterUpdateNode:
+		var payload SetClusterUpdateNode
+		return nil, decodeAnd(command.Payload, &payload, func() error {
+			return state.SetClusterUpdateNode(
+				payload.UpdateID, payload.NodeID, payload.Phase, payload.Error, command.IssuedAt,
+			)
+		})
+	case CommandFinishClusterUpdate:
+		var payload FinishClusterUpdate
+		return nil, decodeAnd(command.Payload, &payload, func() error {
+			return state.FinishClusterUpdate(payload.UpdateID, payload.Failed, payload.Error, command.IssuedAt)
+		})
 	default:
 		return nil, domain.ErrInvalidState
 	}

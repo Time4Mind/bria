@@ -163,6 +163,9 @@ func (s *State) UpdateNodeMetadata(update Node) error {
 }
 
 func (s *State) SetNodeLifecycle(nodeID NodeID, lifecycle NodeLifecycle) error {
+	if s.ClusterUpdate != nil && s.ClusterUpdate.Active() {
+		return fmt.Errorf("%w: cluster membership is locked during update", ErrInvalidState)
+	}
 	node, ok := s.Nodes[nodeID]
 	if !ok {
 		return ErrNotFound
@@ -204,6 +207,9 @@ func (s *State) CanDisableNode(nodeID NodeID) error {
 }
 
 func (s *State) DeleteDisabledNode(nodeID NodeID, at time.Time) error {
+	if s.ClusterUpdate != nil && s.ClusterUpdate.Active() {
+		return fmt.Errorf("%w: cluster membership is locked during update", ErrInvalidState)
+	}
 	node, ok := s.Nodes[nodeID]
 	if !ok {
 		return ErrNotFound
