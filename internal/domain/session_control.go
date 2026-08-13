@@ -154,7 +154,7 @@ func (s *State) CloseSession(
 	s.Sessions[ref.Key()] = session
 	s.clearDeferredInputs(ref)
 	s.clearBackgroundSession(ref)
-	s.repairNavigationAfterUnavailable(ref)
+	s.repairNavigationAfterClosed(ref)
 	return nil
 }
 

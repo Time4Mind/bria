@@ -112,6 +112,25 @@ func (s *State) repairNavigationAfterUnavailable(ref SessionRef) {
 	}
 }
 
+// repairNavigationAfterClosed keeps the actor on the node whose card they
+// explicitly closed. A same-node live session may replace it, but a session on
+// another node must not turn a local close into an implicit host switch.
+func (s *State) repairNavigationAfterClosed(ref SessionRef) {
+	for userID := range s.Users {
+		perNode := s.Navigation.ActiveSessionByUserNode[userID]
+		if perNode == nil || perNode[ref.NodeID] != ref.SessionID {
+			continue
+		}
+		delete(perNode, ref.NodeID)
+		if s.Navigation.ActiveNodeByUser[userID] != ref.NodeID {
+			continue
+		}
+		if replacement, ok := s.mostRecentAvailableSession(userID, ref.NodeID); ok {
+			perNode[ref.NodeID] = replacement.SessionID
+		}
+	}
+}
+
 func (s *State) ensureActiveSession(userID UserID) {
 	if s.Navigation.ActiveNodeByUser == nil {
 		s.Navigation.ActiveNodeByUser = make(map[UserID]NodeID)

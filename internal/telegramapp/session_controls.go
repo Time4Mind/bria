@@ -109,13 +109,13 @@ func (h *Handler) handleSessionControlCallback(
 	}
 	var screen telegramui.Screen
 	if callback.Action == telegramui.ActionConfirmClose {
-		// CloseSession has already selected the most recently used live fallback.
-		// Return straight to that card. If no live fallback remains, stay on the
-		// archived card instead of unexpectedly opening the server selector.
-		if fallback, activeErr := h.service.ActiveSession(actor); activeErr == nil {
+		// CloseSession may select the most recently used live session on the same
+		// node. If that node is now empty, keep its Sessions screen open rather
+		// than switching hosts or leaving the archived card on screen.
+		if fallback, activeErr := h.service.ActiveSession(actor); activeErr == nil && fallback.NodeID == ref.NodeID {
 			screen, err = h.renderSessionCard(ctx, actor, fallback.Ref(), 0)
-		} else if errors.Is(activeErr, domain.ErrNotFound) {
-			screen, err = h.renderSessionCard(ctx, actor, ref, 0)
+		} else if activeErr == nil || errors.Is(activeErr, domain.ErrNotFound) {
+			screen, err = h.projector.NodeSessions(actor, ref.NodeID)
 		} else {
 			err = activeErr
 		}

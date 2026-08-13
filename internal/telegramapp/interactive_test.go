@@ -63,6 +63,64 @@ func TestSelectingWaitingSessionAutomaticallyOpensKeyboard(t *testing.T) {
 	}
 }
 
+func TestNewCodexSessionUpdatePromptOpensVerticalKeyboard(t *testing.T) {
+	fixture := newFixture(t)
+	pane := []byte("✨\u200aUpdate available! 0.97.0 -> 0.104.0\n\n" +
+		"› 1. Update now\n  2. Skip\n  3. Skip until next version\n\nPress enter to continue\n")
+	prompt, ok := interactive.Detect(pane)
+	if !ok || prompt.Kind != "codex_update" {
+		t.Fatalf("prompt=%#v/%v", prompt, ok)
+	}
+	actor := application.Principal{UserID: 7}
+	session, err := fixture.service.ActiveSession(actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report := domain.InteractivePromptReport{
+		SessionID: session.ID, Generation: session.RuntimeGeneration,
+		Present: true, Kind: prompt.Kind, Hash: prompt.Hash,
+	}
+	heartbeat := commandForTest(
+		t, "new-session-update-prompt", clusterstate.CommandPublishNodeHeartbeat,
+		clusterstate.PublishNodeHeartbeat{
+			NodeID: "allowed", BootID: "boot", Interactive: []domain.InteractivePromptReport{report},
+		},
+	)
+	if result := fixture.machine.Apply(heartbeat); result.Err() != nil {
+		t.Fatal(result.Err())
+	}
+	controls := &blockingControls{ref: session.Ref(), pane: pane}
+	handler, err := telegramapp.NewHandlerWithControls(
+		fixture.service, fixture.projector, fixture.codec, fixture.messenger, controls,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, err := fixture.codec.Session(7, telegramui.ActionSelectSession, session.Ref())
+	if err != nil {
+		t.Fatal(err)
+	}
+	callback := encodeCallback(t, telegramui.ActionSelectSession, token)
+	if err := handler.HandleTelegramUpdate(context.Background(), telegrambot.IncomingUpdate{
+		UpdateID: 83, Kind: telegrambot.IncomingCallback, UserID: 7, ChatID: 7,
+		CallbackID: "select-update", CallbackData: callback,
+		CallbackOrigin: telegrambot.Message{ChatID: 7, MessageID: 10},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	screen := fixture.messenger.edited[len(fixture.messenger.edited)-1]
+	grid := telegramui.CanonicalGrid(screen.Grid)
+	for _, action := range []string{"key_up", "key_down", "key_esc", "key_enter"} {
+		if !strings.Contains(grid, action) {
+			t.Fatalf("missing %s in %s", action, grid)
+		}
+	}
+	if strings.Contains(grid, "key_left") || strings.Contains(grid, "key_right") ||
+		!strings.Contains(screen.Text, "Update available!") {
+		t.Fatalf("update screen=%#v grid=%s", screen, grid)
+	}
+}
+
 func TestInteractiveCallbackSendsBoundKeyAndPromptHash(t *testing.T) {
 	fixture := newFixture(t)
 	pane := []byte("☐ Choose\n❯ 1. First\nEnter to select\n")
@@ -182,6 +240,38 @@ func TestActivePromptRepaintsReplicatedLiveCardWithoutNotification(t *testing.T)
 	}
 	if grid := telegramui.CanonicalGrid(fixture.messenger.edited[0].Grid); !strings.Contains(grid, "key_enter") {
 		t.Fatalf("grid=%s", grid)
+	}
+}
+
+func TestActivePromptWithoutRecordedCardSendsKeyboardImmediately(t *testing.T) {
+	fixture := newFixture(t)
+	pane := []byte("✨ Update available! 0.97.0 -> 0.104.0\n" +
+		"› 1. Update now\n  2. Skip\nPress enter to continue\n")
+	publishInteractivePrompt(t, fixture, pane)
+	controls := &blockingControls{
+		ref: domain.SessionRef{NodeID: "allowed", SessionID: "live"}, pane: pane,
+	}
+	handler, err := telegramapp.NewHandlerWithControls(
+		fixture.service, fixture.projector, fixture.codec, fixture.messenger, controls,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	defer cancel()
+	handler.RunInteractiveNotifications(ctx, 5*time.Millisecond)
+	if len(fixture.messenger.sent) != 1 || len(fixture.messenger.edited) != 0 {
+		t.Fatalf("sent=%d edited=%d", len(fixture.messenger.sent), len(fixture.messenger.edited))
+	}
+	grid := telegramui.CanonicalGrid(fixture.messenger.sent[0].Grid)
+	if !strings.Contains(grid, "key_up") || !strings.Contains(grid, "key_down") ||
+		!strings.Contains(grid, "key_esc") || !strings.Contains(grid, "key_enter") {
+		t.Fatalf("grid=%s", grid)
+	}
+	if _, exists, cardErr := fixture.service.TelegramResponseCard(
+		application.Principal{UserID: 7},
+	); cardErr != nil || !exists {
+		t.Fatalf("response card exists=%v err=%v", exists, cardErr)
 	}
 }
 

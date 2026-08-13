@@ -33,13 +33,16 @@ func TestRestoreCheckpointUsesVerticalKeyboard(t *testing.T) {
 	screen := telegramui.RenderInteractiveCard(telegramui.InteractiveInput{
 		Copy: i18n.For("en"), Text: "restore", Control: true, VerticalOnly: true,
 		Tokens: map[telegramui.Action]telegramui.OpaqueToken{
-			telegramui.ActionKeyDown: "token", telegramui.ActionKeyEscape: "token",
-			telegramui.ActionKeyCtrlC: "token", telegramui.ActionKeyEnter: "token",
+			telegramui.ActionKeyUp: "token", telegramui.ActionKeyDown: "token",
+			telegramui.ActionKeySpace: "token", telegramui.ActionKeyTab: "token",
+			telegramui.ActionKeyEscape: "token",
+			telegramui.ActionKeyCtrlC:  "token", telegramui.ActionKeyEnter: "token",
 			telegramui.ActionKeyBack: "token",
 		},
 	})
 	grid := telegramui.CanonicalGrid(screen.Grid)
-	if strings.Contains(grid, "key_left") || !strings.Contains(grid, "key_down") {
+	if strings.Contains(grid, "key_left") || !strings.Contains(grid, "key_up") ||
+		!strings.Contains(grid, "key_down") {
 		t.Fatalf("grid=%s", grid)
 	}
 }

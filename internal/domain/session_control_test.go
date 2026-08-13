@@ -123,17 +123,20 @@ func TestCloseSelectsEachUsersMostRecentAvailableBackgroundSession(t *testing.T)
 	}
 }
 
-func TestCloseNeverLeavesActivePointerEmptyWhileLiveSessionIsVisible(t *testing.T) {
+func TestCloseKeepsSelectedNodeWhenOnlyAnotherNodeHasLiveSession(t *testing.T) {
 	state := fixtureState(t)
 	closing := addSession(t, state, "closing", "alpha", 1, time.Unix(10, 0).UTC())
-	replacement := addSession(t, state, "replacement", "beta", 1, time.Unix(11, 0).UTC())
+	addSession(t, state, "replacement", "beta", 1, time.Unix(11, 0).UTC())
 	if err := state.CloseSession(
 		1, closing, state.Sessions[closing.Key()].Revision, "archive-closing", time.Unix(20, 0).UTC(),
 	); err != nil {
 		t.Fatal(err)
 	}
-	if got := activeRef(state, 1); got != replacement {
-		t.Fatalf("cross-node fallback=%v, want %v", got, replacement)
+	if got := state.Navigation.ActiveNodeByUser[1]; got != "alpha" {
+		t.Fatalf("selected node=%q, want alpha", got)
+	}
+	if got := state.Navigation.ActiveSessionByUserNode[1]["alpha"]; got != "" {
+		t.Fatalf("closed node session=%q, want empty", got)
 	}
 }
 

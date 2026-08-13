@@ -30,6 +30,15 @@ var patterns = []pattern{
 		minGap: 2,
 	},
 	{
+		kind: "codex_update",
+		top: rx(
+			`(?i)^\s*(?:✨[\s\p{Zs}]*)?Update available!`,
+			`(?i)^\s*[›❯>]\s*1\.\s*Update now\b`,
+		),
+		bottom: rx(`(?i)^\s*Press enter to continue\s*$`),
+		minGap: 1,
+	},
+	{
 		kind: "plan_approval",
 		top: rx(
 			`^\s*Would you like to proceed\?`,

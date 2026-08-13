@@ -26,6 +26,8 @@ func TestDetectsProviderPromptsAndClippedFallbacks(t *testing.T) {
 		{"resume", "This session is 3 days old\n  1. Summary\nEnter to confirm\n", "resume_summary"},
 		{"settings", "Select model\n  1. fast\nEsc to exit\n", "settings"},
 		{"hooks trust", "Hooks need review\n1. Review hooks\n2. Trust all and continue\nPress enter to confirm or esc to go back\n", "hooks_trust"},
+		{"codex update", "✨\u200aUpdate available! 0.97.0 -> 0.104.0\n\nRelease notes: https://github.com/openai/codex/releases/latest\n\n› 1. Update now\n  2. Skip\n  3. Skip until next version\n\nPress enter to continue\n", "codex_update"},
+		{"codex update clipped", "› 1. Update now\n  2. Skip\n  3. Skip until next version\nPress enter to continue\n", "codex_update"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

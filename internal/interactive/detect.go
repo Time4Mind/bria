@@ -36,7 +36,7 @@ func Detect(pane []byte) (Prompt, bool) {
 }
 
 func (p Prompt) VerticalOnly() bool {
-	return p.Kind == "restore_checkpoint"
+	return p.Kind == "restore_checkpoint" || p.Kind == "codex_update"
 }
 
 func (p pattern) extract(lines []string) (string, bool) {

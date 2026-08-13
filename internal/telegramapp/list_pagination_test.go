@@ -33,7 +33,9 @@ func TestNodePaginationCallbackEditsSameCarrier(t *testing.T) {
 			t.Fatal(result.Err())
 		}
 	}
-	open := encodeCallback(t, telegramui.ActionSessions, "")
+	// Closing the last session intentionally keeps its node selected. Open the
+	// server selector explicitly before exercising node pagination.
+	open := encodeCallback(t, telegramui.ActionSessions, "servers")
 	origin := telegrambot.Message{ChatID: 7, MessageID: 77}
 	invokeListCallback(t, fixture, 301, open, origin)
 	first := fixture.messenger.edited[len(fixture.messenger.edited)-1]

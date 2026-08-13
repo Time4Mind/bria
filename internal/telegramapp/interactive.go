@@ -88,10 +88,10 @@ func interactiveActions(control, verticalOnly bool) []telegramui.Action {
 		return actions
 	}
 	actions = append(actions, telegramui.ActionKeyDown, telegramui.ActionKeyEscape,
-		telegramui.ActionKeyCtrlC, telegramui.ActionKeyEnter)
+		telegramui.ActionKeyCtrlC, telegramui.ActionKeyEnter, telegramui.ActionKeyUp,
+		telegramui.ActionKeySpace, telegramui.ActionKeyTab)
 	if !verticalOnly {
-		actions = append(actions, telegramui.ActionKeyUp, telegramui.ActionKeyLeft,
-			telegramui.ActionKeyRight, telegramui.ActionKeySpace, telegramui.ActionKeyTab)
+		actions = append(actions, telegramui.ActionKeyLeft, telegramui.ActionKeyRight)
 	}
 	return actions
 }

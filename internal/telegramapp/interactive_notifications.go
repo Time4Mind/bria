@@ -96,13 +96,26 @@ func (h *Handler) refreshActiveInteractive(
 	notice application.InteractiveNotice,
 ) bool {
 	actor := application.Principal{UserID: notice.UserID}
-	card, exists, err := h.service.TelegramResponseCard(actor)
-	if err != nil || !exists {
-		return h.sendInteractiveNotification(ctx, notice)
+	screen, interactive, err := h.renderInteractiveSessionCard(
+		ctx, actor, notice.Session.Ref(),
+	)
+	if err != nil || !interactive {
+		// The replicated prompt can arrive just before node-control can return
+		// its pane. Leave the notice unseen so the next scan retries instead of
+		// permanently replacing the keyboard with a regular card.
+		return false
 	}
-	screen, err := h.renderSessionCard(ctx, actor, notice.Session.Ref(), 0)
+	card, exists, err := h.service.TelegramResponseCard(actor)
 	if err != nil {
 		return false
+	}
+	if !exists {
+		message, sendErr := h.messenger.SendScreen(ctx, int64(notice.UserID), screen)
+		if sendErr != nil {
+			return false
+		}
+		h.rememberResponseCard(ctx, actor, message)
+		return true
 	}
 	_, err = h.messenger.EditScreen(ctx, telegramMessage(card), screen)
 	return err == nil
