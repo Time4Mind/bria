@@ -101,7 +101,7 @@ func TestHeartbeatAgentFollowsLeaderChanges(t *testing.T) {
 		leaders,
 		publisher,
 		func(context.Context) (Heartbeat, error) {
-			return Heartbeat{NodeID: "follower", BootID: "boot"}, nil
+			return Heartbeat{NodeID: "follower", BootID: "boot", OS: "linux", Arch: "arm64"}, nil
 		},
 		time.Second,
 	)

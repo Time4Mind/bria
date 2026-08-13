@@ -15,6 +15,8 @@ func (s *State) PublishNodeHeartbeat(
 	nodeID NodeID,
 	bootID string,
 	version string,
+	osName string,
+	arch string,
 	certificateFingerprint string,
 	previousCertificateFingerprint string,
 	backends []BackendDescriptor,
@@ -39,6 +41,15 @@ func (s *State) PublishNodeHeartbeat(
 	}
 	if err := s.UpdateNodeInventory(nodeID, NodeOnline, version, backends, at); err != nil {
 		return BootRecoveryPlan{}, err
+	}
+	if strings.TrimSpace(osName) != "" || strings.TrimSpace(arch) != "" {
+		node := s.Nodes[nodeID]
+		node.OS = strings.ToLower(strings.TrimSpace(osName))
+		node.Arch = strings.ToLower(strings.TrimSpace(arch))
+		if node.OS == "" || node.Arch == "" {
+			return BootRecoveryPlan{}, fmt.Errorf("node platform must be complete")
+		}
+		s.Nodes[nodeID] = node
 	}
 	plan, err := s.ObserveNodeBoot(nodeID, bootID, at)
 	if err != nil {

@@ -23,6 +23,8 @@ type Heartbeat struct {
 	NodeID                         string                           `json:"node_id"`
 	BootID                         string                           `json:"boot_id"`
 	Version                        string                           `json:"version,omitempty"`
+	OS                             string                           `json:"os,omitempty"`
+	Arch                           string                           `json:"arch,omitempty"`
 	CertificateFingerprint         string                           `json:"-"`
 	PreviousCertificateFingerprint string                           `json:"-"`
 	Backends                       []domain.BackendDescriptor       `json:"backends,omitempty"`
@@ -71,7 +73,8 @@ func (c *ConsensusHeartbeatCommitter) CommitHeartbeat(
 		c.now(),
 		clusterstate.PublishNodeHeartbeat{
 			NodeID: domain.NodeID(report.NodeID), BootID: report.BootID,
-			Version: report.Version, CertificateFingerprint: report.CertificateFingerprint,
+			Version: report.Version, OS: report.OS, Arch: report.Arch,
+			CertificateFingerprint: report.CertificateFingerprint,
 			PreviousCertificateFingerprint: report.PreviousCertificateFingerprint,
 			Backends:                       report.Backends,
 			Archives:                       report.Archives, Interactive: report.Interactive,
@@ -109,6 +112,11 @@ func validateHeartbeat(report Heartbeat) error {
 	}
 	if strings.TrimSpace(report.BootID) == "" || len(report.BootID) > 256 {
 		return errors.New("heartbeat boot id must contain 1 to 256 characters")
+	}
+	platformMissing := strings.TrimSpace(report.OS) == "" && strings.TrimSpace(report.Arch) == ""
+	platformComplete := strings.TrimSpace(report.OS) != "" && strings.TrimSpace(report.Arch) != ""
+	if (!platformMissing && !platformComplete) || len(report.OS) > 32 || len(report.Arch) > 32 {
+		return errors.New("heartbeat platform is invalid")
 	}
 	if report.CertificateFingerprint != "" && !sha256Hex(report.CertificateFingerprint) {
 		return errors.New("heartbeat certificate fingerprint is invalid")

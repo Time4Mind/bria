@@ -190,6 +190,8 @@ type PublishNodeHeartbeat struct {
 	NodeID                         domain.NodeID                    `json:"node_id"`
 	BootID                         string                           `json:"boot_id"`
 	Version                        string                           `json:"version,omitempty"`
+	OS                             string                           `json:"os,omitempty"`
+	Arch                           string                           `json:"arch,omitempty"`
 	CertificateFingerprint         string                           `json:"certificate_fingerprint,omitempty"`
 	PreviousCertificateFingerprint string                           `json:"previous_certificate_fingerprint,omitempty"`
 	Backends                       []domain.BackendDescriptor       `json:"backends,omitempty"`

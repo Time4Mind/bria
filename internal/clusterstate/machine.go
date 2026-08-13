@@ -223,7 +223,7 @@ func apply(state *domain.State, command Command) (json.RawMessage, error) {
 			return nil, fmt.Errorf("decode publish_node_heartbeat: %w", err)
 		}
 		plan, err := state.PublishNodeHeartbeat(
-			payload.NodeID, payload.BootID, payload.Version,
+			payload.NodeID, payload.BootID, payload.Version, payload.OS, payload.Arch,
 			payload.CertificateFingerprint, payload.PreviousCertificateFingerprint,
 			payload.Backends,
 			payload.Archives, payload.Interactive, payload.Finals, command.IssuedAt,

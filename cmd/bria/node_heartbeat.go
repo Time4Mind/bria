@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"runtime"
 	"sync"
 	"time"
 
@@ -63,6 +64,7 @@ func startNodeHeartbeatLoops(
 		cancel()
 		return nodecontrol.Heartbeat{
 			NodeID: nodeConfig.NodeID, BootID: bootID, Version: localBuildVersion(),
+			OS: runtime.GOOS, Arch: runtime.GOARCH,
 			Backends: inventory.Backends(), Archives: archives, Interactive: interactive,
 			Finals: finals,
 			Quotas: quotaStore.Snapshots(),

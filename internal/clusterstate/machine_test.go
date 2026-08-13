@@ -242,7 +242,7 @@ func TestHeartbeatReplicatesNormalizedQuotaAndAddTime(t *testing.T) {
 	}
 	collected := time.Unix(120, 0).UTC()
 	heartbeat := clusterstate.PublishNodeHeartbeat{
-		NodeID: "alpha", BootID: "boot-a",
+		NodeID: "alpha", BootID: "boot-a", OS: "linux", Arch: "arm64",
 		Quotas: []domain.QuotaSnapshot{{
 			NodeID: "alpha", Backend: "codex", AccountID: "acct",
 			Weekly: &domain.QuotaWindow{UsedPercent: 37}, CollectedAt: collected,
@@ -254,6 +254,10 @@ func TestHeartbeatReplicatesNormalizedQuotaAndAddTime(t *testing.T) {
 	got := machine.State().Quotas["alpha/codex"]
 	if got.AccountID != "acct" || got.Weekly == nil || got.Weekly.UsedPercent != 37 {
 		t.Fatalf("quota=%#v", got)
+	}
+	node := machine.State().Nodes["alpha"]
+	if node.OS != "linux" || node.Arch != "arm64" {
+		t.Fatalf("heartbeat platform=%s/%s", node.OS, node.Arch)
 	}
 	data, err := machine.MarshalSnapshot()
 	if err != nil {
