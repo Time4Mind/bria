@@ -20,6 +20,9 @@ tar -xzf "$archive" -C "$stage"
 [ -x "$stage/bria" ] || { echo "archive has no executable bria" >&2; exit 1; }
 "$stage/bria" version >/dev/null
 chmod 0755 "$stage/bria"
+# The control service owns releases, but an isolated runner has a distinct
+# identity and must be able to traverse the immutable release directory.
+chmod 0755 "$stage"
 mv "$stage" "$destination"
 ln -sfn "$destination" "$prefix/.current.new"
 mv -Tf "$prefix/.current.new" "$prefix/current"
