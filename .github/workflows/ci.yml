@@ -34,7 +34,7 @@ jobs:
       - run: go vet ./...
       - run: test -z "$(gofmt -l cmd internal)"
       - run: scripts/build-release.sh "$RUNNER_TEMP/bria-dist"
-      - run: sha256sum -c "$RUNNER_TEMP/bria-dist/SHA256SUMS"
+      - run: cd "$RUNNER_TEMP/bria-dist" && sha256sum -c SHA256SUMS
       - run: GOOS=linux GOARCH=arm64 go build ./cmd/bria
       - run: GOOS=darwin GOARCH=arm64 go build ./cmd/bria
       - run: GOOS=windows GOARCH=amd64 go build ./cmd/bria
