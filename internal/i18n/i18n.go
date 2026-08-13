@@ -1,0 +1,301 @@
+// Package i18n owns Bria's user-interface copy. Agent output, paths, session
+// names, node names, and backend identifiers deliberately bypass it.
+package i18n
+
+import "fmt"
+
+type Key string
+
+const (
+	MenuTitle                    Key = "menu.title"
+	MenuActive                   Key = "menu.active"
+	ButtonSessions               Key = "button.sessions"
+	ButtonArchive                Key = "button.archive"
+	ButtonStatus                 Key = "button.status"
+	ButtonNew                    Key = "button.new"
+	ButtonSettings               Key = "button.settings"
+	ButtonBack                   Key = "button.back"
+	ButtonBackServers            Key = "button.back_servers"
+	ButtonServers                Key = "button.servers"
+	ButtonRefresh                Key = "button.refresh"
+	ButtonMenu                   Key = "button.menu"
+	ButtonNewShort               Key = "button.new_short"
+	ButtonClose                  Key = "button.close"
+	ButtonRestore                Key = "button.restore"
+	ButtonHistory                Key = "button.history"
+	ButtonOlder                  Key = "button.older"
+	ButtonNewer                  Key = "button.newer"
+	ButtonStop                   Key = "button.stop"
+	ButtonClear                  Key = "button.clear"
+	ButtonTerminal               Key = "button.terminal"
+	ButtonConfirmClose           Key = "button.confirm_close"
+	ButtonConfirmClear           Key = "button.confirm_clear"
+	ButtonConfirm                Key = "button.confirm"
+	ButtonCancel                 Key = "button.cancel"
+	ButtonLater                  Key = "button.later"
+	ConfirmClose                 Key = "confirm.close"
+	ConfirmClear                 Key = "confirm.clear"
+	ToastQueued                  Key = "toast.queued"
+	NodesTitle                   Key = "nodes.title"
+	NodesBody                    Key = "nodes.body"
+	NoServers                    Key = "nodes.empty"
+	NodeUnavailable              Key = "node.unavailable"
+	AllSessionsTitle             Key = "sessions.all_title"
+	NoLiveSessions               Key = "sessions.empty"
+	NodeLiveTitle                Key = "sessions.node_title"
+	ServerOffline                Key = "sessions.server_offline"
+	LastCard                     Key = "sessions.last_card"
+	ArchiveSelectTitle           Key = "archive.select_title"
+	ArchiveAllTitle              Key = "archive.all_title"
+	ArchivePageLine              Key = "archive.page_line"
+	ArchiveOlderPages            Key = "archive.older_pages"
+	NodeArchiveTitle             Key = "archive.node_title"
+	NoArchivedSessions           Key = "archive.empty"
+	CardViewOnly                 Key = "card.view_only"
+	CardServerUnavailable        Key = "card.server_unavailable"
+	CardOfflineInputQueued       Key = "card.offline_input_queued"
+	CardOfflineQueueFull         Key = "card.offline_queue_full"
+	SessionStateActive           Key = "session.state.active"
+	SessionStateIdle             Key = "session.state.idle"
+	SessionStateRecovering       Key = "session.state.recovering"
+	SessionStateArchived         Key = "session.state.archived"
+	SessionStateLost             Key = "session.state.lost"
+	SessionPhaseRunning          Key = "session.phase.running"
+	SessionPhaseStopping         Key = "session.phase.stopping"
+	SessionPhaseWaiting          Key = "session.phase.waiting"
+	SessionPhaseDegraded         Key = "session.phase.degraded"
+	SessionPhaseStarting         Key = "session.phase.starting"
+	NewSelectServer              Key = "new.select_server"
+	NewSelectBackend             Key = "new.select_backend"
+	NewNoBackends                Key = "new.no_backends"
+	NewSelectDirectory           Key = "new.select_directory"
+	NewSelectResume              Key = "new.select_resume"
+	NewUseDirectory              Key = "new.use_directory"
+	NewStartFresh                Key = "new.start_fresh"
+	NewParentDirectory           Key = "new.parent_directory"
+	NewNoDirectories             Key = "new.no_directories"
+	NewUntitledSession           Key = "new.untitled_session"
+	NewAgeNow                    Key = "new.age_now"
+	StatusTitle                  Key = "status.title"
+	StatusLine                   Key = "status.line"
+	StatusModeChoose             Key = "status.mode.choose"
+	StatusModeLeader             Key = "status.mode.leader"
+	StatusModeSettings           Key = "status.mode.settings"
+	StatusLeaderBody             Key = "status.leader.body"
+	StatusSettingsBody           Key = "status.settings.body"
+	StatusConfirmLeader          Key = "status.confirm_leader"
+	StatusNodeSettings           Key = "status.node_settings"
+	StatusQuotaHeader            Key = "status.quota.header"
+	QuotaAlert                   Key = "quota.alert"
+	QuotaWindowFiveHour          Key = "quota.window.five_hour"
+	QuotaWindowWeek              Key = "quota.window.week"
+	ValueMinuteShort             Key = "value.minute_short"
+	ValueLines                   Key = "value.lines"
+	SettingsTitle                Key = "settings.title"
+	SettingsBody                 Key = "settings.body"
+	SettingsInterface            Key = "settings.category.interface"
+	SettingsCard                 Key = "settings.category.card"
+	SettingsArchive              Key = "settings.category.archive"
+	SettingsNotifications        Key = "settings.category.notifications"
+	SettingsVoice                Key = "settings.category.voice"
+	SettingsCluster              Key = "settings.category.cluster"
+	SettingsCategoryBody         Key = "settings.category.body"
+	SettingSessionView           Key = "settings.item.session_view"
+	SettingResumeSelection       Key = "settings.item.resume_selection"
+	SettingLanguage              Key = "settings.item.language"
+	SettingToolCalls             Key = "settings.item.tool_calls"
+	SettingToolResults           Key = "settings.item.tool_results"
+	SettingToolOutputLines       Key = "settings.item.tool_output_lines"
+	SettingThinking              Key = "settings.item.thinking"
+	SettingResponseCards         Key = "settings.item.response_cards"
+	SettingTerminalSnapshots     Key = "settings.item.terminal_snapshots"
+	SettingIdleArchive           Key = "settings.item.idle_archive"
+	SettingRetention             Key = "settings.item.retention"
+	SettingExpiry                Key = "settings.item.expiry"
+	SettingNotifyFinished        Key = "settings.item.notify_finished"
+	SettingNotifyError           Key = "settings.item.notify_error"
+	SettingNotifyAction          Key = "settings.item.notify_action"
+	SettingBackgroundDismiss     Key = "settings.item.background_dismiss"
+	SettingNodeSort              Key = "settings.item.node_sort"
+	SettingQuotaPoll             Key = "settings.item.quota_poll"
+	SettingVoiceBackend          Key = "settings.item.voice_backend"
+	SettingOfflineQueue          Key = "settings.item.offline_queue"
+	SettingSessionViewBody       Key = "settings.session_view.body"
+	SettingResumeSelectionBody   Key = "settings.resume_selection.body"
+	SettingLanguageBody          Key = "settings.language.body"
+	SettingToolCallsBody         Key = "settings.tool_calls.body"
+	SettingToolResultsBody       Key = "settings.tool_results.body"
+	SettingToolOutputLinesBody   Key = "settings.tool_output_lines.body"
+	SettingThinkingBody          Key = "settings.thinking.body"
+	SettingResponseCardsBody     Key = "settings.response_cards.body"
+	SettingTerminalSnapshotsBody Key = "settings.terminal_snapshots.body"
+	SettingIdleArchiveBody       Key = "settings.idle_archive.body"
+	SettingRetentionBody         Key = "settings.retention.body"
+	SettingExpiryBody            Key = "settings.expiry.body"
+	SettingNotifyFinishedBody    Key = "settings.notify_finished.body"
+	SettingNotifyErrorBody       Key = "settings.notify_error.body"
+	SettingNotifyActionBody      Key = "settings.notify_action.body"
+	SettingBackgroundDismissBody Key = "settings.background_dismiss.body"
+	SettingNodeSortBody          Key = "settings.node_sort.body"
+	SettingQuotaPollBody         Key = "settings.quota_poll.body"
+	SettingVoiceBackendBody      Key = "settings.voice_backend.body"
+	SettingOfflineQueueBody      Key = "settings.offline_queue.body"
+	VoiceEnableConfirm           Key = "settings.voice.confirm"
+	VoiceEnablePlan              Key = "settings.voice.plan"
+	NodeSpeechSetup              Key = "node.speech.setup"
+	NodeSpeechStatus             Key = "node.speech.status"
+	VoiceSetupRequired           Key = "node.speech.required"
+	BackgroundPanelTitle         Key = "background.panel.title"
+	BackgroundPanelMore          Key = "background.panel.more"
+	BackgroundFinishedNotice     Key = "background.notice.finished"
+	BackgroundErrorNotice        Key = "background.notice.error"
+	BackgroundActionNotice       Key = "background.notice.action"
+	ValueHostFirst               Key = "settings.value.host_first"
+	ValueAllHosts                Key = "settings.value.all_hosts"
+	ValueUnlimited               Key = "settings.value.unlimited"
+	ValueRecordOnly              Key = "settings.value.record_only"
+	ValueDeleteFiles             Key = "settings.value.delete_files"
+	ValueOn                      Key = "settings.value.on"
+	ValueOff                     Key = "settings.value.off"
+	ValueCardsKeepPaginated      Key = "settings.value.cards_keep_paginated"
+	ValueCardsKeepLatest         Key = "settings.value.cards_keep_latest"
+	ValueCardsReplace            Key = "settings.value.cards_replace"
+	ValueTerminalWorking         Key = "settings.value.terminal_working"
+	ValueTerminalAlways          Key = "settings.value.terminal_always"
+	ValueTerminalNever           Key = "settings.value.terminal_never"
+	ValueNodeCreated             Key = "settings.value.node_created"
+	ValueNodeName                Key = "settings.value.node_name"
+	ValueNodeLeader              Key = "settings.value.node_leader"
+	ValueVoiceAuto               Key = "settings.value.voice_auto"
+	ValueVoiceWhisper            Key = "settings.value.voice_whisper"
+	ValueVoiceApple              Key = "settings.value.voice_apple"
+	LanguageEnglish              Key = "language.en"
+	LanguageRussian              Key = "language.ru"
+	LanguageChinese              Key = "language.zh"
+	ToastSaved                   Key = "toast.saved"
+	ToastUnavailable             Key = "toast.unavailable"
+	CallbackFailed               Key = "callback.failed"
+	InputFailed                  Key = "input.failed"
+	VoiceQueued                  Key = "input.voice_queued"
+	ClusterAddNode               Key = "cluster.add_node"
+	ClusterInvite                Key = "cluster.invite"
+	ClusterContract              Key = "cluster.contract"
+	ClusterInvitationTitle       Key = "cluster.invitation.title"
+	ClusterInvitationBody        Key = "cluster.invitation.body"
+	ClusterContractPrompt        Key = "cluster.contract.prompt"
+	ClusterPending               Key = "cluster.pending"
+	ClusterEnrollmentDetail      Key = "cluster.enrollment.detail"
+	ClusterApprove               Key = "cluster.approve"
+	ClusterReject                Key = "cluster.reject"
+	NodeDisable                  Key = "node.disable"
+	NodeEnable                   Key = "node.enable"
+	NodeDelete                   Key = "node.delete"
+	NodeRename                   Key = "node.rename"
+	NodeRenamePrompt             Key = "node.rename.prompt"
+	NodeRenamed                  Key = "node.renamed"
+	ProviderAliasButton          Key = "provider.alias.button"
+	ProviderAliasPrompt          Key = "provider.alias.prompt"
+	ProviderAliasSaved           Key = "provider.alias.saved"
+	ProviderAuthButton           Key = "provider.auth.button"
+	BackendConnect               Key = "backend.connect"
+	BackendDisconnect            Key = "backend.disconnect"
+	ProviderAuthStarting         Key = "provider.auth.starting"
+	ProviderAuthPaste            Key = "provider.auth.paste"
+	ProviderAuthDevice           Key = "provider.auth.device"
+	ProviderAuthSucceeded        Key = "provider.auth.succeeded"
+	ProviderAuthFailed           Key = "provider.auth.failed"
+	ProviderAuthCancelled        Key = "provider.auth.cancelled"
+	NodeDisableConfirm           Key = "node.disable.confirm"
+	NodeDisableSessionsConfirm   Key = "node.disable.sessions_confirm"
+	NodeDeleteConfirm            Key = "node.delete.confirm"
+	NodeDisabled                 Key = "node.disabled"
+	NodeDisabledWithErrors       Key = "node.disabled_errors"
+	EnrollmentApprovedNotice     Key = "cluster.enrollment.approved"
+	EnrollmentRejectedNotice     Key = "cluster.enrollment.rejected"
+	EnrollmentContractAccepted   Key = "cluster.contract.accepted"
+	EnrollmentContractClaim      Key = "cluster.contract.claim"
+	ClusterConnectionLost        Key = "cluster.connection.lost"
+	ClusterConnectionRestored    Key = "cluster.connection.restored"
+	ClusterEventLogTitle         Key = "cluster.event_log.title"
+	ClusterEventLeader           Key = "cluster.event_log.leader"
+	ClusterEventNodeLost         Key = "cluster.event_log.node_lost"
+	ClusterEventNodeRestored     Key = "cluster.event_log.node_restored"
+)
+
+type CountKey string
+
+const (
+	CountLiveSession     CountKey = "count.live_session"
+	CountArchivedSession CountKey = "count.archived_session"
+	CountBackend         CountKey = "count.backend"
+	CountHour            CountKey = "count.hour"
+	CountDay             CountKey = "count.day"
+	CountMinute          CountKey = "count.minute"
+)
+
+type Localizer struct {
+	language string
+	catalog  map[Key]string
+	counts   map[CountKey]countForms
+}
+
+func For(language string) Localizer {
+	normalized := normalize(language)
+	return Localizer{language: normalized, catalog: catalogs[normalized], counts: countCatalogs[normalized]}
+}
+
+func (l Localizer) Language() string { return l.language }
+
+func (l Localizer) Text(key Key) string {
+	if value, ok := l.catalog[key]; ok {
+		return value
+	}
+	if value, ok := catalogs[english][key]; ok {
+		return value
+	}
+	return string(key)
+}
+
+func (l Localizer) Format(key Key, values ...any) string {
+	return fmt.Sprintf(l.Text(key), values...)
+}
+
+func (l Localizer) Count(key CountKey, count int) string {
+	forms, ok := l.counts[key]
+	if !ok {
+		forms = countCatalogs[english][key]
+	}
+	return fmt.Sprintf(forms.choose(l.language, count), count)
+}
+
+func normalize(language string) string {
+	switch language {
+	case russian:
+		return russian
+	case chinese:
+		return chinese
+	default:
+		return english
+	}
+}
+
+type countForms struct {
+	one, few, many, other string
+}
+
+func (f countForms) choose(language string, count int) string {
+	if language == russian {
+		lastTwo, last := count%100, count%10
+		if last == 1 && lastTwo != 11 {
+			return f.one
+		}
+		if last >= 2 && last <= 4 && (lastTwo < 12 || lastTwo > 14) {
+			return f.few
+		}
+		return f.many
+	}
+	if language == english && count == 1 {
+		return f.one
+	}
+	return f.other
+}

@@ -1,0 +1,345 @@
+package main
+
+import (
+	"context"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"flag"
+	"fmt"
+	"io"
+	"net"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"syscall"
+	"time"
+
+	"github.com/Time4Mind/bria/internal/clusterstate"
+	"github.com/Time4Mind/bria/internal/config"
+	"github.com/Time4Mind/bria/internal/consensus"
+	"github.com/Time4Mind/bria/internal/domain"
+	"github.com/Time4Mind/bria/internal/platform"
+	"github.com/Time4Mind/bria/internal/recovery"
+	"github.com/Time4Mind/bria/internal/runtimehost"
+	"github.com/Time4Mind/bria/internal/security"
+	"github.com/hashicorp/raft"
+)
+
+func runNode(arguments []string) error {
+	if len(arguments) > 0 {
+		switch arguments[0] {
+		case "probe":
+			return probeNode(arguments[1:])
+		case "metrics":
+			return metricsNode(arguments[1:])
+		case "cert-request":
+			return createCertificateRenewalRequest(arguments[1:])
+		case "cert-install":
+			return installCertificateRenewal(arguments[1:])
+		case "cert-rollback":
+			return rollbackCertificateRenewal(arguments[1:])
+		}
+	}
+	if len(arguments) == 0 || arguments[0] != "run" {
+		return errors.New("usage: bria node <run|probe|metrics|cert-request|cert-install|cert-rollback>")
+	}
+	flags := flag.NewFlagSet("node run", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	configPath := flags.String("config", "", "path to node config JSON")
+	if err := flags.Parse(arguments[1:]); err != nil {
+		return err
+	}
+	if *configPath == "" || flags.NArg() != 0 {
+		return errors.New("usage: bria node run --config PATH")
+	}
+	nodeConfig, err := config.Load(*configPath)
+	if err != nil {
+		return err
+	}
+	certificate, roots, err := loadNodeTLS(nodeConfig)
+	if err != nil {
+		return err
+	}
+	localFingerprint, err := tlsCertificateFingerprint(certificate)
+	if err != nil {
+		return err
+	}
+	listener, err := net.Listen("tcp", nodeConfig.RaftBind)
+	if err != nil {
+		return fmt.Errorf("listen for raft: %w", err)
+	}
+	resolver := consensus.NewStaticPeerResolver()
+	configurePeerResolver(resolver, nodeConfig)
+	stream, err := consensus.NewTLSStreamLayer(consensus.TLSStreamConfig{
+		Listener: listener, AdvertiseAddress: nodeConfig.RaftAdvertise,
+		Certificate: certificate, Roots: roots, ClusterID: nodeConfig.ClusterID,
+		LocalNodeID: nodeConfig.NodeID, Resolver: resolver,
+	})
+	if err != nil {
+		_ = listener.Close()
+		return err
+	}
+	transport := raft.NewNetworkTransport(stream, 3, 10*time.Second, os.Stderr)
+	machine := clusterstate.NewMachine(nil)
+	node, err := consensus.Open(consensus.Config{
+		NodeID:       nodeConfig.NodeID,
+		DataDir:      filepath.Join(nodeConfig.DataDir, "raft"),
+		Bootstrap:    nodeConfig.Bootstrap,
+		ApplyTimeout: 10 * time.Second,
+		LogOutput:    os.Stderr,
+	}, clusterstate.NewFSM(machine), transport)
+	if err != nil {
+		_ = transport.Close()
+		return err
+	}
+	defer node.Close()
+
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	leaderCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	err = node.WaitForLeader(leaderCtx)
+	cancel()
+	if err != nil {
+		return fmt.Errorf("wait for cluster leader: %w", err)
+	}
+	if nodeConfig.Bootstrap {
+		if node.IsLeader() {
+			if err := applyPendingClusterRestore(ctx, node, nodeConfig); err != nil {
+				return err
+			}
+			if err := reconcileConfiguredVoters(ctx, node, nodeConfig); err != nil {
+				return err
+			}
+			if err := registerConfiguredNodes(ctx, node, nodeConfig); err != nil {
+				return err
+			}
+			plan, err := registerLocalNode(ctx, node, nodeConfig, localFingerprint)
+			if err != nil {
+				return err
+			}
+			if len(plan.Recover) > 0 {
+				runtime, runtimeErr := runtimehost.NewTmuxRecoveryRuntime(
+					runtimehost.ExecCommandRunner{},
+					nodeConfig.TmuxSession,
+					map[string]runtimehost.BackendCommand{
+						"claude": {Executable: nodeConfig.ClaudeCommand, Flags: nodeConfig.EffectiveClaudeFlags()},
+						"codex":  {Executable: nodeConfig.CodexCommand, Flags: nodeConfig.EffectiveCodexFlags()},
+					},
+					30*time.Second,
+				)
+				if runtimeErr != nil {
+					return runtimeErr
+				}
+				executor, recoveryErr := recovery.NewExecutor(
+					domain.NodeID(nodeConfig.NodeID), node.State(), node, runtime,
+				)
+				if recoveryErr != nil {
+					return recoveryErr
+				}
+				if recoveryErr := executor.Run(ctx, plan.Recover); recoveryErr != nil {
+					// Every failed provider resume has already been committed as an
+					// archive transition. Keep the healthy node online.
+					fmt.Fprintf(os.Stderr, "bria reboot recovery: %v\n", recoveryErr)
+				}
+			}
+		}
+	}
+	go maintainDynamicMembership(ctx, node, resolver, nodeConfig)
+	runtimeControl, err := startNodeRuntimeControl(
+		ctx, node, nodeConfig, certificate, roots,
+	)
+	if err != nil {
+		return fmt.Errorf("start node runtime control: %w", err)
+	}
+	defer runtimeControl.Close()
+	go maintainTemporaryLeader(ctx, node)
+	fmt.Fprintf(os.Stderr, "bria node %s running at %s\n", nodeConfig.NodeID, nodeConfig.RaftAdvertise)
+	telegramErrors, err := startTelegram(ctx, node, nodeConfig, runtimeControl)
+	if err != nil {
+		return fmt.Errorf("start Telegram adapter: %w", err)
+	}
+	if telegramErrors == nil {
+		<-ctx.Done()
+		return nil
+	}
+	select {
+	case <-ctx.Done():
+		return nil
+	case err := <-runtimeControl.errors:
+		if err == nil || errors.Is(err, context.Canceled) {
+			return nil
+		}
+		return fmt.Errorf("node runtime control stopped: %w", err)
+	case err := <-telegramErrors:
+		if errors.Is(err, context.Canceled) {
+			return nil
+		}
+		return fmt.Errorf("Telegram adapter stopped: %w", err)
+	}
+}
+
+func loadNodeTLS(nodeConfig config.Config) (tls.Certificate, *x509.CertPool, error) {
+	certificate, err := tls.LoadX509KeyPair(nodeConfig.NodeCertificate, nodeConfig.NodePrivateKey)
+	if err != nil {
+		return tls.Certificate{}, nil, fmt.Errorf("load node certificate: %w", err)
+	}
+	caPEM, err := os.ReadFile(nodeConfig.CACertificate)
+	if err != nil {
+		return tls.Certificate{}, nil, fmt.Errorf("read cluster CA: %w", err)
+	}
+	roots, err := security.CertificatePool(caPEM)
+	if err != nil {
+		return tls.Certificate{}, nil, err
+	}
+	return certificate, roots, nil
+}
+
+func tlsCertificateFingerprint(certificate tls.Certificate) (string, error) {
+	if len(certificate.Certificate) == 0 {
+		return "", errors.New("node certificate chain is empty")
+	}
+	leaf, err := x509.ParseCertificate(certificate.Certificate[0])
+	if err != nil {
+		return "", fmt.Errorf("parse node certificate leaf: %w", err)
+	}
+	return security.NodeCertificateFingerprint(leaf)
+}
+
+func registerLocalNode(
+	ctx context.Context,
+	node *consensus.Node,
+	nodeConfig config.Config,
+	fingerprint string,
+) (domain.BootRecoveryPlan, error) {
+	state := node.State().State()
+	if _, exists := state.Nodes[domain.NodeID(nodeConfig.NodeID)]; !exists {
+		operationID, err := newOperationID()
+		if err != nil {
+			return domain.BootRecoveryPlan{}, err
+		}
+		command, err := clusterstate.NewCommand(
+			operationID, clusterstate.CommandAddNode, time.Now(),
+			localDomainNode(nodeConfig, fingerprint),
+		)
+		if err != nil {
+			return domain.BootRecoveryPlan{}, err
+		}
+		result, err := node.Apply(ctx, command)
+		if err != nil {
+			return domain.BootRecoveryPlan{}, fmt.Errorf("register bootstrap node: %w", err)
+		}
+		if err := result.Err(); err != nil {
+			return domain.BootRecoveryPlan{}, fmt.Errorf("register bootstrap node: %w", err)
+		}
+	}
+	if nodeConfig.BootstrapOwnerID > 0 {
+		if err := ensureBootstrapOwner(ctx, node, nodeConfig); err != nil {
+			return domain.BootRecoveryPlan{}, err
+		}
+	}
+	runtimeOperationID, err := newOperationID()
+	if err != nil {
+		return domain.BootRecoveryPlan{}, err
+	}
+	runtimeCommand, err := clusterstate.NewCommand(
+		runtimeOperationID,
+		clusterstate.CommandUpdateNodeRuntime,
+		time.Now(),
+		clusterstate.UpdateNodeRuntime{
+			NodeID: domain.NodeID(nodeConfig.NodeID), Status: domain.NodeOnline,
+			Version: localBuildVersion(), Backends: connectedLocalBackends(
+				node.State().State(), domain.NodeID(nodeConfig.NodeID), discoverLocalBackends(ctx)),
+		},
+	)
+	if err != nil {
+		return domain.BootRecoveryPlan{}, err
+	}
+	runtimeResult, err := node.Apply(ctx, runtimeCommand)
+	if err != nil {
+		return domain.BootRecoveryPlan{}, fmt.Errorf("publish node runtime: %w", err)
+	}
+	if err := runtimeResult.Err(); err != nil {
+		return domain.BootRecoveryPlan{}, fmt.Errorf("publish node runtime: %w", err)
+	}
+	bootID, err := platform.NewBootIDProvider().Current(ctx)
+	if err != nil {
+		return domain.BootRecoveryPlan{}, fmt.Errorf("read host boot id: %w", err)
+	}
+	operationID, err := newOperationID()
+	if err != nil {
+		return domain.BootRecoveryPlan{}, err
+	}
+	command, err := clusterstate.NewCommand(
+		operationID, clusterstate.CommandObserveBoot, time.Now(),
+		clusterstate.ObserveBoot{NodeID: domain.NodeID(nodeConfig.NodeID), BootID: bootID},
+	)
+	if err != nil {
+		return domain.BootRecoveryPlan{}, err
+	}
+	result, err := node.Apply(ctx, command)
+	if err != nil {
+		return domain.BootRecoveryPlan{}, fmt.Errorf("record node boot: %w", err)
+	}
+	if err := result.Err(); err != nil {
+		return domain.BootRecoveryPlan{}, err
+	}
+	var plan domain.BootRecoveryPlan
+	if err := json.Unmarshal(result.Value, &plan); err != nil {
+		return domain.BootRecoveryPlan{}, fmt.Errorf("decode boot recovery plan: %w", err)
+	}
+	return plan, nil
+}
+
+func connectedLocalBackends(
+	state *domain.State, nodeID domain.NodeID, installed []domain.BackendDescriptor,
+) []domain.BackendDescriptor {
+	if state == nil {
+		return nil
+	}
+	node, ok := state.Nodes[nodeID]
+	if !ok || !node.BackendSelectionInitialized {
+		return nil
+	}
+	connected := make(map[string]bool, len(node.Backends))
+	for _, backend := range node.Backends {
+		connected[strings.ToLower(backend.Name)] = true
+	}
+	result := make([]domain.BackendDescriptor, 0, len(installed))
+	for _, backend := range installed {
+		if connected[strings.ToLower(backend.Name)] {
+			result = append(result, backend)
+		}
+	}
+	return result
+}
+
+func localDomainNode(nodeConfig config.Config, fingerprint string) domain.Node {
+	controlAddress, _ := nodeConfig.ControlAdvertiseAddress()
+	enrollmentAddress := ""
+	if nodeConfig.NodeID == nodeConfig.EffectiveEnrollmentIssuerID() {
+		enrollmentAddress, _ = nodeConfig.EnrollmentAdvertiseAddress()
+	}
+	return domain.Node{
+		ID: domain.NodeID(nodeConfig.NodeID), Name: nodeConfig.NodeName, Status: domain.NodeOnline,
+		Lifecycle: domain.NodeActive, OS: runtime.GOOS, Arch: runtime.GOARCH,
+		Network: domain.NodeNetwork{
+			RaftAddress: nodeConfig.RaftAdvertise, ControlAddress: controlAddress,
+			EnrollmentAddress: enrollmentAddress,
+		},
+		Fingerprint: fingerprint,
+	}
+}
+
+func newOperationID() (string, error) {
+	bytes := make([]byte, 16)
+	if _, err := rand.Read(bytes); err != nil {
+		return "", fmt.Errorf("generate operation id: %w", err)
+	}
+	return hex.EncodeToString(bytes), nil
+}

@@ -1,0 +1,42 @@
+package domain
+
+import "fmt"
+
+type TelegramResponseCard struct {
+	ChatID          int64  `json:"chat_id"`
+	MessageID       int64  `json:"message_id"`
+	Rich            bool   `json:"rich,omitempty"`
+	RichMediaFileID string `json:"rich_media_file_id,omitempty"`
+	PaneHash        string `json:"pane_hash,omitempty"`
+}
+
+func (s *State) AdvanceTelegramCursor(nextUpdateID int64) error {
+	if nextUpdateID < 0 {
+		return fmt.Errorf("Telegram update cursor must not be negative")
+	}
+	if nextUpdateID < s.TelegramNextUpdateID {
+		return ErrInvalidState
+	}
+	s.TelegramNextUpdateID = nextUpdateID
+	return nil
+}
+
+func (s *State) RecordTelegramResponseCard(userID UserID, card TelegramResponseCard) error {
+	if _, ok := s.Users[userID]; !ok {
+		return ErrNotFound
+	}
+	if card.ChatID <= 0 || card.MessageID <= 0 {
+		return fmt.Errorf("Telegram response card identity must be positive")
+	}
+	if card.ChatID != int64(userID) {
+		return ErrAccessDenied
+	}
+	if len(card.RichMediaFileID) > 1024 || len(card.PaneHash) > 128 {
+		return fmt.Errorf("Telegram response card transport metadata is invalid")
+	}
+	if s.TelegramResponseCards == nil {
+		s.TelegramResponseCards = make(map[UserID]TelegramResponseCard)
+	}
+	s.TelegramResponseCards[userID] = card
+	return nil
+}

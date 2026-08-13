@@ -1,0 +1,194 @@
+# Operations
+
+Bria changes one cluster member at a time. An operator must not restart enough
+voters concurrently to lose quorum. The commands below modify only explicit
+paths and never change host routes, DNS, firewall, or proxy settings.
+
+## Authenticated metrics
+
+`bria node metrics --config PATH [--target NODE]` reads the Prometheus text
+exposition from the existing node-control listener. The endpoint requires a
+valid certificate for a current Raft member; there is no second diagnostics
+port and no bearer token. Metrics are deliberately limited to process up,
+readiness, leader presence, local Raft state, and applied index. Session names,
+users, Telegram identifiers, provider accounts, quotas, transcripts, paths,
+and network addresses are not exported.
+
+## Renew a node certificate
+
+Renewal generates the replacement private key on the node that will use it.
+The CA host receives only a request containing the new public key, the current
+certificate, and a short-lived signature made by the current node key.
+
+On the target node, while its current certificate is valid:
+
+```bash
+bria node cert-request \
+  --config /var/lib/bria/config.json \
+  --request /secure-transfer/office-renewal.json \
+  --state /var/lib/bria/office-renewal.private.json
+```
+
+The request can be transferred normally. The state file contains the new
+private key, is created with owner-only permissions, and must stay on the
+target node.
+
+On the bootstrap CA host:
+
+```bash
+bria cluster cert-renew \
+  --config /var/lib/bria/config.json \
+  --request /secure-transfer/office-renewal.json \
+  --confirm-node-id office \
+  --response /secure-transfer/office-renewal-response.json
+```
+
+The issuer accepts only a request signed by a currently valid certificate for
+the same cluster and node, plus an exact operator confirmation of that node ID.
+This works for both statically configured and dynamically enrolled members
+without treating possession of a CA-issued certificate as silent renewal
+authorization. The request expires after 30 minutes. The default replacement
+lifetime is 365 days and cannot exceed 397 days or the CA expiry.
+
+Return the response to the target node and install it:
+
+```bash
+bria node cert-install \
+  --config /var/lib/bria/config.json \
+  --state /var/lib/bria/office-renewal.private.json \
+  --response /secure-transfer/office-renewal-response.json
+```
+
+Installation verifies the CA chain, stable cluster/node identity, request ID,
+and new key pair before making changes. It writes immutable credentials below
+`DATA_DIR/pki/renewals/REQUEST_ID`, records the previous paths, and atomically
+switches the config. The running process keeps its old in-memory credentials;
+restart that one node, then run `bria node probe --config …` before continuing.
+The private request state is removed only after a successful config switch.
+
+If the restarted node cannot rejoin, restore the paths and restart it again:
+
+```bash
+bria node cert-rollback --config /var/lib/bria/config.json
+```
+
+Rollback first verifies that the previous files still form a valid certificate
+for the configured identity. Old credential files are deliberately retained.
+The replacement certificate carries a CA-signed link to the active key. Its
+first heartbeat advances the replicated fingerprint, after which the old key
+is rejected even on already-open Raft streams. Renewal is still not the right
+response to suspected compromise because an attacker could race that
+transition; disable the node and remove its membership instead.
+
+## Logical cluster backup and restore
+
+Create a backup from the current leader through the member-authenticated
+control endpoint:
+
+```bash
+bria cluster backup \
+  --config /var/lib/bria/config.json \
+  --output /secure-backups/bria-2026-08-12.json
+```
+
+The command may start at any reachable member and follows its current-leader
+hint using the leader's replicated control address and certificate fingerprint.
+`--target NODE` remains available when the initial member must be chosen
+explicitly. Brief leader transitions are retried within the bounded command
+deadline.
+
+The command creates a new owner-only file and refuses to overwrite an existing
+path. It contains replicated product state and the idempotency ledger: node and
+session metadata, preferences, archive metadata, navigation, quotas, and the
+Telegram update cursor. It deliberately does not contain raw transcripts,
+project files, native archive payloads, provider credentials, Telegram token,
+callback key, node private keys, or the CA private key. Back up those local
+artifacts separately according to their own retention policy.
+
+The leader signs the envelope with its currently committed Ed25519 node key.
+Restore checks the checksum, signature, CA chain, SPIFFE cluster/node identity,
+and the signer's fingerprint in the backed-up state. A backup cannot be emitted
+during the short certificate-rotation interval before the new fingerprint is
+committed.
+
+First preview without changing anything; this is allowed while the current
+Raft directory exists:
+
+```bash
+bria cluster restore \
+  --config /var/lib/bria/config.json \
+  --input /secure-backups/bria-2026-08-12.json \
+  --dry-run
+```
+
+Actual restore is intentionally a fresh-cluster recovery operation. Stop Bria,
+move the existing `DATA_DIR/raft` directory to separately retained storage,
+then stage the restore with an exact cluster-ID confirmation:
+
+```bash
+bria cluster restore \
+  --config /var/lib/bria/config.json \
+  --input /secure-backups/bria-2026-08-12.json \
+  --confirm personal
+```
+
+Staging refuses a non-empty Raft directory and never deletes or overwrites it.
+On the next bootstrap-node start, Bria applies the signed state in one
+idempotent Raft command and renames the pending file to
+`restore.applied.<digest>.json`. Bring other voters back one at a time only
+after the restored leader is ready. Native session archives and transcripts
+remain origin-local and must be restored separately if those files were lost.
+
+## Rolling binary update
+
+Use this sequence for every administrator-initiated update:
+
+1. Confirm every intended voter is reachable and ready with authenticated
+   `bria node probe`; record the current leader and build versions.
+2. Read the release compatibility note. A state-machine change must ship as a
+   bridge release that reads both formats but writes only the old format until
+   all voters run it. Bria rejects unknown command and snapshot versions rather
+   than guessing.
+3. Update and restart one follower. Wait for its probe to report a current
+   leader and for the cluster status to show it online at the expected version.
+4. Repeat for the remaining followers, never taking down a quorum. In a
+   three-voter cluster, only one node may be unavailable at a time.
+5. Transfer leadership to an already updated healthy node, then update the old
+   leader last. Confirm Telegram polling moves to the new leader before stopping
+   the old one.
+6. Verify all probes, versions, provider status ages, session cards, and one
+   harmless session round trip. Keep the previous binary and config available
+   until this succeeds.
+
+A single-node cluster necessarily has an update outage. A two-voter cluster
+cannot make progress while either voter is down; do not mistake process health
+for quorum readiness. Do not force-bootstrap or rewrite Raft storage during a
+normal update.
+
+## External canary without Telegram UI automation
+
+Before the visual Telegram acceptance pass, a deployment agent can safely run:
+
+1. install the candidate binary and an independent Bria data directory;
+2. run `bria version`, `bria doctor`, and an authenticated local probe;
+3. enroll one remote node through an operator-provided invitation;
+4. verify mTLS probes in both directions and record versions;
+5. create a disposable provider session, restart only its origin node, and
+   confirm recovery or archive follows the configured idle policy;
+6. stop one follower, then the leader, separately, confirming quorum and
+   leadership between steps;
+7. remove the canary services without touching CCBot data or tmux namespaces.
+
+Telegram rendering and button behavior remain an owner-authorized acceptance
+step after the synthetic Bot API E2E pass.
+Client API credentials are not a substitute for permission to drive the
+owner's Telegram interface, and Android access is outside this runbook.
+
+## Telegram polling diagnostics
+
+Never call `getUpdates` manually with a token used by a running Bria node.
+Telegram's update queue is consumptive: a diagnostic poll can remove an update
+from Bria's polling stream or conflict with the elected leader. Diagnose stuck
+updates through Bria logs, replicated cursor state, and synthetic Bot API tests.
+Stop the cluster poller first only when an operator explicitly authorizes a
+live queue inspection.

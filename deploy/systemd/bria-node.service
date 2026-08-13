@@ -1,0 +1,41 @@
+[Unit]
+Description=Bria node
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=bria
+Group=bria
+WorkingDirectory=/var/lib/bria
+Environment=HOME=/var/lib/bria
+EnvironmentFile=-/etc/bria/proxy.env
+ExecStart=/opt/bria/current/bria node run --config /etc/bria/node.json
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=30s
+KillMode=process
+UMask=0077
+
+NoNewPrivileges=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/bria
+PrivateDevices=true
+ProtectClock=true
+ProtectHostname=true
+ProtectKernelLogs=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RemoveIPC=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

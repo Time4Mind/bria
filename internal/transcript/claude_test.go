@@ -1,0 +1,71 @@
+package transcript
+
+import (
+	"context"
+	"path/filepath"
+	"testing"
+)
+
+func TestReaderParsesClaudeEventsAndIgnoresImages(t *testing.T) {
+	layout := newTestLayout(t)
+	workdir := "/srv/acme_project"
+	sessionID := "claude-session-1"
+	path := filepath.Join(layout.claude, encodeClaudeWorkdir(workdir), sessionID+".jsonl")
+	writeTestFile(t, path, `{"type":"user","timestamp":"2026-01-01T00:00:00Z","message":{"content":[{"type":"text","text":"hello"}]}}
+{"type":"assistant","timestamp":"2026-01-01T00:00:01Z","message":{"stop_reason":"tool_use","content":[{"type":"thinking","thinking":"inspect safely"},{"type":"text","text":"I will inspect it."},{"type":"tool_use","id":"tool-1","name":"Read","input":{"file_path":"README.md"}}]}}
+{"type":"user","timestamp":"2026-01-01T00:00:02Z","message":{"content":[{"type":"tool_result","tool_use_id":"tool-1","is_error":true,"content":[{"type":"text","text":"<tool_use_error>denied</tool_use_error>"},{"type":"image","source":{"type":"base64","data":"aW1hZ2U="}}]}]}}
+{"type":"assistant","timestamp":"2026-01-01T00:00:03Z","message":{"stop_reason":"end_turn","content":[{"type":"text","text":"Done."}]}}
+`)
+
+	events, err := newTestReader(t, layout, nil).Read(context.Background(), Request{
+		Backend: BackendClaude, ProviderSessionID: sessionID, Workdir: workdir,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 6 {
+		t.Fatalf("got %d events: %#v", len(events), events)
+	}
+	wantKinds := []EventKind{
+		EventUserText, EventThinking, EventAssistantText,
+		EventToolCall, EventToolResult, EventAssistantFinal,
+	}
+	for index, want := range wantKinds {
+		if events[index].Kind != want {
+			t.Errorf("event %d kind = %q, want %q", index, events[index].Kind, want)
+		}
+	}
+	call := events[3]
+	if call.ToolUseID != "tool-1" || call.ToolName != "Read" ||
+		call.Head != "Read" || call.Body != `{"file_path":"README.md"}` {
+		t.Errorf("unexpected tool call: %#v", call)
+	}
+	result := events[4]
+	if result.ToolUseID != "tool-1" || result.Body != "denied" || !result.Error {
+		t.Errorf("unexpected tool result: %#v", result)
+	}
+	if events[5].Text != "Done." || events[5].Timestamp != "2026-01-01T00:00:03Z" {
+		t.Errorf("unexpected final event: %#v", events[5])
+	}
+}
+
+func TestClaudeStringContentAndEventLimit(t *testing.T) {
+	layout := newTestLayout(t)
+	workdir := "/tmp/project"
+	sessionID := "session-2"
+	path := filepath.Join(layout.claude, encodeClaudeWorkdir(workdir), sessionID+".jsonl")
+	writeTestFile(t, path, `{"type":"user","message":{"content":"first"}}
+{"type":"user","message":{"content":"second"}}
+{"type":"assistant","message":{"stop_reason":"end_turn","content":"third"}}
+`)
+	reader := newTestReader(t, layout, func(config *Config) { config.MaxEvents = 2 })
+	events, err := reader.Read(context.Background(), Request{
+		Backend: BackendClaude, ProviderSessionID: sessionID, Workdir: workdir,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 2 || events[0].Text != "second" || events[1].Text != "third" {
+		t.Fatalf("unexpected bounded events: %#v", events)
+	}
+}

@@ -1,0 +1,240 @@
+package telegramapp
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"github.com/Time4Mind/bria/internal/application"
+	"github.com/Time4Mind/bria/internal/domain"
+	"github.com/Time4Mind/bria/internal/telegrambot"
+	"github.com/Time4Mind/bria/internal/telegramui"
+	"github.com/Time4Mind/bria/internal/terminalimage"
+	"github.com/Time4Mind/bria/internal/transcript"
+)
+
+const (
+	paneInitialDelay   = 500 * time.Millisecond
+	paneRefreshDelay   = 1200 * time.Millisecond
+	paneRefreshLimit   = 1500
+	paneCaptureLimit   = time.Second
+	typingRefreshDelay = 4 * time.Second
+)
+
+// schedulePaneRefresh never delays an update handler. A newer card generation
+// supersedes the old finite worker, and the poller context owns cancellation.
+func (h *Handler) schedulePaneRefresh(
+	ctx context.Context,
+	actor application.Principal,
+	ref domain.SessionRef,
+	message telegrambot.Message,
+) {
+	if h.controls == nil || message.ChatID == 0 || message.MessageID == 0 {
+		return
+	}
+	h.paneMu.Lock()
+	h.paneGeneration[actor.UserID]++
+	generation := h.paneGeneration[actor.UserID]
+	h.paneMu.Unlock()
+	lastTyping := time.Time{}
+	if session, err := h.service.Session(actor, ref); err == nil &&
+		(session.RuntimePhase == domain.RuntimeStarting || session.RuntimePhase == domain.RuntimeRunning) {
+		_ = h.messenger.SendTyping(ctx, message.ChatID)
+		lastTyping = time.Now()
+	}
+	go h.runPaneRefresh(ctx, actor, ref, message, generation, lastTyping)
+}
+
+func (h *Handler) runPaneRefresh(
+	ctx context.Context,
+	actor application.Principal,
+	ref domain.SessionRef,
+	message telegrambot.Message,
+	generation uint64,
+	lastTyping time.Time,
+) {
+	delay := paneInitialDelay
+	for attempt := 0; attempt < paneRefreshLimit; attempt++ {
+		if !waitPaneRefresh(ctx, delay) || !h.canRefresh() ||
+			!h.currentPaneGeneration(actor.UserID, generation) {
+			return
+		}
+		session, err := h.service.Session(actor, ref)
+		if err != nil {
+			return
+		}
+		if (session.RuntimePhase == domain.RuntimeStarting ||
+			session.RuntimePhase == domain.RuntimeRunning) &&
+			time.Since(lastTyping) >= typingRefreshDelay {
+			// Ephemeral transport feedback is best effort and cannot reject a
+			// durably accepted prompt.
+			_ = h.messenger.SendTyping(ctx, message.ChatID)
+			lastTyping = time.Now()
+		}
+		if session.RuntimePhase == domain.RuntimeStarting {
+			delay = paneRefreshDelay
+			continue
+		}
+		if session.RuntimePhase == domain.RuntimeWaitingInput {
+			screen, renderErr := h.renderSessionCard(ctx, actor, ref, 0)
+			if renderErr == nil {
+				_, _ = h.messenger.EditScreen(ctx, message, screen)
+			}
+			return
+		}
+		// Runtime reconciliation may observe the final transcript and publish
+		// idle before this live-card worker gets its next turn. Render once more
+		// so that race cannot leave the Telegram card on a tool result or pane.
+		if session.RuntimePhase == domain.RuntimeIdle {
+			screen, renderErr := h.renderSessionCard(ctx, actor, ref, 0)
+			if renderErr == nil {
+				_, _ = h.messenger.EditScreen(ctx, message, screen)
+			}
+			return
+		}
+		if session.RuntimePhase != domain.RuntimeRunning {
+			if session.RuntimePhase == domain.RuntimeDegraded {
+				screen, renderErr := h.renderSessionCard(ctx, actor, ref, 0)
+				if renderErr == nil {
+					_, _ = h.messenger.EditScreen(ctx, message, screen)
+				}
+			}
+			return
+		}
+		snapshot, err := h.renderSessionCardSnapshot(ctx, actor, ref, 0)
+		if err != nil {
+			return
+		}
+		settled := h.settleFromTranscript(ctx, actor, session, snapshot.events)
+		if settled {
+			snapshot, err = h.renderSessionCardSnapshot(ctx, actor, ref, 0)
+			if err != nil {
+				return
+			}
+		}
+		preferences, preferencesErr := h.service.Preferences(actor)
+		panePhase := session.RuntimePhase
+		if settled {
+			panePhase = domain.RuntimeIdle
+		}
+		if preferencesErr == nil && shouldAttachPane(preferences, panePhase) {
+			h.attachPane(ctx, actor, ref, message, generation, attempt, &snapshot.screen)
+		}
+		message, err = h.messenger.EditScreen(ctx, message, snapshot.screen)
+		if err != nil {
+			return
+		}
+		if settled {
+			return
+		}
+		delay = paneRefreshDelay
+	}
+}
+
+func shouldAttachPane(preferences domain.UserPreferences, phase domain.RuntimePhase) bool {
+	switch preferences.EffectiveTerminalSnapshots() {
+	case domain.TerminalSnapshotAlways:
+		return true
+	case domain.TerminalSnapshotWorking:
+		return phase == domain.RuntimeStarting || phase == domain.RuntimeRunning ||
+			phase == domain.RuntimeStopping || phase == domain.RuntimeWaitingInput ||
+			phase == domain.RuntimeDegraded
+	default:
+		return false
+	}
+}
+
+func (h *Handler) attachPane(
+	ctx context.Context,
+	actor application.Principal,
+	ref domain.SessionRef,
+	message telegrambot.Message,
+	generation uint64,
+	attempt int,
+	screen *telegramui.Screen,
+) {
+	captureCtx, cancel := context.WithTimeout(ctx, paneCaptureLimit)
+	defer cancel()
+	pane, err := h.controls.CapturePane(
+		captureCtx, actor,
+		fmt.Sprintf("pane-%d-%d-%d", message.MessageID, generation, attempt), ref,
+	)
+	if err != nil {
+		return
+	}
+	rendered, err := terminalimage.Render(string(pane), terminalimage.Options{})
+	if err != nil {
+		return
+	}
+	screen.Pane = &telegramui.PaneImage{
+		PNG: rendered.PNG, Hash: rendered.Hash, AnchorOffset: len(screen.Text),
+	}
+}
+
+func (h *Handler) attachImmediatePane(
+	ctx context.Context,
+	actor application.Principal,
+	ref domain.SessionRef,
+	screen *telegramui.Screen,
+) {
+	captureCtx, cancel := context.WithTimeout(ctx, paneCaptureLimit)
+	defer cancel()
+	pane, err := h.controls.CapturePane(captureCtx, actor,
+		fmt.Sprintf("pane-open-%d", time.Now().UnixNano()), ref)
+	if err != nil {
+		return
+	}
+	rendered, err := terminalimage.Render(string(pane), terminalimage.Options{})
+	if err != nil {
+		return
+	}
+	screen.Pane = &telegramui.PaneImage{
+		PNG: rendered.PNG, Hash: rendered.Hash, AnchorOffset: len(screen.Text),
+	}
+}
+
+func (h *Handler) settleFromTranscript(
+	ctx context.Context,
+	actor application.Principal,
+	session domain.Session,
+	events []transcript.Event,
+) bool {
+	if session.RuntimePhase != domain.RuntimeRunning {
+		return false
+	}
+	finalAt, ok := finalTranscriptAt(events)
+	if !ok || finalAt.Before(session.LastEventAt) {
+		return false
+	}
+	settleCtx := application.WithOperationScope(
+		ctx, fmt.Sprintf("transcript-final-%s-%d", session.Ref().Key(), finalAt.UnixNano()),
+	)
+	if h.service.PublishSessionRuntime(settleCtx, session, domain.RuntimeIdle, nil) != nil {
+		return false
+	}
+	go h.deliverFinalFiles(ctx, actor, session.Ref(), events)
+	return true
+}
+
+func (h *Handler) currentPaneGeneration(userID domain.UserID, generation uint64) bool {
+	h.paneMu.Lock()
+	defer h.paneMu.Unlock()
+	return h.paneGeneration[userID] == generation
+}
+
+func (h *Handler) cancelPaneRefresh(userID domain.UserID) {
+	h.paneMu.Lock()
+	h.paneGeneration[userID]++
+	h.paneMu.Unlock()
+}
+
+func waitPaneRefresh(ctx context.Context, delay time.Duration) bool {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
+}

@@ -1,0 +1,9 @@
+[Unit]
+Description=Bria private socket proxy (%i)
+
+[Socket]
+Accept=no
+NoDelay=true
+
+[Install]
+WantedBy=sockets.target

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.time4mind.bria</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>__BRIA_BINARY__</string>
+    <string>node</string><string>run</string>
+    <string>--config</string><string>__BRIA_CONFIG__</string>
+  </array>
+  <key>WorkingDirectory</key><string>__BRIA_HOME__</string>
+  <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
+  <key>ThrottleInterval</key><integer>5</integer>
+  <key>ProcessType</key><string>Background</string>
+  <key>StandardOutPath</key><string>__BRIA_HOME__/logs/node.log</string>
+  <key>StandardErrorPath</key><string>__BRIA_HOME__/logs/node.log</string>
+</dict>
+</plist>

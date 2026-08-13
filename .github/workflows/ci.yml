@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v6
+        with:
+          go-version: 1.26.5
+          cache: true
+      - run: go test -race ./...
+      - run: BRIA_PROCESS_CHAOS=1 go test ./cmd/bria -run '^Test(ProcessChaos|BriaNodeProcessHelper)' -count=1
+      - run: go vet ./...
+      - run: test -z "$(gofmt -l cmd internal)"
+      - run: scripts/build-release.sh "$RUNNER_TEMP/bria-dist"
+      - run: sha256sum -c "$RUNNER_TEMP/bria-dist/SHA256SUMS"
+      - run: GOOS=linux GOARCH=arm64 go build ./cmd/bria
+      - run: GOOS=darwin GOARCH=arm64 go build ./cmd/bria
+      - run: GOOS=windows GOARCH=amd64 go build ./cmd/bria
+
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --extra dev --locked
+      - run: uv run ruff check .
+      - run: uv run pyright
+      - run: uv run python scripts/check_architecture.py
+      - run: uv run python scripts/check_module_size.py
+      - run: uv run python scripts/check_module_size.py --root . --suffix .go
+      - run: uv run pytest
+
+  apple-speech:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: plutil -lint cmd/bria-apple-speech/Info.plist
+      - run: scripts/build-apple-speech.sh "$RUNNER_TEMP/bria-apple-speech"
+      - run: |
+          if "$RUNNER_TEMP/bria-apple-speech" --unsupported; then
+            exit 1
+          fi

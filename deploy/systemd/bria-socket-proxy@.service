@@ -1,0 +1,15 @@
+[Unit]
+Description=Bria private socket proxy worker (%i)
+
+[Service]
+EnvironmentFile=/etc/bria/proxies/%i.env
+ExecStart=/lib/systemd/systemd-socket-proxyd ${BRIA_PROXY_TARGET}
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6

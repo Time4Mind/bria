@@ -1,0 +1,88 @@
+package sessionname
+
+import (
+	"context"
+	"reflect"
+	"strings"
+	"testing"
+	"time"
+)
+
+type runnerStub struct {
+	stdout []byte
+	args   []string
+	env    []string
+}
+
+func (r *runnerStub) Run(
+	_ context.Context,
+	environment []string,
+	_ string,
+	args ...string,
+) ([]byte, []byte, int, error) {
+	r.args = append([]string(nil), args...)
+	r.env = append([]string(nil), environment...)
+	return append([]byte(nil), r.stdout...), nil, 0, nil
+}
+
+func TestGeneratorUsesCheapProviderModelsAndSanitizesOutput(t *testing.T) {
+	for _, test := range []struct {
+		backend string
+		model   string
+		want    string
+	}{
+		{backend: "claude", model: "haiku", want: "fix archive"},
+		{backend: "codex", model: "gpt-mini", want: "fix archive"},
+	} {
+		t.Run(test.backend, func(t *testing.T) {
+			runner := &runnerStub{stdout: []byte("Fix---Archive---Flow\nextra")}
+			generator, err := NewGenerator(runner, map[string]Command{
+				test.backend: {Executable: test.backend, Model: test.model},
+			}, time.Second)
+			if err != nil {
+				t.Fatal(err)
+			}
+			name, err := generator.Generate(context.Background(), test.backend, "restore this session")
+			if err != nil || name != test.want {
+				t.Fatalf("name=%q err=%v", name, err)
+			}
+			if !containsPair(runner.args, "--model", test.model) {
+				t.Fatalf("args=%v", runner.args)
+			}
+			if test.backend == "claude" && !containsValue(runner.env, "IS_SANDBOX=1") {
+				t.Fatalf("Claude environment=%v", runner.env)
+			}
+		})
+	}
+}
+
+func TestGeneratorRejectsRefusals(t *testing.T) {
+	runner := &runnerStub{stdout: []byte("I'm sorry, I cannot help")}
+	generator, err := NewGenerator(runner, map[string]Command{
+		"claude": {Executable: "claude", Model: "haiku"},
+	}, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := generator.Generate(context.Background(), "claude", "sensitive seed"); err == nil {
+		t.Fatal("refusal unexpectedly became a session name")
+	}
+}
+
+func containsPair(values []string, first, second string) bool {
+	for index := 0; index+1 < len(values); index++ {
+		if reflect.DeepEqual(values[index:index+2], []string{first, second}) {
+			return true
+		}
+	}
+	return false
+}
+
+func containsValue(values []string, want string) bool {
+	for _, value := range values {
+		if strings.EqualFold(value, want) {
+			return true
+		}
+	}
+	return false
+}

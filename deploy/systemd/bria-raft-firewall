@@ -1,0 +1,44 @@
+#!/bin/sh
+set -eu
+
+: "${BRIA_RAFT_CIDR:=}"
+: "${BRIA_RAFT_CIDR:?BRIA_RAFT_CIDR is required}"
+: "${BRIA_PRIVATE_PORTS:=7946 7947 7948}"
+
+[ -n "$BRIA_PRIVATE_PORTS" ] || {
+  echo "BRIA_PRIVATE_PORTS must not be empty" >&2
+  exit 1
+}
+
+iptables_bin=$(command -v iptables)
+for port in $BRIA_PRIVATE_PORTS; do
+  case "$port" in
+    ''|*[!0-9]*) echo "invalid private TCP port: $port" >&2; exit 1 ;;
+  esac
+  if [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
+    echo "private TCP port outside 1..65535: $port" >&2
+    exit 1
+  fi
+
+  if [ "$port" = 7946 ]; then
+    comment="bria-raft-private-only"
+  else
+    comment="bria-private-${port}"
+  fi
+
+  # Relay hosts terminate an SSH reverse-forward on loopback and expose it
+  # through systemd-socket-proxyd on the private address. Keep that internal
+  # hop ahead of the private-network DROP rule without opening the port on
+  # any non-loopback interface.
+  loopback_comment="bria-loopback-${port}"
+  if ! "$iptables_bin" -w -C INPUT -i lo -p tcp --dport "$port" \
+    -m comment --comment "$loopback_comment" -j ACCEPT 2>/dev/null; then
+    "$iptables_bin" -w -I INPUT 1 -i lo -p tcp --dport "$port" \
+      -m comment --comment "$loopback_comment" -j ACCEPT
+  fi
+  if ! "$iptables_bin" -w -C INPUT -p tcp --dport "$port" \
+    ! -s "$BRIA_RAFT_CIDR" -m comment --comment "$comment" -j DROP 2>/dev/null; then
+    "$iptables_bin" -w -I INPUT 1 -p tcp --dport "$port" \
+      ! -s "$BRIA_RAFT_CIDR" -m comment --comment "$comment" -j DROP
+  fi
+done

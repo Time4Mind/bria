@@ -1,0 +1,16 @@
+[Unit]
+Description=Restrict Bria Raft to the private cluster network
+Before=bria-node.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/bria/network.env
+ExecStart=/usr/local/libexec/bria-raft-firewall
+RemainAfterExit=true
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
