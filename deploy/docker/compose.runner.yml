@@ -1,0 +1,22 @@
+services:
+  bria-runner:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/runner.Dockerfile
+    command: ["runner", "serve", "--socket", "/run/bria-runner/runner.sock"]
+    restart: unless-stopped
+    user: "${BRIA_RUNNER_UID:-10001}:${BRIA_RUNTIME_GID:-10001}"
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 2g
+    pids_limit: 512
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=256m
+    volumes:
+      - ${BRIA_RUNNER_SOCKET_DIR:?set BRIA_RUNNER_SOCKET_DIR}:/run/bria-runner:rw
+      - ${BRIA_RUNNER_HOME:?set BRIA_RUNNER_HOME}:/srv/bria-agent:rw
+    environment:
+      HOME: /srv/bria-agent
+    # Provider CLIs need outbound Internet access. No Bria PKI, Telegram token,
+    # callback key, control data, Docker socket, or host root is mounted here.

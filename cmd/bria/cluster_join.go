@@ -31,6 +31,7 @@ type joinOptions struct {
 	ControlAdvertise      string
 	EnrollmentDialAddress string
 	Wait                  time.Duration
+	Runner                config.RunnerConfig
 }
 
 func joinCluster(arguments []string) error {
@@ -52,6 +53,9 @@ func joinCluster(arguments []string) error {
 	flags.StringVar(&options.ControlAdvertise, "control-advertise", "", "routable control address")
 	flags.StringVar(&options.EnrollmentDialAddress, "enrollment-dial-address", "", "node-local enrollment tunnel endpoint")
 	flags.DurationVar(&options.Wait, "wait", 24*time.Hour, "approval wait limit")
+	flags.StringVar(&options.Runner.Mode, "runner-mode", config.RunnerModeTrusted, "backend runner: trusted, docker, native-user, or wsl")
+	flags.StringVar(&options.Runner.Socket, "runner-socket", "", "isolated runner Unix socket")
+	flags.StringVar(&options.Runner.Home, "runner-home", "", "runner home visible read-only to control")
 	if err := flags.Parse(arguments); err != nil {
 		return err
 	}

@@ -72,6 +72,11 @@ func main() {
 			fmt.Fprintf(os.Stderr, "bria node: %v\n", err)
 			os.Exit(1)
 		}
+	case "runner":
+		if err := runRunner(os.Args[2:]); err != nil {
+			fmt.Fprintf(os.Stderr, "bria runner: %v\n", err)
+			os.Exit(1)
+		}
 	case "cluster":
 		if err := runCluster(os.Args[2:]); err != nil {
 			fmt.Fprintf(os.Stderr, "bria cluster: %v\n", err)
@@ -87,7 +92,7 @@ type processReplacement struct{ binary string }
 func (r *processReplacement) Error() string { return "restart into staged Bria release" }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: bria <version|doctor|cluster|node>")
+	fmt.Fprintln(os.Stderr, "usage: bria <version|doctor|cluster|node|runner>")
 	os.Exit(2)
 }
 

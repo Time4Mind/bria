@@ -10,8 +10,10 @@ import (
 	"github.com/Time4Mind/bria/internal/runtimehost"
 )
 
-func discoverLocalBackends(ctx context.Context) []domain.BackendDescriptor {
-	runner := runtimehost.ExecCommandRunner{}
+func discoverLocalBackends(
+	ctx context.Context,
+	runner runtimehost.CommandRunner,
+) []domain.BackendDescriptor {
 	if descriptor, err := runtimehost.NewTmuxProbe(runner, 3*time.Second).Probe(ctx); err != nil || !descriptor.Available {
 		return nil
 	}

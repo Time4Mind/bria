@@ -36,6 +36,9 @@ func initCluster(arguments []string) error {
 	advertise := flags.String("raft-advertise", defaults.RaftAdvertise, "raft advertised address")
 	updateManifest := flags.String("update-manifest-url", defaults.UpdateManifestURL, "signed release manifest URL")
 	updatePublicKey := flags.String("update-public-key", defaults.UpdatePublicKey, "base64 Ed25519 release public key")
+	runnerMode := flags.String("runner-mode", config.RunnerModeTrusted, "backend runner: trusted, docker, native-user, or wsl")
+	runnerSocket := flags.String("runner-socket", "", "isolated runner Unix socket")
+	runnerHome := flags.String("runner-home", "", "runner home visible read-only to control")
 	if err := flags.Parse(arguments[1:]); err != nil {
 		return err
 	}
@@ -88,6 +91,9 @@ func initCluster(arguments []string) error {
 		AppleSpeechCommand: "bria-apple-speech",
 		UpdateManifestURL:  *updateManifest,
 		UpdatePublicKey:    *updatePublicKey,
+		Runner: config.RunnerConfig{
+			Mode: *runnerMode, Socket: *runnerSocket, Home: *runnerHome,
+		},
 	}
 	if err := nodeConfig.Validate(); err != nil {
 		return err

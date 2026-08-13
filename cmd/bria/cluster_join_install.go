@@ -122,6 +122,7 @@ func joinedNodeConfig(
 	configured.UpdateManifestURL = bundle.UpdateManifestURL
 	configured.UpdatePublicKey = bundle.UpdatePublicKey
 	configured.WhisperModelPath = filepath.Join(options.DataDir, "models", filepath.Base(defaults.WhisperModelPath))
+	configured.Runner = options.Runner
 	if err := configured.Validate(); err != nil {
 		return config.Config{}, err
 	}

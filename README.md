@@ -31,6 +31,7 @@ cluster foundation.
   restoration when it is still available on the origin node.
 
 See [Go architecture](docs/go-architecture.md),
+[Linux backend isolation](docs/linux-runner-isolation.md),
 [Telegram parity](docs/telegram-parity.md), and
 [product decisions](docs/product-decisions.md). Certificate renewal, rolling
 updates, rollback, and canary checks are documented in
@@ -59,6 +60,9 @@ the pragmatic Go engineering contract in [CONTRIBUTING.md](CONTRIBUTING.md).
 - Claude, Codex, and tmux capability probes plus idempotent reboot recovery
   without shell interpolation; externally removed tmux windows are detected
   during normal operation and become native archives rather than `Lost`;
+- optional Docker, native-user, and hardened WSL runner isolation for
+  untrusted Linux provider agents, keeping node keys, Telegram secrets, Raft,
+  updates, and access decisions in a separate control identity;
 - CCBot-compatible Telegram grids, actor-bound opaque callbacks, a bounded
   Bot API client, private-DM parser, and leader-gated durable polling;
 - ordered text, voice, photo, and document intake pinned to the selected

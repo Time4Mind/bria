@@ -16,7 +16,13 @@ HashiCorp Raft -> deterministic state machine -> snapshots
 node runtime ports -> tmux / provider / archive / transcript
 ```
 
-Each machine runs one `bria` control daemon. A no-init supervisor or a
+Each machine runs one `bria` control daemon. On untrusted Linux execution
+hosts, provider CLIs and tmux run in a separate non-root `bria runner` identity
+over a bounded Unix-socket protocol. The runner receives no node certificate,
+Raft state, Telegram token, callback key, updater access, or ACL operation;
+see [Linux backend isolation](linux-runner-isolation.md).
+
+A no-init supervisor or a
 platform service manager is an operational wrapper, not a second application
 authority. Linux systemd support is independent of AMD64 versus ARM64;
 Android/chroot environments use the no-init profile because PID 1 is not

@@ -6,7 +6,6 @@ import (
 	"crypto/x509"
 	"fmt"
 	"net"
-	"os"
 	"path/filepath"
 	"runtime"
 	"time"
@@ -31,9 +30,10 @@ func startNodeRuntimeControl(
 	nodeConfig config.Config,
 	certificate tls.Certificate,
 	roots *x509.CertPool,
+	backendRuntime backendRuntime,
 ) (*nodeRuntimeControl, error) {
 	driver, err := runtimehost.NewTmuxDriver(
-		runtimehost.ExecCommandRunner{}, 8*time.Second, 400*time.Millisecond, nil,
+		backendRuntime.runner, 8*time.Second, 400*time.Millisecond, nil,
 	)
 	if err != nil {
 		return nil, err
@@ -50,7 +50,7 @@ func startNodeRuntimeControl(
 		return nil, err
 	}
 	nameGenerator, err := sessionname.NewGenerator(
-		sessionname.ExecRunner{}, map[string]sessionname.Command{
+		backendRuntime.nameRunner, map[string]sessionname.Command{
 			"claude": {Executable: nodeConfig.ClaudeCommand, Model: nodeConfig.ClaudeNamingModel},
 			"codex":  {Executable: nodeConfig.CodexCommand, Model: nodeConfig.CodexNamingModel},
 		}, 30*time.Second,
@@ -126,10 +126,7 @@ func startNodeRuntimeControl(
 	if err != nil {
 		return closeFailedRuntime(executor, store, err)
 	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return closeFailedRuntime(executor, store, fmt.Errorf("resolve runtime home: %w", err))
-	}
+	home := backendRuntime.home
 	transcriptReader, err := transcript.NewReader(transcript.Config{
 		ClaudeProjectsRoot: filepath.Join(home, ".claude", "projects"),
 		CodexSessionsRoot:  filepath.Join(home, ".codex", "sessions"),
@@ -140,7 +137,7 @@ func startNodeRuntimeControl(
 		return closeFailedRuntime(executor, store, err)
 	}
 	localStarts, startRouter, err := newLocalSessionStart(
-		node, nodeConfig, home, transcriptReader, executor, client,
+		node, nodeConfig, home, transcriptReader, executor, client, backendRuntime.runner,
 	)
 	if err != nil {
 		return closeFailedRuntime(executor, store, err)
@@ -189,7 +186,7 @@ func startNodeRuntimeControl(
 		return closeFailedRuntime(executor, store, err)
 	}
 	localProviderAuth, providerAuthRouter, err := newProviderAuthentication(
-		nodeConfig, guard, client,
+		nodeConfig, guard, client, backendRuntime,
 	)
 	if err != nil {
 		return closeFailedRuntime(executor, store, err)
@@ -269,6 +266,7 @@ func startNodeRuntimeControl(
 	}
 	if err := startNodeHeartbeatLoops(
 		ctx, node, nodeConfig, client, executor, archiveWriter, transcriptReader,
+		backendRuntime.runner,
 	); err != nil {
 		_ = control.Close()
 		return nil, err

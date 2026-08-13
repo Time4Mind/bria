@@ -33,13 +33,13 @@ func startNodeHeartbeatLoops(
 	localExecutor *runtimehost.LocalExecutor,
 	archiveVerifier archiveVerifier,
 	transcripts transcriptEventReader,
+	runner runtimehost.JSONRPCCommandRunner,
 ) error {
 	bootID, err := platform.NewBootIDProvider().Current(ctx)
 	if err != nil {
 		return fmt.Errorf("read host boot id for heartbeat: %w", err)
 	}
-	inventory := newNodeInventory(discoverLocalBackends(ctx))
-	runner := runtimehost.ExecCommandRunner{}
+	inventory := newNodeInventory(discoverLocalBackends(ctx, runner), runner)
 	claudeQuota, err := quota.NewClaudeCollector(
 		runner, nodeConfig.TmuxSession, nodeConfig.ClaudeCommand, nodeConfig.EffectiveClaudeFlags(),
 	)
@@ -81,7 +81,7 @@ func startNodeHeartbeatLoops(
 		return err
 	}
 	recoveryExecutor, err := newFollowerRecoveryExecutor(
-		node, nodeConfig, client, localExecutor, archiveVerifier,
+		node, nodeConfig, client, localExecutor, archiveVerifier, runner,
 	)
 	if err != nil {
 		return err
@@ -103,13 +103,14 @@ func newFollowerRecoveryExecutor(
 	client *nodecontrol.Client,
 	localExecutor *runtimehost.LocalExecutor,
 	archiveVerifier archiveVerifier,
+	runner runtimehost.CommandRunner,
 ) (*recovery.Executor, error) {
 	remote, err := nodecontrol.NewRemoteRecoveryApplier(nodeConfig.NodeID, node, client)
 	if err != nil {
 		return nil, err
 	}
 	tmuxRuntime, err := runtimehost.NewTmuxRecoveryRuntime(
-		runtimehost.ExecCommandRunner{}, nodeConfig.TmuxSession,
+		runner, nodeConfig.TmuxSession,
 		map[string]runtimehost.BackendCommand{
 			"claude": {Executable: nodeConfig.ClaudeCommand, Flags: nodeConfig.EffectiveClaudeFlags()},
 			"codex":  {Executable: nodeConfig.CodexCommand, Flags: nodeConfig.EffectiveCodexFlags()},
@@ -215,10 +216,14 @@ func logHeartbeatErrors(ctx context.Context, errorsIn <-chan error) {
 type nodeInventory struct {
 	mu       sync.RWMutex
 	backends []domain.BackendDescriptor
+	runner   runtimehost.CommandRunner
 }
 
-func newNodeInventory(backends []domain.BackendDescriptor) *nodeInventory {
-	return &nodeInventory{backends: cloneBackends(backends)}
+func newNodeInventory(
+	backends []domain.BackendDescriptor,
+	runner runtimehost.CommandRunner,
+) *nodeInventory {
+	return &nodeInventory{backends: cloneBackends(backends), runner: runner}
 }
 
 func (i *nodeInventory) Backends() []domain.BackendDescriptor {
@@ -235,7 +240,7 @@ func (i *nodeInventory) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			backends := discoverLocalBackends(ctx)
+			backends := discoverLocalBackends(ctx, i.runner)
 			i.mu.Lock()
 			i.backends = cloneBackends(backends)
 			i.mu.Unlock()

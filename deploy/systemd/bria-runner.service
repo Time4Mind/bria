@@ -1,0 +1,47 @@
+[Unit]
+Description=Bria isolated backend runner
+After=network-online.target
+Wants=network-online.target
+Before=bria-node.service
+
+[Service]
+Type=simple
+User=bria-agent
+Group=bria-runtime
+WorkingDirectory=/srv/bria-agent
+Environment=HOME=/srv/bria-agent
+EnvironmentFile=-/etc/bria/runner.env
+ExecStart=/opt/bria/current/bria runner serve --socket /run/bria-runner/runner.sock
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=15s
+RuntimeDirectory=bria-runner
+RuntimeDirectoryMode=0750
+UMask=0007
+TasksMax=512
+MemoryHigh=1536M
+MemoryMax=2G
+
+NoNewPrivileges=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/srv/bria-agent /run/bria-runner
+PrivateDevices=true
+PrivateTmp=true
+ProtectClock=true
+ProtectHostname=true
+ProtectKernelLogs=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RemoveIPC=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

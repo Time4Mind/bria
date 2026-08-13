@@ -23,6 +23,9 @@ func issueClusterNode(arguments []string) error {
 	outputDir := flags.String("output", "", "new bundle directory")
 	dataDir := flags.String("data-dir", "/var/lib/bria", "target data directory")
 	bind := flags.String("raft-bind", "", "target Raft bind address")
+	runnerMode := flags.String("runner-mode", config.RunnerModeTrusted, "backend runner: trusted, docker, native-user, or wsl")
+	runnerSocket := flags.String("runner-socket", "", "isolated runner Unix socket")
+	runnerHome := flags.String("runner-home", "", "runner home visible read-only to control")
 	if err := flags.Parse(arguments); err != nil {
 		return err
 	}
@@ -43,7 +46,9 @@ func issueClusterNode(arguments []string) error {
 	if *bind == "" {
 		*bind = peer.Address
 	}
-	target, err := issuedNodeConfig(source, peer, *dataDir, *bind)
+	target, err := issuedNodeConfig(source, peer, *dataDir, *bind, config.RunnerConfig{
+		Mode: *runnerMode, Socket: *runnerSocket, Home: *runnerHome,
+	})
 	if err != nil {
 		return err
 	}
@@ -95,6 +100,7 @@ func issuedNodeConfig(
 	peer config.RaftPeer,
 	dataDir string,
 	bind string,
+	runner config.RunnerConfig,
 ) (config.Config, error) {
 	absoluteDataDir, err := filepath.Abs(dataDir)
 	if err != nil {
@@ -134,6 +140,7 @@ func issuedNodeConfig(
 		AppleSpeechCommand: source.AppleSpeechCommand,
 		UpdateManifestURL:  source.UpdateManifestURL,
 		UpdatePublicKey:    source.UpdatePublicKey,
+		Runner:             runner,
 	}
 	if err := target.Validate(); err != nil {
 		return config.Config{}, err

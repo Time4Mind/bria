@@ -27,45 +27,46 @@ type RaftPeer struct {
 }
 
 type Config struct {
-	ClusterID           string     `json:"cluster_id"`
-	NodeID              string     `json:"node_id"`
-	NodeName            string     `json:"node_name"`
-	BootstrapOwnerID    int64      `json:"bootstrap_owner_user_id,omitempty"`
-	DataDir             string     `json:"data_dir"`
-	RaftBind            string     `json:"raft_bind"`
-	RaftAdvertise       string     `json:"raft_advertise"`
-	ControlBind         string     `json:"control_bind,omitempty"`
-	ControlAdvertise    string     `json:"control_advertise,omitempty"`
-	EnrollmentBind      string     `json:"enrollment_bind,omitempty"`
-	EnrollmentAdvertise string     `json:"enrollment_advertise,omitempty"`
-	EnrollmentIssuerID  string     `json:"enrollment_issuer_node_id,omitempty"`
-	RaftPeers           []RaftPeer `json:"raft_peers,omitempty"`
-	Bootstrap           bool       `json:"bootstrap"`
-	CACertificate       string     `json:"ca_certificate"`
-	CAPrivateKey        string     `json:"ca_private_key"`
-	NodeCertificate     string     `json:"node_certificate"`
-	NodePrivateKey      string     `json:"node_private_key"`
-	TelegramTokenFile   string     `json:"telegram_token_file"`
-	CallbackKeyFile     string     `json:"callback_key_file"`
-	TmuxSession         string     `json:"tmux_session"`
-	ClaudeCommand       string     `json:"claude_command"`
-	ClaudeFlags         []string   `json:"claude_flags,omitempty"`
-	ClaudeNamingModel   string     `json:"claude_naming_model,omitempty"`
-	CodexCommand        string     `json:"codex_command"`
-	CodexFlags          []string   `json:"codex_flags,omitempty"`
-	CodexNamingModel    string     `json:"codex_naming_model,omitempty"`
-	SpeechEngine        string     `json:"speech_engine,omitempty"`
-	FFmpegCommand       string     `json:"ffmpeg_command,omitempty"`
-	WhisperCommand      string     `json:"whisper_command,omitempty"`
-	WhisperModelPath    string     `json:"whisper_model_path,omitempty"`
-	WhisperLanguage     string     `json:"whisper_language,omitempty"`
-	WhisperThreads      int        `json:"whisper_threads,omitempty"`
-	AppleSpeechCommand  string     `json:"apple_speech_command,omitempty"`
-	HTTPProxy           string     `json:"http_proxy,omitempty"`
-	SOCKS5Proxy         string     `json:"socks5_proxy,omitempty"`
-	UpdateManifestURL   string     `json:"update_manifest_url,omitempty"`
-	UpdatePublicKey     string     `json:"update_public_key,omitempty"`
-	UpdateInstallRoot   string     `json:"update_install_root,omitempty"`
+	ClusterID           string       `json:"cluster_id"`
+	NodeID              string       `json:"node_id"`
+	NodeName            string       `json:"node_name"`
+	BootstrapOwnerID    int64        `json:"bootstrap_owner_user_id,omitempty"`
+	DataDir             string       `json:"data_dir"`
+	RaftBind            string       `json:"raft_bind"`
+	RaftAdvertise       string       `json:"raft_advertise"`
+	ControlBind         string       `json:"control_bind,omitempty"`
+	ControlAdvertise    string       `json:"control_advertise,omitempty"`
+	EnrollmentBind      string       `json:"enrollment_bind,omitempty"`
+	EnrollmentAdvertise string       `json:"enrollment_advertise,omitempty"`
+	EnrollmentIssuerID  string       `json:"enrollment_issuer_node_id,omitempty"`
+	RaftPeers           []RaftPeer   `json:"raft_peers,omitempty"`
+	Bootstrap           bool         `json:"bootstrap"`
+	CACertificate       string       `json:"ca_certificate"`
+	CAPrivateKey        string       `json:"ca_private_key"`
+	NodeCertificate     string       `json:"node_certificate"`
+	NodePrivateKey      string       `json:"node_private_key"`
+	TelegramTokenFile   string       `json:"telegram_token_file"`
+	CallbackKeyFile     string       `json:"callback_key_file"`
+	TmuxSession         string       `json:"tmux_session"`
+	ClaudeCommand       string       `json:"claude_command"`
+	ClaudeFlags         []string     `json:"claude_flags,omitempty"`
+	ClaudeNamingModel   string       `json:"claude_naming_model,omitempty"`
+	CodexCommand        string       `json:"codex_command"`
+	CodexFlags          []string     `json:"codex_flags,omitempty"`
+	CodexNamingModel    string       `json:"codex_naming_model,omitempty"`
+	SpeechEngine        string       `json:"speech_engine,omitempty"`
+	FFmpegCommand       string       `json:"ffmpeg_command,omitempty"`
+	WhisperCommand      string       `json:"whisper_command,omitempty"`
+	WhisperModelPath    string       `json:"whisper_model_path,omitempty"`
+	WhisperLanguage     string       `json:"whisper_language,omitempty"`
+	WhisperThreads      int          `json:"whisper_threads,omitempty"`
+	AppleSpeechCommand  string       `json:"apple_speech_command,omitempty"`
+	HTTPProxy           string       `json:"http_proxy,omitempty"`
+	SOCKS5Proxy         string       `json:"socks5_proxy,omitempty"`
+	UpdateManifestURL   string       `json:"update_manifest_url,omitempty"`
+	UpdatePublicKey     string       `json:"update_public_key,omitempty"`
+	UpdateInstallRoot   string       `json:"update_install_root,omitempty"`
+	Runner              RunnerConfig `json:"runner,omitempty"`
 }
 
 func Default() (Config, error) {
@@ -250,6 +251,9 @@ func (c Config) Validate() error {
 	if c.UpdateInstallRoot != "" && !filepath.IsAbs(c.UpdateInstallRoot) {
 		return errors.New("update_install_root must be absolute")
 	}
+	if err := c.validateRunner(); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -307,11 +311,5 @@ func (c *Config) expandPaths() {
 	if c.UpdateInstallRoot != "" {
 		c.UpdateInstallRoot = filepath.Clean(c.UpdateInstallRoot)
 	}
-}
-
-func (c Config) EffectiveUpdateInstallRoot() string {
-	if c.UpdateInstallRoot != "" {
-		return c.UpdateInstallRoot
-	}
-	return filepath.Join(c.DataDir, "software")
+	c.expandRunnerPaths()
 }

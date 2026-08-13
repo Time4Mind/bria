@@ -46,10 +46,12 @@ func runNode(arguments []string) error {
 			return rollbackCertificateRenewal(arguments[1:])
 		case "update-watchdog":
 			return runUpdateWatchdog(arguments[1:])
+		case "isolation-check":
+			return checkNodeIsolation(arguments[1:])
 		}
 	}
 	if len(arguments) == 0 || arguments[0] != "run" {
-		return errors.New("usage: bria node <run|probe|metrics|cert-request|cert-install|cert-rollback|update-watchdog>")
+		return errors.New("usage: bria node <run|probe|metrics|cert-request|cert-install|cert-rollback|update-watchdog|isolation-check>")
 	}
 	flags := flag.NewFlagSet("node run", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
@@ -64,6 +66,11 @@ func runNode(arguments []string) error {
 	if err != nil {
 		return err
 	}
+	backendRuntime, err := openBackendRuntime(context.Background(), nodeConfig)
+	if err != nil {
+		return fmt.Errorf("open backend runtime: %w", err)
+	}
+	defer backendRuntime.closer.Close()
 	certificate, roots, err := loadNodeTLS(nodeConfig)
 	if err != nil {
 		return err
@@ -121,13 +128,13 @@ func runNode(arguments []string) error {
 			if err := registerConfiguredNodes(ctx, node, nodeConfig); err != nil {
 				return err
 			}
-			plan, err := registerLocalNode(ctx, node, nodeConfig, localFingerprint)
+			plan, err := registerLocalNode(ctx, node, nodeConfig, localFingerprint, backendRuntime.runner)
 			if err != nil {
 				return err
 			}
 			if len(plan.Recover) > 0 {
 				runtime, runtimeErr := runtimehost.NewTmuxRecoveryRuntime(
-					runtimehost.ExecCommandRunner{},
+					backendRuntime.runner,
 					nodeConfig.TmuxSession,
 					map[string]runtimehost.BackendCommand{
 						"claude": {Executable: nodeConfig.ClaudeCommand, Flags: nodeConfig.EffectiveClaudeFlags()},
@@ -154,7 +161,7 @@ func runNode(arguments []string) error {
 	}
 	go maintainDynamicMembership(ctx, node, resolver, nodeConfig)
 	runtimeControl, err := startNodeRuntimeControl(
-		ctx, node, nodeConfig, certificate, roots,
+		ctx, node, nodeConfig, certificate, roots, backendRuntime,
 	)
 	if err != nil {
 		return fmt.Errorf("start node runtime control: %w", err)
@@ -206,6 +213,7 @@ func registerLocalNode(
 	node *consensus.Node,
 	nodeConfig config.Config,
 	fingerprint string,
+	runner runtimehost.CommandRunner,
 ) (domain.BootRecoveryPlan, error) {
 	state := node.State().State()
 	if _, exists := state.Nodes[domain.NodeID(nodeConfig.NodeID)]; !exists {
@@ -244,7 +252,7 @@ func registerLocalNode(
 		clusterstate.UpdateNodeRuntime{
 			NodeID: domain.NodeID(nodeConfig.NodeID), Status: domain.NodeOnline,
 			Version: localBuildVersion(), Backends: connectedLocalBackends(
-				node.State().State(), domain.NodeID(nodeConfig.NodeID), discoverLocalBackends(ctx)),
+				node.State().State(), domain.NodeID(nodeConfig.NodeID), discoverLocalBackends(ctx, runner)),
 		},
 	)
 	if err != nil {

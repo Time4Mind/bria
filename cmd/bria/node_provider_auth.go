@@ -1,20 +1,35 @@
 package main
 
 import (
+	"fmt"
+
 	"github.com/Time4Mind/bria/internal/config"
 	"github.com/Time4Mind/bria/internal/nodecontrol"
 	"github.com/Time4Mind/bria/internal/providerauth"
+	"github.com/Time4Mind/bria/internal/runnerhost"
 )
 
 func newProviderAuthentication(
 	nodeConfig config.Config,
 	guard *nodecontrol.StateGuard,
 	client *nodecontrol.Client,
+	backendRuntime backendRuntime,
 ) (*providerauth.Manager, *nodecontrol.ProviderAuthRouter, error) {
-	launcher, err := providerauth.NewCommandLauncher(map[string]providerauth.Command{
+	commands := map[string]providerauth.Command{
 		"claude": {Executable: nodeConfig.ClaudeCommand},
 		"codex":  {Executable: nodeConfig.CodexCommand},
-	})
+	}
+	var launcher providerauth.Launcher
+	var err error
+	if nodeConfig.IsolatedRunner() {
+		runnerClient, ok := backendRuntime.runner.(*runnerhost.Client)
+		if !ok {
+			return nil, nil, fmt.Errorf("isolated provider authentication runner is unavailable")
+		}
+		launcher, err = runnerhost.NewAuthLauncher(runnerClient, commands)
+	} else {
+		launcher, err = providerauth.NewCommandLauncher(commands)
+	}
 	if err != nil {
 		return nil, nil, err
 	}

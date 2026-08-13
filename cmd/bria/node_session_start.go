@@ -20,13 +20,14 @@ func newLocalSessionStart(
 	reader *transcript.Reader,
 	executor *runtimehost.LocalExecutor,
 	client *nodecontrol.Client,
+	runner runtimehost.CommandRunner,
 ) (*sessionstart.Local, *nodecontrol.StartRouter, error) {
 	browser, err := workspace.NewBrowser(home)
 	if err != nil {
 		return nil, nil, err
 	}
 	runtime, err := runtimehost.NewTmuxRecoveryRuntime(
-		runtimehost.ExecCommandRunner{}, nodeConfig.TmuxSession,
+		runner, nodeConfig.TmuxSession,
 		map[string]runtimehost.BackendCommand{
 			"claude": {Executable: nodeConfig.ClaudeCommand, Flags: nodeConfig.EffectiveClaudeFlags()},
 			"codex":  {Executable: nodeConfig.CodexCommand, Flags: nodeConfig.EffectiveCodexFlags()},

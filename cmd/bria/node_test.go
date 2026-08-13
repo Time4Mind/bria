@@ -10,6 +10,7 @@ import (
 	"github.com/Time4Mind/bria/internal/config"
 	"github.com/Time4Mind/bria/internal/consensus"
 	"github.com/Time4Mind/bria/internal/domain"
+	"github.com/Time4Mind/bria/internal/runtimehost"
 )
 
 func TestRegisterLocalNodeBootstrapsConfiguredOwner(t *testing.T) {
@@ -29,7 +30,7 @@ func TestRegisterLocalNodeBootstrapsConfiguredOwner(t *testing.T) {
 	}
 	plan, err := registerLocalNode(ctx, node, config.Config{
 		NodeID: "local", NodeName: "Local", BootstrapOwnerID: 77,
-	}, "fingerprint")
+	}, "fingerprint", runtimehost.ExecCommandRunner{})
 	if err != nil {
 		t.Fatal(err)
 	}

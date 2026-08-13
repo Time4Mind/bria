@@ -3,6 +3,12 @@
 The production Go daemon runs as one `bria node` process per host. The
 legacy Python `hub` and `agent` units are not used.
 
+Linux hosts that execute provider agents should use the separate
+`bria-runner.service` and `bria-node-isolated.conf`; see
+`docs/linux-runner-isolation.md`. The single-user unit below remains valid for
+trusted hosts and backwards compatibility, but does not isolate a hostile
+backend from node-control secrets.
+
 The supplied unit expects:
 
 - `/opt/bria/current/bria` — the architecture-specific Go binary;
