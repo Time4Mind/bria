@@ -6,13 +6,11 @@ import (
 	"encoding/hex"
 	"errors"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
 	"github.com/Time4Mind/bria/internal/application"
 	"github.com/Time4Mind/bria/internal/domain"
-	"github.com/Time4Mind/bria/internal/runtimehost"
 	"github.com/Time4Mind/bria/internal/sessionstart"
 	"github.com/Time4Mind/bria/internal/telegrambot"
 	"github.com/Time4Mind/bria/internal/telegramui"
@@ -326,33 +324,6 @@ func (h *Handler) beginCreateOnNode(
 	}
 	flow.backends = backends
 	return h.renderCreateBackends(actor, flow, item.Node.Name, backends)
-}
-
-func createBackends(node domain.Node) []string {
-	if !node.BackendExecutionAllowed() {
-		return nil
-	}
-	return createBackendDescriptors(node.Backends)
-}
-
-func createBackendDescriptors(backends []domain.BackendDescriptor) []string {
-	result := make([]string, 0, len(backends))
-	for _, backend := range backends {
-		if backendSupportsCreate(backend) {
-			result = append(result, strings.ToLower(backend.Name))
-		}
-	}
-	sort.Strings(result)
-	return result
-}
-
-func backendSupportsCreate(backend domain.BackendDescriptor) bool {
-	for _, capability := range backend.Capabilities {
-		if capability == string(runtimehost.CapabilitySessionCreate) {
-			return true
-		}
-	}
-	return false
 }
 
 func (h *Handler) renderCreateBackends(actor application.Principal, flow *createFlow, nodeName string, backends []string) (telegramui.Screen, domain.SessionRef, error) {
