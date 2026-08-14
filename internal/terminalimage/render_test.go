@@ -43,6 +43,9 @@ func TestRenderRejectsOversizedInputAndOutput(t *testing.T) {
 	if _, err := Render("visible", Options{MaxPNGBytes: 4}); !errors.Is(err, ErrLimitExceeded) {
 		t.Fatalf("oversized output error = %v", err)
 	}
+	if _, err := Render("\n \n", Options{}); !errors.Is(err, ErrEmptyCapture) {
+		t.Fatalf("empty capture error = %v", err)
+	}
 }
 
 func TestRenderTruncatesDimensions(t *testing.T) {
@@ -55,5 +58,15 @@ func TestRenderTruncatesDimensions(t *testing.T) {
 	}
 	if result.Width > 120 || result.Height > 100 {
 		t.Fatalf("dimensions = %dx%d", result.Width, result.Height)
+	}
+}
+
+func TestRenderKeepsTallPaneReadableOnMobile(t *testing.T) {
+	result, err := Render(strings.Repeat("x\n", 160), Options{})
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if result.Height > 2*result.Width || result.Height > DefaultMaxHeight {
+		t.Fatalf("mobile dimensions = %dx%d", result.Width, result.Height)
 	}
 }

@@ -49,9 +49,39 @@ type styledRune struct {
 // and OSC controls are discarded so untrusted pane output cannot reach PNG
 // encoders or Telegram as control data.
 func parseANSI(text string, maxLines, maxColumns int) [][]styledRune {
-	lines := make([][]styledRune, 1, maxLines)
+	if maxLines < 1 || maxColumns < 1 {
+		return nil
+	}
+	// Keep the most recent bounded viewport. Blank rows before the first and
+	// after the last visible cell are discarded; otherwise a temporarily tall
+	// detached tmux pane turns into a mostly empty portrait image on phones.
+	ring := make([][]styledRune, maxLines)
+	head, count, pendingBlanks := 0, 0, 0
+	currentLine := make([]styledRune, 0, min(maxColumns, 80))
+	appendLine := func(line []styledRune) {
+		cloned := append([]styledRune(nil), line...)
+		if count < maxLines {
+			ring[(head+count)%maxLines] = cloned
+			count++
+			return
+		}
+		ring[head] = cloned
+		head = (head + 1) % maxLines
+	}
+	finishLine := func() {
+		if visibleANSI(currentLine) {
+			for pendingBlanks > 0 {
+				appendLine(nil)
+				pendingBlanks--
+			}
+			appendLine(currentLine)
+		} else if count > 0 && pendingBlanks < maxLines {
+			pendingBlanks++
+		}
+		currentLine = currentLine[:0]
+	}
 	current := defaultStyle()
-	for index := 0; index < len(text) && len(lines) <= maxLines; {
+	for index := 0; index < len(text); {
 		if text[index] == 0x1b {
 			index = consumeEscape(text, index, &current)
 			continue
@@ -63,27 +93,38 @@ func parseANSI(text string, maxLines, maxColumns int) [][]styledRune {
 		index += size
 		switch r {
 		case '\n':
-			if len(lines) == maxLines {
-				return lines
-			}
-			lines = append(lines, nil)
+			finishLine()
 		case '\r', '\b':
 			continue
 		case '\t':
-			spaces := 4 - len(lines[len(lines)-1])%4
+			spaces := 4 - len(currentLine)%4
 			for range spaces {
-				if len(lines[len(lines)-1]) == maxColumns {
+				if len(currentLine) == maxColumns {
 					break
 				}
-				lines[len(lines)-1] = append(lines[len(lines)-1], styledRune{' ', current})
+				currentLine = append(currentLine, styledRune{' ', current})
 			}
 		default:
-			if (r >= 0x20 && r != 0x7f) && len(lines[len(lines)-1]) < maxColumns {
-				lines[len(lines)-1] = append(lines[len(lines)-1], styledRune{r, current})
+			if (r >= 0x20 && r != 0x7f) && len(currentLine) < maxColumns {
+				currentLine = append(currentLine, styledRune{r, current})
 			}
 		}
 	}
+	finishLine()
+	lines := make([][]styledRune, count)
+	for index := range count {
+		lines[index] = ring[(head+index)%maxLines]
+	}
 	return lines
+}
+
+func visibleANSI(line []styledRune) bool {
+	for _, item := range line {
+		if item.value != ' ' || item.style.customBG {
+			return true
+		}
+	}
+	return false
 }
 
 func decodeRune(value string) (rune, int) {

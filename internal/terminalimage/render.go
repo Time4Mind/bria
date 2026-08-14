@@ -23,12 +23,15 @@ const (
 	DefaultMaxInputBytes = 256 << 10
 	DefaultMaxPNGBytes   = 10 << 20
 	DefaultMaxColumns    = 200
-	DefaultMaxLines      = 160
+	DefaultMaxLines      = 48
 	DefaultMaxWidth      = 3200
-	DefaultMaxHeight     = 4096
+	DefaultMaxHeight     = 1800
 )
 
-var ErrLimitExceeded = errors.New("terminal image limit exceeded")
+var (
+	ErrLimitExceeded = errors.New("terminal image limit exceeded")
+	ErrEmptyCapture  = errors.New("terminal image has no visible cells")
+)
 
 type Options struct {
 	FontSize      float64
@@ -67,6 +70,9 @@ func Render(text string, options Options) (Result, error) {
 		defer closer.Close()
 	}
 	lines := parseANSI(text, options.MaxLines, options.MaxColumns)
+	if len(lines) == 0 {
+		return Result{}, ErrEmptyCapture
+	}
 	metrics := face.Metrics()
 	cellWidth := max(1, font.MeasureString(face, "M").Ceil())
 	lineHeight := max(1, metrics.Height.Round()+2)
@@ -76,9 +82,10 @@ func Render(text string, options Options) (Result, error) {
 	}
 	width := min(options.MaxWidth, columns*cellWidth+2*options.Padding)
 	height := min(options.MaxHeight, len(lines)*lineHeight+2*options.Padding)
-	// Telegram photos reject aspect ratios above 20:1. Pad narrow or short
-	// captures instead of making a valid pane fail at the transport boundary.
-	width = min(options.MaxWidth, max(width, (height+19)/20))
+	// Telegram accepts extreme aspect ratios, but its mobile client renders a
+	// tall narrow image as a large near-empty strip. Keep live pane snapshots
+	// at no more than 2:1 portrait while retaining the 20:1 landscape limit.
+	width = min(options.MaxWidth, max(width, (height+1)/2))
 	height = min(options.MaxHeight, max(height, (width+19)/20))
 	canvas := image.NewRGBA(image.Rect(0, 0, width, height))
 	draw.Draw(canvas, canvas.Bounds(), image.NewUniform(defaultBackground), image.Point{}, draw.Src)
@@ -109,7 +116,7 @@ func Render(text string, options Options) (Result, error) {
 	if output.Len() > options.MaxPNGBytes {
 		return Result{}, ErrLimitExceeded
 	}
-	digest := sha256.Sum256([]byte(text))
+	digest := sha256.Sum256(output.Bytes())
 	return Result{
 		PNG: output.Bytes(), Hash: hex.EncodeToString(digest[:]), Width: width, Height: height,
 	}, nil

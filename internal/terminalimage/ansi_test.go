@@ -25,6 +25,16 @@ func TestParseANSIDiscardsControlsAndBoundsPane(t *testing.T) {
 	}
 }
 
+func TestParseANSIUsesRecentViewportAndTrimsBlankEdges(t *testing.T) {
+	lines := parseANSI("\nold\n\nmid\nnew\n\n\n", 3, 20)
+	if got := plainLines(lines); got != "\nmid\nnew" {
+		t.Fatalf("recent pane = %q", got)
+	}
+	if lines := parseANSI(" \n\t\n", 3, 20); len(lines) != 0 {
+		t.Fatalf("blank pane was retained: %#v", lines)
+	}
+}
+
 func assertColor(t *testing.T, got, want color.RGBA) {
 	t.Helper()
 	if got != want {
