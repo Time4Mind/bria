@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/Time4Mind/bria/internal/domain"
@@ -60,15 +59,11 @@ func (s *Store) Put(record Record) error {
 	if err := os.MkdirAll(filepath.Dir(s.path), 0700); err != nil {
 		return fmt.Errorf("create provider binding directory: %w", err)
 	}
-	lock, err := os.OpenFile(s.path+".lock", os.O_CREATE|os.O_RDWR, 0600)
+	lock, err := acquireFileLock(s.path + ".lock")
 	if err != nil {
 		return fmt.Errorf("open provider binding lock: %w", err)
 	}
-	defer lock.Close()
-	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
-		return fmt.Errorf("lock provider bindings: %w", err)
-	}
-	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN) //nolint:errcheck
+	defer lock.Close() //nolint:errcheck
 	records, err := s.read()
 	if err != nil {
 		return err
