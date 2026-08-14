@@ -56,9 +56,11 @@ func TestProcessorRetriesDownloadWithoutKeepingPartialBytes(t *testing.T) {
 }
 
 type recordingTranscriber struct {
-	path string
-	data []byte
-	err  error
+	path     string
+	data     []byte
+	err      error
+	text     string
+	language string
 }
 
 func (t *recordingTranscriber) Transcribe(_ context.Context, path string) (string, error) {
@@ -67,7 +69,19 @@ func (t *recordingTranscriber) Transcribe(_ context.Context, path string) (strin
 	if t.err != nil {
 		return "", t.err
 	}
+	if t.text != "" {
+		return t.text, nil
+	}
 	return "  recognized voice  ", nil
+}
+
+func (t *recordingTranscriber) TranscribeLanguage(
+	ctx context.Context,
+	path string,
+	language string,
+) (string, error) {
+	t.language = language
+	return t.Transcribe(ctx, path)
 }
 
 func TestProcessorStoresPersistentMediaSecurelyAndIdempotently(t *testing.T) {
@@ -156,16 +170,34 @@ func TestProcessorVoiceIsLocalAndTemporary(t *testing.T) {
 		t.Fatal(err)
 	}
 	result, err := processor.Process(context.Background(), workdir, Input{
-		Kind: KindVoice, FileID: "voice", UniqueID: "voice-unique", Size: 3,
+		Kind: KindVoice, FileID: "voice", UniqueID: "voice-unique", Size: 3, Language: "ru",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Text != "recognized voice" || string(transcriber.data) != "ogg" {
+	if result.Text != "recognized voice" || string(transcriber.data) != "ogg" ||
+		transcriber.language != "ru" {
 		t.Fatalf("unexpected voice result: %#v, data=%q", result, transcriber.data)
 	}
 	if _, err := os.Stat(transcriber.path); !os.IsNotExist(err) {
 		t.Fatalf("voice temporary file remains: %v", err)
+	}
+}
+
+func TestProcessorRejectsRecognizerPunctuationAsNoSpeech(t *testing.T) {
+	transcriber := &recordingTranscriber{text: "  .  "}
+	processor, err := NewProcessor(ProcessorConfig{
+		Downloader:  &bytesDownloader{data: []byte("ogg")},
+		Transcriber: transcriber, TempDir: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = processor.Process(context.Background(), t.TempDir(), Input{
+		Kind: KindVoice, FileID: "voice", UniqueID: "voice-unique", Language: "ru",
+	})
+	if err == nil || !strings.Contains(err.Error(), "returned no speech") {
+		t.Fatalf("punctuation transcription error=%v", err)
 	}
 }
 

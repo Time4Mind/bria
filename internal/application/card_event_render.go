@@ -11,7 +11,11 @@ import (
 )
 
 const (
-	DefaultCardPageRunes  = 3500
+	DefaultCardPageRunes = 3500
+	// Telegram's legacy text carrier is limited by encoded payload size. Keep
+	// enough room for the session header, background panel, and keyboard even
+	// when a Rich Markdown card has to fall back to editMessageText.
+	DefaultCardPageBytes  = 3000
 	cardEventJoiner       = "\n\n\u00a0\n\n"
 	defaultTechnicalLines = 15
 )
@@ -20,6 +24,7 @@ type CardRenderOptions struct {
 	Now               time.Time
 	Location          *time.Location
 	MaxPageRunes      int
+	MaxPageBytes      int
 	MaxTechnicalLines int
 }
 
@@ -48,7 +53,7 @@ func RenderCardEventPages(
 	options = normalizedCardRenderOptions(options)
 	prepared := prepareCardEvents(preferences, events)
 	blocks := renderCardEventBlocks(prepared, options)
-	renderedPages := packCardEventPages(blocks, options.MaxPageRunes)
+	renderedPages := packCardEventPages(blocks, options.MaxPageRunes, options.MaxPageBytes)
 	pages := make([]CardEventPage, len(renderedPages))
 	for index, text := range renderedPages {
 		pages[index] = CardEventPage{
@@ -67,6 +72,11 @@ func RenderCardEventPages(
 func normalizedCardRenderOptions(options CardRenderOptions) CardRenderOptions {
 	if options.MaxPageRunes <= 0 {
 		options.MaxPageRunes = DefaultCardPageRunes
+	}
+	if options.MaxPageBytes <= 0 {
+		options.MaxPageBytes = DefaultCardPageBytes
+	} else if options.MaxPageBytes < utf8.UTFMax {
+		options.MaxPageBytes = utf8.UTFMax
 	}
 	if options.MaxTechnicalLines <= 0 {
 		options.MaxTechnicalLines = defaultTechnicalLines
@@ -95,7 +105,7 @@ func renderCardEventBlocks(events []CardEvent, options CardRenderOptions) []card
 			continue
 		}
 		if event.Kind == CardEventAssistantText {
-			chunks := splitCardText(text, options.MaxPageRunes)
+			chunks := splitCardText(text, options.MaxPageRunes, options.MaxPageBytes)
 			for chunkIndex, chunk := range chunks {
 				blocks = append(blocks, cardEventBlock{
 					text: chunk, pageBreak: event.PageBreak || chunkIndex > 0,
@@ -103,7 +113,7 @@ func renderCardEventBlocks(events []CardEvent, options CardRenderOptions) []card
 			}
 			continue
 		}
-		text = boundCardBlock(text, options.MaxPageRunes)
+		text = boundCardBlock(text, options.MaxPageRunes, options.MaxPageBytes)
 		blocks = append(blocks, cardEventBlock{text: text, pageBreak: event.PageBreak})
 	}
 	return blocks
@@ -117,7 +127,9 @@ func renderCardEvent(event CardEvent, inFlight bool, options CardRenderOptions) 
 		return strings.TrimSpace(event.Text)
 	case CardEventThinking:
 		head := "∴ thinking" + cardTimeMarker(event, inFlight, options)
-		return expandableCardBlock(head, event.Body, options.MaxPageRunes, options.MaxTechnicalLines)
+		return expandableCardBlock(
+			head, event.Body, options.MaxPageRunes, options.MaxPageBytes, options.MaxTechnicalLines,
+		)
 	case CardEventToolCall:
 		return renderToolCardEvent(event, inFlight, options)
 	case CardEventToolResult:
@@ -150,7 +162,9 @@ func renderToolCardEvent(event CardEvent, inFlight bool, options CardRenderOptio
 			body = event.ResultBody
 		}
 	}
-	return expandableCardBlock(head, body, options.MaxPageRunes, options.MaxTechnicalLines)
+	return expandableCardBlock(
+		head, body, options.MaxPageRunes, options.MaxPageBytes, options.MaxTechnicalLines,
+	)
 }
 
 func cardTimeMarker(event CardEvent, inFlight bool, options CardRenderOptions) string {
@@ -168,22 +182,21 @@ func cardTimeMarker(event CardEvent, inFlight bool, options CardRenderOptions) s
 	return " · " + event.StartedAt.In(options.Location).Format("15:04")
 }
 
-func expandableCardBlock(head, body string, limit, maxLines int) string {
+func expandableCardBlock(head, body string, runeLimit, byteLimit, maxLines int) string {
 	body = trimTechnicalBody(body, maxLines)
 	if body == "" {
-		return boundCardBlock(head, limit)
+		return boundCardBlock(head, runeLimit, byteLimit)
 	}
 	escapedHead := html.EscapeString(head)
 	body = escapeDetailsClose(body)
 	prefix := "<details><summary>" + escapedHead + "</summary>\n\n"
 	suffix := "\n\n</details>"
-	available := limit - utf8.RuneCountInString(prefix) - utf8.RuneCountInString(suffix)
-	if available < 1 {
-		return boundCardBlock(head, limit)
+	availableRunes := runeLimit - utf8.RuneCountInString(prefix) - utf8.RuneCountInString(suffix)
+	availableBytes := byteLimit - len(prefix) - len(suffix)
+	if availableRunes < 1 || availableBytes < 1 {
+		return boundCardBlock(head, runeLimit, byteLimit)
 	}
-	if utf8.RuneCountInString(body) > available {
-		body = truncateRunes(body, max(1, available))
-	}
+	body = truncateCardText(body, availableRunes, availableBytes)
 	return prefix + body + suffix
 }
 
@@ -205,17 +218,29 @@ func escapeDetailsClose(text string) string {
 	return strings.ReplaceAll(text, "</details>", "&lt;/details&gt;")
 }
 
-func boundCardBlock(text string, limit int) string {
-	if utf8.RuneCountInString(text) <= limit {
+func boundCardBlock(text string, runeLimit, byteLimit int) string {
+	if utf8.RuneCountInString(text) <= runeLimit && len(text) <= byteLimit {
 		return text
 	}
 	const suffix = "\n…"
-	suffixRunes := utf8.RuneCountInString(suffix)
-	if limit <= suffixRunes {
-		return truncateRunes(text, limit)
+	availableRunes := runeLimit - utf8.RuneCountInString(suffix)
+	availableBytes := byteLimit - len(suffix)
+	if availableRunes < 1 || availableBytes < 1 {
+		return truncateCardText(text, runeLimit, byteLimit)
 	}
-	available := limit - suffixRunes
-	return string([]rune(text)[:available]) + suffix
+	return truncateCardText(text, availableRunes, availableBytes) + suffix
+}
+
+func truncateCardText(text string, runeLimit, byteLimit int) string {
+	if runeLimit <= 0 || byteLimit <= 0 {
+		return ""
+	}
+	runes := []rune(text)
+	if len(runes) > runeLimit {
+		runes = runes[:runeLimit]
+	}
+	runes = runes[:runePrefixWithinBytes(runes, byteLimit)]
+	return string(runes)
 }
 
 func truncateRunes(text string, limit int) string {

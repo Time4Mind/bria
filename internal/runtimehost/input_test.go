@@ -92,7 +92,7 @@ func TestExternalInputRejectsMissingTelegramIdentity(t *testing.T) {
 
 func TestVoiceBackendMetadataIsClosedAndVoiceOnly(t *testing.T) {
 	valid := InputPayload{
-		Kind: InputVoice, VoiceBackend: "apple",
+		Kind: InputVoice, VoiceBackend: "apple", VoiceLanguage: "ru",
 		File: InputFile{Provider: "telegram", ID: "voice", UniqueID: "unique"},
 	}
 	if err := valid.validate(); err != nil {
@@ -106,6 +106,11 @@ func TestVoiceBackendMetadataIsClosedAndVoiceOnly(t *testing.T) {
 	invalid = valid
 	invalid.Kind = InputPhoto
 	if err := invalid.validate(); err == nil {
-		t.Fatal("voice backend accepted for photo")
+		t.Fatal("voice metadata accepted for photo")
+	}
+	invalid = valid
+	invalid.VoiceLanguage = "arbitrary"
+	if err := invalid.validate(); err == nil {
+		t.Fatal("unknown voice language accepted")
 	}
 }

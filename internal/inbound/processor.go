@@ -2,10 +2,12 @@ package inbound
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode"
 )
 
 type Processor struct {
@@ -104,11 +106,29 @@ func (p *Processor) processVoice(ctx context.Context, input Input) (Result, erro
 	if err := file.Close(); err != nil {
 		return Result{}, fmt.Errorf("close voice temporary file: %w", err)
 	}
-	text, err := p.transcriber.Transcribe(ctx, path)
+	var text string
+	if transcriber, ok := p.transcriber.(LanguageTranscriber); ok && input.Language != "" {
+		text, err = transcriber.TranscribeLanguage(ctx, path, input.Language)
+	} else {
+		text, err = p.transcriber.Transcribe(ctx, path)
+	}
 	if err != nil {
 		return Result{}, fmt.Errorf("transcribe voice: %w", err)
 	}
-	return Result{Kind: KindVoice, Text: strings.TrimSpace(text)}, nil
+	text = strings.TrimSpace(text)
+	if !containsTranscriptContent(text) {
+		return Result{}, errors.New("transcribe voice: recognizer returned no speech")
+	}
+	return Result{Kind: KindVoice, Text: text}, nil
+}
+
+func containsTranscriptContent(text string) bool {
+	for _, value := range text {
+		if unicode.IsLetter(value) || unicode.IsNumber(value) {
+			return true
+		}
+	}
+	return false
 }
 
 func validateMediaInput(input Input, maxBytes int64) error {

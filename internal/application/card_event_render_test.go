@@ -166,6 +166,27 @@ func TestCardRendererPaginationIsBoundedDeterministicAndLatest(t *testing.T) {
 	}
 }
 
+func TestCardRendererBoundsMultibytePagesForTelegramFallback(t *testing.T) {
+	events := []application.CardEvent{{
+		Kind: application.CardEventAssistantText,
+		Text: strings.Repeat("длинный русский ответ ", 400),
+	}}
+	result := application.RenderCardEventPages(
+		domain.DefaultUserPreferences(), events, application.CardRenderOptions{},
+	)
+	if len(result.Pages) < 2 {
+		t.Fatalf("multibyte answer was not paginated: %d pages", len(result.Pages))
+	}
+	for index, page := range result.Pages {
+		if len(page.RichMarkdown) > application.DefaultCardPageBytes {
+			t.Fatalf("page %d has %d encoded bytes", index+1, len(page.RichMarkdown))
+		}
+		if !utf8.ValidString(page.RichMarkdown) {
+			t.Fatalf("page %d is not valid UTF-8", index+1)
+		}
+	}
+}
+
 func TestCardRendererBoundsTechnicalBlockWithoutBreakingDetails(t *testing.T) {
 	events := []application.CardEvent{{
 		Kind: application.CardEventToolCall, Text: "Read", Body: strings.Repeat("long body ", 100),

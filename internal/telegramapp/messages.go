@@ -120,6 +120,11 @@ func (h *Handler) sendIncomingInput(
 			return sessioncontrol.Accepted{}, domain.ErrInvalidState
 		}
 		payload.VoiceBackend = string(preferences.EffectiveVoiceBackend())
+		language := preferences.EffectiveLanguage()
+		if language == domain.LanguageAuto {
+			language = domain.LanguageFromTelegram(update.LanguageCode)
+		}
+		payload.VoiceLanguage = string(language)
 	}
 	return h.controls.SendExternalInput(ctx, actor, operationID, payload)
 }

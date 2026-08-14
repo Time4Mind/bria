@@ -70,6 +70,14 @@ func NewWhisperTranscriber(config WhisperConfig) (*WhisperTranscriber, error) {
 }
 
 func (t *WhisperTranscriber) Transcribe(ctx context.Context, audioPath string) (string, error) {
+	return t.TranscribeLanguage(ctx, audioPath, t.config.Language)
+}
+
+func (t *WhisperTranscriber) TranscribeLanguage(
+	ctx context.Context,
+	audioPath string,
+	language string,
+) (string, error) {
 	if err := validateRegularFile(audioPath); err != nil {
 		return "", fmt.Errorf("inspect voice input: %w", err)
 	}
@@ -92,7 +100,7 @@ func (t *WhisperTranscriber) Transcribe(ctx context.Context, audioPath string) (
 	if err := t.convert(ctx, audioPath, wavPath); err != nil {
 		return "", err
 	}
-	stdout, err := t.runWhisper(ctx, wavPath)
+	stdout, err := t.runWhisper(ctx, wavPath, language)
 	if err != nil {
 		return "", err
 	}
@@ -116,14 +124,22 @@ func (t *WhisperTranscriber) convert(ctx context.Context, input, output string) 
 	)
 }
 
-func (t *WhisperTranscriber) runWhisper(ctx context.Context, wavPath string) (string, error) {
+func (t *WhisperTranscriber) runWhisper(
+	ctx context.Context,
+	wavPath string,
+	language string,
+) (string, error) {
+	language = strings.ToLower(strings.TrimSpace(language))
+	if language != "auto" && language != "ru" && language != "en" && language != "zh" {
+		return "", fmt.Errorf("%w: unsupported whisper language", ErrInvalidInput)
+	}
 	commandCtx, cancel := context.WithTimeout(ctx, t.config.TranscribeTimeout)
 	defer cancel()
 	stdout := &truncatingBuffer{limit: int(t.config.MaxOutputBytes) + 1}
 	stderr := &truncatingBuffer{limit: 4096}
 	err := t.config.Runner.Run(commandCtx, stdout, stderr, t.config.WhisperBinary,
 		"-m", t.config.ModelPath, "-f", wavPath, "-nt", "-otxt",
-		"-t", strconv.Itoa(t.config.Threads), "-l", t.config.Language,
+		"-t", strconv.Itoa(t.config.Threads), "-l", language,
 	)
 	if err != nil {
 		return "", commandFailure("whisper-cli", err, stderr.String())

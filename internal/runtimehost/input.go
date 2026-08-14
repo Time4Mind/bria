@@ -26,11 +26,12 @@ type InputFile struct {
 }
 
 type InputPayload struct {
-	Kind         InputKind `json:"kind"`
-	Caption      string    `json:"caption,omitempty"`
-	Origin       string    `json:"origin,omitempty"`
-	VoiceBackend string    `json:"voice_backend,omitempty"`
-	File         InputFile `json:"file"`
+	Kind          InputKind `json:"kind"`
+	Caption       string    `json:"caption,omitempty"`
+	Origin        string    `json:"origin,omitempty"`
+	VoiceBackend  string    `json:"voice_backend,omitempty"`
+	VoiceLanguage string    `json:"voice_language,omitempty"`
+	File          InputFile `json:"file"`
 }
 
 const maxInputCaptionBytes = 16 << 10
@@ -48,12 +49,16 @@ func (p InputPayload) validate() error {
 		len(p.Caption) > maxInputCaptionBytes || len(p.Origin) > 512 {
 		return errors.New("external input metadata exceeds limits")
 	}
-	if p.Kind != InputVoice && p.VoiceBackend != "" {
-		return errors.New("voice backend is valid only for voice input")
+	if p.Kind != InputVoice && (p.VoiceBackend != "" || p.VoiceLanguage != "") {
+		return errors.New("voice metadata is valid only for voice input")
 	}
 	if p.Kind == InputVoice && p.VoiceBackend != "" && p.VoiceBackend != "auto" &&
 		p.VoiceBackend != "whisper" && p.VoiceBackend != "apple" && p.VoiceBackend != "off" {
 		return errors.New("unsupported voice backend")
+	}
+	if p.Kind == InputVoice && p.VoiceLanguage != "" && p.VoiceLanguage != "auto" &&
+		p.VoiceLanguage != "ru" && p.VoiceLanguage != "en" && p.VoiceLanguage != "zh" {
+		return errors.New("unsupported voice language")
 	}
 	return nil
 }

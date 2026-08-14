@@ -56,6 +56,7 @@ func deferredInput(
 	result.Kind = domain.DeferredInputKind(input.Kind)
 	result.Caption = input.Caption
 	result.VoiceBackend = input.VoiceBackend
+	result.VoiceLanguage = input.VoiceLanguage
 	result.File = domain.DeferredInputFile{
 		Provider: input.File.Provider, ID: input.File.ID, UniqueID: input.File.UniqueID,
 		Name: input.File.Name, MIMEType: input.File.MIMEType, Size: input.File.Size,
@@ -165,7 +166,7 @@ func deferredRequest(session domain.Session, input domain.DeferredSessionInput) 
 	if input.Kind != domain.DeferredInputText {
 		request.Input = &runtimehost.InputPayload{
 			Kind: runtimehost.InputKind(input.Kind), Caption: input.Caption,
-			VoiceBackend: input.VoiceBackend,
+			VoiceBackend: input.VoiceBackend, VoiceLanguage: input.VoiceLanguage,
 			File: runtimehost.InputFile{
 				Provider: input.File.Provider, ID: input.File.ID, UniqueID: input.File.UniqueID,
 				Name: input.File.Name, MIMEType: input.File.MIMEType, Size: input.File.Size,

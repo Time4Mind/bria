@@ -36,6 +36,7 @@ type DeferredSessionInput struct {
 	Text               string            `json:"text,omitempty"`
 	Caption            string            `json:"caption,omitempty"`
 	VoiceBackend       string            `json:"voice_backend,omitempty"`
+	VoiceLanguage      string            `json:"voice_language,omitempty"`
 	File               DeferredInputFile `json:"file,omitempty"`
 	QueuedAt           time.Time         `json:"queued_at"`
 }
@@ -59,13 +60,19 @@ func (input DeferredSessionInput) Validate() error {
 			len(input.File.Name) > 255 || len(input.File.MIMEType) > 255 || len(input.Caption) > 16<<10 {
 			return fmt.Errorf("%w: deferred external input is invalid", ErrInvalidState)
 		}
-		if input.Kind != DeferredInputVoice && input.VoiceBackend != "" {
-			return fmt.Errorf("%w: voice backend on non-voice input", ErrInvalidState)
+		if input.Kind != DeferredInputVoice &&
+			(input.VoiceBackend != "" || input.VoiceLanguage != "") {
+			return fmt.Errorf("%w: voice metadata on non-voice input", ErrInvalidState)
 		}
 		if input.Kind == DeferredInputVoice && input.VoiceBackend != "" &&
 			input.VoiceBackend != "auto" && input.VoiceBackend != "whisper" &&
 			input.VoiceBackend != "apple" && input.VoiceBackend != "off" {
 			return fmt.Errorf("%w: unsupported deferred voice backend", ErrInvalidState)
+		}
+		if input.Kind == DeferredInputVoice && input.VoiceLanguage != "" &&
+			input.VoiceLanguage != "auto" && input.VoiceLanguage != "ru" &&
+			input.VoiceLanguage != "en" && input.VoiceLanguage != "zh" {
+			return fmt.Errorf("%w: unsupported deferred voice language", ErrInvalidState)
 		}
 	default:
 		return fmt.Errorf("%w: unsupported deferred input kind", ErrInvalidState)

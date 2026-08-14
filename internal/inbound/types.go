@@ -27,6 +27,7 @@ type Input struct {
 	FileName string
 	MIMEType string
 	Size     int64
+	Language string
 }
 
 type Result struct {
@@ -45,6 +46,13 @@ type Downloader interface {
 // Transcriber consumes a local audio file and returns plain recognized text.
 type Transcriber interface {
 	Transcribe(ctx context.Context, audioPath string) (string, error)
+}
+
+// LanguageTranscriber allows a transport-selected language to override the
+// node default for one recording. Implementations still receive a closed,
+// validated language set from the runtime boundary.
+type LanguageTranscriber interface {
+	TranscribeLanguage(ctx context.Context, audioPath, language string) (string, error)
 }
 
 type ProcessorConfig struct {

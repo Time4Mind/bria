@@ -71,6 +71,7 @@ func (r runtimeInputResolver) ResolveInput(
 		Kind: inbound.Kind(payload.Kind), Text: payload.Caption,
 		FileID: payload.File.ID, UniqueID: payload.File.UniqueID,
 		FileName: payload.File.Name, MIMEType: payload.File.MIMEType, Size: payload.File.Size,
+		Language: payload.VoiceLanguage,
 	})
 	if err != nil {
 		return "", err

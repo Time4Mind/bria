@@ -55,6 +55,14 @@ func NewAppleSpeechTranscriber(config AppleSpeechConfig) (*AppleSpeechTranscribe
 }
 
 func (t *AppleSpeechTranscriber) Transcribe(ctx context.Context, audioPath string) (string, error) {
+	return t.TranscribeLanguage(ctx, audioPath, t.config.Language)
+}
+
+func (t *AppleSpeechTranscriber) TranscribeLanguage(
+	ctx context.Context,
+	audioPath string,
+	language string,
+) (string, error) {
 	if err := validateRegularFile(audioPath); err != nil {
 		return "", fmt.Errorf("inspect voice input: %w", err)
 	}
@@ -74,17 +82,25 @@ func (t *AppleSpeechTranscriber) Transcribe(ctx context.Context, audioPath strin
 	); err != nil {
 		return "", err
 	}
-	return t.recognize(ctx, wavPath)
+	return t.recognize(ctx, wavPath, language)
 }
 
-func (t *AppleSpeechTranscriber) recognize(ctx context.Context, wavPath string) (string, error) {
+func (t *AppleSpeechTranscriber) recognize(
+	ctx context.Context,
+	wavPath string,
+	language string,
+) (string, error) {
+	language = strings.TrimSpace(language)
+	if !validAppleSpeechLanguage(language) {
+		return "", fmt.Errorf("%w: unsupported Apple Speech language", ErrInvalidInput)
+	}
 	commandCtx, cancel := context.WithTimeout(ctx, t.config.TranscribeTimeout)
 	defer cancel()
 	stdout := &truncatingBuffer{limit: int(t.config.MaxOutputBytes) + 1}
 	stderr := &truncatingBuffer{limit: 4096}
 	err := t.config.Runner.Run(
 		commandCtx, stdout, stderr, t.config.SpeechBinary,
-		"--input", wavPath, "--locale", t.config.Language, "--on-device",
+		"--input", wavPath, "--locale", language, "--on-device",
 	)
 	if err != nil {
 		return "", commandFailure("Apple Speech", err, stderr.String())
@@ -97,4 +113,18 @@ func (t *AppleSpeechTranscriber) recognize(ctx context.Context, wavPath string) 
 		return "", errors.New("Apple Speech returned an empty transcription")
 	}
 	return text, nil
+}
+
+func validAppleSpeechLanguage(language string) bool {
+	if language == "" || len(language) > 35 {
+		return false
+	}
+	for _, value := range language {
+		if (value >= 'a' && value <= 'z') || (value >= 'A' && value <= 'Z') ||
+			(value >= '0' && value <= '9') || value == '-' {
+			continue
+		}
+		return false
+	}
+	return true
 }

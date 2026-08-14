@@ -9,9 +9,49 @@ import (
 
 	"github.com/Time4Mind/bria/internal/clusterstate"
 	"github.com/Time4Mind/bria/internal/domain"
+	"github.com/Time4Mind/bria/internal/telegramapp"
 	"github.com/Time4Mind/bria/internal/telegrambot"
 	"github.com/Time4Mind/bria/internal/telegramui"
+	"github.com/Time4Mind/bria/internal/transcript"
 )
+
+func TestMultibyteSessionPageFitsLegacyTelegramEdit(t *testing.T) {
+	fixture := newFixture(t)
+	ref := domain.SessionRef{NodeID: "allowed", SessionID: "live"}
+	controls := &blockingControls{ref: ref, events: []transcript.Event{{
+		Kind: transcript.EventAssistantFinal,
+		Text: strings.Repeat("длинный русский ответ ", 400),
+	}}}
+	handler, err := telegramapp.NewHandlerWithControls(
+		fixture.service, fixture.projector, fixture.codec, fixture.messenger, controls,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, err := fixture.codec.Page(7, telegramui.ActionPagePrevious, ref, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := (telegramui.Callback{
+		Action: telegramui.ActionPagePrevious, Token: token,
+	}).Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := handler.HandleTelegramUpdate(context.Background(), telegrambot.IncomingUpdate{
+		UpdateID: 91, Kind: telegrambot.IncomingCallback, ChatID: 7, UserID: 7,
+		CallbackID: "previous", CallbackData: data,
+		CallbackOrigin: telegrambot.Message{ChatID: 7, MessageID: 50},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(fixture.messenger.edited) != 1 {
+		t.Fatalf("edits=%d", len(fixture.messenger.edited))
+	}
+	if size := len(fixture.messenger.edited[0].Text); size > telegrambot.MaxMessageTextBytes {
+		t.Fatalf("session page has %d encoded bytes", size)
+	}
+}
 
 func TestNodePaginationCallbackEditsSameCarrier(t *testing.T) {
 	fixture := newFixture(t)

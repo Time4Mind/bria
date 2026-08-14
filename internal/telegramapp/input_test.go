@@ -100,3 +100,36 @@ func TestVoiceInputIsRejectedBeforeNodeTransferWhenRecognitionIsOff(t *testing.T
 		t.Fatalf("disabled voice was transferred to a node: %#v", controls.external)
 	}
 }
+
+func TestVoiceInputUsesTheExplicitInterfaceLanguage(t *testing.T) {
+	fixture := newFixture(t)
+	actor := application.Principal{UserID: 7}
+	preferences, err := fixture.service.Preferences(actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	preferences.Language = domain.LanguageRussian
+	preferences.VoiceBackend = domain.VoiceAuto
+	if err := fixture.service.SetPreferences(context.Background(), actor, preferences); err != nil {
+		t.Fatal(err)
+	}
+	controls := &blockingControls{ref: domain.SessionRef{NodeID: "allowed", SessionID: "live"}}
+	handler, err := telegramapp.NewHandlerWithControls(
+		fixture.service, fixture.projector, fixture.codec, fixture.messenger, controls,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := handler.HandleTelegramUpdate(context.Background(), telegrambot.IncomingUpdate{
+		UpdateID: 47, Kind: telegrambot.IncomingMessage, ChatID: 7, UserID: 7,
+		LanguageCode: "en", Content: telegrambot.ContentDescriptor{
+			Kind: telegrambot.IncomingVoice, FileID: "voice-id", FileUniqueID: "voice-unique",
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if controls.external == nil || controls.external.VoiceBackend != "auto" ||
+		controls.external.VoiceLanguage != "ru" {
+		t.Fatalf("voice routing metadata=%#v", controls.external)
+	}
+}
