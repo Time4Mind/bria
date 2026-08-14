@@ -17,6 +17,8 @@ type BackendCommand struct {
 	Flags      []string
 }
 
+const providerStartupGrace = 250 * time.Millisecond
+
 // TmuxRecoveryRuntime restores a provider session into a deterministic tmux
 // window. All command components are passed as argv; session metadata is never
 // interpolated into a shell command.
@@ -112,7 +114,7 @@ func (r *TmuxRecoveryRuntime) Resume(
 		return err
 	}
 	args := []string{"new-window", "-a", "-d", "-t", r.tmuxSession}
-	args = append(args, providerBindingEnvironment(session, r.tmuxSession, windowName)...)
+	args = append(args, providerEnvironment(session, backend.Flags, r.tmuxSession, windowName)...)
 	args = append(args, "-n", windowName, "-c", workdir, backendPath)
 	args = append(args, providerArgs...)
 	result, err := r.runner.Run(runCtx, tmuxPath, args...)
@@ -125,6 +127,28 @@ func (r *TmuxRecoveryRuntime) Resume(
 			return nil
 		}
 		return commandExitError("create recovery window", result)
+	}
+	return r.awaitProviderStartup(runCtx, tmuxPath, target)
+}
+
+func (r *TmuxRecoveryRuntime) awaitProviderStartup(
+	ctx context.Context,
+	tmuxPath string,
+	target string,
+) error {
+	timer := time.NewTimer(providerStartupGrace)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+	}
+	exists, err := r.windowExists(ctx, tmuxPath, target)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return errors.New("provider exited during startup")
 	}
 	return nil
 }

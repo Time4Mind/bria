@@ -54,9 +54,9 @@ func TestTmuxRecoveryRuntimeStartsBackendWithArgv(t *testing.T) {
 	}{
 		{
 			backend: "claude",
-			command: BackendCommand{Executable: "claude", Flags: []string{"--flag"}},
+			command: BackendCommand{Executable: "claude", Flags: []string{"--dangerously-skip-permissions"}},
 			path:    "/opt/claude",
-			want:    []string{"/opt/claude", "--flag", "--resume", "provider;not-shell"},
+			want:    []string{"/opt/claude", "--dangerously-skip-permissions", "--resume", "provider;not-shell"},
 		},
 		{
 			backend: "codex",
@@ -85,7 +85,7 @@ func TestTmuxRecoveryRuntimeStartsBackendWithArgv(t *testing.T) {
 			if err := runtime.Resume(context.Background(), session, "operation"); err != nil {
 				t.Fatalf("Resume(): %v", err)
 			}
-			if len(runner.calls) != 4 {
+			if len(runner.calls) != 5 {
 				t.Fatalf("calls=%#v", runner.calls)
 			}
 			last := runner.calls[3]
@@ -102,6 +102,9 @@ func TestTmuxRecoveryRuntimeStartsBackendWithArgv(t *testing.T) {
 			}
 			if test.backend == "codex" && !slices.Contains(last.args, "BRIA_BINDING_SESSION_ID=s") {
 				t.Fatalf("Codex launch has no Bria binding identity: %#v", last.args)
+			}
+			if test.backend == "claude" && !slices.Contains(last.args, "IS_SANDBOX=1") {
+				t.Fatalf("Claude launch has no root-compatible sandbox marker: %#v", last.args)
 			}
 		})
 	}
@@ -134,7 +137,7 @@ func TestTmuxSessionRuntimeFreshAndResumeArgv(t *testing.T) {
 		session domain.Session
 		want    []string
 	}{
-		{name: "fresh claude", session: domain.Session{Backend: "claude", ProviderSessionID: "assigned"}, want: []string{"/claude", "--flag", "--session-id", "assigned"}},
+		{name: "fresh claude", session: domain.Session{Backend: "claude", ProviderSessionID: "assigned"}, want: []string{"/claude", "--dangerously-skip-permissions", "--session-id", "assigned"}},
 		{name: "fresh codex", session: domain.Session{Backend: "codex"}, want: []string{"/codex", "--flag"}},
 		{name: "resume codex", session: domain.Session{Backend: "codex", ProviderSessionID: "existing", ProviderResume: true}, want: []string{"/codex", "--flag", "resume", "existing"}},
 	}
@@ -145,7 +148,7 @@ func TestTmuxSessionRuntimeFreshAndResumeArgv(t *testing.T) {
 				results: []CommandResult{{ExitCode: 1}, {ExitCode: 0}, {ExitCode: 0}},
 			}
 			runtime, err := NewTmuxRecoveryRuntime(runner, "bria", map[string]BackendCommand{
-				"claude": {Executable: "claude", Flags: []string{"--flag"}},
+				"claude": {Executable: "claude", Flags: []string{"--dangerously-skip-permissions"}},
 				"codex":  {Executable: "codex", Flags: []string{"--flag"}},
 			}, time.Second)
 			if err != nil {
@@ -160,7 +163,15 @@ func TestTmuxSessionRuntimeFreshAndResumeArgv(t *testing.T) {
 			if target != "bria:"+TmuxWindowName("n", "s") {
 				t.Fatalf("target=%q", target)
 			}
-			args := runner.calls[len(runner.calls)-1].args
+			var args []string
+			for _, call := range runner.calls {
+				if len(call.args) > 0 && call.args[0] == "new-window" {
+					args = call.args
+				}
+			}
+			if args == nil {
+				t.Fatalf("new-window call missing from %#v", runner.calls)
+			}
 			backendPath := "/" + test.session.Backend
 			backendIndex := slices.Index(args, backendPath)
 			if backendIndex < 0 {
@@ -170,5 +181,27 @@ func TestTmuxSessionRuntimeFreshAndResumeArgv(t *testing.T) {
 				t.Fatalf("provider argv=%#v want=%#v", got, test.want)
 			}
 		})
+	}
+}
+
+func TestTmuxSessionRuntimeRejectsProviderThatExitsDuringStartup(t *testing.T) {
+	runner := &scriptedRunner{
+		paths: map[string]string{"tmux": "/tmux", "claude": "/claude"},
+		results: []CommandResult{
+			{ExitCode: 1}, {ExitCode: 0}, {ExitCode: 0}, {ExitCode: 1},
+		},
+	}
+	runtime, err := NewTmuxRecoveryRuntime(runner, "bria", map[string]BackendCommand{
+		"claude": {Executable: "claude", Flags: []string{"--dangerously-skip-permissions"}},
+	}, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = runtime.Start(context.Background(), domain.Session{
+		ID: "s", NodeID: "n", Backend: "claude", Workdir: t.TempDir(),
+		ProviderSessionID: "assigned", RuntimeGeneration: 1,
+	})
+	if err == nil || err.Error() != "provider exited during startup" {
+		t.Fatalf("startup error=%v", err)
 	}
 }

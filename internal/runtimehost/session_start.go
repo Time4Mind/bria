@@ -48,7 +48,7 @@ func (r *TmuxRecoveryRuntime) Start(ctx context.Context, session domain.Session)
 		return "", err
 	}
 	args := []string{"new-window", "-a", "-d", "-t", r.tmuxSession}
-	args = append(args, providerBindingEnvironment(session, r.tmuxSession, window)...)
+	args = append(args, providerEnvironment(session, backend.Flags, r.tmuxSession, window)...)
 	args = append(args, "-n", window, "-c", workdir, backendPath)
 	args = append(args, providerArgs...)
 	result, err := r.runner.Run(ctx, tmuxPath, args...)
@@ -61,19 +61,37 @@ func (r *TmuxRecoveryRuntime) Start(ctx context.Context, session domain.Session)
 		}
 		return "", commandExitError("create session window", result)
 	}
+	if err := r.awaitProviderStartup(ctx, tmuxPath, target); err != nil {
+		return "", err
+	}
 	return target, nil
 }
 
-func providerBindingEnvironment(session domain.Session, tmuxSession, window string) []string {
-	if !strings.EqualFold(session.Backend, "codex") {
+func providerEnvironment(
+	session domain.Session,
+	flags []string,
+	tmuxSession string,
+	window string,
+) []string {
+	if strings.EqualFold(session.Backend, "claude") {
+		for _, flag := range flags {
+			if flag == "--dangerously-skip-permissions" {
+				// Claude refuses its explicit bypass flag under root unless the
+				// caller declares the already trusted/sandboxed execution context.
+				return []string{"-e", "IS_SANDBOX=1"}
+			}
+		}
 		return nil
 	}
-	return []string{
-		"-e", providerbinding.EnvNodeID + "=" + string(session.NodeID),
-		"-e", providerbinding.EnvSessionID + "=" + string(session.ID),
-		"-e", providerbinding.EnvTmuxSession + "=" + tmuxSession,
-		"-e", providerbinding.EnvTmuxWindow + "=" + window,
+	if strings.EqualFold(session.Backend, "codex") {
+		return []string{
+			"-e", providerbinding.EnvNodeID + "=" + string(session.NodeID),
+			"-e", providerbinding.EnvSessionID + "=" + string(session.ID),
+			"-e", providerbinding.EnvTmuxSession + "=" + tmuxSession,
+			"-e", providerbinding.EnvTmuxWindow + "=" + window,
+		}
 	}
+	return nil
 }
 
 func startArgs(session domain.Session, flags []string) ([]string, error) {
