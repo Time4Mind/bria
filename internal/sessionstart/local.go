@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/Time4Mind/bria/internal/domain"
+	"github.com/Time4Mind/bria/internal/providerbinding"
 	"github.com/Time4Mind/bria/internal/runtimehost"
 	"github.com/Time4Mind/bria/internal/transcript"
 	"github.com/Time4Mind/bria/internal/workspace"
@@ -19,6 +20,7 @@ type Local struct {
 	state       StateReader
 	browser     *workspace.Browser
 	transcripts *transcript.Reader
+	bindings    *providerbinding.Store
 	runtime     *runtimehost.TmuxRecoveryRuntime
 	executor    *runtimehost.LocalExecutor
 }
@@ -28,13 +30,14 @@ func NewLocal(
 	state StateReader,
 	browser *workspace.Browser,
 	transcripts *transcript.Reader,
+	bindings *providerbinding.Store,
 	runtime *runtimehost.TmuxRecoveryRuntime,
 	executor *runtimehost.LocalExecutor,
 ) (*Local, error) {
-	if nodeID == "" || state == nil || browser == nil || transcripts == nil || runtime == nil || executor == nil {
+	if nodeID == "" || state == nil || browser == nil || transcripts == nil || bindings == nil || runtime == nil || executor == nil {
 		return nil, errors.New("session start dependencies are required")
 	}
-	return &Local{nodeID: nodeID, state: state, browser: browser, transcripts: transcripts, runtime: runtime, executor: executor}, nil
+	return &Local{nodeID: nodeID, state: state, browser: browser, transcripts: transcripts, bindings: bindings, runtime: runtime, executor: executor}, nil
 }
 
 func (l *Local) Browse(_ context.Context, request BrowseRequest) (BrowseResult, error) {
@@ -60,6 +63,31 @@ func (l *Local) Browse(_ context.Context, request BrowseRequest) (BrowseResult, 
 func (l *Local) Discover(ctx context.Context, request DiscoverRequest) (transcript.Discovery, error) {
 	if err := l.authorize(request.ActorID, request.NodeID); err != nil {
 		return transcript.Discovery{}, err
+	}
+	if strings.EqualFold(request.Backend, "codex") && request.Session.SessionID != "" {
+		if request.Session.NodeID != l.nodeID {
+			return transcript.Discovery{}, domain.ErrNotFound
+		}
+		record, found, lookupErr := l.bindings.Lookup(request.Session, request.Workdir)
+		if lookupErr != nil {
+			return transcript.Discovery{}, lookupErr
+		}
+		if !found || (!request.After.IsZero() && record.UpdatedAt.Before(request.After)) {
+			return transcript.Discovery{Candidates: []transcript.Candidate{}}, nil
+		}
+		if _, readErr := l.transcripts.Read(ctx, transcript.Request{
+			Backend: transcript.BackendCodex, ProviderSessionID: record.ProviderSessionID,
+			Workdir: request.Workdir,
+		}); readErr != nil {
+			if errors.Is(readErr, transcript.ErrTranscriptNotFound) {
+				return transcript.Discovery{Candidates: []transcript.Candidate{}}, nil
+			}
+			return transcript.Discovery{}, readErr
+		}
+		candidate := transcript.Candidate{
+			ProviderSessionID: record.ProviderSessionID, UpdatedAt: record.UpdatedAt,
+		}
+		return transcript.Discovery{Candidates: []transcript.Candidate{candidate}, Total: 1}, nil
 	}
 	discovery, err := l.transcripts.Discover(
 		ctx, transcript.Backend(strings.ToLower(request.Backend)), request.Workdir,

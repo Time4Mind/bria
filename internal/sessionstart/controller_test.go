@@ -32,12 +32,14 @@ type startServiceStub struct {
 	provisionErr error
 	provisions   int
 	discoveries  []transcript.Candidate
+	requests     []DiscoverRequest
 }
 
 func (*startServiceStub) Browse(context.Context, BrowseRequest) (BrowseResult, error) {
 	return BrowseResult{}, nil
 }
-func (s *startServiceStub) Discover(context.Context, DiscoverRequest) (transcript.Discovery, error) {
+func (s *startServiceStub) Discover(_ context.Context, request DiscoverRequest) (transcript.Discovery, error) {
+	s.requests = append(s.requests, request)
 	items := append([]transcript.Candidate(nil), s.discoveries...)
 	return transcript.Discovery{Candidates: items, Total: len(items)}, nil
 }
@@ -89,6 +91,9 @@ func TestCreateProvisionsAndPublishesIdle(t *testing.T) {
 	}
 	if got := machine.State().Sessions[session.Ref().Key()].RuntimePhase; got != domain.RuntimeIdle {
 		t.Fatalf("phase=%q", got)
+	}
+	if len(router.requests) != 1 || router.requests[0].Session != session.Ref() {
+		t.Fatalf("provider discovery was not scoped to created session: %#v", router.requests)
 	}
 }
 

@@ -111,10 +111,9 @@ func (r *TmuxRecoveryRuntime) Resume(
 	if err != nil {
 		return err
 	}
-	args := []string{
-		"new-window", "-a", "-d", "-t", r.tmuxSession, "-n", windowName, "-c", workdir,
-		backendPath,
-	}
+	args := []string{"new-window", "-a", "-d", "-t", r.tmuxSession}
+	args = append(args, providerBindingEnvironment(session, r.tmuxSession, windowName)...)
+	args = append(args, "-n", windowName, "-c", workdir, backendPath)
 	args = append(args, providerArgs...)
 	result, err := r.runner.Run(runCtx, tmuxPath, args...)
 	if err != nil {

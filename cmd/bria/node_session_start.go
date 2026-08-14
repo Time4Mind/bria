@@ -1,12 +1,14 @@
 package main
 
 import (
+	"path/filepath"
 	"time"
 
 	"github.com/Time4Mind/bria/internal/config"
 	"github.com/Time4Mind/bria/internal/consensus"
 	"github.com/Time4Mind/bria/internal/domain"
 	"github.com/Time4Mind/bria/internal/nodecontrol"
+	"github.com/Time4Mind/bria/internal/providerbinding"
 	"github.com/Time4Mind/bria/internal/runtimehost"
 	"github.com/Time4Mind/bria/internal/sessionstart"
 	"github.com/Time4Mind/bria/internal/transcript"
@@ -36,8 +38,12 @@ func newLocalSessionStart(
 	if err != nil {
 		return nil, nil, err
 	}
+	bindings, err := providerbinding.NewStore(filepath.Join(nodeConfig.DataDir, "provider-bindings.json"))
+	if err != nil {
+		return nil, nil, err
+	}
 	local, err := sessionstart.NewLocal(
-		domain.NodeID(nodeConfig.NodeID), node.State(), browser, reader, runtime, executor,
+		domain.NodeID(nodeConfig.NodeID), node.State(), browser, reader, bindings, runtime, executor,
 	)
 	if err != nil {
 		return nil, nil, err

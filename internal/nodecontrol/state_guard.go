@@ -126,6 +126,8 @@ func domainAction(action runtimehost.Action) (domain.SessionAction, bool) {
 	switch action {
 	case runtimehost.ActionSendInput:
 		return domain.ActionSendInput, false
+	case runtimehost.ActionSendKey:
+		return domain.ActionSendKey, false
 	case runtimehost.ActionStop:
 		return domain.ActionStop, false
 	case runtimehost.ActionCapture:

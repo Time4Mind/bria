@@ -24,13 +24,14 @@ type BrowseResult struct {
 }
 
 type DiscoverRequest struct {
-	ActorID domain.UserID `json:"actor_id"`
-	NodeID  domain.NodeID `json:"node_id"`
-	Backend string        `json:"backend"`
-	Workdir string        `json:"workdir"`
-	Offset  int           `json:"offset,omitempty"`
-	Limit   int           `json:"limit"`
-	After   time.Time     `json:"after,omitempty"`
+	ActorID domain.UserID     `json:"actor_id"`
+	NodeID  domain.NodeID     `json:"node_id"`
+	Session domain.SessionRef `json:"session,omitempty"`
+	Backend string            `json:"backend"`
+	Workdir string            `json:"workdir"`
+	Offset  int               `json:"offset,omitempty"`
+	Limit   int               `json:"limit"`
+	After   time.Time         `json:"after,omitempty"`
 }
 
 type ProvisionRequest struct {

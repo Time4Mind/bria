@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/Time4Mind/bria/internal/domain"
+	"github.com/Time4Mind/bria/internal/providerbinding"
 )
 
 // Start creates or resumes a provider in the deterministic Bria tmux window.
@@ -46,7 +47,9 @@ func (r *TmuxRecoveryRuntime) Start(ctx context.Context, session domain.Session)
 	if err != nil {
 		return "", err
 	}
-	args := []string{"new-window", "-a", "-d", "-t", r.tmuxSession, "-n", window, "-c", workdir, backendPath}
+	args := []string{"new-window", "-a", "-d", "-t", r.tmuxSession}
+	args = append(args, providerBindingEnvironment(session, r.tmuxSession, window)...)
+	args = append(args, "-n", window, "-c", workdir, backendPath)
 	args = append(args, providerArgs...)
 	result, err := r.runner.Run(ctx, tmuxPath, args...)
 	if err != nil {
@@ -59,6 +62,18 @@ func (r *TmuxRecoveryRuntime) Start(ctx context.Context, session domain.Session)
 		return "", commandExitError("create session window", result)
 	}
 	return target, nil
+}
+
+func providerBindingEnvironment(session domain.Session, tmuxSession, window string) []string {
+	if !strings.EqualFold(session.Backend, "codex") {
+		return nil
+	}
+	return []string{
+		"-e", providerbinding.EnvNodeID + "=" + string(session.NodeID),
+		"-e", providerbinding.EnvSessionID + "=" + string(session.ID),
+		"-e", providerbinding.EnvTmuxSession + "=" + tmuxSession,
+		"-e", providerbinding.EnvTmuxWindow + "=" + window,
+	}
 }
 
 func startArgs(session domain.Session, flags []string) ([]string, error) {

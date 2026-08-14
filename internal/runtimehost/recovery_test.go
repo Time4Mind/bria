@@ -4,6 +4,7 @@ import (
 	"context"
 	"os/exec"
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 
@@ -88,15 +89,19 @@ func TestTmuxRecoveryRuntimeStartsBackendWithArgv(t *testing.T) {
 				t.Fatalf("calls=%#v", runner.calls)
 			}
 			last := runner.calls[3]
-			wantPrefix := []string{"new-window", "-a", "-d", "-t", "bria", "-n"}
+			wantPrefix := []string{"new-window", "-a", "-d", "-t", "bria"}
 			if last.name != "/usr/bin/tmux" || !reflect.DeepEqual(last.args[:len(wantPrefix)], wantPrefix) {
 				t.Fatalf("new-window prefix = %q %#v", last.name, last.args)
 			}
-			if last.args[6] != TmuxWindowName("n", "s") || last.args[7] != "-c" || last.args[8] != workdir {
+			backendIndex := slices.Index(last.args, test.path)
+			if backendIndex < 2 || last.args[backendIndex-2] != "-c" || last.args[backendIndex-1] != workdir {
 				t.Fatalf("new-window target = %#v", last.args)
 			}
-			if !reflect.DeepEqual(last.args[9:], test.want) {
+			if !reflect.DeepEqual(last.args[backendIndex:], test.want) {
 				t.Fatalf("backend argv = %#v, want %#v", last.args[9:], test.want)
+			}
+			if test.backend == "codex" && !slices.Contains(last.args, "BRIA_BINDING_SESSION_ID=s") {
+				t.Fatalf("Codex launch has no Bria binding identity: %#v", last.args)
 			}
 		})
 	}
@@ -155,7 +160,13 @@ func TestTmuxSessionRuntimeFreshAndResumeArgv(t *testing.T) {
 			if target != "bria:"+TmuxWindowName("n", "s") {
 				t.Fatalf("target=%q", target)
 			}
-			if got := runner.calls[len(runner.calls)-1].args[9:]; !reflect.DeepEqual(got, test.want) {
+			args := runner.calls[len(runner.calls)-1].args
+			backendPath := "/" + test.session.Backend
+			backendIndex := slices.Index(args, backendPath)
+			if backendIndex < 0 {
+				t.Fatalf("provider executable missing from %#v", args)
+			}
+			if got := args[backendIndex:]; !reflect.DeepEqual(got, test.want) {
 				t.Fatalf("provider argv=%#v want=%#v", got, test.want)
 			}
 		})

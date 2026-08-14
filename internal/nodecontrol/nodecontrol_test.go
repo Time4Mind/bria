@@ -117,8 +117,14 @@ func TestStateGuardReauthorizesSharedControl(t *testing.T) {
 	}
 	request := runtimeRequest(runtimehost.ActionStop)
 	request.ActorID = 2
-	if err := guard.AuthorizeRuntime(context.Background(), request); err != nil {
-		t.Fatalf("shared stop rejected: %v", err)
+	for _, action := range []runtimehost.Action{
+		runtimehost.ActionStop,
+		runtimehost.ActionSendKey,
+	} {
+		request.Action = action
+		if err := guard.AuthorizeRuntime(context.Background(), request); err != nil {
+			t.Fatalf("shared %s rejected: %v", action, err)
+		}
 	}
 	request.Action = runtimehost.ActionClose
 	request.ArchiveCommitID = "archive"

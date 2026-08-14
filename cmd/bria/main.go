@@ -82,6 +82,11 @@ func main() {
 			fmt.Fprintf(os.Stderr, "bria cluster: %v\n", err)
 			os.Exit(1)
 		}
+	case "provider-hook":
+		if err := runProviderHook(os.Args[2:]); err != nil {
+			fmt.Fprintf(os.Stderr, "bria provider-hook: %v\n", err)
+			os.Exit(1)
+		}
 	default:
 		usage()
 	}
@@ -92,7 +97,7 @@ type processReplacement struct{ binary string }
 func (r *processReplacement) Error() string { return "restart into staged Bria release" }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: bria <version|doctor|cluster|node|runner>")
+	fmt.Fprintln(os.Stderr, "usage: bria <version|doctor|cluster|node|runner|provider-hook>")
 	os.Exit(2)
 }
 

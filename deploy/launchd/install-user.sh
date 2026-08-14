@@ -31,6 +31,7 @@ plutil -lint "$temporary" >/dev/null
 chmod 0600 "$temporary"
 mv "$temporary" "$destination"
 trap - EXIT HUP INT TERM
+"$binary" provider-hook --config "$config" --install
 launchctl bootout "gui/$(id -u)/com.time4mind.bria" 2>/dev/null || true
 launchctl bootstrap "gui/$(id -u)" "$destination"
 echo "installed $destination"

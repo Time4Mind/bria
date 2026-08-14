@@ -178,7 +178,8 @@ func (c *Controller) bindProvider(ctx context.Context, session domain.Session) e
 	}
 	discovery, err := c.router.Discover(ctx, DiscoverRequest{
 		ActorID: session.OwnerID, NodeID: session.NodeID, Backend: session.Backend,
-		Workdir: session.Workdir, Limit: 8, After: session.ProviderBindingSince,
+		Session: session.Ref(), Workdir: session.Workdir, Limit: 8,
+		After: session.ProviderBindingSince,
 	})
 	if err != nil {
 		return err
