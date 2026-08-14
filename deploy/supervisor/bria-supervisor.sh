@@ -12,6 +12,14 @@ restart_floor="${BRIA_RESTART_BACKOFF:-5}"
 backoff_max="${BRIA_BACKOFF_MAX:-120}"
 healthy_run_sec="${BRIA_HEALTHY_RUN_SEC:-120}"
 
+# Non-login shells spawned by tmux commonly omit the per-user binary
+# directory. Bria itself may still be reachable through an absolute symlink,
+# while backend discovery incorrectly reports that every provider is absent.
+case ":${PATH:-}:" in
+    *":$HOME/.local/bin:"*) ;;
+    *) export PATH="$HOME/.local/bin:${PATH:-/usr/local/bin:/usr/bin:/bin}" ;;
+esac
+
 peer_one="${BRIA_TUNNEL_PEER_ONE:-}"
 peer_two="${BRIA_TUNNEL_PEER_TWO:-}"
 peer_three="${BRIA_TUNNEL_PEER_THREE:-}"
