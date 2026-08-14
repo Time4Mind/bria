@@ -35,6 +35,12 @@ jobs:
       - run: test -z "$(gofmt -l cmd internal)"
       - run: scripts/build-release.sh "$RUNNER_TEMP/bria-dist"
       - run: cd "$RUNNER_TEMP/bria-dist" && sha256sum -c SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bria-dist-${{ github.sha }}
+          path: ${{ runner.temp }}/bria-dist
+          retention-days: 7
+          if-no-files-found: error
       - run: GOOS=linux GOARCH=arm64 go build ./cmd/bria
       - run: GOOS=darwin GOARCH=arm64 go build ./cmd/bria
       - run: GOOS=windows GOARCH=amd64 go build ./cmd/bria
