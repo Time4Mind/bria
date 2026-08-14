@@ -4,7 +4,7 @@ import "errors"
 
 func runCluster(arguments []string) error {
 	if len(arguments) == 0 {
-		return errors.New("usage: bria cluster <init|join|contract|claim|set-peers|issue-node|cert-renew|set-owner|backup|restore|retire-node|relocate-node>")
+		return errors.New("usage: bria cluster <init|join|contract|claim|set-peers|issue-node|cert-renew|recover-ca|set-owner|backup|restore|retire-node|relocate-node>")
 	}
 	switch arguments[0] {
 	case "init":
@@ -21,6 +21,8 @@ func runCluster(arguments []string) error {
 		return issueClusterNode(arguments[1:])
 	case "cert-renew":
 		return renewClusterNodeCertificate(arguments[1:])
+	case "recover-ca":
+		return recoverClusterCA(arguments[1:])
 	case "set-owner":
 		return setClusterOwner(arguments[1:])
 	case "backup":
@@ -32,6 +34,6 @@ func runCluster(arguments []string) error {
 	case "relocate-node":
 		return relocateClusterNode(arguments[1:])
 	default:
-		return errors.New("usage: bria cluster <init|join|contract|claim|set-peers|issue-node|cert-renew|set-owner|backup|restore|retire-node|relocate-node>")
+		return errors.New("usage: bria cluster <init|join|contract|claim|set-peers|issue-node|cert-renew|recover-ca|set-owner|backup|restore|retire-node|relocate-node>")
 	}
 }
