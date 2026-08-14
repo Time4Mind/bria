@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Time4Mind/bria/internal/domain"
 	"github.com/Time4Mind/bria/internal/i18n"
 )
 
@@ -69,6 +70,20 @@ func TestUnavailableNodeKeepsReadSurfacesGolden(t *testing.T) {
 	assertGoldenGrid(t, screen, `[Last card · backend -> session@last]
 [🗄 Archive -> archive]
 [← Servers -> sessions@servers]`)
+}
+
+func TestNodeIsolationControlIsAdministrative(t *testing.T) {
+	member := RenderNodeMembership(NodeMembershipInput{
+		Copy: englishCopy, Node: domain.Node{ID: "node", Name: "Node"},
+	})
+	assertActionAbsent(t, member.Grid, ActionNodeIsolationRequire)
+	admin := RenderNodeMembership(NodeMembershipInput{
+		Copy: englishCopy, Node: domain.Node{ID: "node", Name: "Node"},
+		CanManageIsolation: true, IsolationCanRequire: true, IsolationRequireToken: "require",
+	})
+	if !strings.Contains(CanonicalGrid(admin.Grid), "Require isolation") {
+		t.Fatalf("administrative isolation control missing: %s", CanonicalGrid(admin.Grid))
+	}
 }
 
 func TestAllHostSessionsUseThreeButtonsPerRowGolden(t *testing.T) {

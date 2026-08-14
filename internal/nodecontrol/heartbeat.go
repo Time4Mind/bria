@@ -32,6 +32,7 @@ type Heartbeat struct {
 	Interactive                    []domain.InteractivePromptReport `json:"interactive,omitempty"`
 	Finals                         []domain.TranscriptFinalReport   `json:"transcript_finals,omitempty"`
 	Quotas                         []domain.QuotaSnapshot           `json:"quotas,omitempty"`
+	BackendIsolation               domain.BackendIsolationReport    `json:"backend_isolation,omitempty"`
 }
 
 type HeartbeatAck struct {
@@ -79,6 +80,7 @@ func (c *ConsensusHeartbeatCommitter) CommitHeartbeat(
 			Backends:                       report.Backends,
 			Archives:                       report.Archives, Interactive: report.Interactive,
 			Finals: report.Finals, Quotas: report.Quotas,
+			BackendIsolation: report.BackendIsolation,
 		},
 	)
 	if err != nil {
@@ -144,6 +146,16 @@ func validateHeartbeat(report Heartbeat) error {
 	}
 	if len(report.Quotas) > 16 {
 		return errors.New("heartbeat quota inventory is too large")
+	}
+	mode := strings.ToLower(strings.TrimSpace(report.BackendIsolation.Mode))
+	if mode == "" {
+		mode = "trusted"
+	}
+	if (mode == "trusted" && report.BackendIsolation.Ready) ||
+		((mode == "docker" || mode == "native-user" || mode == "wsl") &&
+			!report.BackendIsolation.Ready) ||
+		(mode != "trusted" && mode != "docker" && mode != "native-user" && mode != "wsl") {
+		return errors.New("heartbeat backend isolation report is invalid")
 	}
 	for _, snapshot := range report.Quotas {
 		if snapshot.NodeID != domain.NodeID(report.NodeID) {

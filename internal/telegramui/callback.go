@@ -41,6 +41,8 @@ const (
 	ActionNodeDelete           Action = "node_delete"
 	ActionNodeDeleteYes        Action = "node_delete_yes"
 	ActionNodeRename           Action = "node_rename"
+	ActionNodeIsolationRequire Action = "node_iso_on"
+	ActionNodeIsolationAllow   Action = "node_iso_off"
 	ActionProviderAlias        Action = "provider_alias"
 	ActionProviderAuth         Action = "provider_auth"
 	ActionProviderAuthCancel   Action = "provider_auth_cancel"
@@ -171,7 +173,8 @@ func knownAction(action Action) bool {
 		ActionEnrollmentOpen, ActionEnrollmentApprove, ActionEnrollmentReject,
 		ActionNodeDisable, ActionNodeDisableYes, ActionNodeEnable,
 		ActionNodeDelete, ActionNodeDeleteYes,
-		ActionNodeRename, ActionProviderAlias, ActionProviderAuth, ActionProviderAuthCancel,
+		ActionNodeRename, ActionNodeIsolationRequire, ActionNodeIsolationAllow,
+		ActionProviderAlias, ActionProviderAuth, ActionProviderAuthCancel,
 		ActionBackendConnect, ActionBackendDisconnect,
 		ActionNewSession, ActionNewNode, ActionNewBackend, ActionNewDirectory,
 		ActionNewDirectoryUp, ActionNewDirectoryPick, ActionNewDirectoryBack,

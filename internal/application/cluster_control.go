@@ -43,3 +43,15 @@ func (s *Service) IsOwner(actor Principal) bool {
 	access, ok := state.Users[actor.UserID]
 	return ok && access.Role == domain.RoleOwner
 }
+
+func (s *Service) IsAdmin(actor Principal) bool {
+	if actor.UserID <= 0 {
+		return false
+	}
+	state := s.reader.State()
+	if state == nil {
+		return false
+	}
+	access, ok := state.Users[actor.UserID]
+	return ok && (access.Role == domain.RoleOwner || access.Role == domain.RoleAdmin)
+}

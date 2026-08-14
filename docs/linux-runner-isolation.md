@@ -11,6 +11,21 @@ The legacy default is `trusted`; this preserves Android, macOS, Windows, and
 existing installations. A trusted node is intentionally not a future
 multi-user security boundary.
 
+Isolation has two deliberately separate controls:
+
+- the node-local `runner` configuration installs and selects the real OS-level
+  boundary;
+- an owner or administrator enables **Require isolation** for that individual
+  node in its server settings.
+
+The cluster policy defaults to off for existing and newly enrolled nodes. A
+node reports its actual runner mode in authenticated heartbeats. Requiring
+isolation does not claim that a sandbox was installed: until the report says
+the isolated runner passed preflight, Bria rejects new sessions, provider
+authentication, and every backend runtime command on that node. A trusted
+node with this policy also refuses to start after a restart. Configure and
+verify the local runner first, then enable the per-node policy.
+
 ## Invariants
 
 - Never mount `/var/lib/bria`, `/etc/bria`, node PKI, the Telegram token,
@@ -56,7 +71,8 @@ Set this in the node configuration:
 ```
 
 Then run `bria node isolation-check --config /etc/bria/node.json` before
-starting the node. The check rejects root runners, the same UID as control,
+starting the node, and enable **Require isolation** in that node's settings.
+The check rejects root runners, the same UID as control,
 containers mislabeled as native users, and an unavailable socket.
 
 ## Docker

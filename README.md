@@ -62,7 +62,8 @@ the pragmatic Go engineering contract in [CONTRIBUTING.md](CONTRIBUTING.md).
   during normal operation and become native archives rather than `Lost`;
 - optional Docker, native-user, and hardened WSL runner isolation for
   untrusted Linux provider agents, keeping node keys, Telegram secrets, Raft,
-  updates, and access decisions in a separate control identity;
+  updates, and access decisions in a separate control identity, with an
+  owner/admin-enforced policy selected independently for each node;
 - CCBot-compatible Telegram grids, actor-bound opaque callbacks, a bounded
   Bot API client, private-DM parser, and leader-gated durable polling;
 - ordered text, voice, photo, and document intake pinned to the selected

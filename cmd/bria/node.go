@@ -117,6 +117,9 @@ func runNode(arguments []string) error {
 	if err != nil {
 		return fmt.Errorf("wait for cluster leader: %w", err)
 	}
+	if err := enforceLocalBackendIsolationPolicy(node.State().State(), nodeConfig); err != nil {
+		return err
+	}
 	if nodeConfig.Bootstrap {
 		if node.IsLeader() {
 			if err := applyPendingClusterRestore(ctx, node, nodeConfig); err != nil {
@@ -331,7 +334,24 @@ func localDomainNode(nodeConfig config.Config, fingerprint string) domain.Node {
 			EnrollmentAddress: enrollmentAddress,
 		},
 		Fingerprint: fingerprint,
+		BackendIsolation: domain.BackendIsolationReport{
+			Mode: nodeConfig.EffectiveRunnerMode(), Ready: nodeConfig.IsolatedRunner(),
+		},
 	}
+}
+
+func enforceLocalBackendIsolationPolicy(state *domain.State, nodeConfig config.Config) error {
+	if state == nil {
+		return errors.New("cluster state is unavailable")
+	}
+	node, ok := state.Nodes[domain.NodeID(nodeConfig.NodeID)]
+	if !ok || !node.BackendIsolationRequired || nodeConfig.IsolatedRunner() {
+		return nil
+	}
+	return fmt.Errorf(
+		"node %s requires backend isolation; configure an isolated runner before restart",
+		nodeConfig.NodeID,
+	)
 }
 
 func newOperationID() (string, error) {

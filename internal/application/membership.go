@@ -232,6 +232,32 @@ func (s *Service) SetNodeBackendConnected(
 	})
 }
 
+func (s *Service) SetNodeBackendIsolationRequired(
+	ctx context.Context,
+	actor Principal,
+	nodeID domain.NodeID,
+	required bool,
+) error {
+	if !s.IsAdmin(actor) {
+		return domain.ErrAccessDenied
+	}
+	state := s.reader.State()
+	node, ok := state.Nodes[nodeID]
+	if !ok || !state.CanAccessNode(actor.UserID, nodeID) {
+		return domain.ErrNotFound
+	}
+	if required && !node.BackendIsolation.Ready {
+		for _, session := range state.Sessions {
+			if session.NodeID == nodeID && session.IsLive() {
+				return domain.ErrInvalidState
+			}
+		}
+	}
+	return s.apply(ctx, clusterstate.CommandSetNodeIsolation, clusterstate.SetNodeIsolation{
+		NodeID: nodeID, Required: required,
+	})
+}
+
 type ProviderAliasCandidate struct {
 	NodeID  domain.NodeID
 	Backend string
@@ -244,6 +270,9 @@ func (s *Service) ProviderAliasCandidates(actor Principal) ([]ProviderAliasCandi
 	state := s.reader.State()
 	result := make([]ProviderAliasCandidate, 0)
 	for _, node := range state.VisibleNodes(actor.UserID) {
+		if !node.BackendExecutionAllowed() {
+			continue
+		}
 		for _, backend := range node.Backends {
 			if strings.TrimSpace(backend.Name) != "" {
 				result = append(result, ProviderAliasCandidate{

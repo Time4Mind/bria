@@ -27,6 +27,14 @@ type BackendDescriptor struct {
 	Capabilities []string `json:"capabilities,omitempty"`
 }
 
+// BackendIsolationReport is the node's authenticated report about the local
+// provider runner. Ready is true only after the node has completed the
+// platform-specific isolation preflight.
+type BackendIsolationReport struct {
+	Mode  string `json:"mode,omitempty"`
+	Ready bool   `json:"ready,omitempty"`
+}
+
 type TranscriptFinalReport struct {
 	SessionID  SessionID `json:"session_id"`
 	Generation uint64    `json:"generation"`
@@ -53,6 +61,11 @@ type Node struct {
 	OS                          string              `json:"os,omitempty"`
 	Arch                        string              `json:"arch,omitempty"`
 	Fingerprint                 string              `json:"fingerprint,omitempty"`
+	// BackendIsolationRequired is cluster policy. BackendIsolation reports the
+	// actual local runner selected by this node. Keeping these separate prevents
+	// an administrative toggle from pretending that host isolation was installed.
+	BackendIsolationRequired bool                   `json:"backend_isolation_required,omitempty"`
+	BackendIsolation         BackendIsolationReport `json:"backend_isolation,omitempty"`
 }
 
 func (n Node) EffectiveLifecycle() NodeLifecycle {
@@ -63,3 +76,7 @@ func (n Node) EffectiveLifecycle() NodeLifecycle {
 }
 
 func (n Node) Enabled() bool { return n.EffectiveLifecycle() == NodeActive }
+
+func (n Node) BackendExecutionAllowed() bool {
+	return !n.BackendIsolationRequired || n.BackendIsolation.Ready
+}

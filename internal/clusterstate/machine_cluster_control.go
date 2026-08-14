@@ -65,6 +65,11 @@ func applyClusterControl(
 		return nil, decodeAnd(command.Payload, &payload, func() error {
 			return state.SetNodeLifecycle(payload.NodeID, payload.Lifecycle)
 		})
+	case CommandSetNodeIsolation:
+		var payload SetNodeIsolation
+		return nil, decodeAnd(command.Payload, &payload, func() error {
+			return state.SetNodeBackendIsolationRequired(payload.NodeID, payload.Required)
+		})
 	case CommandDeleteNode:
 		var payload DeleteNode
 		return nil, decodeAnd(command.Payload, &payload, func() error {

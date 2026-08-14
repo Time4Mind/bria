@@ -130,7 +130,8 @@ func (s *Service) RequireSessionAction(
 	if requiresOnlineRuntime(action) {
 		session, ok := state.Sessions[ref.Key()]
 		node, nodeOK := state.Nodes[ref.NodeID]
-		if !ok || !session.IsLive() || !nodeOK || node.Status != domain.NodeOnline {
+		if !ok || !session.IsLive() || !nodeOK || node.Status != domain.NodeOnline ||
+			!node.BackendExecutionAllowed() {
 			return domain.ErrInvalidState
 		}
 	}

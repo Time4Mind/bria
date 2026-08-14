@@ -145,6 +145,22 @@ func (p *TelegramProjector) nodeSettings(
 	if err != nil {
 		return telegramui.Screen{}, err
 	}
+	canManageIsolation := canAdministerNodes(state, actor.UserID)
+	var isolationRequire, isolationAllow telegramui.OpaqueToken
+	if canManageIsolation {
+		isolationRequire, err = p.tokens.Node(
+			actor.UserID, telegramui.ActionNodeIsolationRequire, nodeID,
+		)
+		if err != nil {
+			return telegramui.Screen{}, err
+		}
+		isolationAllow, err = p.tokens.Node(
+			actor.UserID, telegramui.ActionNodeIsolationAllow, nodeID,
+		)
+		if err != nil {
+			return telegramui.Screen{}, err
+		}
+	}
 	live := 0
 	for _, session := range state.Sessions {
 		if session.NodeID == nodeID && session.IsLive() {
@@ -165,13 +181,25 @@ func (p *TelegramProjector) nodeSettings(
 		Copy: copy, Node: node, Backends: strings.Join(names, ", "),
 		Status: projectionNodeStatus(node.Status), LiveSessions: live, CanDisable: canDisable,
 		DisableToken: disable, EnableToken: enable, DeleteToken: remove, RenameToken: rename,
-		ProviderAliases: aliases,
-		BackendChoices:  p.backendChoices(state, actor.UserID, node),
-		SpeechStatus:    speechStatus,
-		SpeechToken:     speech,
-		BackAction:      backAction,
-		BackToken:       backToken,
+		ProviderAliases:       aliases,
+		BackendChoices:        p.backendChoices(state, actor.UserID, node),
+		SpeechStatus:          speechStatus,
+		SpeechToken:           speech,
+		CanManageIsolation:    canManageIsolation,
+		IsolationRequired:     node.BackendIsolationRequired,
+		IsolationReady:        node.BackendIsolation.Ready,
+		IsolationCanRequire:   live == 0 || node.BackendIsolation.Ready,
+		IsolationMode:         node.BackendIsolation.Mode,
+		IsolationRequireToken: isolationRequire,
+		IsolationAllowToken:   isolationAllow,
+		BackAction:            backAction,
+		BackToken:             backToken,
 	}), nil
+}
+
+func canAdministerNodes(state *domain.State, userID domain.UserID) bool {
+	access, ok := state.Users[userID]
+	return ok && (access.Role == domain.RoleOwner || access.Role == domain.RoleAdmin)
 }
 
 func (p *TelegramProjector) backendChoices(

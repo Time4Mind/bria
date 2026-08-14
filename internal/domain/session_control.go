@@ -206,7 +206,8 @@ func (s *State) RestoreSession(
 	if session.State != SessionArchived || !session.ArchiveReady ||
 		strings.TrimSpace(session.ArchiveID) == "" ||
 		strings.TrimSpace(session.ProviderSessionID) == "" ||
-		strings.TrimSpace(session.Workdir) == "" || !nodeOK || node.Status != NodeOnline {
+		strings.TrimSpace(session.Workdir) == "" || !nodeOK || node.Status != NodeOnline ||
+		!node.BackendExecutionAllowed() {
 		return ErrInvalidState
 	}
 	if err := requireRevision(session, expectedRevision); err != nil {

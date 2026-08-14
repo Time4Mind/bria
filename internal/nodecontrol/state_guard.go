@@ -69,7 +69,7 @@ func (g *StateGuard) AuthorizeRuntime(
 		NodeID: domain.NodeID(request.NodeID), SessionID: domain.SessionID(request.SessionID),
 	}
 	node, ok := state.Nodes[ref.NodeID]
-	if !ok || !node.Enabled() {
+	if !ok || !node.Enabled() || !node.BackendExecutionAllowed() {
 		return domain.ErrAccessDenied
 	}
 	session, ok := state.Sessions[ref.Key()]
@@ -110,6 +110,7 @@ func (g *StateGuard) AuthorizeProviderAuth(
 	}
 	node, ok := state.Nodes[domain.NodeID(nodeID)]
 	if !ok || !node.Enabled() || node.Status != domain.NodeOnline ||
+		!node.BackendExecutionAllowed() ||
 		!state.CanAccessNode(domain.UserID(actorID), node.ID) {
 		return domain.ErrNotFound
 	}

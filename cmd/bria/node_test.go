@@ -50,3 +50,19 @@ func TestRegisterLocalNodeBootstrapsConfiguredOwner(t *testing.T) {
 		t.Fatalf("bootstrap owner preferences=%#v", state.Preferences[77])
 	}
 }
+
+func TestEnforceLocalBackendIsolationPolicyFailsClosed(t *testing.T) {
+	state := domain.NewState()
+	if err := state.AddNode(domain.Node{
+		ID: "local", Name: "Local", BackendIsolationRequired: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := enforceLocalBackendIsolationPolicy(state, config.Config{NodeID: "local"}); err == nil {
+		t.Fatal("trusted runner accepted required isolation policy")
+	}
+	isolated := config.Config{NodeID: "local", Runner: config.RunnerConfig{Mode: config.RunnerModeDocker}}
+	if err := enforceLocalBackendIsolationPolicy(state, isolated); err != nil {
+		t.Fatalf("isolated runner rejected: %v", err)
+	}
+}

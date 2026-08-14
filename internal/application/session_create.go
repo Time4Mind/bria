@@ -56,7 +56,7 @@ func (s *Service) CreateSession(
 	if actor.UserID <= 0 || !state.CanAccessNode(actor.UserID, request.NodeID) || !ok {
 		return domain.Session{}, domain.ErrNotFound
 	}
-	if !node.Enabled() || node.Status != domain.NodeOnline ||
+	if !node.Enabled() || node.Status != domain.NodeOnline || !node.BackendExecutionAllowed() ||
 		!supportsBackend(node, backend, createCapability) {
 		return domain.Session{}, domain.ErrInvalidState
 	}

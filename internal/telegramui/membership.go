@@ -75,22 +75,29 @@ func RenderEnrollmentDetail(input EnrollmentDetailInput) Screen {
 }
 
 type NodeMembershipInput struct {
-	Copy            i18n.Localizer
-	Node            domain.Node
-	Backends        string
-	Status          NodeStatus
-	LiveSessions    int
-	CanDisable      bool
-	DisableToken    OpaqueToken
-	EnableToken     OpaqueToken
-	DeleteToken     OpaqueToken
-	RenameToken     OpaqueToken
-	ProviderAliases []ProviderAliasItem
-	BackendChoices  []NodeBackendItem
-	SpeechStatus    string
-	SpeechToken     OpaqueToken
-	BackAction      Action
-	BackToken       OpaqueToken
+	Copy                  i18n.Localizer
+	Node                  domain.Node
+	Backends              string
+	Status                NodeStatus
+	LiveSessions          int
+	CanDisable            bool
+	DisableToken          OpaqueToken
+	EnableToken           OpaqueToken
+	DeleteToken           OpaqueToken
+	RenameToken           OpaqueToken
+	ProviderAliases       []ProviderAliasItem
+	BackendChoices        []NodeBackendItem
+	SpeechStatus          string
+	SpeechToken           OpaqueToken
+	CanManageIsolation    bool
+	IsolationRequired     bool
+	IsolationReady        bool
+	IsolationCanRequire   bool
+	IsolationMode         string
+	IsolationRequireToken OpaqueToken
+	IsolationAllowToken   OpaqueToken
+	BackAction            Action
+	BackToken             OpaqueToken
 }
 
 type NodeBackendItem struct {
@@ -110,6 +117,16 @@ type ProviderAliasItem struct {
 func RenderNodeMembership(input NodeMembershipInput) Screen {
 	text := input.Copy.Format(i18n.StatusNodeSettings, html.EscapeString(input.Node.Name),
 		html.EscapeString(input.Backends), nodeStatusGlyph(input.Status))
+	if input.CanManageIsolation {
+		isolation := input.Copy.Text(i18n.ValueOff)
+		if input.IsolationReady {
+			isolation = input.Copy.Format(i18n.NodeIsolationReady,
+				html.EscapeString(input.IsolationMode))
+		} else if input.IsolationRequired {
+			isolation = input.Copy.Text(i18n.NodeIsolationMissing)
+		}
+		text += "\n" + input.Copy.Format(i18n.NodeIsolationStatus, isolation)
+	}
 	rows := Grid{}
 	if input.Node.Enabled() && input.CanDisable {
 		rows = append(rows, Row{button(input.Copy.Text(i18n.NodeDisable), ActionNodeDisable,
@@ -122,6 +139,18 @@ func RenderNodeMembership(input NodeMembershipInput) Screen {
 	}
 	rows = append(rows, Row{button(input.Copy.Text(i18n.NodeRename), ActionNodeRename,
 		input.RenameToken)})
+	if input.CanManageIsolation {
+		if input.IsolationRequired {
+			rows = append(rows, Row{button(input.Copy.Text(i18n.NodeIsolationAllow),
+				ActionNodeIsolationAllow, input.IsolationAllowToken)})
+		} else if !input.IsolationCanRequire {
+			rows = append(rows, Row{button(input.Copy.Text(i18n.NodeIsolationCloseSessions),
+				ActionNoop, "")})
+		} else {
+			rows = append(rows, Row{button(input.Copy.Text(i18n.NodeIsolationRequire),
+				ActionNodeIsolationRequire, input.IsolationRequireToken)})
+		}
+	}
 	if input.SpeechStatus != "" {
 		rows = append(rows, Row{button(
 			input.Copy.Format(i18n.NodeSpeechStatus, input.SpeechStatus),

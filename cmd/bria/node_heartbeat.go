@@ -68,6 +68,9 @@ func startNodeHeartbeatLoops(
 			Backends: inventory.Backends(), Archives: archives, Interactive: interactive,
 			Finals: finals,
 			Quotas: quotaStore.Snapshots(),
+			BackendIsolation: domain.BackendIsolationReport{
+				Mode: nodeConfig.EffectiveRunnerMode(), Ready: nodeConfig.IsolatedRunner(),
+			},
 		}, nil
 	}
 	agent, err := nodecontrol.NewHeartbeatAgent(node, client, snapshot, nodeHeartbeatInterval)

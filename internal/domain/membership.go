@@ -141,6 +141,16 @@ func (s *State) RenameNode(nodeID NodeID, name string) error {
 	return nil
 }
 
+func (s *State) SetNodeBackendIsolationRequired(nodeID NodeID, required bool) error {
+	node, ok := s.Nodes[nodeID]
+	if !ok {
+		return ErrNotFound
+	}
+	node.BackendIsolationRequired = required
+	s.Nodes[nodeID] = node
+	return nil
+}
+
 func (s *State) UpdateNodeMetadata(update Node) error {
 	node, ok := s.Nodes[update.ID]
 	if !ok {

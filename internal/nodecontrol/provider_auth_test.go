@@ -107,4 +107,10 @@ func TestStateGuardProviderAuthIsOwnerOnlineBackendOnly(t *testing.T) {
 	if err := guard.AuthorizeProviderAuth(context.Background(), 1, "target", "unknown"); err == nil {
 		t.Fatal("unknown backend provider auth succeeded")
 	}
+	node = state.Nodes["target"]
+	node.BackendIsolationRequired = true
+	state.Nodes["target"] = node
+	if err := guard.AuthorizeProviderAuth(context.Background(), 1, "target", "codex"); err == nil {
+		t.Fatal("provider auth used an unisolated backend despite node policy")
+	}
 }

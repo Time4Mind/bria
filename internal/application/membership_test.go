@@ -77,3 +77,35 @@ func TestInvitationRequiresAvailableIssuer(t *testing.T) {
 		t.Fatal("invitation issued while CA issuer was offline")
 	}
 }
+
+func TestNodeIsolationPolicyRequiresAdministrativeRole(t *testing.T) {
+	state := domain.NewState()
+	if err := state.AddNode(domain.Node{ID: "alpha", Name: "Alpha", Status: domain.NodeOnline}); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.SetNodeAccess(1, domain.RoleAdmin, "alpha"); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.SetNodeAccess(2, domain.RoleMember, "alpha"); err != nil {
+		t.Fatal(err)
+	}
+	machine := clusterstate.NewMachine(state)
+	port := localMachine{machine: machine}
+	service, err := application.NewService(port, port)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.SetNodeBackendIsolationRequired(
+		context.Background(), application.Principal{UserID: 1}, "alpha", true,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if !machine.State().Nodes["alpha"].BackendIsolationRequired {
+		t.Fatal("administrative isolation policy was not committed")
+	}
+	if err := service.SetNodeBackendIsolationRequired(
+		context.Background(), application.Principal{UserID: 2}, "alpha", false,
+	); err == nil {
+		t.Fatal("member changed administrative isolation policy")
+	}
+}

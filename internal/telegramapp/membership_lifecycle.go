@@ -18,7 +18,8 @@ func isMembershipLifecycleAction(action telegramui.Action) bool {
 	switch action {
 	case telegramui.ActionNodeDisable, telegramui.ActionNodeDisableYes,
 		telegramui.ActionNodeEnable, telegramui.ActionNodeDelete,
-		telegramui.ActionNodeDeleteYes, telegramui.ActionNodeRename:
+		telegramui.ActionNodeDeleteYes, telegramui.ActionNodeRename,
+		telegramui.ActionNodeIsolationRequire, telegramui.ActionNodeIsolationAllow:
 		return true
 	default:
 		return false
@@ -81,6 +82,19 @@ func (h *Handler) handleMembershipLifecycle(
 			telegramui.RenderNodeRenamePromptWithBack(
 				input.Copy, input.Node.Name, back.Action, back.Token,
 			))
+		return err
+	case telegramui.ActionNodeIsolationRequire, telegramui.ActionNodeIsolationAllow:
+		required := callback.Action == telegramui.ActionNodeIsolationRequire
+		if err := h.service.SetNodeBackendIsolationRequired(ctx, actor, nodeID, required); err != nil {
+			if errors.Is(err, domain.ErrInvalidState) {
+				return nil
+			}
+			return err
+		}
+		screen, err := h.projectNodeSettings(actor, nodeID)
+		if err == nil {
+			_, err = h.messenger.EditScreen(ctx, update.CallbackOrigin, screen)
+		}
 		return err
 	default:
 		return nil

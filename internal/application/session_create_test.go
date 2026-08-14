@@ -76,3 +76,20 @@ func TestCreateCodexResumeAndProviderBinding(t *testing.T) {
 		t.Fatalf("provider id=%q", got)
 	}
 }
+
+func TestCreateSessionFailsClosedWhenRequiredIsolationIsNotReady(t *testing.T) {
+	service, machine := createService(t, "codex")
+	state := machine.State()
+	if err := state.SetNodeBackendIsolationRequired("alpha", true); err != nil {
+		t.Fatal(err)
+	}
+	machine = clusterstate.NewMachine(state)
+	port := localMachine{machine: machine}
+	service, _ = application.NewService(port, port)
+	_, err := service.CreateSession(context.Background(), application.Principal{UserID: 7}, application.CreateSessionRequest{
+		NodeID: "alpha", Backend: "codex", Workdir: t.TempDir(),
+	})
+	if err == nil {
+		t.Fatal("session started without required backend isolation")
+	}
+}

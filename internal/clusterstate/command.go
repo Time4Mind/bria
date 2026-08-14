@@ -58,6 +58,7 @@ const (
 	CommandRestoreCluster         CommandKind = "restore_cluster"
 	CommandSetProviderAlias       CommandKind = "set_provider_alias"
 	CommandSetNodeBackend         CommandKind = "set_node_backend"
+	CommandSetNodeIsolation       CommandKind = "set_node_isolation"
 	CommandQueueDeferredInput     CommandKind = "queue_deferred_input"
 	CommandResolveDeferredInput   CommandKind = "resolve_deferred_input"
 	CommandBeginClusterUpdate     CommandKind = "begin_cluster_update"
@@ -199,6 +200,7 @@ type PublishNodeHeartbeat struct {
 	Interactive                    []domain.InteractivePromptReport `json:"interactive,omitempty"`
 	Finals                         []domain.TranscriptFinalReport   `json:"transcript_finals,omitempty"`
 	Quotas                         []domain.QuotaSnapshot           `json:"quotas,omitempty"`
+	BackendIsolation               domain.BackendIsolationReport    `json:"backend_isolation,omitempty"`
 }
 
 type MarkNodeOffline struct {
@@ -281,6 +283,11 @@ type SetNodeBackend struct {
 	NodeID    domain.NodeID `json:"node_id"`
 	Backend   string        `json:"backend"`
 	Connected bool          `json:"connected"`
+}
+
+type SetNodeIsolation struct {
+	NodeID   domain.NodeID `json:"node_id"`
+	Required bool          `json:"required"`
 }
 
 type SetClusterUpdateNode struct {

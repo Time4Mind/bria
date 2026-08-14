@@ -207,7 +207,7 @@ func apply(state *domain.State, command Command) (json.RawMessage, error) {
 		CommandIssueEnrollmentInvite, CommandSubmitEnrollment, CommandDecideEnrollment,
 		CommandSubmitNodeContract, CommandMarkEnrollmentNotified,
 		CommandRenameNode, CommandUpdateNodeMetadata,
-		CommandSetNodeLifecycle, CommandDeleteNode,
+		CommandSetNodeLifecycle, CommandDeleteNode, CommandSetNodeIsolation,
 		CommandBeginClusterUpdate, CommandSetClusterUpdateNode, CommandFinishClusterUpdate:
 		return applyClusterControl(state, command)
 	case CommandUpdateNodeRuntime:
@@ -227,6 +227,7 @@ func apply(state *domain.State, command Command) (json.RawMessage, error) {
 			payload.CertificateFingerprint, payload.PreviousCertificateFingerprint,
 			payload.Backends,
 			payload.Archives, payload.Interactive, payload.Finals, command.IssuedAt,
+			payload.BackendIsolation,
 		)
 		if err != nil {
 			return nil, err

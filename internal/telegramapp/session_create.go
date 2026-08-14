@@ -298,7 +298,11 @@ func (h *Handler) beginCreateOnNode(
 	backends := createBackends(item.Node)
 	if len(backends) == 0 {
 		choices := make([]telegramui.CreateChoice, 0, len(item.Node.InstalledBackends))
-		for _, backend := range item.Node.InstalledBackends {
+		installed := item.Node.InstalledBackends
+		if !item.Node.BackendExecutionAllowed() {
+			installed = nil
+		}
+		for _, backend := range installed {
 			name := strings.ToLower(strings.TrimSpace(backend.Name))
 			if name == "" || !backendSupportsCreate(backend) {
 				continue
@@ -325,6 +329,9 @@ func (h *Handler) beginCreateOnNode(
 }
 
 func createBackends(node domain.Node) []string {
+	if !node.BackendExecutionAllowed() {
+		return nil
+	}
 	return createBackendDescriptors(node.Backends)
 }
 
