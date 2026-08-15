@@ -1,0 +1,45 @@
+package main
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"testing"
+)
+
+func TestPreflightUpdateCandidateAcceptsCurrentConfig(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture")
+	}
+	binary := writePreflightFixture(t, "exit 0")
+	if err := preflightUpdateCandidate(
+		context.Background(), binary, filepath.Join(t.TempDir(), "config.json"),
+	); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPreflightUpdateCandidateRejectsIncompatibleConfig(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture")
+	}
+	binary := writePreflightFixture(t, `echo 'bria node: decode config: json: unknown field "runner"' >&2
+exit 1`)
+	err := preflightUpdateCandidate(
+		context.Background(), binary, filepath.Join(t.TempDir(), "config.json"),
+	)
+	if err == nil || !strings.Contains(err.Error(), `unknown field "runner"`) {
+		t.Fatalf("error=%v", err)
+	}
+}
+
+func writePreflightFixture(t *testing.T, body string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "bria")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\n"+body+"\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}

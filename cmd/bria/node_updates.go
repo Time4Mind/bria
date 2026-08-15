@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"fmt"
 	"net/http"
 	"net/url"
 	"os"
@@ -16,6 +18,7 @@ import (
 
 func newNodeUpdateServices(
 	nodeConfig config.Config,
+	configPath string,
 	client *nodecontrol.Client,
 	restarts chan<- string,
 ) (*clusterupdate.Manager, *nodecontrol.UpdateRouter, error) {
@@ -44,6 +47,9 @@ func newNodeUpdateServices(
 			URL: nodeConfig.UpdateManifestURL, PublicKey: publicKey, Client: httpClient,
 		},
 		Client: httpClient,
+		Preflight: func(ctx context.Context, binary string) error {
+			return preflightUpdateCandidate(ctx, binary, configPath)
+		},
 		Restart: func(binary string) {
 			select {
 			case restarts <- binary:
@@ -65,6 +71,25 @@ func newNodeUpdateServices(
 	return local, router, nil
 }
 
+func preflightUpdateCandidate(ctx context.Context, binary, configPath string) error {
+	probeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	output, err := exec.CommandContext(
+		probeCtx, binary, "node", "probe", "--config", configPath, "--health-only",
+	).CombinedOutput()
+	if err == nil {
+		return nil
+	}
+	detail := strings.Join(strings.Fields(string(output)), " ")
+	if detail == "" {
+		detail = err.Error()
+	}
+	if len(detail) > 240 {
+		detail = detail[:240]
+	}
+	return fmt.Errorf("candidate cannot use the current node config: %s", detail)
+}
+
 type nodeUpdateControl struct {
 	local    *clusterupdate.Manager
 	router   *nodecontrol.UpdateRouter
@@ -72,10 +97,10 @@ type nodeUpdateControl struct {
 }
 
 func prepareNodeUpdates(
-	nodeConfig config.Config, client *nodecontrol.Client,
+	nodeConfig config.Config, configPath string, client *nodecontrol.Client,
 ) (*nodeUpdateControl, error) {
 	restarts := make(chan string, 1)
-	local, router, err := newNodeUpdateServices(nodeConfig, client, restarts)
+	local, router, err := newNodeUpdateServices(nodeConfig, configPath, client, restarts)
 	if err != nil {
 		return nil, err
 	}

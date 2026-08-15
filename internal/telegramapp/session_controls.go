@@ -59,6 +59,12 @@ func (h *Handler) handleSessionControlCallback(
 	if callback.Action == telegramui.ActionClose || callback.Action == telegramui.ActionClear {
 		screen, renderErr := h.confirmation(actor, ref, callback.Action)
 		if renderErr != nil {
+			if errors.Is(renderErr, domain.ErrInvalidState) {
+				if err := h.messenger.AnswerCallbackQuery(ctx, update.CallbackID, ""); err != nil {
+					return err
+				}
+				return h.editUnavailableSession(ctx, actor, ref, update.CallbackOrigin)
+			}
 			return h.controlError(ctx, actor, update.CallbackID, renderErr)
 		}
 		if err := h.messenger.AnswerCallbackQuery(ctx, update.CallbackID, ""); err != nil {
@@ -102,6 +108,11 @@ func (h *Handler) handleSessionControlCallback(
 		_, err = h.controls.OpenTerminal(ctx, actor, operationID, ref)
 	}
 	if err != nil {
+		if (callback.Action == telegramui.ActionConfirmClose ||
+			callback.Action == telegramui.ActionConfirmClear) &&
+			errors.Is(err, domain.ErrInvalidState) {
+			return h.editUnavailableSession(ctx, actor, ref, update.CallbackOrigin)
+		}
 		if errors.Is(err, sessioncontrol.ErrRuntimeUnavailable) {
 			return h.editUnavailableSession(ctx, actor, ref, update.CallbackOrigin)
 		}
@@ -192,6 +203,13 @@ func (h *Handler) confirmation(
 ) (telegramui.Screen, error) {
 	session, err := h.service.Session(actor, ref)
 	if err != nil {
+		return telegramui.Screen{}, err
+	}
+	requiredAction := domain.ActionClose
+	if action == telegramui.ActionClear {
+		requiredAction = domain.ActionClear
+	}
+	if err := h.service.RequireSessionAction(actor, ref, requiredAction); err != nil {
 		return telegramui.Screen{}, err
 	}
 	confirmAction := telegramui.ActionConfirmClose

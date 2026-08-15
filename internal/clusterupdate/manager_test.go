@@ -10,11 +10,13 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 )
@@ -58,7 +60,8 @@ func TestManagerDownloadsVerifiesActivatesAndConfirms(t *testing.T) {
 	manager, err := NewManager(ManagerConfig{
 		NodeID: "node", InstallRoot: filepath.Join(root, "software"), ActivationPath: activation,
 		Fetcher: Fetcher{URL: server.URL + "/manifest", PublicKey: publicKey, Client: server.Client()},
-		Client:  server.Client(), Restart: func(path string) { restarted <- path },
+		Client:  server.Client(), Preflight: func(context.Context, string) error { return nil },
+		Restart:  func(path string) { restarted <- path },
 		Watchdog: func(Request) error { return nil },
 	})
 	if err != nil {
@@ -85,6 +88,93 @@ func TestManagerDownloadsVerifiesActivatesAndConfirms(t *testing.T) {
 	}
 	if err := ConfirmInstalled(filepath.Join(root, "software"), "v2"); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestManagerRejectsIncompatibleCandidateBeforeActivation(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture")
+	}
+	artifact := releaseFixture(t, "v2")
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifestBody []byte
+	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/artifact" {
+			_, _ = writer.Write(artifact)
+			return
+		}
+		_, _ = writer.Write(manifestBody)
+	}))
+	defer server.Close()
+	digest := sha256.Sum256(artifact)
+	manifest, err := SignManifest(Manifest{
+		Version: "v2", PublishedAt: time.Now(), Artifacts: []Artifact{{
+			OS: runtime.GOOS, Arch: runtime.GOARCH, URL: server.URL + "/artifact",
+			SHA256: hex.EncodeToString(digest[:]), Size: int64(len(artifact)),
+		}},
+	}, privateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifestBody, _ = json.Marshal(manifest)
+	manifestDigest := sha256.Sum256(manifestBody)
+	root := t.TempDir()
+	activation := filepath.Join(root, "bria")
+	if err := os.WriteFile(activation, []byte("old"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	restarted := make(chan string, 1)
+	manager, err := NewManager(ManagerConfig{
+		NodeID: "node", InstallRoot: filepath.Join(root, "software"), ActivationPath: activation,
+		Fetcher: Fetcher{URL: server.URL + "/manifest", PublicKey: publicKey, Client: server.Client()},
+		Client:  server.Client(),
+		Preflight: func(context.Context, string) error {
+			return errors.New(`decode config: json: unknown field "runner"`)
+		},
+		Restart:  func(path string) { restarted <- path },
+		Watchdog: func(Request) error { return nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := Request{
+		NodeID: "node", UpdateID: "incompatible", Version: "v2",
+		ManifestSHA256: hex.EncodeToString(manifestDigest[:]),
+	}
+	if _, err := manager.Start(context.Background(), request); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		status, statusErr := manager.Status(context.Background(), request)
+		if statusErr != nil {
+			t.Fatal(statusErr)
+		}
+		if status.Phase == PhaseFailed {
+			if !strings.Contains(status.Error, `unknown field "runner"`) {
+				t.Fatalf("status=%#v", status)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("manager did not fail preflight: %#v", status)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	select {
+	case path := <-restarted:
+		t.Fatalf("incompatible candidate restarted %q", path)
+	default:
+	}
+	content, err := os.ReadFile(activation)
+	if err != nil || string(content) != "old" {
+		t.Fatalf("activation changed: %q, %v", content, err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "software", "update-pending.json")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("pending update exists after rejected preflight: %v", err)
 	}
 }
 

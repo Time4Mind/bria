@@ -21,6 +21,11 @@ state.json
 coverage.out
 *.test
 
+# Agent instructions and state are strictly local.
+AGENTS.md
+.agents/
+.codex/
+
 # Runtime state and credentials must never enter source control.
 secrets/
 *.key

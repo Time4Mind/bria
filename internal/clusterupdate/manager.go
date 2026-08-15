@@ -54,6 +54,7 @@ type ManagerConfig struct {
 	ActivationPath string
 	Fetcher        Fetcher
 	Client         *http.Client
+	Preflight      func(context.Context, string) error
 	Restart        func(string)
 	Watchdog       func(Request) error
 }
@@ -67,7 +68,8 @@ type Manager struct {
 func NewManager(config ManagerConfig) (*Manager, error) {
 	if config.NodeID == "" || config.InstallRoot == "" || !filepath.IsAbs(config.InstallRoot) ||
 		config.ActivationPath == "" || !filepath.IsAbs(config.ActivationPath) ||
-		config.Fetcher.URL == "" || len(config.Fetcher.PublicKey) == 0 || config.Restart == nil {
+		config.Fetcher.URL == "" || len(config.Fetcher.PublicKey) == 0 || config.Preflight == nil ||
+		config.Restart == nil {
 		return nil, errors.New("cluster update manager configuration is incomplete")
 	}
 	config.InstallRoot = filepath.Clean(config.InstallRoot)
@@ -225,6 +227,9 @@ func (m *Manager) downloadAndActivate(ctx context.Context, request Request, arti
 	}
 	if err := verifyReleaseBinary(destination, request.Version); err != nil {
 		return err
+	}
+	if err := m.config.Preflight(ctx, releaseBinary(destination)); err != nil {
+		return fmt.Errorf("preflight staged Bria: %w", err)
 	}
 	return m.switchCurrent(request, destination)
 }

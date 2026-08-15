@@ -61,7 +61,11 @@ func runNode(arguments []string) error {
 	if *configPath == "" || flags.NArg() != 0 {
 		return errors.New("usage: bria node run --config PATH")
 	}
-	nodeConfig, err := config.Load(*configPath)
+	absoluteConfigPath, err := filepath.Abs(*configPath)
+	if err != nil {
+		return fmt.Errorf("resolve config path: %w", err)
+	}
+	nodeConfig, err := config.Load(absoluteConfigPath)
 	if err != nil {
 		return err
 	}
@@ -163,7 +167,7 @@ func runNode(arguments []string) error {
 	}
 	go maintainDynamicMembership(ctx, node, resolver, nodeConfig)
 	runtimeControl, err := startNodeRuntimeControl(
-		ctx, node, nodeConfig, certificate, roots, backendRuntime,
+		ctx, node, nodeConfig, absoluteConfigPath, certificate, roots, backendRuntime,
 	)
 	if err != nil {
 		return fmt.Errorf("start node runtime control: %w", err)

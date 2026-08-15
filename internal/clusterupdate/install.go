@@ -98,10 +98,7 @@ func extractRelease(archivePath, destination string) error {
 }
 
 func verifyReleaseBinary(destination, version string) error {
-	binary := filepath.Join(destination, "bria")
-	if _, err := os.Stat(binary); err != nil {
-		binary += ".exe"
-	}
+	binary := releaseBinary(destination)
 	output, err := exec.Command(binary, "version").Output()
 	if err != nil {
 		return fmt.Errorf("verify staged Bria binary: %w", err)
@@ -113,6 +110,14 @@ func verifyReleaseBinary(destination, version string) error {
 		return errors.New("staged Bria version does not match manifest")
 	}
 	return nil
+}
+
+func releaseBinary(destination string) string {
+	binary := filepath.Join(destination, "bria")
+	if _, err := os.Stat(binary); err != nil {
+		binary += ".exe"
+	}
+	return binary
 }
 
 func (m *Manager) switchCurrent(request Request, destination string) error {

@@ -28,6 +28,7 @@ func startNodeRuntimeControl(
 	ctx context.Context,
 	node *consensus.Node,
 	nodeConfig config.Config,
+	configPath string,
 	certificate tls.Certificate,
 	roots *x509.CertPool,
 	backendRuntime backendRuntime,
@@ -122,7 +123,7 @@ func startNodeRuntimeControl(
 	if err != nil {
 		return closeFailedRuntime(executor, store, err)
 	}
-	updates, err := prepareNodeUpdates(nodeConfig, client)
+	updates, err := prepareNodeUpdates(nodeConfig, configPath, client)
 	if err != nil {
 		return closeFailedRuntime(executor, store, err)
 	}
