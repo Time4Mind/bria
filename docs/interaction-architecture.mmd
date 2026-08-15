@@ -1,0 +1,25 @@
+flowchart TD
+  subgraph Interfaces["Replaceable interaction adapters"]
+    TG["Telegram adapter"]
+    FUTURE["Future Web / Matrix / native adapter"]
+  end
+
+  LIFE["interaction.Adapter lifecycle"]
+  APP["Application services and authorization"]
+  COMMANDS["Versioned consensus commands"]
+  RAFT["HashiCorp Raft and deterministic state"]
+  RUNTIME["Node runtime ports"]
+  PROVIDERS["tmux / providers / archive / transcript"]
+
+  TG --> LIFE
+  FUTURE -.-> LIFE
+  LIFE --> APP
+  APP --> COMMANDS
+  COMMANDS --> RAFT
+  APP --> RUNTIME
+  RUNTIME --> PROVIDERS
+
+  classDef adapter fill:#e8f3ff,stroke:#2878b5,color:#102a3c
+  classDef core fill:#eaf7ec,stroke:#2b7a3d,color:#16351d
+  class TG,FUTURE,LIFE adapter
+  class APP,COMMANDS,RAFT,RUNTIME,PROVIDERS core

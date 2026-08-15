@@ -4,6 +4,26 @@ Bria changes one cluster member at a time. An operator must not restart enough
 voters concurrently to lose quorum. The commands below modify only explicit
 paths and never change host routes, DNS, firewall, or proxy settings.
 
+## Leader policy
+
+Open **Settings → Cluster → Leader selection**. Bria defaults to **Manual**:
+choose one online, enabled node and confirm it. The assignment is replicated
+and persistent. A non-selected node does not consume interaction updates or run
+leader-only work; if the selected node is unavailable, the others wait. Choose
+**Automatic** only when ordinary Raft leader failover should immediately move
+that work to the elected node.
+
+On a new cluster with no assignment, the current Raft leader exposes a bounded
+setup screen so the owner can select a node or enable automatic mode. The
+**Status** screen does not change leader policy.
+
+This setting never creates quorum. Before taking the selected leader offline,
+verify enough voters remain reachable and, when needed, select another healthy
+node while quorum still exists. One member left from a three-voter configuration
+cannot commit or make itself leader. Convert to an intentional single-voter
+topology only through the normal disable/removal workflow; never force-bootstrap
+live Raft storage to work around an outage.
+
 ## Authenticated metrics
 
 `bria node metrics --config PATH [--target NODE]` reads the Prometheus text

@@ -84,6 +84,8 @@ const (
 	ActionSetBgDismiss         Action = "set_bg_dismiss"
 	ActionSetNodeSort          Action = "set_node_sort"
 	ActionSetQuotaPoll         Action = "set_quota_poll"
+	ActionSetLeaderMode        Action = "set_leader_mode"
+	ActionSetLeaderNode        Action = "set_leader_node"
 	ActionSetVoiceBackend      Action = "set_voice"
 	ActionSetOfflineQueue      Action = "set_offline_q"
 	ActionConfirmVoiceEnable   Action = "voice_enable_yes"
@@ -187,7 +189,8 @@ func knownAction(action Action) bool {
 		ActionSetToolOutputLines, ActionSetThinking, ActionSetResponseCards, ActionSetTerminalSnapshots,
 		ActionSelectNode, ActionSelectSession,
 		ActionSetNotifyFinished, ActionSetNotifyError, ActionSetNotifyAction, ActionSetBgDismiss,
-		ActionSetNodeSort, ActionSetQuotaPoll, ActionSetOfflineQueue,
+		ActionSetNodeSort, ActionSetQuotaPoll, ActionSetLeaderMode, ActionSetLeaderNode,
+		ActionSetOfflineQueue,
 		ActionSetVoiceBackend, ActionConfirmVoiceEnable, ActionCancelVoiceEnable,
 		ActionNodeSpeechSetup, ActionNodeSpeechBack,
 		ActionSelectArchive, ActionSelectArchiveNode, ActionArchivePrevious, ActionArchiveNext,

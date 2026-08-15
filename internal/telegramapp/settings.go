@@ -215,14 +215,14 @@ func (h *Handler) openSetting(
 	switch setting {
 	case telegramui.SettingSessionView, telegramui.SettingResumeSelection,
 		telegramui.SettingLanguage,
-		telegramui.SettingToolCalls, telegramui.SettingToolResults, telegramui.SettingThinking,
-		telegramui.SettingToolOutputLines,
+		telegramui.SettingToolCalls, telegramui.SettingToolResults, telegramui.SettingThinking, telegramui.SettingToolOutputLines,
 		telegramui.SettingResponseCards,
 		telegramui.SettingTerminalSnapshots,
 		telegramui.SettingIdleArchive, telegramui.SettingRetention, telegramui.SettingExpiry,
 		telegramui.SettingNotifyFinished, telegramui.SettingNotifyError,
 		telegramui.SettingNotifyAction, telegramui.SettingBackgroundDismiss,
-		telegramui.SettingNodeSort, telegramui.SettingQuotaPoll,
+		telegramui.SettingNodeSort, telegramui.SettingQuotaPoll, telegramui.SettingLeaderMode,
+		telegramui.SettingLeaderNode,
 		telegramui.SettingVoiceBackend, telegramui.SettingOfflineQueue:
 		return h.projector.Setting(actor, setting)
 	default:
@@ -538,7 +538,7 @@ func settingMutation(action telegramui.Action) bool {
 		telegramui.ActionSetNotifyAction, telegramui.ActionSetBgDismiss:
 		return true
 	case telegramui.ActionSetNodeSort, telegramui.ActionSetQuotaPoll,
-		telegramui.ActionSetOfflineQueue:
+		telegramui.ActionSetLeaderMode, telegramui.ActionSetOfflineQueue:
 		return true
 	case telegramui.ActionSetVoiceBackend, telegramui.ActionConfirmVoiceEnable,
 		telegramui.ActionCancelVoiceEnable:

@@ -1,4 +1,10 @@
-# Architecture
+# Legacy Python prototype architecture
+
+> This document describes the retained Python behavioral prototype. It is not
+> the production cluster contract. The Go implementation, leader policy,
+> consensus boundary, and replaceable interaction adapters are documented in
+> [Go architecture](go-architecture.md). New production decisions must be made
+> against that document.
 
 The project is a hub-and-agent system. The hub owns product state and user
 navigation; an agent owns everything that is inherently local to a machine.

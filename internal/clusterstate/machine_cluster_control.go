@@ -14,6 +14,16 @@ func applyClusterControl(
 	case CommandRequestQuotaRefresh:
 		state.RequestQuotaRefresh(command.IssuedAt)
 		return nil, nil
+	case CommandSetLeaderSelectionMode:
+		var payload SetLeaderSelectionMode
+		return nil, decodeAnd(command.Payload, &payload, func() error {
+			return state.SetLeaderSelectionMode(payload.Mode)
+		})
+	case CommandSetPreferredLeader:
+		var payload SetPreferredLeader
+		return nil, decodeAnd(command.Payload, &payload, func() error {
+			return state.SetPreferredLeader(payload.NodeID)
+		})
 	case CommandSetTemporaryLeader:
 		var payload SetTemporaryLeader
 		return nil, decodeAnd(command.Payload, &payload, func() error {

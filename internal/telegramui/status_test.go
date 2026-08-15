@@ -26,7 +26,7 @@ func TestStatusRendersQuotaTableAndRefreshBeforeModes(t *testing.T) {
 		},
 	})
 	assertGoldenGrid(t, screen, `[🔄 Refresh -> status_refresh@choose]
-[• Select -> status_mode@choose] | [Leader -> status_mode@leader] | [Settings -> status_mode@settings]
+[• Select -> status_mode@choose] | [Settings -> status_mode@settings]
 [👑 🟢 Laptop -> node@laptop]
 [🔴 Game -> node@game]
 [← Back -> menu]`)

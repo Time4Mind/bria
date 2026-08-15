@@ -31,6 +31,8 @@ const (
 	SettingBackgroundDismiss SettingID = "background_dismiss"
 	SettingNodeSort          SettingID = "node_sort"
 	SettingQuotaPoll         SettingID = "quota_poll"
+	SettingLeaderMode        SettingID = "leader_mode"
+	SettingLeaderNode        SettingID = "leader_node"
 	SettingVoiceBackend      SettingID = "voice_backend"
 	SettingOfflineQueue      SettingID = "offline_queue"
 )
@@ -61,6 +63,8 @@ var settingsCatalog = []settingDescriptor{
 	{id: SettingNotifyAction, category: CategoryNotifications, label: i18n.SettingNotifyAction, body: i18n.SettingNotifyActionBody},
 	{id: SettingBackgroundDismiss, category: CategoryNotifications, label: i18n.SettingBackgroundDismiss, body: i18n.SettingBackgroundDismissBody},
 	{id: SettingVoiceBackend, category: CategoryVoice, label: i18n.SettingVoiceBackend, body: i18n.SettingVoiceBackendBody},
+	{id: SettingLeaderMode, category: CategoryCluster, label: i18n.SettingLeaderMode, body: i18n.SettingLeaderModeBody},
+	{id: SettingLeaderNode, category: CategoryCluster, label: i18n.SettingLeaderNode, body: i18n.SettingLeaderNodeBody},
 	{id: SettingNodeSort, category: CategoryCluster, label: i18n.SettingNodeSort, body: i18n.SettingNodeSortBody},
 	{id: SettingQuotaPoll, category: CategoryCluster, label: i18n.SettingQuotaPoll, body: i18n.SettingQuotaPollBody},
 }

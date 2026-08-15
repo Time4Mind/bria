@@ -27,10 +27,20 @@ type SettingsInput struct {
 	BackgroundDismiss  int
 	NodeSort           string
 	QuotaPollMinutes   int
+	LeaderAutomatic    bool
+	PreferredLeader    string
+	LeaderNodes        []LeaderSettingNode
 	VoiceBackend       string
 	OfflineQueueLimit  int
 	ClusterAccounts    string
 	PendingEnrollments []PendingEnrollmentItem
+}
+
+type LeaderSettingNode struct {
+	Name     string
+	Selected bool
+	Disabled bool
+	Token    OpaqueToken
 }
 
 func RenderVoiceEnableConfirmation(copy i18n.Localizer, plans []string) Screen {
@@ -190,6 +200,22 @@ func settingChoices(input SettingsInput, id SettingID) Grid {
 			button(selectedLabel(input.QuotaPollMinutes == 5, copy.Format(i18n.ValueMinuteShort, 5)), ActionSetQuotaPoll, "5"),
 			button(selectedLabel(input.QuotaPollMinutes == 10, copy.Format(i18n.ValueMinuteShort, 10)), ActionSetQuotaPoll, "10"),
 		}}
+	case SettingLeaderMode:
+		return Grid{Row{
+			button(selectedLabel(!input.LeaderAutomatic, copy.Text(i18n.ValueLeaderManual)), ActionSetLeaderMode, "manual"),
+			button(selectedLabel(input.LeaderAutomatic, copy.Text(i18n.ValueLeaderAutomatic)), ActionSetLeaderMode, "automatic"),
+		}}
+	case SettingLeaderNode:
+		rows := make(Grid, 0, len(input.LeaderNodes))
+		for _, node := range input.LeaderNodes {
+			label := selectedLabel(node.Selected, node.Name)
+			action, token := ActionSetLeaderNode, node.Token
+			if node.Disabled {
+				action, token = ActionNoop, ""
+			}
+			rows = append(rows, Row{button(label, action, token)})
+		}
+		return rows
 	case SettingVoiceBackend:
 		return visibilityChoices(copy, input.VoiceBackend != "off", ActionSetVoiceBackend)
 	case SettingOfflineQueue:
@@ -270,6 +296,13 @@ func settingValue(input SettingsInput, id SettingID) string {
 		}
 	case SettingQuotaPoll:
 		return copy.Format(i18n.ValueMinuteShort, input.QuotaPollMinutes)
+	case SettingLeaderMode:
+		return selectedValue(input.LeaderAutomatic, copy.Text(i18n.ValueLeaderAutomatic), copy.Text(i18n.ValueLeaderManual))
+	case SettingLeaderNode:
+		if input.PreferredLeader == "" {
+			return copy.Text(i18n.ValueLeaderUnassigned)
+		}
+		return input.PreferredLeader
 	case SettingVoiceBackend:
 		return visibilityValue(copy, input.VoiceBackend != "off")
 	case SettingOfflineQueue:

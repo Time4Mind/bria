@@ -11,6 +11,7 @@ import (
 	"github.com/Time4Mind/bria/internal/clusterupdate"
 	"github.com/Time4Mind/bria/internal/config"
 	"github.com/Time4Mind/bria/internal/consensus"
+	"github.com/Time4Mind/bria/internal/interaction"
 )
 
 func confirmRunningUpdate(nodeConfig config.Config) {
@@ -44,7 +45,7 @@ func startUpdateCoordinator(
 }
 
 func waitForNodeRuntime(
-	ctx context.Context, control *nodeRuntimeControl, telegramErrors <-chan error,
+	ctx context.Context, control *nodeRuntimeControl, adapterErrors <-chan interaction.Failure,
 ) error {
 	for {
 		select {
@@ -57,14 +58,14 @@ func waitForNodeRuntime(
 				return nil
 			}
 			return fmt.Errorf("node runtime control stopped: %w", err)
-		case err := <-telegramErrors:
-			if telegramErrors == nil {
+		case failure := <-adapterErrors:
+			if adapterErrors == nil {
 				continue
 			}
-			if errors.Is(err, context.Canceled) {
+			if failure.Err == nil || errors.Is(failure.Err, context.Canceled) {
 				return nil
 			}
-			return fmt.Errorf("Telegram adapter stopped: %w", err)
+			return fmt.Errorf("%s adapter stopped: %w", failure.Adapter, failure.Err)
 		}
 	}
 }

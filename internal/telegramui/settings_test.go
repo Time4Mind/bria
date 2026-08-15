@@ -106,9 +106,25 @@ func TestClusterSettingsExposeGlobalSortAndPollingGolden(t *testing.T) {
 	if !strings.Contains(screen.Text, input.ClusterAccounts) {
 		t.Fatalf("cluster account summary missing: %q", screen.Text)
 	}
-	assertGoldenGrid(t, screen, `[⬆ Обновить кластер -> cluster_update] | [＋ Подключить ноду -> cluster_add]
+	assertGoldenGrid(t, screen, `[Выбор лидера: Вручную -> setting@leader_mode] | [Лидер: Не назначен -> setting@leader_node]
 [Сортировка серверов: По времени -> setting@node_sort] | [Опрос лимитов: 10 мин -> setting@quota_poll]
+[⬆ Обновить кластер -> cluster_update] | [＋ Подключить ноду -> cluster_add]
 [← Назад -> settings]`)
+}
+
+func TestLeaderSettingsExposeModeAndEligibleNodes(t *testing.T) {
+	input := settingsFixture("ru")
+	input.LeaderNodes = []LeaderSettingNode{
+		{Name: "Android", Selected: true, Token: "android"},
+		{Name: "Offline", Disabled: true, Token: "offline"},
+	}
+	screen, err := RenderSetting(input, SettingLeaderNode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertGoldenGrid(t, screen, `[• Android -> set_leader_node@android]
+[Offline -> noop]
+[← Назад -> settings_cat@cluster]`)
 }
 
 func TestResponseCardChoicesDescribeTheThreeModesConcise(t *testing.T) {

@@ -80,3 +80,24 @@ func TestTemporaryLeaderRejectsOfflineAndLongPins(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestLeaderSelectionDefaultsManualAndPersistsAssignment(t *testing.T) {
+	state := domain.NewState()
+	if state.LeaderPolicy.EffectiveMode() != domain.LeaderSelectionManual {
+		t.Fatal("new state did not default to manual leader selection")
+	}
+	if err := state.AddNode(domain.Node{ID: "node", Name: "Node"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.SetPreferredLeader("node"); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.SetLeaderSelectionMode(domain.LeaderSelectionAutomatic); err != nil {
+		t.Fatal(err)
+	}
+	clone := state.Clone()
+	if clone.LeaderPolicy.NodeID != "node" ||
+		clone.LeaderPolicy.EffectiveMode() != domain.LeaderSelectionAutomatic {
+		t.Fatalf("leader policy=%+v", clone.LeaderPolicy)
+	}
+}

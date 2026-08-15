@@ -110,15 +110,21 @@
   remain available for 24 hours. Tokens alone never authorize membership.
 - Duplicate display names receive an increasing numeric suffix automatically.
   Node names remain editable from node settings.
-- Manual leadership transfer lasts up to 30 minutes or until the preferred node
-  becomes unavailable.
+- Leader selection is manual by default and is configured under
+  `Settings → Cluster`. The first interactive entry requires the owner to pick
+  a leader or explicitly enable automatic selection. A manual assignment is
+  persistent; non-selected nodes wait when it is unavailable. Automatic mode
+  lets the current Raft leader serve. Neither mode weakens Raft quorum.
 - Menu → Status always opens in `Select` mode. Its Rich Markdown table contains
   every server/backend pair, cached quota values, reset time and age in minutes;
   offline rows retain their last value and carry an unavailable marker. Refresh
-  polls nodes asynchronously. `Leader` confirms a 30-minute preference and
-  `Settings` opens node details. Server sorting is globally configurable as
-  creation time (default), name, or leader first; quota polling is 5 or 10
-  minutes (default 10).
+  polls nodes asynchronously. Status contains server selection and node
+  settings; leader policy is not a Status mode. Server sorting is globally
+  configurable as creation time (default), name, or leader first; quota polling
+  is 5 or 10 minutes (default 10).
+- Telegram is an interaction adapter, not a core dependency. Replacing it must
+  require a new adapter and presentation mapping, not changes to domain,
+  consensus, membership, or node runtime behavior.
 - Quota alerts use the CCBot thresholds 50/75/90%. Snapshots with the same
   backend and stable provider account ID are treated as one account even when
   several nodes report them. For a provider without a stable ID, the owner may

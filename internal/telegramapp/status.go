@@ -2,7 +2,6 @@ package telegramapp
 
 import (
 	"context"
-	"errors"
 	"time"
 
 	"github.com/Time4Mind/bria/internal/application"
@@ -11,11 +10,6 @@ import (
 	"github.com/Time4Mind/bria/internal/telegrambot"
 	"github.com/Time4Mind/bria/internal/telegramui"
 )
-
-type leadershipTransfer interface {
-	LeaderID() string
-	TransferLeadershipTo(string) error
-}
 
 type settingsReturn struct {
 	Action telegramui.Action
@@ -87,8 +81,6 @@ func (h *Handler) openLegacyNodeSettingsFromSessions(
 
 func statusMode(token telegramui.OpaqueToken) telegramui.StatusMode {
 	switch telegramui.StatusMode(token) {
-	case telegramui.StatusLeader:
-		return telegramui.StatusLeader
 	case telegramui.StatusSettings:
 		return telegramui.StatusSettings
 	default:
@@ -116,6 +108,17 @@ func (h *Handler) confirmStatusLeader(
 	token telegramui.OpaqueToken,
 ) (telegramui.Screen, error) {
 	nodeID, err := h.resolveStatusNode(actor, telegramui.ActionStatusLeaderNode, token)
+	if err != nil {
+		return telegramui.Screen{}, err
+	}
+	return h.projector.ConfirmLeader(actor, nodeID)
+}
+
+func (h *Handler) confirmClusterLeader(
+	actor application.Principal,
+	token telegramui.OpaqueToken,
+) (telegramui.Screen, error) {
+	nodeID, err := h.resolveStatusNode(actor, telegramui.ActionSetLeaderNode, token)
 	if err != nil {
 		return telegramui.Screen{}, err
 	}
@@ -188,19 +191,33 @@ func (h *Handler) applyStatusLeader(
 	if err != nil {
 		return telegramui.Screen{}, err
 	}
-	if err := h.service.SetTemporaryLeader(ctx, actor, nodeID); err != nil {
+	if err := h.service.SetPreferredLeader(ctx, actor, nodeID); err != nil {
 		return telegramui.Screen{}, err
 	}
-	transfer, ok := h.leadership.(leadershipTransfer)
-	if !ok {
-		return telegramui.Screen{}, errors.New("leadership transfer is unavailable")
+	if err := h.service.SetLeaderSelectionMode(
+		ctx, actor, domain.LeaderSelectionManual,
+	); err != nil {
+		return telegramui.Screen{}, err
 	}
-	if transfer.LeaderID() != string(nodeID) {
-		if err := transfer.TransferLeadershipTo(string(nodeID)); err != nil {
-			return telegramui.Screen{}, err
-		}
+	return h.projector.Setting(actor, telegramui.SettingLeaderNode)
+}
+
+func (h *Handler) updateLeaderMode(
+	ctx context.Context,
+	actor application.Principal,
+	token telegramui.OpaqueToken,
+) (telegramui.Screen, error) {
+	mode := domain.LeaderSelectionMode(token)
+	if mode != domain.LeaderSelectionManual && mode != domain.LeaderSelectionAutomatic {
+		return telegramui.Screen{}, domain.ErrNotFound
 	}
-	return h.projectStatus(actor, telegramui.StatusChoose)
+	if err := h.service.SetLeaderSelectionMode(ctx, actor, mode); err != nil {
+		return telegramui.Screen{}, err
+	}
+	if mode == domain.LeaderSelectionManual {
+		return h.projector.Setting(actor, telegramui.SettingLeaderNode)
+	}
+	return h.projector.Setting(actor, telegramui.SettingLeaderMode)
 }
 
 func (h *Handler) resolveStatusNode(

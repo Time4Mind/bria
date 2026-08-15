@@ -208,7 +208,8 @@ func apply(state *domain.State, command Command) (json.RawMessage, error) {
 				payload.UserID, payload.Session, payload.EventRevision,
 			)
 		})
-	case CommandRequestQuotaRefresh, CommandSetTemporaryLeader, CommandClearTemporaryLeader,
+	case CommandRequestQuotaRefresh, CommandSetLeaderSelectionMode, CommandSetPreferredLeader,
+		CommandSetTemporaryLeader, CommandClearTemporaryLeader,
 		CommandIssueEnrollmentInvite, CommandSubmitEnrollment, CommandDecideEnrollment,
 		CommandSubmitNodeContract, CommandMarkEnrollmentNotified,
 		CommandRenameNode, CommandUpdateNodeMetadata,

@@ -93,54 +93,6 @@ type fixture struct {
 	events    *[]string
 }
 
-func newFixture(t *testing.T) fixture {
-	t.Helper()
-	state := domain.NewState()
-	for _, node := range []domain.Node{
-		{ID: "allowed", Name: "Allowed", Status: domain.NodeOnline},
-		{ID: "hidden", Name: "Hidden", Status: domain.NodeOnline},
-	} {
-		if err := state.AddNode(node); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := state.SetNodeAccess(7, domain.RoleOwner, "allowed"); err != nil {
-		t.Fatal(err)
-	}
-	created := time.Unix(100, 0).UTC()
-	if err := state.AddSession(domain.Session{
-		ID: "live", NodeID: "allowed", OwnerID: 7, Name: "Live", Backend: "codex",
-		State: domain.SessionActive, CreatedAt: created, LiveSinceAt: created,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	machine := clusterstate.NewMachine(state)
-	events := make([]string, 0)
-	port := machinePort{machine: machine, events: &events}
-	service, err := application.NewService(port, port)
-	if err != nil {
-		t.Fatal(err)
-	}
-	codec, err := callbacktoken.New([]byte(strings.Repeat("k", callbacktoken.KeyBytes)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	projector, err := application.NewTelegramProjector(port, codec)
-	if err != nil {
-		t.Fatal(err)
-	}
-	messenger := &messengerStub{events: &events}
-	handler, err := telegramapp.NewHandler(service, projector, codec, messenger)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return fixture{
-		handler: handler, service: service, projector: projector,
-		machine: machine, codec: codec, messenger: messenger,
-		events: &events,
-	}
-}
-
 func TestMessageOpensActorMenuAndUnknownActorIsDropped(t *testing.T) {
 	fixture := newFixture(t)
 	if err := fixture.handler.HandleTelegramUpdate(context.Background(), telegrambot.IncomingUpdate{

@@ -37,7 +37,8 @@ func allowedNodeTokenAction(action telegramui.Action) bool {
 	switch action {
 	case telegramui.ActionSelectNode, telegramui.ActionSelectArchiveNode,
 		telegramui.ActionStatusLeaderNode, telegramui.ActionStatusSettingsNode,
-		telegramui.ActionNodeSettings, telegramui.ActionNewSession, telegramui.ActionConfirmLeader:
+		telegramui.ActionNodeSettings, telegramui.ActionNewSession, telegramui.ActionConfirmLeader,
+		telegramui.ActionSetLeaderNode:
 		return true
 	default:
 		return false

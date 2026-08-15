@@ -31,15 +31,15 @@ func RenderSettingsCategory(input SettingsInput, category SettingsCategory) (Scr
 	}
 	copy := input.Copy
 	rows := make(Grid, 0, len(settingsIn(category))+1)
-	if category == CategoryCluster {
-		rows = append(rows, clusterSettingsActions(input)...)
-	}
 	items := make([]Button, 0, len(settingsIn(category)))
 	for _, descriptor := range settingsIn(category) {
 		label := copy.Text(descriptor.label) + ": " + settingValue(input, descriptor.id)
 		items = append(items, button(label, ActionOpenSetting, OpaqueToken(descriptor.id)))
 	}
 	rows = append(rows, settingsRows(items)...)
+	if category == CategoryCluster {
+		rows = append(rows, clusterSettingsActions(input)...)
+	}
 	rows = append(rows, Row{button(copy.Text(i18n.ButtonBack), ActionSettings, "")})
 	return Screen{
 		Name: ScreenSettings, ParseMode: ParseModeHTML,

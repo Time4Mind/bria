@@ -159,6 +159,44 @@ func TestClusterPollingAndNodeSortSettingsAreReplicated(t *testing.T) {
 	}
 }
 
+func TestLeaderSelectionModeAndAssignmentAreReplicated(t *testing.T) {
+	fixture := newFixture(t)
+	applySettingCallback(t, fixture, 211, telegramui.ActionSetLeaderMode, "automatic")
+	if got := fixture.machine.State().LeaderPolicy.EffectiveMode(); got != domain.LeaderSelectionAutomatic {
+		t.Fatalf("leader mode=%q", got)
+	}
+	token, err := fixture.codec.Node(7, telegramui.ActionSetLeaderNode, "allowed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.handler.HandleTelegramUpdate(context.Background(), telegrambot.IncomingUpdate{
+		UpdateID: 212, Kind: telegrambot.IncomingCallback, UserID: 7, ChatID: 7,
+		CallbackID: "leader", CallbackData: encodeCallback(t, telegramui.ActionSetLeaderNode, token),
+		CallbackOrigin: telegrambot.Message{ChatID: 7, MessageID: 10},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	confirmation := fixture.messenger.edited[len(fixture.messenger.edited)-1]
+	if len(confirmation.Grid) == 0 || len(confirmation.Grid[0]) == 0 {
+		t.Fatalf("leader confirmation=%+v", confirmation)
+	}
+	confirmData, err := confirmation.Grid[0][0].Callback.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.handler.HandleTelegramUpdate(context.Background(), telegrambot.IncomingUpdate{
+		UpdateID: 213, Kind: telegrambot.IncomingCallback, UserID: 7, ChatID: 7,
+		CallbackID: "leader-confirm", CallbackData: confirmData,
+		CallbackOrigin: telegrambot.Message{ChatID: 7, MessageID: 10},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	policy := fixture.machine.State().LeaderPolicy
+	if policy.NodeID != "allowed" || policy.EffectiveMode() != domain.LeaderSelectionManual {
+		t.Fatalf("leader policy=%+v", policy)
+	}
+}
+
 func applySettingCallback(
 	t *testing.T,
 	fixture fixture,

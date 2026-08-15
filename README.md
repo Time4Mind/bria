@@ -1,7 +1,8 @@
 # Bria
 
-Bria is a fault-tolerant, multi-node Telegram control plane for Codex and
-Claude Code terminal sessions. It is a separate project from CCBot: both can
+Bria is a fault-tolerant, multi-node control plane for Codex and Claude Code
+terminal sessions. Telegram is the first interaction adapter, not part of the
+cluster core. Bria is a separate project from CCBot: both can
 run on the same host with independent processes, tmux namespaces, state, hooks,
 and Telegram bots.
 
@@ -12,8 +13,11 @@ cluster foundation.
 
 ## Product invariants
 
-- every node is a voting member and may become leader;
-- only the leader consumes Telegram updates;
+- every enabled node is a voting member and may become Raft leader;
+- leader selection is manual by default; the owner assigns it under
+  `Settings → Cluster`, while automatic selection is an explicit option;
+- only the selected node, while it is also the current Raft leader, runs
+  interactive adapters and cluster work; other nodes wait for it;
 - global metadata is replicated through Raft; raw provider transcripts remain
   on their origin node;
 - sessions use node-qualified identity and remain attached to their origin;
@@ -64,8 +68,9 @@ the pragmatic Go engineering contract in [CONTRIBUTING.md](CONTRIBUTING.md).
   untrusted Linux provider agents, keeping node keys, Telegram secrets, Raft,
   updates, and access decisions in a separate control identity, with an
   owner/admin-enforced policy selected independently for each node;
-- CCBot-compatible Telegram grids, actor-bound opaque callbacks, a bounded
-  Bot API client, private-DM parser, and leader-gated durable polling;
+- a transport-neutral interaction lifecycle plus CCBot-compatible Telegram
+  grids, actor-bound opaque callbacks, a bounded Bot API client, private-DM
+  parser, and leader-gated durable polling;
 - ordered text, voice, photo, and document intake pinned to the selected
   session, with direct target-node Telegram downloads, node-local whisper.cpp
   or macOS Apple Speech transcription, and archived `.bria-inbox` attachments;
@@ -85,8 +90,9 @@ the pragmatic Go engineering contract in [CONTRIBUTING.md](CONTRIBUTING.md).
   error, and action-required notifications, and configurable replicated
   dismissal after 1, 3, 5, or 10 switches into the session;
 - a cluster-wide Rich Markdown status table with per-node/provider quota
-  snapshots, data age, offline cache, async refresh, leader marking, a
-  confirmed 30-minute leadership preference, and global node sorting;
+  snapshots, data age, offline cache, async refresh, leader marking, and global
+  node sorting; persistent manual/automatic leader policy lives in cluster
+  settings rather than Status;
 - node-local Claude and Codex quota collectors with replicated normalized
   snapshots, five/ten-minute polling, daily budget tracking, unique-account
   threshold alerts, and no provider credentials or raw terminal output in

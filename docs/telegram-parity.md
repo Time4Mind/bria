@@ -46,7 +46,7 @@ current-leader, node ACL and exact-target checks as runtime input.
 | Archive inspect | Last transcript card page, then a separate paginated History surface | Inspect never expands the full transcript inline | Restore targets the original node; History is readable with view access |
 | Settings | Category list with nested setting screens and current values | Preserve the edit-in-place category hierarchy | `Interface and language`, `Card content`, and `Archive`; session view stays under Interface |
 | Auto-archive | `6h`, `12h`, `24h` choices, default `6h` | Preserve values; policy belongs to the session owner | No per-node variant |
-| Status | Compact usage view with `🔄 Refresh` and Menu-style back navigation | Preserve through the Rich Markdown renderer | Refresh first; `Select` / `Leader` / `Settings` modes, followed by server buttons and the cluster quota table |
+| Status | Compact usage view with `🔄 Refresh` and Menu-style back navigation | Preserve through the Rich Markdown renderer | Refresh first; `Select` / `Settings` modes, followed by server buttons and the cluster quota table. Leader policy lives under `Settings → Cluster` |
 | Provider auth | `/login`: Claude OAuth URL plus paste-back code; Codex device URL/code and automatic completion | Preserve the provider-native exchange inside the selected server's settings | mTLS current-leader routing; secrets stay on that server |
 | Interactive UI | Space/up/tab, left/down/right, Esc/Ctrl-C/Enter, then `🔙 Back`, `+ new`, `≡ Menu` | Preserve | Key buttons are owner-only |
 | History | `◀ Older`, `N/M`, `Newer ▶` | Preserve | Node badge; view access is sufficient |

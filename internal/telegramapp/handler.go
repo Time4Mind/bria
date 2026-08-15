@@ -284,6 +284,8 @@ func (h *Handler) handleCallback(
 		screen, err = h.projectStatus(actor, statusMode(callback.Token))
 	case telegramui.ActionStatusLeaderNode:
 		screen, err = h.confirmStatusLeader(actor, callback.Token)
+	case telegramui.ActionSetLeaderNode:
+		screen, err = h.confirmClusterLeader(actor, callback.Token)
 	case telegramui.ActionStatusSettingsNode:
 		if isLegacyNodeSessionsScreen(update.CallbackOrigin.Text) {
 			screen, err = h.openLegacyNodeSettingsFromSessions(actor, callback.Token)
@@ -298,6 +300,8 @@ func (h *Handler) handleCallback(
 		screen, err = h.backToNodeSpeechSettings(actor, callback.Token)
 	case telegramui.ActionConfirmLeader:
 		screen, err = h.applyStatusLeader(ctx, actor, callback.Token)
+	case telegramui.ActionSetLeaderMode:
+		screen, err = h.updateLeaderMode(ctx, actor, callback.Token)
 	case telegramui.ActionClusterAdd:
 		screen = telegramui.RenderEnrollmentMethods(h.copy(actor))
 	case telegramui.ActionClusterInvite:

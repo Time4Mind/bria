@@ -26,6 +26,7 @@ type State struct {
 	Quotas                  map[string]QuotaSnapshot          `json:"quotas,omitempty"`
 	ProviderAccountAliases  map[string]string                 `json:"provider_account_aliases,omitempty"`
 	QuotaRefreshRequestedAt time.Time                         `json:"quota_refresh_requested_at,omitempty"`
+	LeaderPolicy            LeaderPolicy                      `json:"leader_policy,omitempty"`
 	TemporaryLeader         TemporaryLeader                   `json:"temporary_leader,omitempty"`
 	TelegramBotID           int64                             `json:"telegram_bot_id,omitempty"`
 	TelegramNextUpdateID    int64                             `json:"telegram_next_update_id,omitempty"`
@@ -214,6 +215,7 @@ func (s *State) Clone() *State {
 		clone.ProviderAccountAliases[key] = alias
 	}
 	clone.QuotaRefreshRequestedAt = s.QuotaRefreshRequestedAt
+	clone.LeaderPolicy = s.LeaderPolicy
 	clone.TemporaryLeader = s.TemporaryLeader
 	if s.ClusterUpdate != nil {
 		update := cloneClusterUpdate(*s.ClusterUpdate)

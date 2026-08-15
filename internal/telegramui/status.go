@@ -40,14 +40,12 @@ type StatusInput struct {
 func RenderStatus(input StatusInput) Screen {
 	copy := input.Copy
 	mode := input.Mode
-	if mode != StatusLeader && mode != StatusSettings {
+	if mode != StatusSettings {
 		mode = StatusChoose
 	}
 	text := copy.Text(i18n.StatusTitle)
 	if mode == StatusChoose {
 		text += "\n\n" + statusTable(copy, input.Items, input.Now)
-	} else if mode == StatusLeader {
-		text += "\n\n" + copy.Text(i18n.StatusLeaderBody)
 	} else {
 		text += "\n\n" + copy.Text(i18n.StatusSettingsBody)
 	}
@@ -55,7 +53,6 @@ func RenderStatus(input StatusInput) Screen {
 		Row{button(copy.Text(i18n.ButtonRefresh), ActionStatusRefresh, OpaqueToken(mode))},
 		Row{
 			button(selectedLabel(mode == StatusChoose, copy.Text(i18n.StatusModeChoose)), ActionStatusMode, "choose"),
-			button(selectedLabel(mode == StatusLeader, copy.Text(i18n.StatusModeLeader)), ActionStatusMode, "leader"),
 			button(selectedLabel(mode == StatusSettings, copy.Text(i18n.StatusModeSettings)), ActionStatusMode, "settings"),
 		},
 	}
@@ -76,9 +73,6 @@ func RenderStatus(input StatusInput) Screen {
 			}
 		}
 		action, token := statusNodeAction(mode), item.Token
-		if item.Disabled && mode == StatusLeader {
-			action, token = ActionNoop, ""
-		}
 		rows = append(rows, Row{button(label, action, token)})
 	}
 	if len(input.Items) == 0 {
@@ -100,7 +94,7 @@ func RenderLeaderConfirmation(copy i18n.Localizer, nodeName string, token Opaque
 		Name: ScreenStatus, Text: copy.Format(i18n.StatusConfirmLeader, nodeName),
 		Grid: Grid{
 			Row{button(copy.Text(i18n.ButtonConfirm), ActionConfirmLeader, token)},
-			Row{button(copy.Text(i18n.ButtonCancel), ActionStatusMode, "leader")},
+			Row{button(copy.Text(i18n.ButtonCancel), ActionOpenSetting, OpaqueToken(SettingLeaderNode))},
 		},
 	}
 }
@@ -120,8 +114,6 @@ func RenderNodeSettings(
 
 func statusNodeAction(mode StatusMode) Action {
 	switch mode {
-	case StatusLeader:
-		return ActionStatusLeaderNode
 	case StatusSettings:
 		return ActionStatusSettingsNode
 	default:

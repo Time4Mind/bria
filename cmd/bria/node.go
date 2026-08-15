@@ -173,18 +173,18 @@ func runNode(arguments []string) error {
 		return fmt.Errorf("start node runtime control: %w", err)
 	}
 	defer runtimeControl.Close()
-	go maintainTemporaryLeader(ctx, node)
+	go maintainLeaderPolicy(ctx, node)
 	updateCoordinator, err := startUpdateCoordinator(ctx, node, nodeConfig, runtimeControl)
 	if err != nil {
 		return fmt.Errorf("start cluster update coordinator: %w", err)
 	}
 	fmt.Fprintf(os.Stderr, "bria node %s running at %s\n", nodeConfig.NodeID, nodeConfig.RaftAdvertise)
-	telegramErrors, err := startTelegram(ctx, node, nodeConfig, runtimeControl, updateCoordinator)
+	adapterErrors, err := startInteractionAdapters(ctx, node, nodeConfig, runtimeControl, updateCoordinator)
 	if err != nil {
-		return fmt.Errorf("start Telegram adapter: %w", err)
+		return fmt.Errorf("start interaction adapters: %w", err)
 	}
 	confirmRunningUpdate(nodeConfig)
-	return waitForNodeRuntime(ctx, runtimeControl, telegramErrors)
+	return waitForNodeRuntime(ctx, runtimeControl, adapterErrors)
 }
 
 func loadNodeTLS(nodeConfig config.Config) (tls.Certificate, *x509.CertPool, error) {

@@ -1,20 +1,18 @@
 # Go architecture
 
-Dependencies point inward. Telegram, CLI, network, Raft, tmux, and filesystem
-code may depend on application/domain contracts; the domain imports none of
-them.
+Dependencies point inward. Interaction transports, CLI, network, Raft, tmux,
+and filesystem code may depend on application/domain contracts; the domain
+imports none of them.
 
-```text
-Telegram / CLI
-      |
-application (actor-first authorization)
-      |
-versioned consensus commands
-      |
-HashiCorp Raft -> deterministic state machine -> snapshots
-      |
-node runtime ports -> tmux / provider / archive / transcript
-```
+![Bria interaction boundary](interaction-architecture.svg)
+
+The daemon starts interface implementations through the small
+`internal/interaction.Adapter` lifecycle. Telegram-specific polling, parsing,
+rendering, Bot API calls, and callback handling stay in the Telegram adapter
+packages. A future Web, Matrix, or native client supplies another adapter over
+the same application service and semantic screen/use-case contracts; it does
+not change domain, consensus, membership, or session-runtime packages. An
+architecture test rejects Telegram imports from those core packages.
 
 Each machine runs one `bria` control daemon. On untrusted Linux execution
 hosts, provider CLIs and tmux run in a separate non-root `bria runner` identity
@@ -35,8 +33,9 @@ Replicated:
 - node identity, display name, status and capabilities;
 - the sole Telegram owner and its automatically granted node set (legacy
   role/grant fields remain snapshot-compatible but are not exposed);
-- normalized per-node/provider quota snapshots, refresh requests and temporary
-  leader preference; provider credentials and raw quota output remain local;
+- normalized per-node/provider quota snapshots, refresh requests and the
+  manual/automatic leader policy; provider credentials and raw quota output
+  remain local;
 - session metadata, provider identifiers, owner and navigation (legacy grants
   remain decodable);
 - preferences, archive metadata and administrative audit events;
@@ -101,11 +100,15 @@ Telegram failure is downstream of durable command/event commit and cannot
 delay an agent ACK. UI refreshes re-authorize the sole owner so a changed owner
 identity stops old cards from updating.
 
-Only the current Raft leader long-polls Telegram. A leadership loss cancels the
-in-flight request; the next leader reloads the replicated cursor. Each update
-also scopes application operation IDs deterministically, so replay after an
-unknown cursor-commit outcome reuses the command ledger instead of duplicating
-the transition.
+Interactive adapters run only when local policy permits the current Raft
+leader. Manual mode is the default. Before the first assignment, the current
+leader exposes only the short leader-setup flow; after assignment, all other
+nodes wait for the selected node. Automatic mode allows the current Raft leader
+to serve immediately. For Telegram, leadership loss cancels the in-flight poll
+and the next permitted leader reloads the replicated cursor. Each update also
+scopes application operation IDs deterministically, so replay after an unknown
+cursor-commit outcome reuses the command ledger instead of duplicating the
+transition.
 
 ## Security
 
@@ -160,6 +163,14 @@ cluster may operate while both members are connected, but after either member
 is lost the survivor cannot safely elect itself without risking split brain.
 Bria never bypasses this Raft safety rule or implements forced two-node
 election logic.
+
+The leader policy does not alter quorum. A manually selected node must still
+win or receive legitimate Raft leadership before it can serve adapters. If the
+selected node is unavailable, followers wait; they do not elect a replacement
+for product work unless the owner enabled automatic selection. In a three-voter
+configuration, one surviving voter still cannot commit even when it is the
+preferred node. An intentionally reduced standalone deployment must first use
+the normal membership lifecycle to become a one-voter cluster.
 
 ## Go engineering standard
 

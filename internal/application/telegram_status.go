@@ -30,9 +30,7 @@ func (p *TelegramProjector) StatusModeWithReturn(
 	now := time.Now()
 	for _, node := range nodes {
 		action := telegramui.ActionSelectNode
-		if mode == telegramui.StatusLeader {
-			action = telegramui.ActionStatusLeaderNode
-		} else if mode == telegramui.StatusSettings {
+		if mode == telegramui.StatusSettings {
 			action = telegramui.ActionStatusSettingsNode
 		}
 		token, tokenErr := p.tokens.Node(actor.UserID, action, node.ID)
@@ -44,10 +42,6 @@ func (p *TelegramProjector) StatusModeWithReturn(
 			Leader: node.ID == leaderID, ObservedAt: node.LastSeenAt,
 			Quotas:   nodeQuotas(state, node),
 			Disabled: !node.Enabled(),
-		}
-		if item.Leader && state.TemporaryLeader.NodeID == node.ID &&
-			state.TemporaryLeader.Until.After(now) {
-			item.PinnedMinutes = max(1, int(state.TemporaryLeader.Until.Sub(now).Minutes()+0.999))
 		}
 		items = append(items, item)
 	}

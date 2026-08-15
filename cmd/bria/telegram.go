@@ -18,6 +18,7 @@ import (
 	"github.com/Time4Mind/bria/internal/consensus"
 	"github.com/Time4Mind/bria/internal/domain"
 	"github.com/Time4Mind/bria/internal/i18n"
+	"github.com/Time4Mind/bria/internal/interaction"
 	"github.com/Time4Mind/bria/internal/sessioncontrol"
 	"github.com/Time4Mind/bria/internal/sessionstart"
 	"github.com/Time4Mind/bria/internal/telegramapp"
@@ -25,13 +26,13 @@ import (
 	"github.com/Time4Mind/bria/internal/telegramui"
 )
 
-func startTelegram(
+func newTelegramAdapter(
 	ctx context.Context,
 	node *consensus.Node,
 	nodeConfig config.Config,
 	runtimeControl *nodeRuntimeControl,
 	updateCoordinator *clusterupdate.Coordinator,
-) (<-chan error, error) {
+) (interaction.Adapter, error) {
 	token, enabled, err := loadOptionalTelegramToken(nodeConfig.TelegramTokenFile)
 	if err != nil || !enabled {
 		return nil, err
@@ -51,6 +52,7 @@ func startTelegram(
 		return nil, err
 	}
 	service.SetLeadership(node)
+	adapterLeader := adapterLeadership{nodeID: domain.NodeID(nodeConfig.NodeID), node: node}
 	caCertificate, err := os.ReadFile(nodeConfig.CACertificate)
 	if err != nil {
 		return nil, fmt.Errorf("read enrollment CA certificate: %w", err)
@@ -83,12 +85,14 @@ func startTelegram(
 		return nil, err
 	}
 	handler, err := telegramapp.NewHandlerWithControlsAndLeadership(
-		service, projector, codec, client, controls, node,
+		service, projector, codec, client, controls, adapterLeader,
 	)
 	if err != nil {
 		return nil, err
 	}
-	starter, err := sessionstart.NewController(service, node.State(), runtimeControl.starts, node)
+	starter, err := sessionstart.NewController(
+		service, node.State(), runtimeControl.starts, adapterLeader,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -120,7 +124,7 @@ func startTelegram(
 		Interval:    time.Second,
 	})
 	go func() { _ = starter.Run(ctx) }()
-	go func() { _ = controls.RunDeferredInputs(ctx, node, 500*time.Millisecond) }()
+	go func() { _ = controls.RunDeferredInputs(ctx, adapterLeader, 500*time.Millisecond) }()
 	go func() {
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -146,7 +150,7 @@ func startTelegram(
 		return nil, err
 	}
 	poller, err := telegrambot.NewPoller(telegrambot.PollerConfig{
-		API: client, Leadership: node, Cursor: cursor, Handler: observedHandler,
+		API: client, Leadership: adapterLeader, Cursor: cursor, Handler: observedHandler,
 		LongPollTimeout: 30 * time.Second, LeadershipCheckInterval: 250 * time.Millisecond,
 		RetryDelay: time.Second, MaxCallbackAttempts: 5,
 		OnLeaderActivated: func(activationCtx context.Context) error {
@@ -190,12 +194,7 @@ func startTelegram(
 	if err != nil {
 		return nil, err
 	}
-	errorChannel := make(chan error, 1)
-	go func() {
-		errorChannel <- poller.Run(ctx)
-		close(errorChannel)
-	}()
-	return errorChannel, nil
+	return interaction.Func{AdapterName: "telegram", RunFunc: poller.Run}, nil
 }
 
 // telegramCallbackLogSuffix identifies a failed UI route without persisting

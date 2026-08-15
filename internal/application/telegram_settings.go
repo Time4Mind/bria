@@ -75,7 +75,22 @@ func (p *TelegramProjector) Setting(
 		return telegramui.Screen{}, err
 	}
 	preferences := state.Preferences[actor.UserID]
-	return telegramui.RenderSetting(settingsInput(state, actor.UserID, preferences), setting)
+	input := settingsInput(state, actor.UserID, preferences)
+	if setting == telegramui.SettingLeaderNode {
+		for _, node := range visibleNodes(state, actor) {
+			token, tokenErr := p.tokens.Node(
+				actor.UserID, telegramui.ActionSetLeaderNode, node.ID,
+			)
+			if tokenErr != nil {
+				return telegramui.Screen{}, tokenErr
+			}
+			input.LeaderNodes = append(input.LeaderNodes, telegramui.LeaderSettingNode{
+				Name: node.Name, Selected: state.LeaderPolicy.NodeID == node.ID,
+				Disabled: !node.Enabled() || node.Status == domain.NodeOffline, Token: token,
+			})
+		}
+	}
+	return telegramui.RenderSetting(input, setting)
 }
 
 func (p *TelegramProjector) preferences(actor Principal) (domain.UserPreferences, error) {
@@ -95,6 +110,10 @@ func settingsInput(
 	userID domain.UserID,
 	preferences domain.UserPreferences,
 ) telegramui.SettingsInput {
+	preferredLeader := ""
+	if node, ok := state.Nodes[state.LeaderPolicy.NodeID]; ok {
+		preferredLeader = node.Name
+	}
 	return telegramui.SettingsInput{
 		Copy:              i18n.For(string(preferences.EffectiveLanguage())),
 		AllHosts:          preferences.SessionView == domain.ViewAllHosts,
@@ -114,6 +133,8 @@ func settingsInput(
 		BackgroundDismiss: preferences.EffectiveBackgroundDismissSwitches(),
 		NodeSort:          string(preferences.EffectiveNodeSort()),
 		QuotaPollMinutes:  preferences.EffectiveQuotaPollMinutes(),
+		LeaderAutomatic:   state.LeaderPolicy.EffectiveMode() == domain.LeaderSelectionAutomatic,
+		PreferredLeader:   preferredLeader,
 		VoiceBackend:      string(preferences.EffectiveVoiceBackend()),
 		OfflineQueueLimit: preferences.EffectiveOfflineInputQueueLimit(),
 		ClusterAccounts:   clusterAccountSummary(state, userID),

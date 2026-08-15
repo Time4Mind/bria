@@ -1,0 +1,20 @@
+flowchart TD
+  STATUS["Статус"] --> SELECT["Выбор сервера"]
+  STATUS --> NODESET["Настройки сервера"]
+
+  SETTINGS["Настройки"] --> CLUSTER["Кластер"]
+  CLUSTER --> MODE{"Выбор лидера"}
+  MODE -->|"Ручной — по умолчанию"| NODE["Выбрать доступную ноду"]
+  NODE --> CONFIRM["Подтвердить постоянное назначение"]
+  CONFIRM --> TRANSFER["Передать лидерство по правилам Raft"]
+  MODE -->|"Автоматический"| AUTO["Работает текущий Raft-лидер"]
+
+  OFFLINE["Назначенный лидер недоступен"] --> WAIT["Остальные ноды ждут"]
+  QUORUM["Нет кворума"] --> BLOCKED["Работа не продолжается автоматически"]
+
+  classDef choice fill:#182334,stroke:#69b7ff,color:#e9f3ff
+  classDef primary fill:#173729,stroke:#56d39b,color:#ecfff6
+  classDef blocked fill:#3a2027,stroke:#f47c8d,color:#fff0f2
+  class STATUS,SETTINGS,MODE choice
+  class SELECT,NODESET,CLUSTER,NODE,CONFIRM,TRANSFER,AUTO primary
+  class OFFLINE,WAIT,QUORUM,BLOCKED blocked

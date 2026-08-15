@@ -25,6 +25,10 @@ need tests on the target before they are described as supported.
 
 - Keep dependencies pointing inward: transport and platform adapters depend on
   application/domain contracts, never the reverse.
+- Treat Telegram as one replaceable interaction adapter. Domain, consensus,
+  membership, and runtime packages must not import Telegram packages; new
+  interfaces enter through `internal/interaction.Adapter` and application
+  ports. Keep the architecture import test current when core packages change.
 - Define small interfaces at the point where they are consumed. Return concrete
   types unless callers need substitution.
 - Pass request-scoped `context.Context` as the first argument of blocking
