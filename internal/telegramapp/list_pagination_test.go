@@ -15,7 +15,7 @@ import (
 	"github.com/Time4Mind/bria/internal/transcript"
 )
 
-func TestMultibyteSessionPageFitsLegacyTelegramEdit(t *testing.T) {
+func TestMultibyteRichSessionPageReplacesLegacyCarrier(t *testing.T) {
 	fixture := newFixture(t)
 	ref := domain.SessionRef{NodeID: "allowed", SessionID: "live"}
 	controls := &blockingControls{ref: ref, events: []transcript.Event{{
@@ -45,10 +45,16 @@ func TestMultibyteSessionPageFitsLegacyTelegramEdit(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if len(fixture.messenger.edited) != 1 {
-		t.Fatalf("edits=%d", len(fixture.messenger.edited))
+	if len(fixture.messenger.edited) != 0 || len(fixture.messenger.sent) != 1 {
+		t.Fatalf("edits=%d sends=%d", len(fixture.messenger.edited), len(fixture.messenger.sent))
 	}
-	if size := len(fixture.messenger.edited[0].Text); size > telegrambot.MaxMessageTextBytes {
+	if !fixture.messenger.sent[0].RichMarkdown {
+		t.Fatalf("replacement is not rich: %#v", fixture.messenger.sent[0])
+	}
+	if len(fixture.messenger.deleted) != 1 || fixture.messenger.deleted[0].MessageID != 50 {
+		t.Fatalf("obsolete carrier=%#v", fixture.messenger.deleted)
+	}
+	if size := len(fixture.messenger.sent[0].Text); size > telegrambot.MaxMessageTextBytes {
 		t.Fatalf("session page has %d encoded bytes", size)
 	}
 }

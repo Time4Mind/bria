@@ -367,11 +367,11 @@ func (h *Handler) handleCallback(
 	targetRich := screen.RichMarkdown || screen.Pane != nil
 	replaceCarrier := update.CallbackOrigin.Rich && !targetRich
 	if !update.CallbackOrigin.Rich && targetRich {
-		switch callback.Action {
-		case telegramui.ActionStatus, telegramui.ActionStatusRefresh,
-			telegramui.ActionSelectSession, telegramui.ActionSelectArchive:
-			replaceCarrier = true
-		}
+		// A legacy card cannot acquire Rich Markdown by being edited through the
+		// legacy endpoint: Telegram accepts the text but shows details, fences,
+		// and tables literally. Replace it on the first transition regardless of
+		// which action exposed the rich screen (including Sessions and paging).
+		replaceCarrier = true
 	}
 	if replaceCarrier {
 		// Telegram cannot safely change carrier type in place. In particular,

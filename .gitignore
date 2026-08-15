@@ -21,10 +21,35 @@ state.json
 coverage.out
 *.test
 
-# Agent instructions and state are strictly local.
+# Agent instructions, memory, skills, and state are strictly local.
+AGENT.md
 AGENTS.md
+agent.md
+agents.md
+CLAUDE.md
+claude.md
+MEMORY.md
+memory.md
+SKILL.md
+skill.md
+GEMINI.md
+gemini.md
+.agent/
 .agents/
+.claude/
 .codex/
+.gemini/
+.aider*
+.cline/
+.continue/
+.cursor/
+.junie/
+.openhands/
+.roo/
+.windsurf/
+.ccbot-inbox/
+.github/copilot-instructions.md
+.github/instructions/
 
 # Runtime state and credentials must never enter source control.
 secrets/
@@ -32,6 +57,8 @@ secrets/
 *.pem
 *.crt
 *.token
+*.session
+*.session-journal
 *.db
 *.db-*
 *.bolt
