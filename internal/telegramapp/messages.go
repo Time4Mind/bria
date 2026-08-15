@@ -2,6 +2,7 @@ package telegramapp
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"strings"
@@ -155,8 +156,16 @@ func (h *Handler) rememberResponseCard(
 		ChatID: message.ChatID, MessageID: message.MessageID, Rich: message.Rich,
 		RichMediaFileID: message.RichMediaFileID, PaneHash: message.PaneHash,
 	}
+	if exists && previous == card {
+		return
+	}
+	fingerprint := sha256.Sum256([]byte(fmt.Sprintf(
+		"%d:%d:%t:%s:%s", card.ChatID, card.MessageID, card.Rich,
+		card.RichMediaFileID, card.PaneHash,
+	)))
 	recordCtx := application.WithOperationScope(
-		ctx, fmt.Sprintf("telegram-response-card-%d-%d", card.ChatID, card.MessageID),
+		ctx, fmt.Sprintf("telegram-response-card-%d-%d-%x",
+			card.ChatID, card.MessageID, fingerprint[:8]),
 	)
 	if err := h.service.RecordTelegramResponseCard(recordCtx, actor, card); err != nil {
 		return
@@ -174,6 +183,19 @@ func (h *Handler) rememberResponseCard(
 		return
 	}
 	_ = h.messenger.ClearKeyboard(ctx, previousMessage)
+}
+
+func (h *Handler) editResponseCard(
+	ctx context.Context,
+	actor application.Principal,
+	message telegrambot.Message,
+	screen telegramui.Screen,
+) (telegrambot.Message, error) {
+	edited, err := h.messenger.EditScreen(ctx, message, screen)
+	if err == nil {
+		h.rememberResponseCard(ctx, actor, edited)
+	}
+	return edited, err
 }
 
 func (h *Handler) sendProjected(

@@ -117,7 +117,7 @@ func (h *Handler) refreshActiveInteractive(
 		h.rememberResponseCard(ctx, actor, message)
 		return true
 	}
-	_, err = h.messenger.EditScreen(ctx, telegramMessage(card), screen)
+	_, err = h.editResponseCard(ctx, actor, telegramMessage(card), screen)
 	return err == nil
 }
 

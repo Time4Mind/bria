@@ -18,6 +18,7 @@ const (
 	DefaultCardPageBytes  = 3000
 	cardEventJoiner       = "\n\n\u00a0\n\n"
 	defaultTechnicalLines = 15
+	maxTechnicalSummary   = 64
 )
 
 type CardRenderOptions struct {
@@ -187,6 +188,7 @@ func expandableCardBlock(head, body string, runeLimit, byteLimit, maxLines int) 
 	if body == "" {
 		return boundCardBlock(head, runeLimit, byteLimit)
 	}
+	head = truncateRunes(head, maxTechnicalSummary)
 	escapedHead := html.EscapeString(head)
 	body = escapeDetailsClose(body)
 	prefix := "<details><summary>" + escapedHead + "</summary>\n\n"

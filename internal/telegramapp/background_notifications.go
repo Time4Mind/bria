@@ -161,7 +161,7 @@ func (h *Handler) refreshBackgroundPanel(ctx context.Context, userID domain.User
 	if err != nil {
 		return false
 	}
-	_, err = h.messenger.EditScreen(ctx, telegramMessage(card), screen)
+	_, err = h.editResponseCard(ctx, actor, telegramMessage(card), screen)
 	return err == nil
 }
 
@@ -188,9 +188,10 @@ func (h *Handler) settleRunningSessions(ctx context.Context) {
 			)
 			if err == nil {
 				if h.settleFromTranscript(ctx, candidate.Actor, candidate.Session, events) {
-					go h.deliverFinalFiles(
-						ctx, candidate.Actor, candidate.Session.Ref(), events,
-					)
+					active, activeErr := h.service.ActiveSession(candidate.Actor)
+					if activeErr == nil && active.Ref() == candidate.Session.Ref() {
+						h.refreshBackgroundPanel(ctx, candidate.Actor.UserID)
+					}
 				}
 			}
 		}()

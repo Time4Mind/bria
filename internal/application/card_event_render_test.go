@@ -204,6 +204,23 @@ func TestCardRendererBoundsTechnicalBlockWithoutBreakingDetails(t *testing.T) {
 	}
 }
 
+func TestCardRendererBoundsExpandableSummaryLikeCCBot(t *testing.T) {
+	page := application.RenderCardEventPages(
+		domain.DefaultUserPreferences(), []application.CardEvent{{
+			Kind: application.CardEventToolCall,
+			Text: strings.Repeat("long-tool-name-", 10), Body: "details",
+		}}, fixedCardOptions(3500),
+	).Latest.RichMarkdown
+	summaryEnd := strings.Index(page, "</summary>")
+	if summaryEnd < 0 {
+		t.Fatalf("details summary missing: %q", page)
+	}
+	summary := strings.TrimPrefix(page[:summaryEnd], "<details><summary>")
+	if utf8.RuneCountInString(summary) > 64 || !strings.HasSuffix(summary, "…") {
+		t.Fatalf("summary was not bounded to one compact line: %q", summary)
+	}
+}
+
 func TestCardRendererLimitsTechnicalLinesAndKeepsFinalAnswer(t *testing.T) {
 	lines := make([]string, 25)
 	for index := range lines {

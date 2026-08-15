@@ -19,7 +19,83 @@ func buildRichTextMessage(text string) (richMessage, error) {
 }
 
 func normalizeRichMarkdown(text string) string {
-	return normalizeRichTables(normalizeRichShellFences(text))
+	text = normalizeRichTables(normalizeRichShellFences(text))
+	return escapeUnsupportedRichTags(text)
+}
+
+var allowedRichTags = map[string]struct{}{
+	"a": {}, "aside": {}, "audio": {}, "b": {}, "blockquote": {}, "br": {},
+	"caption": {}, "cite": {}, "code": {}, "del": {}, "details": {}, "em": {},
+	"figcaption": {}, "figure": {}, "footer": {}, "h1": {}, "h2": {}, "h3": {},
+	"h4": {}, "h5": {}, "h6": {}, "hr": {}, "i": {}, "img": {}, "ins": {},
+	"li": {}, "mark": {}, "ol": {}, "p": {}, "pre": {}, "s": {}, "strike": {},
+	"strong": {}, "sub": {}, "summary": {}, "sup": {}, "table": {}, "tbody": {},
+	"td": {}, "tfoot": {}, "th": {}, "thead": {}, "tr": {}, "u": {}, "ul": {},
+	"video":      {},
+	"tg-collage": {}, "tg-emoji": {}, "tg-map": {}, "tg-math": {},
+	"tg-math-block": {}, "tg-reference": {}, "tg-slideshow": {}, "tg-spoiler": {},
+	"tg-time": {},
+}
+
+// Telegram's Rich Markdown parser silently consumes unknown tag-shaped text.
+// Agent transcripts routinely contain XML-like context or tool output, so
+// mirror CCBot and escape every unsupported '<' outside Markdown code. Native
+// Rich tags, including the <details> blocks used for tool calls, stay intact.
+func escapeUnsupportedRichTags(text string) string {
+	var result strings.Builder
+	result.Grow(len(text))
+	for index := 0; index < len(text); {
+		if strings.HasPrefix(text[index:], "```") {
+			closing := strings.Index(text[index+3:], "```")
+			if closing < 0 {
+				result.WriteString(text[index:])
+				break
+			}
+			closing += index + 6
+			result.WriteString(text[index:closing])
+			index = closing
+			continue
+		}
+		if text[index] == '`' {
+			closing := strings.IndexByte(text[index+1:], '`')
+			newline := strings.IndexByte(text[index+1:], '\n')
+			if closing >= 0 && (newline < 0 || closing < newline) {
+				closing += index + 2
+				result.WriteString(text[index:closing])
+				index = closing
+				continue
+			}
+		}
+		if text[index] == '<' && !startsAllowedRichTag(text[index:]) {
+			result.WriteString("&lt;")
+			index++
+			continue
+		}
+		result.WriteByte(text[index])
+		index++
+	}
+	return result.String()
+}
+
+func startsAllowedRichTag(text string) bool {
+	if len(text) < 3 || text[0] != '<' {
+		return false
+	}
+	end := strings.IndexByte(text, '>')
+	if end < 0 || end > 512 {
+		return false
+	}
+	content := strings.TrimSpace(text[1:end])
+	content = strings.TrimPrefix(content, "/")
+	if content == "" {
+		return false
+	}
+	nameEnd := strings.IndexAny(content, " \t\r\n/")
+	if nameEnd >= 0 {
+		content = content[:nameEnd]
+	}
+	_, ok := allowedRichTags[strings.ToLower(content)]
+	return ok
 }
 
 var copyableRichShellLanguages = map[string]struct{}{

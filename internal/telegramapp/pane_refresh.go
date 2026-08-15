@@ -78,7 +78,7 @@ func (h *Handler) runPaneRefresh(
 		if session.RuntimePhase == domain.RuntimeWaitingInput {
 			screen, renderErr := h.renderSessionCard(ctx, actor, ref, 0)
 			if renderErr == nil {
-				_, _ = h.messenger.EditScreen(ctx, message, screen)
+				_, _ = h.editResponseCard(ctx, actor, message, screen)
 			}
 			return
 		}
@@ -88,7 +88,7 @@ func (h *Handler) runPaneRefresh(
 		if session.RuntimePhase == domain.RuntimeIdle {
 			screen, renderErr := h.renderSessionCard(ctx, actor, ref, 0)
 			if renderErr == nil {
-				_, _ = h.messenger.EditScreen(ctx, message, screen)
+				_, _ = h.editResponseCard(ctx, actor, message, screen)
 			}
 			return
 		}
@@ -96,7 +96,7 @@ func (h *Handler) runPaneRefresh(
 			if session.RuntimePhase == domain.RuntimeDegraded {
 				screen, renderErr := h.renderSessionCard(ctx, actor, ref, 0)
 				if renderErr == nil {
-					_, _ = h.messenger.EditScreen(ctx, message, screen)
+					_, _ = h.editResponseCard(ctx, actor, message, screen)
 				}
 			}
 			return
@@ -120,7 +120,14 @@ func (h *Handler) runPaneRefresh(
 		if preferencesErr == nil && shouldAttachPane(preferences, panePhase) {
 			h.attachPane(ctx, actor, ref, message, generation, attempt, &snapshot.screen)
 		}
-		message, err = h.messenger.EditScreen(ctx, message, snapshot.screen)
+		if settled {
+			message, err = h.editResponseCard(ctx, actor, message, snapshot.screen)
+		} else {
+			// Keep high-frequency live-pane edits local to this worker. Replicating
+			// every screenshot hash would add avoidable Raft traffic; durable
+			// transport metadata is needed only at a settled interaction boundary.
+			message, err = h.messenger.EditScreen(ctx, message, snapshot.screen)
+		}
 		if err != nil {
 			return
 		}
