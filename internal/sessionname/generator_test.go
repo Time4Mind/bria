@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 type runnerStub struct {
@@ -66,6 +67,28 @@ func TestGeneratorRejectsRefusals(t *testing.T) {
 	}
 	if _, err := generator.Generate(context.Background(), "claude", "sensitive seed"); err == nil {
 		t.Fatal("refusal unexpectedly became a session name")
+	}
+}
+
+func TestGeneratorTruncatesLongUnicodeSeedOnRuneBoundary(t *testing.T) {
+	runner := &runnerStub{stdout: []byte("windows-node")}
+	generator, err := NewGenerator(runner, map[string]Command{
+		"codex": {Executable: "codex", Model: "gpt-mini"},
+	}, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seed := strings.Repeat("длинный русский запрос ", 20)
+	truncated := truncateUTF8(strings.Join(strings.Fields(seed), " "), 200)
+	if len(truncated) > 200 || !utf8.ValidString(truncated) {
+		t.Fatalf("invalid truncated seed: bytes=%d value=%q", len(truncated), truncated)
+	}
+	if _, err := generator.Generate(context.Background(), "codex", seed); err != nil {
+		t.Fatal(err)
+	}
+	prompt := runner.args[len(runner.args)-1]
+	if !utf8.ValidString(prompt) || !strings.Contains(prompt, truncated) {
+		t.Fatalf("naming prompt contains invalid UTF-8: %q", prompt)
 	}
 }
 

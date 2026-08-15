@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 const promptTemplate = "Generate a 2 word kebab-case name (lowercase, hyphenated, exactly two words) for a coding session about: %s\nReply with only the name, no quotes."
@@ -65,9 +66,7 @@ func (g *Generator) Generate(ctx context.Context, backend, seed string) (string,
 		return "", errors.New("unsupported naming backend")
 	}
 	seed = strings.Join(strings.Fields(seed), " ")
-	if len(seed) > 200 {
-		seed = seed[:200]
-	}
+	seed = truncateUTF8(seed, 200)
 	if seed == "" {
 		return "", errors.New("naming seed is empty")
 	}
@@ -83,6 +82,17 @@ func (g *Generator) Generate(ctx context.Context, backend, seed string) (string,
 		return "", errors.New("naming command failed")
 	}
 	return sanitize(stdout)
+}
+
+func truncateUTF8(text string, maxBytes int) string {
+	if len(text) <= maxBytes {
+		return text
+	}
+	cut := maxBytes
+	for cut > 0 && !utf8.RuneStart(text[cut]) {
+		cut--
+	}
+	return text[:cut]
 }
 
 func namingCommand(backend, model, prompt string) ([]string, []string) {
