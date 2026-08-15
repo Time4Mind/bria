@@ -86,7 +86,7 @@ func NewClient(config ClientConfig) (*Client, error) {
 	}
 	richRequestTimeout := config.RichRequestTimeout
 	if richRequestTimeout <= 0 || richRequestTimeout > requestTimeout {
-		richRequestTimeout = min(requestTimeout, 1200*time.Millisecond)
+		richRequestTimeout = min(requestTimeout, 3*time.Second)
 	}
 	fileRequestTimeout := config.FileRequestTimeout
 	if fileRequestTimeout <= 0 {

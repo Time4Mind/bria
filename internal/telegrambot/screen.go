@@ -3,6 +3,7 @@ package telegrambot
 import (
 	"context"
 	"fmt"
+	"log"
 
 	"github.com/Time4Mind/bria/internal/telegramui"
 )
@@ -20,8 +21,11 @@ func (c *Client) SendScreen(
 		if richErr == nil {
 			return message, nil
 		}
+		log.Printf("bria telegram: rich send failed; using expandable fallback: %v", richErr)
+		fallbackText := richFallbackMarkdownV2(screen)
 		fallback, fallbackErr := c.SendMessage(ctx, MessageRequest{
-			ChatID: chatID, Text: richFallbackText(screen), Grid: screen.Grid,
+			ChatID: chatID, Text: fallbackText, ParseMode: telegramui.ParseModeMarkdownV2,
+			Grid: screen.Grid,
 		})
 		if fallbackErr != nil {
 			return Message{}, fmt.Errorf("rich screen failed: %v; text fallback: %w", richErr, fallbackErr)
@@ -53,9 +57,11 @@ func (c *Client) EditScreen(
 		return Message{}, richErr
 	}
 	if screen.Pane != nil || screen.RichMarkdown {
+		fallbackText := richFallbackMarkdownV2(screen)
 		return c.EditMessage(ctx, EditMessageRequest{
 			ChatID: message.ChatID, MessageID: message.MessageID,
-			Text: richFallbackText(screen), Grid: screen.Grid,
+			Text: fallbackText, ParseMode: telegramui.ParseModeMarkdownV2,
+			Grid: screen.Grid,
 		})
 	}
 	return c.EditMessage(ctx, EditMessageRequest{

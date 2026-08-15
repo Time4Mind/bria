@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"html"
 	"strings"
 	"unicode/utf8"
 
@@ -212,14 +211,6 @@ func subWrapRichTableRow(line string) string {
 		}
 	}
 	return "|" + strings.Join(cells, "|") + "|"
-}
-
-func richFallbackText(screen telegramui.Screen) string {
-	text := screen.Text
-	text = strings.ReplaceAll(text, "<details><summary>", "")
-	text = strings.ReplaceAll(text, "</summary>\n\n", "\n")
-	text = strings.ReplaceAll(text, "</details>", "")
-	return html.UnescapeString(text)
 }
 
 const (

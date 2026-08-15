@@ -129,8 +129,9 @@ func TestRichTextScreenNeedsNoMediaAndFallsBackWithoutDetailsMarkup(t *testing.T
 		if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
 			t.Fatal(err)
 		}
-		if strings.Contains(payload.Text, "<details>") ||
-			!strings.Contains(payload.Text, "✓ Bash\necho ok") {
+		if payload.ParseMode != string(telegramui.ParseModeMarkdownV2) ||
+			strings.Contains(payload.Text, "<details>") ||
+			!strings.Contains(payload.Text, ">✓ Bash\n>echo ok||") {
 			t.Fatalf("fallback text=%q", payload.Text)
 		}
 		writeJSON(t, writer, map[string]any{
@@ -167,7 +168,6 @@ func TestRichTextNormalizesNativeMarkdownTableLikeCCBot(t *testing.T) {
 		t.Fatalf("rich table=\n%s\nwant=\n%s", rich.Markdown, want)
 	}
 }
-
 func TestRichUploadEditClearsStaleFileIDWhenTelegramReturnsTrue(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if !strings.HasPrefix(request.Header.Get("Content-Type"), "multipart/form-data") {
