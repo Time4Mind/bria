@@ -84,8 +84,9 @@ func TestCarrierFlowArchiveRestoreReturnsToLiveCard(t *testing.T) {
 	invokeCarrierAction(t, handler, 530, origin, telegramui.ActionArchive, "")
 	invokeCarrierData(t, handler, 531, origin,
 		callbackForAction(t, lastEdited(t, fixture), telegramui.ActionSelectArchive))
+	inspect := lastEdited(t, fixture)
 	invokeCarrierData(t, handler, 532, origin,
-		callbackForAction(t, lastEdited(t, fixture), telegramui.ActionRestore))
+		callbackForAction(t, inspect, telegramui.ActionRestore))
 	card := lastEdited(t, fixture)
 	if card.Name != telegramui.ScreenSessionCard || !strings.Contains(card.Text, "Archived · Allowed") {
 		t.Fatalf("restored card=%#v", card)
@@ -115,17 +116,18 @@ func TestCarrierFlowArchiveInspectHistoryAndBack(t *testing.T) {
 	list := lastEdited(t, fixture)
 	invokeCarrierData(t, handler, 511, origin,
 		callbackForAction(t, list, telegramui.ActionSelectArchive))
-	inspect := lastEdited(t, fixture)
+	inspect := lastSent(t, fixture)
 	if !strings.Contains(inspect.Text, "latest page") {
 		t.Fatalf("inspect=%#v", inspect)
 	}
-	invokeCarrierData(t, handler, 512, origin,
+	richOrigin := telegrambot.Message{ChatID: 7, MessageID: 506, Rich: true}
+	invokeCarrierData(t, handler, 512, richOrigin,
 		callbackForAction(t, inspect, telegramui.ActionArchiveHistory))
 	history := lastEdited(t, fixture)
 	if !strings.Contains(telegramui.CanonicalGrid(history.Grid), "history_prev") {
 		t.Fatalf("history=%#v", history)
 	}
-	invokeCarrierData(t, handler, 513, origin,
+	invokeCarrierData(t, handler, 513, richOrigin,
 		callbackForAction(t, history, telegramui.ActionSelectArchive))
 	if back := lastEdited(t, fixture); !strings.Contains(back.Text, "latest page") {
 		t.Fatalf("inspect back=%#v", back)
@@ -229,4 +231,12 @@ func lastEdited(t *testing.T, fixture fixture) telegramui.Screen {
 		t.Fatal("no carrier edit")
 	}
 	return fixture.messenger.edited[len(fixture.messenger.edited)-1]
+}
+
+func lastSent(t *testing.T, fixture fixture) telegramui.Screen {
+	t.Helper()
+	if len(fixture.messenger.sent) == 0 {
+		t.Fatal("no new carrier")
+	}
+	return fixture.messenger.sent[len(fixture.messenger.sent)-1]
 }

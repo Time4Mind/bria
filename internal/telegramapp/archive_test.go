@@ -34,7 +34,7 @@ func TestArchiveInspectShowsLastPageAndSeparateHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 	invokeArchiveCallback(t, handler, 91, telegramui.ActionSelectArchive, inspectToken)
-	inspect := fixture.messenger.edited[len(fixture.messenger.edited)-1]
+	inspect := fixture.messenger.sent[len(fixture.messenger.sent)-1]
 	if !strings.Contains(inspect.Text, "last archived answer") ||
 		strings.Contains(inspect.Text, "first archived answer") {
 		t.Fatalf("inspect text=%q", inspect.Text)
@@ -135,7 +135,9 @@ func invokeArchiveCallback(
 	if err := handler.HandleTelegramUpdate(context.Background(), telegrambot.IncomingUpdate{
 		UpdateID: updateID, Kind: telegrambot.IncomingCallback,
 		UserID: 7, ChatID: 7, CallbackID: "archive", CallbackData: data,
-		CallbackOrigin: telegrambot.Message{ChatID: 7, MessageID: 20},
+		CallbackOrigin: telegrambot.Message{
+			ChatID: 7, MessageID: 20, Rich: action != telegramui.ActionSelectArchive,
+		},
 	}); err != nil {
 		t.Fatal(err)
 	}

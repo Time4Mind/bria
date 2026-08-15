@@ -342,10 +342,10 @@ func TestHiddenTechnicalEventsLeaveOnlyAssistantNarrative(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if len(fixture.messenger.edited) != 1 {
-		t.Fatalf("edits=%#v", fixture.messenger.edited)
+	if len(fixture.messenger.sent) != 1 {
+		t.Fatalf("sent=%#v", fixture.messenger.sent)
 	}
-	screen := fixture.messenger.edited[0]
+	screen := fixture.messenger.sent[0]
 	if !strings.Contains(screen.Text, "Visible answer") {
 		t.Fatalf("assistant answer missing: %q", screen.Text)
 	}
@@ -389,7 +389,7 @@ func TestTranscriptPageButtonsResolveOpaqueTargetPage(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	latest := fixture.messenger.edited[len(fixture.messenger.edited)-1]
+	latest := fixture.messenger.sent[len(fixture.messenger.sent)-1]
 	if !strings.Contains(latest.Text, "Second answer") || strings.Contains(latest.Text, "First answer") ||
 		!strings.Contains(telegramui.CanonicalGrid(latest.Grid), "2/2") {
 		t.Fatalf("latest page=%#v", latest)
@@ -402,7 +402,7 @@ func TestTranscriptPageButtonsResolveOpaqueTargetPage(t *testing.T) {
 	if err := handler.HandleTelegramUpdate(context.Background(), telegrambot.IncomingUpdate{
 		UpdateID: 91, Kind: telegrambot.IncomingCallback, ChatID: 7, UserID: 7,
 		CallbackID: "previous", CallbackData: previousData,
-		CallbackOrigin: telegrambot.Message{ChatID: 7, MessageID: 10},
+		CallbackOrigin: telegrambot.Message{ChatID: 7, MessageID: 10, Rich: true},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -419,7 +419,7 @@ func TestTranscriptPageButtonsResolveOpaqueTargetPage(t *testing.T) {
 	if err := handler.HandleTelegramUpdate(context.Background(), telegrambot.IncomingUpdate{
 		UpdateID: 92, Kind: telegrambot.IncomingCallback, ChatID: 7, UserID: 7,
 		CallbackID: "wrapped-previous", CallbackData: wrappedData,
-		CallbackOrigin: telegrambot.Message{ChatID: 7, MessageID: 10},
+		CallbackOrigin: telegrambot.Message{ChatID: 7, MessageID: 10, Rich: true},
 	}); err != nil {
 		t.Fatal(err)
 	}

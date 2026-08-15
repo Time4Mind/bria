@@ -364,10 +364,19 @@ func (h *Handler) handleCallback(
 		}
 	}
 	var edited telegrambot.Message
-	if screen.Name == telegramui.ScreenStatus && screen.RichMarkdown && !update.CallbackOrigin.Rich {
-		// Telegram cannot change a legacy message into a Rich Markdown carrier
-		// through editMessageText. Send the native table first, then remove the
-		// obsolete menu/status card so the transition still leaves one screen.
+	targetRich := screen.RichMarkdown || screen.Pane != nil
+	replaceCarrier := update.CallbackOrigin.Rich && !targetRich
+	if !update.CallbackOrigin.Rich && targetRich {
+		switch callback.Action {
+		case telegramui.ActionStatus, telegramui.ActionStatusRefresh,
+			telegramui.ActionSelectSession, telegramui.ActionSelectArchive:
+			replaceCarrier = true
+		}
+	}
+	if replaceCarrier {
+		// Telegram cannot safely change carrier type in place. In particular,
+		// legacy-to-rich flattens details and media, while rich-to-legacy can
+		// retain stale media. Replace atomically so settings never corrupt a card.
 		edited, err = h.messenger.SendScreen(ctx, update.ChatID, screen)
 		if err == nil {
 			_ = h.messenger.DeleteMessage(ctx, update.CallbackOrigin)
