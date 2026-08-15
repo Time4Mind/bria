@@ -14,7 +14,7 @@ func TestReaderParsesClaudeEventsAndIgnoresImages(t *testing.T) {
 	writeTestFile(t, path, `{"type":"user","timestamp":"2026-01-01T00:00:00Z","message":{"content":[{"type":"text","text":"hello"}]}}
 {"type":"assistant","timestamp":"2026-01-01T00:00:01Z","message":{"stop_reason":"tool_use","content":[{"type":"thinking","thinking":"inspect safely"},{"type":"text","text":"I will inspect it."},{"type":"tool_use","id":"tool-1","name":"Read","input":{"file_path":"README.md"}}]}}
 {"type":"user","timestamp":"2026-01-01T00:00:02Z","message":{"content":[{"type":"tool_result","tool_use_id":"tool-1","is_error":true,"content":[{"type":"text","text":"<tool_use_error>denied</tool_use_error>"},{"type":"image","source":{"type":"base64","data":"aW1hZ2U="}}]}]}}
-{"type":"assistant","timestamp":"2026-01-01T00:00:03Z","message":{"stop_reason":"end_turn","content":[{"type":"text","text":"Done."}]}}
+{"type":"assistant","timestamp":"2026-01-01T00:00:03Z","message":{"stop_reason":"end_turn","model":"claude-haiku-4-5","usage":{"input_tokens":1000,"cache_creation_input_tokens":2000,"cache_read_input_tokens":37000},"content":[{"type":"text","text":"Done."}]}}
 `)
 
 	events, err := newTestReader(t, layout, nil).Read(context.Background(), Request{
@@ -46,6 +46,9 @@ func TestReaderParsesClaudeEventsAndIgnoresImages(t *testing.T) {
 	}
 	if events[5].Text != "Done." || events[5].Timestamp != "2026-01-01T00:00:03Z" {
 		t.Errorf("unexpected final event: %#v", events[5])
+	}
+	if events[5].ContextPercent == nil || *events[5].ContextPercent != 20 {
+		t.Errorf("Claude context percent = %#v, want 20", events[5].ContextPercent)
 	}
 }
 

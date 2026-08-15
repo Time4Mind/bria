@@ -106,9 +106,16 @@ func (h *Handler) runPaneRefresh(
 		// idle before this live-card worker gets its next turn. Render once more
 		// so that race cannot leave the Telegram card on a tool result or pane.
 		if session.RuntimePhase == domain.RuntimeIdle {
-			screen, renderErr := h.renderSessionCard(ctx, actor, ref, 0)
+			snapshot, renderErr := h.renderSessionCardSnapshot(ctx, actor, ref, 0)
 			if renderErr == nil {
-				_, _ = h.editResponseCard(ctx, actor, message, screen)
+				if finalAt, ok := finalTranscriptAt(snapshot.events); ok &&
+					transcriptFinalBelongsToCurrentTurn(session, finalAt, time.Now()) {
+					_, _ = h.repostFinalResponseCard(
+						ctx, actor, message, ref, snapshot.screen,
+					)
+				} else {
+					_, _ = h.editResponseCard(ctx, actor, message, snapshot.screen)
+				}
 			}
 			return
 		}
@@ -140,7 +147,9 @@ func (h *Handler) runPaneRefresh(
 		if preferencesErr == nil && shouldAttachPane(preferences, panePhase) {
 			h.attachPane(ctx, actor, ref, message, generation, attempt, &snapshot.screen)
 		}
-		if settled || (!message.Rich && (snapshot.screen.RichMarkdown || snapshot.screen.Pane != nil)) {
+		if settled {
+			message, err = h.repostFinalResponseCard(ctx, actor, message, ref, snapshot.screen)
+		} else if !message.Rich && (snapshot.screen.RichMarkdown || snapshot.screen.Pane != nil) {
 			message, err = h.editResponseCard(ctx, actor, message, snapshot.screen)
 		} else {
 			// Keep high-frequency live-pane edits local to this worker. Replicating

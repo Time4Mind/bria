@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -20,6 +21,7 @@ import (
 )
 
 type blockingControls struct {
+	mu       sync.RWMutex
 	started  chan struct{}
 	release  chan struct{}
 	ref      domain.SessionRef
@@ -99,6 +101,7 @@ func TestReplaceResponseCardsDeletesThePreviousReplicatedCard(t *testing.T) {
 func TestPaneRefreshRendersFinalAnswerWhenRuntimeAlreadySettledIdle(t *testing.T) {
 	fixture := newFixture(t)
 	fixture.messenger.sendNotify = make(chan struct{}, 2)
+	fixture.messenger.deleteNotify = make(chan struct{}, 1)
 	ref := domain.SessionRef{NodeID: "allowed", SessionID: "live"}
 	controls := &blockingControls{ref: ref, events: []transcript.Event{
 		{Kind: transcript.EventToolResult, Head: "Bash", Body: "tool completed"},
@@ -126,12 +129,16 @@ func TestPaneRefreshRendersFinalAnswerWhenRuntimeAlreadySettledIdle(t *testing.T
 	case <-time.After(2 * time.Second):
 		t.Fatal("settled idle card was not promoted to a rich final card")
 	}
+	waitTestNotification(t, fixture.messenger.deleteNotify, "old active carrier was not deleted")
 	if len(fixture.messenger.sent) < 2 {
 		t.Fatal("settled idle card was not promoted to a rich final card")
 	}
 	latest := fixture.messenger.sent[len(fixture.messenger.sent)-1].Text
 	if !strings.Contains(latest, "FINAL ANSWER") {
 		t.Fatalf("final answer missing from settled card: %q", latest)
+	}
+	if len(fixture.messenger.deleted) == 0 || fixture.messenger.deleted[0].MessageID != 1 {
+		t.Fatalf("old active carrier was not deleted: %#v", fixture.messenger.deleted)
 	}
 }
 
@@ -199,6 +206,8 @@ func (c *blockingControls) Transcript(
 	application.Principal,
 	domain.SessionRef,
 ) ([]transcript.Event, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	return append([]transcript.Event(nil), c.events...), nil
 }
 

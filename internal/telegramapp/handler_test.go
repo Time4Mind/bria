@@ -30,13 +30,12 @@ func (p machinePort) Apply(_ context.Context, command clusterstate.Command) (clu
 }
 
 type messengerStub struct {
-	answers    []string
-	sent       []telegramui.Screen
-	edited     []telegramui.Screen
-	deleted    []telegrambot.Message
-	events     *[]string
-	editNotify chan struct{}
-	sendNotify chan struct{}
+	answers                              []string
+	sent                                 []telegramui.Screen
+	edited                               []telegramui.Screen
+	deleted                              []telegrambot.Message
+	events                               *[]string
+	editNotify, sendNotify, deleteNotify chan struct{}
 }
 
 func (m *messengerStub) AnswerCallbackQuery(_ context.Context, id, text string) error {
@@ -76,6 +75,7 @@ func (m *messengerStub) EditScreen(_ context.Context, message telegrambot.Messag
 }
 func (m *messengerStub) DeleteMessage(_ context.Context, message telegrambot.Message) error {
 	m.deleted = append(m.deleted, message)
+	notifyTest(m.deleteNotify)
 	return nil
 }
 func (m *messengerStub) ClearKeyboard(_ context.Context, message telegrambot.Message) error {

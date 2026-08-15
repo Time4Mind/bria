@@ -45,6 +45,13 @@ func (h *Handler) handleMessage(
 		screen, err := h.projector.MainMenu(actor)
 		return h.sendProjected(ctx, update.ChatID, screen, err)
 	}
+	voiceBaseline := voicePendingBaseline{}
+	if update.Content.Kind == telegrambot.IncomingVoice {
+		preferences, preferencesErr := h.service.Preferences(actor)
+		if preferencesErr == nil && preferences.EffectiveVoiceBackend() != domain.VoiceOff {
+			voiceBaseline = h.captureVoiceBaseline(ctx, actor)
+		}
+	}
 	accepted, err := h.sendIncomingInput(ctx, actor, update)
 	if errors.Is(err, domain.ErrQueueFull) {
 		screen, projectErr := h.projector.SessionCard(actor, accepted.Session)
@@ -74,11 +81,13 @@ func (h *Handler) handleMessage(
 	if err != nil {
 		return err
 	}
-	// The prompt is already durably queued. Render replicated state immediately;
-	// transcript and terminal refresh stay off the Telegram request path.
+	// The prompt is already durably queued. Text and ordinary media render only
+	// replicated state here. Voice reuses the bounded pre-submit transcript
+	// snapshot so its CCBot-compatible pending user row appears immediately.
 	screen, err := h.projector.SessionCard(actor, accepted.Session)
 	if err == nil && update.Content.Kind == telegrambot.IncomingVoice && !accepted.Deferred {
-		screen.Text += "\n\n" + h.copy(actor).Text(i18n.VoiceQueued)
+		h.markVoicePending(actor, accepted.Session, operationIDForInput(update.UpdateID), voiceBaseline)
+		screen, err = h.pendingVoiceCard(actor, accepted.Session, voiceBaseline)
 	}
 	message, err := h.sendProjectedMessage(ctx, update.ChatID, screen, err)
 	if err == nil {
@@ -96,7 +105,7 @@ func (h *Handler) sendIncomingInput(
 	actor application.Principal,
 	update telegrambot.IncomingUpdate,
 ) (sessioncontrol.Accepted, error) {
-	operationID := fmt.Sprintf("tg-%d-input", update.UpdateID)
+	operationID := operationIDForInput(update.UpdateID)
 	if update.Content.Kind == "" || update.Content.Kind == telegrambot.IncomingText {
 		return h.controls.SendInput(ctx, actor, operationID, update.Text)
 	}
@@ -128,6 +137,10 @@ func (h *Handler) sendIncomingInput(
 		payload.VoiceLanguage = string(language)
 	}
 	return h.controls.SendExternalInput(ctx, actor, operationID, payload)
+}
+
+func operationIDForInput(updateID int64) string {
+	return fmt.Sprintf("tg-%d-input", updateID)
 }
 
 func runtimeInputKind(kind telegrambot.IncomingContentKind) (runtimehost.InputKind, bool) {
@@ -230,6 +243,43 @@ func (h *Handler) editResponseCard(
 		h.rememberResponseCard(ctx, actor, edited)
 	}
 	return edited, err
+}
+
+func (h *Handler) repostFinalResponseCard(
+	ctx context.Context,
+	actor application.Principal,
+	previous telegrambot.Message,
+	ref domain.SessionRef,
+	screen telegramui.Screen,
+) (telegrambot.Message, error) {
+	// Completion can be observed both by the live worker and the heartbeat
+	// reconciler. Serialize promotion and compare the replicated carrier so one
+	// backend turn creates exactly one new Telegram message.
+	h.finalRepostMu.Lock()
+	defer h.finalRepostMu.Unlock()
+	if current, ok, err := h.service.TelegramResponseCard(actor); err == nil && ok {
+		if current.ChatID != previous.ChatID || current.MessageID != previous.MessageID ||
+			current.Rich != previous.Rich || current.RichMediaFileID != previous.RichMediaFileID {
+			return telegramMessage(current), nil
+		}
+	}
+	replacement, err := h.messenger.SendScreen(ctx, previous.ChatID, screen)
+	if err != nil {
+		return telegrambot.Message{}, err
+	}
+	h.recordResponseCard(ctx, actor, replacement)
+	current, ok, recordErr := h.service.TelegramResponseCard(actor)
+	if recordErr != nil || !ok || current.ChatID != replacement.ChatID ||
+		current.MessageID != replacement.MessageID {
+		_ = h.messenger.DeleteMessage(ctx, replacement)
+		if recordErr != nil {
+			return telegrambot.Message{}, recordErr
+		}
+		return telegrambot.Message{}, errors.New("final response card was not committed")
+	}
+	_ = h.messenger.DeleteMessage(ctx, previous)
+	h.rememberResolvedCardPage(actor.UserID, replacement, ref, screen)
+	return replacement, nil
 }
 
 func (h *Handler) sendProjected(

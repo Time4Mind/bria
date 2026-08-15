@@ -3,6 +3,7 @@ package transcript
 import (
 	"bytes"
 	"encoding/json"
+	"math"
 	"strings"
 )
 
@@ -27,10 +28,21 @@ type codexPayload struct {
 	Content   json.RawMessage `json:"content"`
 	Summary   json.RawMessage `json:"summary"`
 	IsError   bool            `json:"is_error"`
+	Info      *codexTokenInfo `json:"info"`
+}
+
+type codexTokenInfo struct {
+	LastTokenUsage     *codexTokenUsage `json:"last_token_usage"`
+	ModelContextWindow int              `json:"model_context_window"`
+}
+
+type codexTokenUsage struct {
+	TotalTokens int `json:"total_tokens"`
 }
 
 func parseCodex(lines [][]byte, maxBodyBytes int) []Event {
 	events := make([]Event, 0, len(lines))
+	var contextPercent *int
 	for _, line := range lines {
 		var row codexRow
 		if json.Unmarshal(line, &row) != nil {
@@ -42,6 +54,10 @@ func parseCodex(lines [][]byte, maxBodyBytes int) []Event {
 		}
 		switch row.Type {
 		case "event_msg":
+			if payload.Type == "token_count" {
+				contextPercent = codexContextPercent(payload.Info)
+				continue
+			}
 			if event, ok := parseCodexEventMessage(payload, row.Timestamp, maxBodyBytes); ok {
 				events = append(events, event)
 			}
@@ -49,7 +65,21 @@ func parseCodex(lines [][]byte, maxBodyBytes int) []Event {
 			events = append(events, parseCodexResponseItem(row, payload, maxBodyBytes)...)
 		}
 	}
+	if len(events) > 0 && contextPercent != nil {
+		events[len(events)-1].ContextPercent = contextPercent
+	}
 	return events
+}
+
+func codexContextPercent(info *codexTokenInfo) *int {
+	if info == nil || info.LastTokenUsage == nil || info.ModelContextWindow <= 0 ||
+		info.LastTokenUsage.TotalTokens < 0 {
+		return nil
+	}
+	percent := int(math.Round(float64(info.LastTokenUsage.TotalTokens) * 100 /
+		float64(info.ModelContextWindow)))
+	percent = min(100, max(0, percent))
+	return &percent
 }
 
 func parseCodexEventMessage(payload codexPayload, timestamp string, maxBodyBytes int) (Event, bool) {

@@ -176,7 +176,7 @@ const (
 	ToastUnavailable             Key = "toast.unavailable"
 	CallbackFailed               Key = "callback.failed"
 	InputFailed                  Key = "input.failed"
-	VoiceQueued                  Key = "input.voice_queued"
+	VoiceTranscribing            Key = "input.voice_transcribing"
 	ClusterAddNode               Key = "cluster.add_node"
 	ClusterInvite                Key = "cluster.invite"
 	ClusterContract              Key = "cluster.contract"

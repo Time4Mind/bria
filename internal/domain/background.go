@@ -69,6 +69,13 @@ func (s *State) noteSessionBecameBackground(userID UserID, session Session, at t
 		s.deleteBackgroundNotice(userID, session.Ref())
 	}
 	s.setBackgroundNotice(userID, session, kind, at)
+	if kind == BackgroundFinished {
+		// This is a panel seed for a turn the user already saw while active, not
+		// a newly completed background turn that warrants a push notification.
+		notice := s.Navigation.BackgroundByUser[userID][session.Ref().Key()]
+		notice.Notified = true
+		s.Navigation.BackgroundByUser[userID][session.Ref().Key()] = notice
+	}
 }
 
 func (s *State) acknowledgeBackgroundNotice(userID UserID, ref SessionRef) {
@@ -160,6 +167,10 @@ func currentBackgroundKind(session Session) (BackgroundNoticeKind, bool) {
 	switch session.RuntimePhase {
 	case RuntimeStarting, RuntimeRunning, RuntimeStopping:
 		return BackgroundWorking, true
+	case RuntimeIdle:
+		// A completed live session stays in the compact background panel after
+		// switching away. The user's acknowledgement threshold dismisses it.
+		return BackgroundFinished, true
 	case RuntimeWaitingInput:
 		return BackgroundNeedsAction, true
 	case RuntimeDegraded:

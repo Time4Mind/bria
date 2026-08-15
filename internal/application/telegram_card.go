@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/Time4Mind/bria/internal/domain"
@@ -23,6 +24,21 @@ func (p *TelegramProjector) SessionCardPage(
 	ref domain.SessionRef,
 	events []CardEvent,
 	requestedPage int,
+) (telegramui.Screen, error) {
+	return p.SessionCardPageWithContext(actor, ref, events, requestedPage, CardContext{})
+}
+
+type CardContext struct {
+	ActivePercent     *int
+	BackgroundPercent map[string]int
+}
+
+func (p *TelegramProjector) SessionCardPageWithContext(
+	actor Principal,
+	ref domain.SessionRef,
+	events []CardEvent,
+	requestedPage int,
+	context CardContext,
 ) (telegramui.Screen, error) {
 	state, err := p.actorState(actor)
 	if err != nil {
@@ -95,31 +111,41 @@ func (p *TelegramProjector) SessionCardPage(
 		}
 		tokens[target.action] = token
 	}
-	text := fmt.Sprintf(
+	parts := []string{fmt.Sprintf(
 		"%s · %s · %s · %s",
 		displaySessionName(session),
 		node.Name,
 		session.Backend,
 		lastAgentActivity(events),
-	)
+	), "─────"}
+	metadata := ""
 	if node.Status != domain.NodeOnline {
-		text += "\n" + actorCopy(state, actor).Text(i18n.CardServerUnavailable)
+		metadata += actorCopy(state, actor).Text(i18n.CardServerUnavailable)
 		if queueCount > 0 {
-			text += "\n" + actorCopy(state, actor).Format(
+			metadata += "\n" + actorCopy(state, actor).Format(
 				i18n.CardOfflineInputQueued, queueCount, queueLimit,
 			)
 		}
 	}
 	if session.LastOperation != nil && session.LastOperation.Action == domain.ActionSendInput &&
 		session.LastOperation.Status == domain.OperationFailed {
-		text += "\n" + actorCopy(state, actor).Text(i18n.InputFailed)
+		if metadata != "" {
+			metadata += "\n"
+		}
+		metadata += actorCopy(state, actor).Text(i18n.InputFailed)
+	}
+	if metadata != "" {
+		parts = append(parts, metadata)
 	}
 	richMarkdown := ""
 	if page <= len(pages.Pages) {
 		richMarkdown = pages.Pages[page-1].RichMarkdown
 	}
 	if richMarkdown != "" {
-		text += "\n\n" + richMarkdown
+		parts = append(parts, richMarkdown)
+	}
+	if context.ActivePercent != nil {
+		parts = append(parts, "\u00a0", fmt.Sprintf("context: %d%%", *context.ActivePercent))
 	}
 	allHosts := preferences.SessionView == domain.ViewAllHosts
 	var switcher []telegramui.SessionItem
@@ -134,11 +160,14 @@ func (p *TelegramProjector) SessionCardPage(
 		}
 		if state.Navigation.ActiveNodeByUser[actor.UserID] == session.NodeID &&
 			state.Navigation.ActiveSessionByUserNode[actor.UserID][session.NodeID] == session.ID {
-			if panel := backgroundPanel(state, actor, session.Ref(), allHosts); panel != "" {
-				text += "\n\n" + panel
+			if panel := backgroundPanel(
+				state, actor, session.Ref(), allHosts, context.BackgroundPercent,
+			); panel != "" {
+				parts = append(parts, "\u00a0", panel)
 			}
 		}
 	}
+	text := strings.Join(parts, "\n\n")
 	return telegramui.RenderSessionCard(telegramui.CardInput{
 		Copy: actorCopy(state, actor), Text: text, Access: access,
 		RichMarkdown: richMarkdown != "",
@@ -178,11 +207,14 @@ func backgroundPanel(
 	actor Principal,
 	active domain.SessionRef,
 	allHosts bool,
+	contextPercent map[string]int,
 ) string {
 	const limit = 5
 	notices := state.Navigation.BackgroundByUser[actor.UserID]
 	items := make([]domain.BackgroundNotice, 0, len(notices))
+	known := make(map[string]bool, len(notices))
 	for _, notice := range notices {
+		known[notice.Session.Key()] = true
 		if notice.Dismissed {
 			continue
 		}
@@ -194,6 +226,19 @@ func backgroundPanel(
 			continue
 		}
 		items = append(items, notice)
+	}
+	for _, session := range state.Sessions {
+		node, nodeOK := state.Nodes[session.NodeID]
+		if known[session.Ref().Key()] || !nodeOK || node.Status != domain.NodeOnline ||
+			!session.IsLive() || session.RuntimePhase != domain.RuntimeIdle ||
+			session.Ref() == active || !state.CanViewSession(actor.UserID, session.Ref()) ||
+			(!allHosts && session.NodeID != active.NodeID) {
+			continue
+		}
+		items = append(items, domain.BackgroundNotice{
+			Session: session.Ref(), Kind: domain.BackgroundFinished,
+			EventRevision: session.Revision, ChangedAt: session.LastEventAt, Notified: true,
+		})
 	}
 	slices.SortFunc(items, func(a, b domain.BackgroundNotice) int {
 		if order := b.ChangedAt.Compare(a.ChangedAt); order != 0 {
@@ -212,6 +257,9 @@ func backgroundPanel(
 		}
 		item := telegramui.BackgroundItem{
 			Name: name, Status: telegramui.BackgroundStatusGlyph(string(notice.Kind)),
+		}
+		if percent, ok := contextPercent[notice.Session.Key()]; ok {
+			item.ContextPercent = &percent
 		}
 		if allHosts {
 			item.NodeName = state.Nodes[session.NodeID].Name

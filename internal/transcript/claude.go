@@ -3,6 +3,7 @@ package transcript
 import (
 	"bytes"
 	"encoding/json"
+	"math"
 	"strings"
 )
 
@@ -15,6 +16,14 @@ type claudeRow struct {
 type claudeMessage struct {
 	Content    json.RawMessage `json:"content"`
 	StopReason string          `json:"stop_reason"`
+	Model      string          `json:"model"`
+	Usage      claudeUsage     `json:"usage"`
+}
+
+type claudeUsage struct {
+	InputTokens              int `json:"input_tokens"`
+	CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+	CacheReadInputTokens     int `json:"cache_read_input_tokens"`
 }
 
 type claudeBlock struct {
@@ -31,6 +40,7 @@ type claudeBlock struct {
 
 func parseClaude(lines [][]byte, maxBodyBytes int) []Event {
 	events := make([]Event, 0, len(lines))
+	var contextPercent *int
 	for _, line := range lines {
 		var row claudeRow
 		if json.Unmarshal(line, &row) != nil || (row.Type != "user" && row.Type != "assistant") {
@@ -46,8 +56,29 @@ func parseClaude(lines [][]byte, maxBodyBytes int) []Event {
 			continue
 		}
 		events = append(events, claudeAssistantEvents(blocks, row.Timestamp, message.StopReason, maxBodyBytes)...)
+		if percent := claudeContextPercent(message); percent != nil {
+			contextPercent = percent
+		}
+	}
+	if len(events) > 0 && contextPercent != nil {
+		events[len(events)-1].ContextPercent = contextPercent
 	}
 	return events
+}
+
+func claudeContextPercent(message claudeMessage) *int {
+	used := float64(message.Usage.InputTokens) + float64(message.Usage.CacheCreationInputTokens) +
+		float64(message.Usage.CacheReadInputTokens)
+	if used <= 0 {
+		return nil
+	}
+	window := 1_000_000
+	if strings.Contains(strings.ToLower(message.Model), "haiku") {
+		window = 200_000
+	}
+	percent := int(math.Round(used * 100 / float64(window)))
+	percent = min(100, max(0, percent))
+	return &percent
 }
 
 func decodeClaudeBlocks(content json.RawMessage) []claudeBlock {

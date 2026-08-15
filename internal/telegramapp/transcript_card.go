@@ -168,14 +168,34 @@ func (h *Handler) renderSessionCardSnapshot(
 		screen, err := h.projector.SessionCard(actor, ref)
 		return sessionCardSnapshot{screen: screen}, err
 	}
+	session, sessionErr := h.service.Session(actor, ref)
+	if sessionErr != nil {
+		return sessionCardSnapshot{}, sessionErr
+	}
 	events, err := h.controls.Transcript(ctx, actor, ref)
 	if err != nil {
-		// Runtime transcript availability must never make the replicated last
-		// card unreadable. Offline and not-yet-bound sessions use the base card.
-		screen, projectErr := h.projector.SessionCard(actor, ref)
-		return sessionCardSnapshot{screen: screen}, projectErr
+		// A transient node-control failure must not erase a previously rendered
+		// transcript by replacing the live card with its header-only projection.
+		// Reuse the bounded in-memory copy when possible; otherwise leave the
+		// existing Telegram card untouched until the transcript is reachable.
+		if cached, ok := h.cachedCardTranscript(ref); ok {
+			events = cached
+		} else if session.ProviderSessionID == "" {
+			screen, projectErr := h.projector.SessionCard(actor, ref)
+			if projectErr == nil {
+				h.appendPendingVoiceRows(actor, ref, &screen)
+			}
+			return sessionCardSnapshot{screen: screen}, projectErr
+		} else {
+			return sessionCardSnapshot{}, err
+		}
 	}
-	screen, err := h.projector.SessionCardPage(actor, ref, cardEvents(events), page)
+	h.rememberCardTranscript(ref, session.Revision, events)
+	renderedEvents := events
+	renderedEvents = h.withPendingVoiceRows(actor, ref, session, events)
+	screen, err := h.projector.SessionCardPageWithContext(
+		actor, ref, cardEvents(renderedEvents), page, h.cardContext(ref),
+	)
 	if err == nil {
 		preferences, preferencesErr := h.service.Preferences(actor)
 		if preferencesErr == nil &&

@@ -96,16 +96,26 @@ func TestReconciliationRefreshesActiveResponseCardWithRecoveredFinal(t *testing.
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 	handler.RunBackgroundNotifications(ctx, 5*time.Millisecond)
-	if len(fixture.messenger.edited) == 0 {
-		t.Fatal("active response card was not refreshed after transcript reconciliation")
+	if len(fixture.messenger.sent) == 0 {
+		t.Fatal("active final did not create a new response card")
 	}
-	latest := fixture.messenger.edited[len(fixture.messenger.edited)-1].Text
+	latest := fixture.messenger.sent[len(fixture.messenger.sent)-1].Text
 	if !strings.Contains(latest, "RECOVERED FINAL") {
 		t.Fatalf("recovered final missing from active card: %q", latest)
+	}
+	if len(fixture.messenger.deleted) == 0 ||
+		fixture.messenger.deleted[len(fixture.messenger.deleted)-1].MessageID != 51 {
+		t.Fatalf("completed carrier was not removed: %#v", fixture.messenger.deleted)
 	}
 	settled := fixture.machine.State().Sessions[ref.Key()]
 	if settled.RuntimePhase != domain.RuntimeIdle {
 		t.Fatalf("runtime phase = %q", settled.RuntimePhase)
+	}
+	if active, activeErr := fixture.service.ActiveSession(actor); activeErr != nil || active.Ref() != ref {
+		t.Fatalf("completed session stopped being active: %#v / %v", active, activeErr)
+	}
+	if _, background := fixture.machine.State().Navigation.BackgroundByUser[actor.UserID][ref.Key()]; background {
+		t.Fatal("active completed session was incorrectly placed in the background panel")
 	}
 }
 

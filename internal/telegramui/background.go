@@ -8,10 +8,11 @@ import (
 )
 
 type BackgroundItem struct {
-	Name     string
-	NodeName string
-	Marker   string
-	Status   string
+	Name           string
+	NodeName       string
+	Marker         string
+	Status         string
+	ContextPercent *int
 }
 
 func RenderBackgroundPanel(
@@ -30,7 +31,11 @@ func RenderBackgroundPanel(
 			parts = append(parts, "·", item.NodeName)
 		}
 		parts = append(parts, item.Status)
-		lines = append(lines, strings.Join(nonEmpty(parts), " "))
+		line := strings.Join(nonEmpty(parts), " ")
+		if item.ContextPercent != nil {
+			line += fmt.Sprintf(" · %d%%", *item.ContextPercent)
+		}
+		lines = append(lines, line)
 	}
 	if extra > 0 {
 		lines = append(lines, copy.Format(i18n.BackgroundPanelMore, extra))

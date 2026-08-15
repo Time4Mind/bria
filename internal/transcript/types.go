@@ -31,14 +31,15 @@ const (
 )
 
 type Event struct {
-	Kind      EventKind `json:"kind"`
-	Text      string    `json:"text,omitempty"`
-	ToolUseID string    `json:"tool_use_id,omitempty"`
-	ToolName  string    `json:"tool_name,omitempty"`
-	Head      string    `json:"head,omitempty"`
-	Body      string    `json:"body,omitempty"`
-	Error     bool      `json:"error,omitempty"`
-	Timestamp string    `json:"timestamp,omitempty"`
+	Kind           EventKind `json:"kind"`
+	Text           string    `json:"text,omitempty"`
+	ToolUseID      string    `json:"tool_use_id,omitempty"`
+	ToolName       string    `json:"tool_name,omitempty"`
+	Head           string    `json:"head,omitempty"`
+	Body           string    `json:"body,omitempty"`
+	Error          bool      `json:"error,omitempty"`
+	Timestamp      string    `json:"timestamp,omitempty"`
+	ContextPercent *int      `json:"context_percent,omitempty"`
 }
 
 type Request struct {

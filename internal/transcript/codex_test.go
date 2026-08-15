@@ -24,6 +24,7 @@ func TestReaderParsesCodexEvents(t *testing.T) {
 {"timestamp":"ignored","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"duplicate"}]}}
 {"timestamp":"t6","type":"event_msg","payload":{"type":"agent_message","message":"answer","phase":"final_answer"}}
 {"timestamp":"t7","ordinal":1,"type":"response_item","payload":{"type":"message","role":"assistant","phase":"final","content":[{"type":"output_text","text":"new-format answer"}]}}
+{"timestamp":"t8","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"total_tokens":47720},"model_context_window":258400}}}
 `)
 	events, err := newTestReader(t, layout, nil).Read(context.Background(), Request{
 		Backend: BackendCodex, ProviderSessionID: sessionID, Workdir: workdir,
@@ -51,6 +52,9 @@ func TestReaderParsesCodexEvents(t *testing.T) {
 	}
 	if events[4].Body != "ok" {
 		t.Errorf("unexpected result: %#v", events[4])
+	}
+	if events[len(events)-1].ContextPercent == nil || *events[len(events)-1].ContextPercent != 18 {
+		t.Errorf("Codex context percent = %#v, want 18", events[len(events)-1].ContextPercent)
 	}
 }
 

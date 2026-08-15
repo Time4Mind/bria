@@ -21,6 +21,37 @@ func TestSessionCardUsesSingleLineHeader(t *testing.T) {
 	if !strings.Contains(screen.Text, "a-new · Alpha · claude · —") {
 		t.Fatalf("session header is not a single line: %q", screen.Text)
 	}
+	if !strings.HasPrefix(screen.Text, "a-new · Alpha · claude · —\n\n─────") {
+		t.Fatalf("header separator does not match CCBot Markdown layout: %q", screen.Text)
+	}
+}
+
+func TestSessionCardSeparatesContextAndBackgroundLikeCCBot(t *testing.T) {
+	projector, state, _ := projectorFixture(t)
+	ref := domain.SessionRef{NodeID: "alpha", SessionID: "a-new"}
+	backgroundRef := domain.SessionRef{NodeID: "alpha", SessionID: "a-old"}
+	state.Navigation.BackgroundByUser[2] = map[string]domain.BackgroundNotice{
+		backgroundRef.Key(): {
+			Session: backgroundRef, Kind: domain.BackgroundFinished,
+			EventRevision: 2, ChangedAt: time.Unix(80, 0).UTC(),
+		},
+	}
+	activePercent := 24
+	screen, err := projector.SessionCardPageWithContext(
+		application.Principal{UserID: 2}, ref,
+		[]application.CardEvent{{Kind: application.CardEventAssistantText, Text: "answer"}},
+		1, application.CardContext{
+			ActivePercent:     &activePercent,
+			BackgroundPercent: map[string]int{backgroundRef.Key(): 61},
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "\n\nanswer\n\n\u00a0\n\ncontext: 24%\n\n\u00a0\n\n─── background ───  \na-old ✅ · 61%"
+	if !strings.Contains(screen.Text, want) {
+		t.Fatalf("card metadata layout differs from CCBot:\n%q\nwant tail:\n%q", screen.Text, want)
+	}
 }
 
 func TestSessionCardUsesAgentTimestampAsRecordedByBackend(t *testing.T) {
@@ -120,23 +151,31 @@ func TestBackgroundPanelFollowsSessionViewMode(t *testing.T) {
 	}
 	actor := application.Principal{UserID: 2}
 	ref := domain.SessionRef{NodeID: "alpha", SessionID: "a-new"}
-	hostFirst, err := projector.SessionCard(actor, ref)
+	hostFirst, err := projector.SessionCardPageWithContext(
+		actor, ref, nil, 0,
+		application.CardContext{BackgroundPercent: map[string]int{"alpha/a-old": 37}},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(hostFirst.Text, "a-old ✅") || strings.Contains(hostFirst.Text, "g-new") ||
+	if !strings.Contains(hostFirst.Text, "a-old ✅ · 37%") || strings.Contains(hostFirst.Text, "g-new") ||
 		strings.Contains(hostFirst.Text, "g-old") {
 		t.Fatalf("host-first panel=%q", hostFirst.Text)
 	}
 	preferences := state.Preferences[2]
 	preferences.SessionView = domain.ViewAllHosts
 	state.Preferences[2] = preferences
-	allHosts, err := projector.SessionCard(actor, ref)
+	allHosts, err := projector.SessionCardPageWithContext(
+		actor, ref, nil, 0,
+		application.CardContext{BackgroundPercent: map[string]int{
+			"alpha/a-old": 37, "gamma/g-new": 82,
+		}},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(allHosts.Text, "g-new · Gamma ❌") ||
-		!strings.Contains(allHosts.Text, "a-old · Alpha ✅") ||
+	if !strings.Contains(allHosts.Text, "g-new · Gamma ❌ · 82%") ||
+		!strings.Contains(allHosts.Text, "a-old · Alpha ✅ · 37%") ||
 		strings.Contains(allHosts.Text, "g-old") {
 		t.Fatalf("all-host panel=%q", allHosts.Text)
 	}

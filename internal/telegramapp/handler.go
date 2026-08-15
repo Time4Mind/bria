@@ -38,9 +38,9 @@ type Handler struct {
 	leadership Leadership
 	starter    SessionStarter
 
-	paneMu             sync.Mutex
-	paneGeneration     map[domain.UserID]uint64
-	paneWorkers        map[domain.UserID]uint64
+	paneRefreshState
+	voicePendingState
+	cardRuntimeState
 	fileMu             sync.Mutex
 	deliveredFiles     map[string]bool
 	promptHashes       map[domain.UserID]map[string]string
@@ -79,8 +79,9 @@ func NewHandler(
 	return &Handler{
 		service: service, projector: projector, tokens: tokens, messenger: activity,
 		activity:           activity,
-		paneGeneration:     make(map[domain.UserID]uint64),
-		paneWorkers:        make(map[domain.UserID]uint64),
+		paneRefreshState:   newPaneRefreshState(),
+		voicePendingState:  newVoicePendingState(),
+		cardRuntimeState:   newCardRuntimeState(),
 		deliveredFiles:     make(map[string]bool),
 		promptHashes:       make(map[domain.UserID]map[string]string),
 		createFlows:        make(map[domain.UserID]*createFlow),

@@ -76,6 +76,7 @@ func (h *Handler) scanBackgroundNotifications(
 	panelFingerprints map[domain.UserID]string,
 ) {
 	deliveries := h.service.BackgroundDeliveries()
+	h.refreshBackgroundContexts(ctx, deliveries)
 	byUser := make(map[domain.UserID][]application.BackgroundDelivery)
 	for _, delivery := range deliveries {
 		byUser[delivery.UserID] = append(byUser[delivery.UserID], delivery)
@@ -98,7 +99,7 @@ func (h *Handler) scanBackgroundNotifications(
 		}
 	}
 	for userID, userDeliveries := range byUser {
-		fingerprint := backgroundFingerprint(userDeliveries)
+		fingerprint := h.backgroundFingerprint(userDeliveries)
 		previous, known := panelFingerprints[userID]
 		if known && previous == fingerprint {
 			continue
@@ -202,10 +203,13 @@ func (h *Handler) settleRunningSessions(ctx context.Context) {
 				ctx, candidate.Actor, candidate.Session.Ref(),
 			)
 			if err == nil {
+				h.rememberCardTranscript(
+					candidate.Session.Ref(), candidate.Session.Revision, events,
+				)
 				if h.settleFromTranscript(ctx, candidate.Actor, candidate.Session, events) {
 					active, activeErr := h.service.ActiveSession(candidate.Actor)
 					if activeErr == nil && active.Ref() == candidate.Session.Ref() {
-						h.refreshBackgroundPanel(ctx, candidate.Actor.UserID)
+						h.repostActiveFinal(ctx, candidate.Actor, candidate.Session.Ref())
 					}
 				}
 			}
@@ -214,12 +218,29 @@ func (h *Handler) settleRunningSessions(ctx context.Context) {
 	workers.Wait()
 }
 
-func backgroundFingerprint(deliveries []application.BackgroundDelivery) string {
+func (h *Handler) repostActiveFinal(
+	ctx context.Context,
+	actor application.Principal,
+	ref domain.SessionRef,
+) {
+	card, ok, err := h.service.TelegramResponseCard(actor)
+	if err != nil || !ok {
+		return
+	}
+	screen, err := h.renderSessionCard(ctx, actor, ref, 0)
+	if err != nil {
+		return
+	}
+	_, _ = h.repostFinalResponseCard(ctx, actor, telegramMessage(card), ref, screen)
+}
+
+func (h *Handler) backgroundFingerprint(deliveries []application.BackgroundDelivery) string {
 	var result strings.Builder
 	for _, delivery := range deliveries {
-		fmt.Fprintf(&result, "%s:%s:%d:%d;", delivery.Session.Ref().Key(),
+		percent, present := h.backgroundContextValue(delivery.Session.Ref())
+		fmt.Fprintf(&result, "%s:%s:%d:%d:%t:%d;", delivery.Session.Ref().Key(),
 			delivery.Notice.Kind, delivery.Notice.EventRevision,
-			delivery.Notice.Acknowledgements)
+			delivery.Notice.Acknowledgements, present, percent)
 	}
 	return result.String()
 }

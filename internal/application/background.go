@@ -88,6 +88,30 @@ func (s *Service) BackgroundDeliveries() []BackgroundDelivery {
 			})
 		}
 	}
+	// Snapshots written before idle sessions were seeded into BackgroundByUser
+	// still need a complete CCBot-style panel after upgrade or leader restart.
+	// Synthesize already-notified finished rows; no push is emitted for work the
+	// user previously watched in the active card.
+	for userID := range state.TelegramResponseCards {
+		active := activeRef(state, userID)
+		notices := state.Navigation.BackgroundByUser[userID]
+		for _, session := range state.Sessions {
+			node, nodeOK := state.Nodes[session.NodeID]
+			_, known := notices[session.Ref().Key()]
+			if known || !nodeOK || node.Status != domain.NodeOnline || !session.IsLive() ||
+				session.RuntimePhase != domain.RuntimeIdle || session.Ref() == active ||
+				!state.CanViewSession(userID, session.Ref()) {
+				continue
+			}
+			result = append(result, BackgroundDelivery{
+				UserID: userID, Session: session, Node: node,
+				Notice: domain.BackgroundNotice{
+					Session: session.Ref(), Kind: domain.BackgroundFinished,
+					EventRevision: session.Revision, ChangedAt: session.LastEventAt, Notified: true,
+				},
+			})
+		}
+	}
 	slices.SortFunc(result, func(a, b BackgroundDelivery) int {
 		if order := cmp.Compare(a.UserID, b.UserID); order != 0 {
 			return order

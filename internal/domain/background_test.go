@@ -76,6 +76,17 @@ func TestBackgroundPreferencesDefaultToNotificationsAndOneSwitch(t *testing.T) {
 	}
 }
 
+func TestSwitchingAwayFromIdleSessionShowsItAsFinishedBackground(t *testing.T) {
+	state, first, second := backgroundState(t)
+	if err := state.SelectSession(1, second, time.Unix(4, 0).UTC()); err != nil {
+		t.Fatal(err)
+	}
+	notice, ok := state.Navigation.BackgroundByUser[1][first.Key()]
+	if !ok || notice.Kind != domain.BackgroundFinished || notice.Dismissed || !notice.Notified {
+		t.Fatalf("idle session was not retained as finished background: %#v", notice)
+	}
+}
+
 func TestDismissedWorkingNoticeRestartsWhenSessionBecomesBackgroundAgain(t *testing.T) {
 	state, first, second := backgroundState(t)
 	session := state.Sessions[first.Key()]
