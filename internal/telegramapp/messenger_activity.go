@@ -58,6 +58,8 @@ func (m *activityMessenger) SendScreen(
 func (m *activityMessenger) EditScreen(
 	ctx context.Context, message telegrambot.Message, screen telegramui.Screen,
 ) (telegrambot.Message, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	return m.inner.EditScreen(ctx, message, screen)
 }
 
