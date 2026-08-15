@@ -125,9 +125,10 @@ func parseCodexResponseItem(row codexRow, payload codexPayload, maxBodyBytes int
 		if len(arguments) == 0 {
 			arguments = payload.Input
 		}
+		head, body := codexToolCall(name, arguments, maxBodyBytes)
 		return []Event{{
-			Kind: EventToolCall, ToolUseID: id, ToolName: name, Head: name,
-			Body: codexArguments(arguments, maxBodyBytes), Timestamp: row.Timestamp,
+			Kind: EventToolCall, ToolUseID: id, ToolName: head, Head: head,
+			Body: body, Timestamp: row.Timestamp,
 		}}
 	case "function_call_output", "custom_tool_call_output":
 		id := payload.CallID
@@ -179,19 +180,4 @@ func codexServiceUserText(text string) bool {
 	return strings.HasPrefix(text, "# AGENTS.md instructions for ") &&
 		strings.Contains(text, "\n<INSTRUCTIONS>") &&
 		strings.HasSuffix(text, "</INSTRUCTIONS>")
-}
-
-func codexArguments(raw json.RawMessage, maxBodyBytes int) string {
-	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
-		return ""
-	}
-	var encoded string
-	if json.Unmarshal(raw, &encoded) == nil {
-		encoded = strings.TrimSpace(encoded)
-		if json.Valid([]byte(encoded)) {
-			return compactJSON(json.RawMessage(encoded), maxBodyBytes)
-		}
-		return bounded(encoded, maxBodyBytes)
-	}
-	return compactJSON(raw, maxBodyBytes)
 }

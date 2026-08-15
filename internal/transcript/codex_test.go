@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -50,6 +51,36 @@ func TestReaderParsesCodexEvents(t *testing.T) {
 	}
 	if events[4].Body != "ok" {
 		t.Errorf("unexpected result: %#v", events[4])
+	}
+}
+
+func TestReaderFormatsCodexExecWrapperAsBash(t *testing.T) {
+	layout := newTestLayout(t)
+	path := filepath.Join(layout.codex, "2026", "08", "15", "rollout-exec.jsonl")
+	writeTestFile(t, path, `{"type":"session_meta","payload":{"id":"codex-exec","cwd":"/srv/project"}}
+{"timestamp":"t1","type":"response_item","payload":{"type":"custom_tool_call","call_id":"call-1","name":"exec","input":"const r = await tools.exec_command({\n  cmd: \"printf 'one\\ntwo\\n'\",\n  workdir: \"/srv/project\",\n  yield_time_ms: 10000\n});\ntext(r.output);\n"}}
+`)
+	events, err := newTestReader(t, layout, nil).Read(context.Background(), Request{
+		Backend: BackendCodex, ProviderSessionID: "codex-exec", Workdir: "/srv/project",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("got %d events: %#v", len(events), events)
+	}
+	call := events[0]
+	if call.Head != "Bash" || call.ToolName != "Bash" {
+		t.Fatalf("tool identity was not normalized: %#v", call)
+	}
+	const want = "```bash\nprintf 'one\ntwo\n'\n```"
+	if call.Body != want {
+		t.Fatalf("body = %q, want %q", call.Body, want)
+	}
+	for _, hidden := range []string{"tools.exec_command", "workdir", "yield_time_ms", "text(r.output)"} {
+		if strings.Contains(call.Body, hidden) {
+			t.Errorf("service wrapper leaked %q into %q", hidden, call.Body)
+		}
 	}
 }
 

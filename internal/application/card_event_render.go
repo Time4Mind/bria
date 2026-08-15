@@ -206,12 +206,35 @@ func trimTechnicalBody(body string, maxLines int) string {
 		return ""
 	}
 	lines := strings.Split(body, "\n")
-	if len(lines) <= maxLines {
+	contentLines := 0
+	for _, line := range lines {
+		if !strings.HasPrefix(strings.TrimSpace(line), "```") {
+			contentLines++
+		}
+	}
+	if contentLines <= maxLines {
 		return body
 	}
-	extra := len(lines) - maxLines
-	return strings.Join(lines[:maxLines], "\n") +
-		fmt.Sprintf("\n… (+%d more lines)", extra)
+	trimmed := make([]string, 0, maxLines+3)
+	kept := 0
+	fenceOpen := false
+	for _, line := range lines {
+		if strings.HasPrefix(strings.TrimSpace(line), "```") {
+			trimmed = append(trimmed, line)
+			fenceOpen = !fenceOpen
+			continue
+		}
+		if kept == maxLines {
+			break
+		}
+		trimmed = append(trimmed, line)
+		kept++
+	}
+	trimmed = append(trimmed, fmt.Sprintf("… (+%d more lines)", contentLines-maxLines))
+	if fenceOpen {
+		trimmed = append(trimmed, "```")
+	}
+	return strings.Join(trimmed, "\n")
 }
 
 func escapeDetailsClose(text string) string {

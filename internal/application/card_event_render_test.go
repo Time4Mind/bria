@@ -225,6 +225,39 @@ func TestCardRendererLimitsTechnicalLinesAndKeepsFinalAnswer(t *testing.T) {
 	}
 }
 
+func TestCardRendererKeepsFenceWhenLimitingToolCommand(t *testing.T) {
+	preferences := domain.DefaultUserPreferences()
+	preferences.ToolOutputLines = 2
+	page := application.RenderCardEventPages(preferences, []application.CardEvent{{
+		Kind: application.CardEventToolCall,
+		Text: "Bash",
+		Body: "```bash\none\ntwo\nthree\n```",
+	}}, fixedCardOptions(3500)).Latest.RichMarkdown
+	for _, want := range []string{"```bash\none\ntwo", "… (+1 more lines)\n```", "</details>"} {
+		if !strings.Contains(page, want) {
+			t.Errorf("missing %q in %q", want, page)
+		}
+	}
+	if strings.Contains(page, "three") {
+		t.Fatalf("fenced command exceeded configured limit: %q", page)
+	}
+}
+
+func TestCardRendererClosesLimitedCommandFenceBeforeFoldedResult(t *testing.T) {
+	preferences := domain.DefaultUserPreferences()
+	preferences.ToolOutputLines = 2
+	page := application.RenderCardEventPages(preferences, []application.CardEvent{{
+		Kind:       application.CardEventToolCall,
+		Text:       "Bash",
+		Body:       "```bash\none\ntwo\nthree\n```",
+		HasResult:  true,
+		ResultBody: "result",
+	}}, fixedCardOptions(3500)).Latest.RichMarkdown
+	if !strings.Contains(page, "```bash\none\ntwo\n… (+5 more lines)\n```") {
+		t.Fatalf("limited folded event left a broken fence: %q", page)
+	}
+}
+
 func TestCardRendererReturnsAddressableEmptyPage(t *testing.T) {
 	preferences := domain.DefaultUserPreferences()
 	if err := preferences.SetCardEventVisibility(domain.CardEventThinking, false); err != nil {
