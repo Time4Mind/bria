@@ -34,6 +34,40 @@ func TestRuntimePhaseIsIndependentFromLifecycle(t *testing.T) {
 	}
 }
 
+func TestDeliveredInputAcknowledgementPreservesPromptTimestamp(t *testing.T) {
+	state := fixtureState(t)
+	promptAt := time.Unix(20, 0).UTC()
+	ref := addSession(t, state, "fast-provider", "alpha", 1, time.Unix(10, 0).UTC())
+	session := state.Sessions[ref.Key()]
+	queued := &domain.SessionOperationResult{
+		OperationID: "input-fast", Action: domain.ActionSendInput,
+		Status: domain.OperationQueued,
+	}
+	if err := state.PublishSessionRuntime(
+		ref, session.RuntimeGeneration, domain.RuntimeRunning, queued, promptAt,
+	); err != nil {
+		t.Fatal(err)
+	}
+	session = state.Sessions[ref.Key()]
+	ackAt := promptAt.Add(15 * time.Second)
+	succeeded := &domain.SessionOperationResult{
+		OperationID: "input-fast", Action: domain.ActionSendInput,
+		Status: domain.OperationSucceeded,
+	}
+	if err := state.PublishSessionRuntime(
+		ref, session.RuntimeGeneration, domain.RuntimeRunning, succeeded, ackAt,
+	); err != nil {
+		t.Fatal(err)
+	}
+	got := state.Sessions[ref.Key()]
+	if got.LastEventAt != promptAt {
+		t.Fatalf("last event = %v, want prompt time %v", got.LastEventAt, promptAt)
+	}
+	if got.LastOperation == nil || got.LastOperation.At != ackAt {
+		t.Fatalf("operation acknowledgement = %#v", got.LastOperation)
+	}
+}
+
 func TestClearResetsNamingAndRejectsOldRuntimeGeneration(t *testing.T) {
 	state := fixtureState(t)
 	ref := addSession(t, state, "clear-me", "alpha", 1, time.Unix(10, 0).UTC())

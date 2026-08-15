@@ -47,12 +47,27 @@ func (h *Handler) runBackgroundReconciliation(ctx context.Context, interval time
 	for {
 		if h.canRefresh() {
 			h.settleRunningSessions(ctx)
+			h.restoreActivePaneRefreshes(ctx)
 		}
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
 		}
+	}
+}
+
+func (h *Handler) restoreActivePaneRefreshes(ctx context.Context) {
+	for _, candidate := range h.service.RunningSessions() {
+		active, err := h.service.ActiveSession(candidate.Actor)
+		if err != nil || active.Ref() != candidate.Session.Ref() {
+			continue
+		}
+		card, ok, err := h.service.TelegramResponseCard(candidate.Actor)
+		if err != nil || !ok {
+			continue
+		}
+		h.ensurePaneRefresh(ctx, candidate.Actor, candidate.Session.Ref(), telegramMessage(card))
 	}
 }
 

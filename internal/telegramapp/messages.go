@@ -148,33 +148,15 @@ func (h *Handler) rememberResponseCard(
 	actor application.Principal,
 	message telegrambot.Message,
 ) {
-	previous, exists, err := h.service.TelegramResponseCard(actor)
-	if err != nil {
-		return
-	}
-	card := domain.TelegramResponseCard{
-		ChatID: message.ChatID, MessageID: message.MessageID, Rich: message.Rich,
-		RichMediaFileID: message.RichMediaFileID, PaneHash: message.PaneHash,
-	}
-	if exists && previous == card {
-		return
-	}
-	fingerprint := sha256.Sum256([]byte(fmt.Sprintf(
-		"%d:%d:%t:%s:%s", card.ChatID, card.MessageID, card.Rich,
-		card.RichMediaFileID, card.PaneHash,
-	)))
-	recordCtx := application.WithOperationScope(
-		ctx, fmt.Sprintf("telegram-response-card-%d-%d-%x",
-			card.ChatID, card.MessageID, fingerprint[:8]),
-	)
-	if err := h.service.RecordTelegramResponseCard(recordCtx, actor, card); err != nil {
+	previous, exists, changed := h.recordResponseCard(ctx, actor, message)
+	if !changed {
 		return
 	}
 	preferences, err := h.service.Preferences(actor)
 	if err != nil || !exists {
 		return
 	}
-	if previous.ChatID == card.ChatID && previous.MessageID == card.MessageID {
+	if previous.ChatID == message.ChatID && previous.MessageID == message.MessageID {
 		return
 	}
 	previousMessage := telegrambot.Message{ChatID: previous.ChatID, MessageID: previous.MessageID}
@@ -185,12 +167,64 @@ func (h *Handler) rememberResponseCard(
 	_ = h.messenger.ClearKeyboard(ctx, previousMessage)
 }
 
+func (h *Handler) recordResponseCard(
+	ctx context.Context,
+	actor application.Principal,
+	message telegrambot.Message,
+) (domain.TelegramResponseCard, bool, bool) {
+	previous, exists, err := h.service.TelegramResponseCard(actor)
+	if err != nil {
+		return domain.TelegramResponseCard{}, false, false
+	}
+	card := domain.TelegramResponseCard{
+		ChatID: message.ChatID, MessageID: message.MessageID, Rich: message.Rich,
+		RichMediaFileID: message.RichMediaFileID, PaneHash: message.PaneHash,
+	}
+	if exists && previous == card {
+		return previous, true, false
+	}
+	fingerprint := sha256.Sum256([]byte(fmt.Sprintf(
+		"%d:%d:%t:%s:%s", card.ChatID, card.MessageID, card.Rich,
+		card.RichMediaFileID, card.PaneHash,
+	)))
+	recordCtx := application.WithOperationScope(
+		ctx, fmt.Sprintf("telegram-response-card-%d-%d-%x",
+			card.ChatID, card.MessageID, fingerprint[:8]),
+	)
+	if err := h.service.RecordTelegramResponseCard(recordCtx, actor, card); err != nil {
+		return previous, exists, false
+	}
+	return previous, exists, true
+}
+
 func (h *Handler) editResponseCard(
 	ctx context.Context,
 	actor application.Principal,
 	message telegrambot.Message,
 	screen telegramui.Screen,
 ) (telegrambot.Message, error) {
+	// A background reconciliation may have already promoted this carrier while
+	// an older live-card worker was sleeping. Re-read the replicated identity so
+	// concurrent recovery paths cannot create two replacement cards.
+	if current, ok, err := h.service.TelegramResponseCard(actor); err == nil && ok &&
+		current.ChatID == message.ChatID && current.MessageID != 0 &&
+		(current.MessageID != message.MessageID || current.Rich != message.Rich ||
+			current.RichMediaFileID != message.RichMediaFileID) {
+		message = telegramMessage(current)
+	}
+	if !message.Rich && (screen.RichMarkdown || screen.Pane != nil) {
+		// Rich Markdown is a distinct Telegram carrier. CCBot promotes a legacy
+		// live card instead of permanently downgrading every later tool spoiler;
+		// mirror that behavior by replacing the carrier once and retaining the
+		// Rich message for subsequent edits.
+		replacement, err := h.messenger.SendScreen(ctx, message.ChatID, screen)
+		if err != nil {
+			return telegrambot.Message{}, err
+		}
+		_ = h.messenger.DeleteMessage(ctx, message)
+		h.recordResponseCard(ctx, actor, replacement)
+		return replacement, nil
+	}
 	edited, err := h.messenger.EditScreen(ctx, message, screen)
 	if err == nil {
 		h.rememberResponseCard(ctx, actor, edited)

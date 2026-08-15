@@ -229,7 +229,8 @@ func cardEventKind(kind transcript.EventKind) (application.CardEventKind, bool) 
 func finalTranscriptAt(events []transcript.Event) (time.Time, bool) {
 	for index := len(events) - 1; index >= 0; index-- {
 		if events[index].Kind != transcript.EventAssistantFinal {
-			if events[index].Kind == transcript.EventAssistantText ||
+			if events[index].Kind == transcript.EventUserText ||
+				events[index].Kind == transcript.EventAssistantText ||
 				events[index].Kind == transcript.EventThinking ||
 				events[index].Kind == transcript.EventToolCall {
 				return time.Time{}, false

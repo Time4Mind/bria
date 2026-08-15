@@ -35,6 +35,7 @@ func (h *Handler) schedulePaneRefresh(
 	h.paneMu.Lock()
 	h.paneGeneration[actor.UserID]++
 	generation := h.paneGeneration[actor.UserID]
+	h.paneWorkers[actor.UserID] = generation
 	h.paneMu.Unlock()
 	lastTyping := time.Time{}
 	if session, err := h.service.Session(actor, ref); err == nil &&
@@ -45,6 +46,24 @@ func (h *Handler) schedulePaneRefresh(
 	go h.runPaneRefresh(ctx, actor, ref, message, generation, lastTyping)
 }
 
+// ensurePaneRefresh restores the live-card poller after a leader or Bria
+// process restart. tmux outlives the node process, while goroutines do not;
+// without this guard a replicated running session can keep executing with a
+// permanently frozen Telegram card.
+func (h *Handler) ensurePaneRefresh(
+	ctx context.Context,
+	actor application.Principal,
+	ref domain.SessionRef,
+	message telegrambot.Message,
+) {
+	h.paneMu.Lock()
+	_, running := h.paneWorkers[actor.UserID]
+	h.paneMu.Unlock()
+	if !running {
+		h.schedulePaneRefresh(ctx, actor, ref, message)
+	}
+}
+
 func (h *Handler) runPaneRefresh(
 	ctx context.Context,
 	actor application.Principal,
@@ -53,6 +72,7 @@ func (h *Handler) runPaneRefresh(
 	generation uint64,
 	lastTyping time.Time,
 ) {
+	defer h.finishPaneRefresh(actor.UserID, generation)
 	delay := paneInitialDelay
 	for attempt := 0; attempt < paneRefreshLimit; attempt++ {
 		if !waitPaneRefresh(ctx, delay) || !h.canRefresh() ||
@@ -120,7 +140,7 @@ func (h *Handler) runPaneRefresh(
 		if preferencesErr == nil && shouldAttachPane(preferences, panePhase) {
 			h.attachPane(ctx, actor, ref, message, generation, attempt, &snapshot.screen)
 		}
-		if settled {
+		if settled || (!message.Rich && (snapshot.screen.RichMarkdown || snapshot.screen.Pane != nil)) {
 			message, err = h.editResponseCard(ctx, actor, message, snapshot.screen)
 		} else {
 			// Keep high-frequency live-pane edits local to this worker. Replicating
@@ -135,6 +155,14 @@ func (h *Handler) runPaneRefresh(
 			return
 		}
 		delay = paneRefreshDelay
+	}
+}
+
+func (h *Handler) finishPaneRefresh(userID domain.UserID, generation uint64) {
+	h.paneMu.Lock()
+	defer h.paneMu.Unlock()
+	if h.paneWorkers[userID] == generation {
+		delete(h.paneWorkers, userID)
 	}
 }
 
@@ -210,7 +238,7 @@ func (h *Handler) settleFromTranscript(
 		return false
 	}
 	finalAt, ok := finalTranscriptAt(events)
-	if !ok || finalAt.Before(session.LastEventAt) {
+	if !ok || !transcriptFinalBelongsToCurrentTurn(session, finalAt, time.Now()) {
 		return false
 	}
 	settleCtx := application.WithOperationScope(
@@ -223,6 +251,28 @@ func (h *Handler) settleFromTranscript(
 	return true
 }
 
+const deliveredInputTimestampSkew = 2 * time.Minute
+const deliveredInputSettleGrace = 2 * time.Second
+
+func transcriptFinalBelongsToCurrentTurn(
+	session domain.Session,
+	finalAt time.Time,
+	now time.Time,
+) bool {
+	if !finalAt.Before(session.LastEventAt) {
+		return true
+	}
+	// Older builds stamped LastEventAt again when the local node acknowledged
+	// an already-delivered prompt. A fast backend can finish before that
+	// acknowledgement is replicated. Accept only that narrow legacy skew; all
+	// other finals older than the current turn remain stale.
+	operation := session.LastOperation
+	return operation != nil && operation.Action == domain.ActionSendInput &&
+		operation.Status == domain.OperationSucceeded &&
+		session.LastEventAt.Sub(finalAt) <= deliveredInputTimestampSkew &&
+		!now.Before(operation.At.Add(deliveredInputSettleGrace))
+}
+
 func (h *Handler) currentPaneGeneration(userID domain.UserID, generation uint64) bool {
 	h.paneMu.Lock()
 	defer h.paneMu.Unlock()
@@ -232,6 +282,7 @@ func (h *Handler) currentPaneGeneration(userID domain.UserID, generation uint64)
 func (h *Handler) cancelPaneRefresh(userID domain.UserID) {
 	h.paneMu.Lock()
 	h.paneGeneration[userID]++
+	delete(h.paneWorkers, userID)
 	h.paneMu.Unlock()
 }
 

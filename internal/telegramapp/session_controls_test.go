@@ -98,7 +98,6 @@ func TestReplaceResponseCardsDeletesThePreviousReplicatedCard(t *testing.T) {
 
 func TestPaneRefreshRendersFinalAnswerWhenRuntimeAlreadySettledIdle(t *testing.T) {
 	fixture := newFixture(t)
-	fixture.messenger.editNotify = make(chan struct{}, 1)
 	ref := domain.SessionRef{NodeID: "allowed", SessionID: "live"}
 	controls := &blockingControls{ref: ref, events: []transcript.Event{
 		{Kind: transcript.EventToolResult, Head: "Bash", Body: "tool completed"},
@@ -118,12 +117,14 @@ func TestPaneRefreshRendersFinalAnswerWhenRuntimeAlreadySettledIdle(t *testing.T
 	}); err != nil {
 		t.Fatal(err)
 	}
-	select {
-	case <-fixture.messenger.editNotify:
-	case <-time.After(2 * time.Second):
-		t.Fatal("settled idle card was not refreshed")
+	deadline := time.Now().Add(2 * time.Second)
+	for len(fixture.messenger.sent) < 2 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
 	}
-	latest := fixture.messenger.edited[len(fixture.messenger.edited)-1].Text
+	if len(fixture.messenger.sent) < 2 {
+		t.Fatal("settled idle card was not promoted to a rich final card")
+	}
+	latest := fixture.messenger.sent[len(fixture.messenger.sent)-1].Text
 	if !strings.Contains(latest, "FINAL ANSWER") {
 		t.Fatalf("final answer missing from settled card: %q", latest)
 	}

@@ -109,6 +109,111 @@ func TestReconciliationRefreshesActiveResponseCardWithRecoveredFinal(t *testing.
 	}
 }
 
+func TestReconciliationAcceptsFastFinalBeforeLegacyDeliveryAck(t *testing.T) {
+	fixture := newFixture(t)
+	actor := application.Principal{UserID: 7}
+	ref := domain.SessionRef{NodeID: "allowed", SessionID: "live"}
+	session := fixture.machine.State().Sessions[ref.Key()]
+	finalAt := time.Now().Add(-20 * time.Second).UTC()
+	ackAt := finalAt.Add(10 * time.Second)
+	applyBackgroundCommand(t, fixture, "legacy-running-ack",
+		clusterstate.CommandPublishSessionRuntime, ackAt,
+		clusterstate.PublishSessionRuntime{
+			Session: ref, Generation: session.RuntimeGeneration,
+			Phase: domain.RuntimeRunning, Result: &domain.SessionOperationResult{
+				OperationID: "legacy-input", Action: domain.ActionSendInput,
+				Status: domain.OperationSucceeded,
+			},
+		})
+	if err := fixture.service.RecordTelegramResponseCard(
+		application.WithOperationScope(context.Background(), "legacy-card"), actor,
+		domain.TelegramResponseCard{ChatID: 7, MessageID: 61, Rich: true},
+	); err != nil {
+		t.Fatal(err)
+	}
+	controls := &blockingControls{ref: ref, events: []transcript.Event{{
+		Kind: transcript.EventAssistantFinal, Text: "FAST FINAL",
+		Timestamp: finalAt.Format(time.RFC3339Nano),
+	}}}
+	handler, err := telegramapp.NewHandlerWithControls(
+		fixture.service, fixture.projector, fixture.codec, fixture.messenger, controls,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	handler.RunBackgroundNotifications(ctx, 5*time.Millisecond)
+	if got := fixture.machine.State().Sessions[ref.Key()].RuntimePhase; got != domain.RuntimeIdle {
+		t.Fatalf("runtime phase = %q", got)
+	}
+}
+
+func TestBackgroundReconciliationRestoresLiveCardWorkerAfterRestart(t *testing.T) {
+	fixture := newFixture(t)
+	fixture.messenger.sendNotify = make(chan struct{}, 1)
+	fixture.messenger.editNotify = make(chan struct{}, 1)
+	actor := application.Principal{UserID: 7}
+	ref := domain.SessionRef{NodeID: "allowed", SessionID: "live"}
+	session := fixture.machine.State().Sessions[ref.Key()]
+	runningAt := time.Now().Add(-time.Second).UTC()
+	applyBackgroundCommand(t, fixture, "restart-running",
+		clusterstate.CommandPublishSessionRuntime, runningAt,
+		clusterstate.PublishSessionRuntime{
+			Session: ref, Generation: session.RuntimeGeneration,
+			Phase: domain.RuntimeRunning,
+		})
+	if err := fixture.service.RecordTelegramResponseCard(
+		application.WithOperationScope(context.Background(), "legacy-live-card"), actor,
+		domain.TelegramResponseCard{ChatID: 7, MessageID: 71, Rich: false},
+	); err != nil {
+		t.Fatal(err)
+	}
+	controls := &blockingControls{
+		ref: ref, pane: []byte("provider is working\n"), events: []transcript.Event{{
+			Kind: transcript.EventToolCall, Head: "Bash", Body: "echo working",
+			Timestamp: runningAt.Format(time.RFC3339Nano),
+		}},
+	}
+	handler, err := telegramapp.NewHandlerWithControls(
+		fixture.service, fixture.projector, fixture.codec, fixture.messenger, controls,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		handler.RunBackgroundNotifications(ctx, 5*time.Millisecond)
+	}()
+	select {
+	case <-fixture.messenger.sendNotify:
+	case <-time.After(2 * time.Second):
+		cancel()
+		<-done
+		t.Fatal("restart reconciliation did not promote and refresh the live card")
+	}
+	select {
+	case <-fixture.messenger.editNotify:
+	case <-time.After(2 * time.Second):
+		cancel()
+		<-done
+		t.Fatal("restored worker did not refresh the terminal snapshot")
+	}
+	cancel()
+	<-done
+	if len(fixture.messenger.sent) == 0 || !fixture.messenger.sent[0].RichMarkdown {
+		t.Fatalf("replacement screen = %#v", fixture.messenger.sent)
+	}
+	if len(fixture.messenger.edited) == 0 || fixture.messenger.edited[len(fixture.messenger.edited)-1].Pane == nil {
+		t.Fatalf("refreshed screen = %#v", fixture.messenger.edited)
+	}
+	if len(fixture.messenger.deleted) == 0 || fixture.messenger.deleted[0].MessageID != 71 {
+		t.Fatalf("legacy carrier was not replaced: %#v", fixture.messenger.deleted)
+	}
+}
+
 func applyBackgroundCommand(
 	t *testing.T,
 	fixture fixture,

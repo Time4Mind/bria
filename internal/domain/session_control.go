@@ -40,7 +40,15 @@ func (s *State) PublishSessionRuntime(
 	if phase != RuntimeWaitingInput {
 		session.InteractivePrompt = nil
 	}
-	session.LastEventAt = at
+	// The acknowledgement for a delivered text prompt can be committed after a
+	// fast provider has already written its final transcript event. It is not a
+	// new user/session event, so preserving the original prompt timestamp keeps
+	// transcript reconciliation monotonic.
+	deliveredInputAck := previousPhase == RuntimeRunning && phase == RuntimeRunning &&
+		result != nil && result.Action == ActionSendInput && result.Status == OperationSucceeded
+	if !deliveredInputAck {
+		session.LastEventAt = at
+	}
 	session.Revision++
 	s.Sessions[ref.Key()] = session
 	s.publishBackgroundTransition(previousPhase, session, result, at)
