@@ -10,14 +10,14 @@ import (
 )
 
 func clusterSettingsActions(input SettingsInput) Grid {
-	rows := Grid{
-		Row{button(input.Copy.Text(i18n.ClusterUpdateButton), ActionClusterUpdate, "")},
-		Row{button(input.Copy.Text(i18n.ClusterAddNode), ActionClusterAdd, "")},
+	buttons := []Button{
+		button(input.Copy.Text(i18n.ClusterUpdateButton), ActionClusterUpdate, ""),
+		button(input.Copy.Text(i18n.ClusterAddNode), ActionClusterAdd, ""),
 	}
 	for _, pending := range input.PendingEnrollments {
-		rows = append(rows, Row{button("⏳ "+pending.Name, ActionEnrollmentOpen, pending.Token)})
+		buttons = append(buttons, button("⏳ "+pending.Name, ActionEnrollmentOpen, pending.Token))
 	}
-	return rows
+	return settingsRows(buttons)
 }
 
 func RenderClusterUpdateConfirmation(copy i18n.Localizer) Screen {

@@ -12,12 +12,9 @@ func TestSettingsRootUsesCCBotCategoryFlowGolden(t *testing.T) {
 	if screen.ParseMode != ParseModeHTML || !strings.HasPrefix(screen.Text, "<b>") {
 		t.Fatalf("settings format=%q/%q", screen.ParseMode, screen.Text)
 	}
-	assertGoldenGrid(t, screen, `[🖥 Interface and language -> settings_cat@interface]
-[🧾 Card content -> settings_cat@card]
-[🗄 Archive -> settings_cat@archive]
-[🔔 Notifications -> settings_cat@notifications]
-[🎙 Speech recognition -> settings_cat@voice]
-[🖧 Cluster -> settings_cat@cluster]
+	assertGoldenGrid(t, screen, `[🖥 Interface and language -> settings_cat@interface] | [🧾 Card content -> settings_cat@card]
+[🗄 Archive -> settings_cat@archive] | [🔔 Notifications -> settings_cat@notifications]
+[🎙 Speech recognition -> settings_cat@voice] | [🖧 Cluster -> settings_cat@cluster]
 [← Back -> menu]`)
 }
 
@@ -26,8 +23,7 @@ func TestSettingsCategoryShowsCurrentValuesGolden(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertGoldenGrid(t, screen, `[Auto-archive: Unlimited -> setting@idle_archive]
-[Archive retention: Unlimited -> setting@retention]
+	assertGoldenGrid(t, screen, `[Auto-archive: Unlimited -> setting@idle_archive] | [Archive retention: Unlimited -> setting@retention]
 [On expiry: Delete files -> setting@expiry]
 [← Back -> settings]`)
 }
@@ -68,12 +64,9 @@ func TestCardVisibilitySettingsShowIndependentValuesGolden(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertGoldenGrid(t, screen, `[Tool calls: On -> setting@show_tool_calls]
-[Tool results: Off -> setting@show_tool_results]
-[Output lines: 15 lines -> setting@tool_output_lines]
-[Reasoning: On -> setting@show_thinking]
-[Response cards: Keep · paging -> setting@response_cards]
-[Terminal snapshots: While working -> setting@terminal_snapshots]
+	assertGoldenGrid(t, screen, `[Tool calls: On -> setting@show_tool_calls] | [Tool results: Off -> setting@show_tool_results]
+[Output lines: 15 lines -> setting@tool_output_lines] | [Reasoning: On -> setting@show_thinking]
+[Response cards: Keep · paging -> setting@response_cards] | [Terminal snapshots: While working -> setting@terminal_snapshots]
 [← Back -> settings]`)
 
 	setting, err := RenderSetting(input, SettingToolResults)
@@ -92,10 +85,8 @@ func TestNotificationSettingsAndDismissChoicesGolden(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertGoldenGrid(t, screen, `[Фон: задача готова: Вкл -> setting@notify_finished]
-[Фон: ошибки: Выкл -> setting@notify_error]
-[Фон: требуется действие: Вкл -> setting@notify_action]
-[Скрывать после переключений: 5 -> setting@background_dismiss]
+	assertGoldenGrid(t, screen, `[Фон: задача готова: Вкл -> setting@notify_finished] | [Фон: ошибки: Выкл -> setting@notify_error]
+[Фон: требуется действие: Вкл -> setting@notify_action] | [Скрывать после переключений: 5 -> setting@background_dismiss]
 [← Назад -> settings]`)
 	dismiss, err := RenderSetting(input, SettingBackgroundDismiss)
 	if err != nil {
@@ -115,10 +106,8 @@ func TestClusterSettingsExposeGlobalSortAndPollingGolden(t *testing.T) {
 	if !strings.Contains(screen.Text, input.ClusterAccounts) {
 		t.Fatalf("cluster account summary missing: %q", screen.Text)
 	}
-	assertGoldenGrid(t, screen, `[⬆ Обновить кластер -> cluster_update]
-[＋ Подключить ноду -> cluster_add]
-[Сортировка серверов: По времени -> setting@node_sort]
-[Опрос лимитов: 10 мин -> setting@quota_poll]
+	assertGoldenGrid(t, screen, `[⬆ Обновить кластер -> cluster_update] | [＋ Подключить ноду -> cluster_add]
+[Сортировка серверов: По времени -> setting@node_sort] | [Опрос лимитов: 10 мин -> setting@quota_poll]
 [← Назад -> settings]`)
 }
 

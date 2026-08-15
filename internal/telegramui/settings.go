@@ -81,44 +81,6 @@ func RenderNodeVoiceSetupStarted(
 	return screen
 }
 
-func RenderSettings(input SettingsInput) Screen {
-	copy := input.Copy
-	return Screen{
-		Name: ScreenSettings, ParseMode: ParseModeHTML,
-		Text: "<b>" + copy.Text(i18n.SettingsTitle) + "</b>\n\n" + copy.Text(i18n.SettingsBody),
-		Grid: Grid{
-			Row{button(copy.Text(i18n.SettingsInterface), ActionSettingsCategory, OpaqueToken(CategoryInterface))},
-			Row{button(copy.Text(i18n.SettingsCard), ActionSettingsCategory, OpaqueToken(CategoryCard))},
-			Row{button(copy.Text(i18n.SettingsArchive), ActionSettingsCategory, OpaqueToken(CategoryArchive))},
-			Row{button(copy.Text(i18n.SettingsNotifications), ActionSettingsCategory, OpaqueToken(CategoryNotifications))},
-			Row{button(copy.Text(i18n.SettingsVoice), ActionSettingsCategory, OpaqueToken(CategoryVoice))},
-			Row{button(copy.Text(i18n.SettingsCluster), ActionSettingsCategory, OpaqueToken(CategoryCluster))},
-			Row{button(copy.Text(i18n.ButtonBack), ActionMenu, "")},
-		},
-	}
-}
-
-func RenderSettingsCategory(input SettingsInput, category SettingsCategory) (Screen, error) {
-	if !validSettingsCategory(category) {
-		return Screen{}, fmt.Errorf("unknown settings category: %q", category)
-	}
-	copy := input.Copy
-	rows := make(Grid, 0, len(settingsIn(category))+1)
-	if category == CategoryCluster {
-		rows = append(rows, clusterSettingsActions(input)...)
-	}
-	for _, descriptor := range settingsIn(category) {
-		label := copy.Text(descriptor.label) + ": " + settingValue(input, descriptor.id)
-		rows = append(rows, Row{button(label, ActionOpenSetting, OpaqueToken(descriptor.id))})
-	}
-	rows = append(rows, Row{button(copy.Text(i18n.ButtonBack), ActionSettings, "")})
-	return Screen{
-		Name: ScreenSettings, ParseMode: ParseModeHTML,
-		Text: settingsCategoryText(input, category),
-		Grid: rows,
-	}, nil
-}
-
 func RenderSetting(input SettingsInput, id SettingID) (Screen, error) {
 	descriptor, ok := descriptorFor(id)
 	if !ok {
