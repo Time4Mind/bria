@@ -11,13 +11,11 @@ import (
 	"github.com/Time4Mind/bria/internal/telegramui"
 )
 
-func (p *TelegramProjector) Status(actor Principal) (telegramui.Screen, error) {
-	return p.StatusMode(actor, telegramui.StatusChoose)
-}
-
-func (p *TelegramProjector) StatusMode(
+func (p *TelegramProjector) StatusModeWithReturn(
 	actor Principal,
 	mode telegramui.StatusMode,
+	backAction telegramui.Action,
+	backToken telegramui.OpaqueToken,
 ) (telegramui.Screen, error) {
 	state, err := p.actorState(actor)
 	if err != nil {
@@ -55,6 +53,7 @@ func (p *TelegramProjector) StatusMode(
 	}
 	return telegramui.RenderStatus(telegramui.StatusInput{
 		Copy: actorCopy(state, actor), Mode: mode, Now: now, Items: items,
+		BackAction: backAction, BackToken: backToken,
 	}), nil
 }
 

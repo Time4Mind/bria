@@ -29,10 +29,12 @@ type StatusItem struct {
 }
 
 type StatusInput struct {
-	Copy  i18n.Localizer
-	Mode  StatusMode
-	Now   time.Time
-	Items []StatusItem
+	Copy       i18n.Localizer
+	Mode       StatusMode
+	Now        time.Time
+	Items      []StatusItem
+	BackAction Action
+	BackToken  OpaqueToken
 }
 
 func RenderStatus(input StatusInput) Screen {
@@ -82,7 +84,11 @@ func RenderStatus(input StatusInput) Screen {
 	if len(input.Items) == 0 {
 		rows = append(rows, Row{button(copy.Text(i18n.NoServers), ActionNoop, "")})
 	}
-	rows = append(rows, Row{button(copy.Text(i18n.ButtonBack), ActionMenu, "")})
+	backAction, backToken := input.BackAction, input.BackToken
+	if backAction == "" {
+		backAction = ActionMenu
+	}
+	rows = append(rows, Row{button(copy.Text(i18n.ButtonBack), backAction, backToken)})
 	return Screen{
 		Name: ScreenStatus, Text: text, Grid: rows,
 		RichMarkdown: mode == StatusChoose,

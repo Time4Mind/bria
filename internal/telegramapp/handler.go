@@ -5,7 +5,6 @@ package telegramapp
 import (
 	"context"
 	"errors"
-	"strings"
 	"sync"
 	"time"
 
@@ -55,6 +54,7 @@ type Handler struct {
 	clusterUpdater     clusterUpdater
 	providerAuthFlows  map[domain.UserID]providerAuthFlow
 	nodeSettingsBack   map[domain.UserID]settingsReturn
+	statusBack         map[domain.UserID]settingsReturn
 	speechMu           sync.Mutex
 	speechTargets      map[domain.UserID]domain.NodeID
 	knownSpeechNodes   map[domain.NodeID]bool
@@ -91,6 +91,7 @@ func NewHandler(
 		providerAliasFlows: make(map[domain.UserID]providerAliasFlow),
 		providerAuthFlows:  make(map[domain.UserID]providerAuthFlow),
 		nodeSettingsBack:   make(map[domain.UserID]settingsReturn),
+		statusBack:         make(map[domain.UserID]settingsReturn),
 		speechTargets:      make(map[domain.UserID]domain.NodeID),
 		knownSpeechNodes:   make(map[domain.NodeID]bool),
 		cardPages:          make(map[cardPageKey]cardPageState),
@@ -256,7 +257,8 @@ func (h *Handler) handleCallback(
 	case telegramui.ActionSessions:
 		h.clearCreateFlow(actor.UserID)
 		if callback.Token == "servers" || isLegacyNodeSessionsScreen(update.CallbackOrigin.Text) {
-			screen, err = h.projector.OpenNodeSelector(actor)
+			h.rememberStatusReturn(actor, true)
+			screen, err = h.openStatus(ctx, actor, update, telegramui.StatusChoose, true)
 		} else {
 			screen, err = h.openSessions(ctx, actor)
 		}
@@ -274,11 +276,12 @@ func (h *Handler) handleCallback(
 	case telegramui.ActionOpenSetting:
 		screen, err = h.openSetting(actor, callback.Token)
 	case telegramui.ActionStatus:
+		h.rememberStatusReturn(actor, false)
 		screen, err = h.openStatus(ctx, actor, update, telegramui.StatusChoose, true)
 	case telegramui.ActionStatusRefresh:
 		screen, err = h.openStatus(ctx, actor, update, statusMode(callback.Token), true)
 	case telegramui.ActionStatusMode:
-		screen, err = h.projector.StatusMode(actor, statusMode(callback.Token))
+		screen, err = h.projectStatus(actor, statusMode(callback.Token))
 	case telegramui.ActionStatusLeaderNode:
 		screen, err = h.confirmStatusLeader(actor, callback.Token)
 	case telegramui.ActionStatusSettingsNode:
@@ -404,27 +407,6 @@ func (h *Handler) handleCallback(
 		}
 	}
 	return err
-}
-
-func leavesSessionCard(action telegramui.Action) bool {
-	switch action {
-	case telegramui.ActionStop, telegramui.ActionTerminal, telegramui.ActionConfirmClose,
-		telegramui.ActionConfirmClear, telegramui.ActionCancelControl,
-		telegramui.ActionKeyUp, telegramui.ActionKeyDown, telegramui.ActionKeyLeft,
-		telegramui.ActionKeyRight, telegramui.ActionKeyEnter, telegramui.ActionKeyEscape,
-		telegramui.ActionKeySpace, telegramui.ActionKeyTab, telegramui.ActionKeyCtrlC,
-		telegramui.ActionKeyBack:
-		return false
-	default:
-		return true
-	}
-}
-
-func isLegacyNodeSessionsScreen(text string) bool {
-	first, _, _ := strings.Cut(strings.TrimSpace(text), "\n")
-	return strings.Contains(first, " · ") &&
-		(strings.Contains(first, "сесси") || strings.Contains(first, "session") ||
-			strings.Contains(first, "会话"))
 }
 
 func (h *Handler) selectArchiveNode(

@@ -70,7 +70,7 @@ func (h *Handler) handleMembershipLifecycle(
 		if err := h.service.DeleteNode(ctx, actor, nodeID); err != nil {
 			return err
 		}
-		screen, err := h.projector.StatusMode(actor, telegramui.StatusSettings)
+		screen, err := h.projectStatus(actor, telegramui.StatusSettings)
 		if err == nil {
 			_, err = h.messenger.EditScreen(ctx, update.CallbackOrigin, screen)
 		}

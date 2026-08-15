@@ -22,6 +22,34 @@ type settingsReturn struct {
 	Token  telegramui.OpaqueToken
 }
 
+func (h *Handler) rememberStatusReturn(actor application.Principal, fromSessions bool) {
+	back := settingsReturn{Action: telegramui.ActionMenu}
+	if fromSessions {
+		back = settingsReturn{Action: telegramui.ActionSessions}
+	}
+	h.membershipMu.Lock()
+	h.statusBack[actor.UserID] = back
+	h.membershipMu.Unlock()
+}
+
+func (h *Handler) statusReturn(actor application.Principal) settingsReturn {
+	h.membershipMu.Lock()
+	defer h.membershipMu.Unlock()
+	back, ok := h.statusBack[actor.UserID]
+	if !ok {
+		return settingsReturn{Action: telegramui.ActionMenu}
+	}
+	return back
+}
+
+func (h *Handler) projectStatus(
+	actor application.Principal,
+	mode telegramui.StatusMode,
+) (telegramui.Screen, error) {
+	back := h.statusReturn(actor)
+	return h.projector.StatusModeWithReturn(actor, mode, back.Action, back.Token)
+}
+
 func isStatusAction(action telegramui.Action) bool {
 	switch action {
 	case telegramui.ActionStatus, telegramui.ActionStatusRefresh, telegramui.ActionStatusMode,
@@ -80,7 +108,7 @@ func (h *Handler) openStatus(
 			return telegramui.Screen{}, err
 		}
 	}
-	return h.projector.StatusMode(actor, mode)
+	return h.projectStatus(actor, mode)
 }
 
 func (h *Handler) confirmStatusLeader(
@@ -172,7 +200,7 @@ func (h *Handler) applyStatusLeader(
 			return telegramui.Screen{}, err
 		}
 	}
-	return h.projector.StatusMode(actor, telegramui.StatusChoose)
+	return h.projectStatus(actor, telegramui.StatusChoose)
 }
 
 func (h *Handler) resolveStatusNode(
@@ -222,7 +250,7 @@ func (h *Handler) scheduleStatusRefresh(
 					}
 					continue
 				}
-				screen, err := h.projector.StatusMode(actor, mode)
+				screen, err := h.projectStatus(actor, mode)
 				if err == nil {
 					_, _ = h.messenger.EditScreen(ctx, message, screen)
 				}

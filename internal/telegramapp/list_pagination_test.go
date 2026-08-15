@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Time4Mind/bria/internal/application"
 	"github.com/Time4Mind/bria/internal/clusterstate"
 	"github.com/Time4Mind/bria/internal/domain"
 	"github.com/Time4Mind/bria/internal/telegramapp"
@@ -79,23 +80,24 @@ func TestNodePaginationCallbackEditsSameCarrier(t *testing.T) {
 			t.Fatal(result.Err())
 		}
 	}
-	// Closing the last session intentionally keeps its node selected. Open the
-	// server selector explicitly before exercising node pagination.
-	open := encodeCallback(t, telegramui.ActionSessions, "servers")
+	// The dedicated server selector remains independently pageable even though
+	// the Sessions -> Servers route now opens the full status screen.
 	origin := telegrambot.Message{ChatID: 7, MessageID: 77}
-	invokeListCallback(t, fixture, 301, open, origin)
-	first := fixture.messenger.edited[len(fixture.messenger.edited)-1]
+	first, err := fixture.projector.OpenNodeSelector(application.Principal{UserID: 7})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !strings.Contains(telegramui.CanonicalGrid(first.Grid), "nodes_next") {
 		t.Fatalf("first page=%#v", first)
 	}
 	next := callbackForAction(t, first, telegramui.ActionNodesNext)
-	invokeListCallback(t, fixture, 302, next, origin)
+	invokeListCallback(t, fixture, 301, next, origin)
 	second := fixture.messenger.edited[len(fixture.messenger.edited)-1]
 	grid := telegramui.CanonicalGrid(second.Grid)
 	if !strings.Contains(grid, "nodes_prev") || !strings.Contains(grid, "nodes_next") {
 		t.Fatalf("second page=%s", grid)
 	}
-	if len(fixture.messenger.sent) != 0 || len(fixture.messenger.edited) != 2 {
+	if len(fixture.messenger.sent) != 0 || len(fixture.messenger.edited) != 1 {
 		t.Fatalf("sent=%d edited=%d", len(fixture.messenger.sent), len(fixture.messenger.edited))
 	}
 }

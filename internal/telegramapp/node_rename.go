@@ -51,5 +51,6 @@ func (h *Handler) acceptNodeRename(
 	h.membershipMu.Lock()
 	delete(h.renameFlows, actor.UserID)
 	h.membershipMu.Unlock()
-	return h.sendProjected(ctx, chatID, h.nodeSettingsResult(actor, i18n.NodeRenamed, ""), nil)
+	screen, err := h.projectNodeSettings(actor, flow.NodeID)
+	return h.sendProjected(ctx, chatID, screen, err)
 }

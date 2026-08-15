@@ -61,6 +61,9 @@ func TestMutedBackgroundNotificationIsNotSentAndIsDurablyConsumed(t *testing.T) 
 
 func TestReconciliationRefreshesActiveResponseCardWithRecoveredFinal(t *testing.T) {
 	fixture := newFixture(t)
+	// This test intentionally runs reconciliation and card refresh concurrently;
+	// the shared ordering slice is for synchronous callback tests only.
+	fixture.messenger.events = nil
 	actor := application.Principal{UserID: 7}
 	ref := domain.SessionRef{NodeID: "allowed", SessionID: "live"}
 	session := fixture.machine.State().Sessions[ref.Key()]

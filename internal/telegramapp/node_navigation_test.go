@@ -50,7 +50,7 @@ func TestNodeWithoutLiveSessionKeepsSessionListFallback(t *testing.T) {
 	}
 }
 
-func TestLegacyNodeSessionButtonsPreserveTheirNavigationContext(t *testing.T) {
+func TestLegacyNodeSessionButtonsUpgradeToStatusNavigation(t *testing.T) {
 	fixture := newFixture(t)
 	origin := telegrambot.Message{
 		ChatID: 7, MessageID: 11, Text: "Allowed · active sessions",
@@ -62,9 +62,11 @@ func TestLegacyNodeSessionButtonsPreserveTheirNavigationContext(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if got := fixture.messenger.edited[len(fixture.messenger.edited)-1]; got.Name != telegramui.ScreenNodes {
+	if got := fixture.messenger.sent[len(fixture.messenger.sent)-1]; got.Name != telegramui.ScreenStatus ||
+		!got.RichMarkdown {
 		t.Fatalf("legacy servers callback opened %#v", got)
 	}
+	statusOrigin := stubMessageForScreen(1, fixture.messenger.sent[len(fixture.messenger.sent)-1])
 
 	settingsToken, err := fixture.codec.Node(
 		7, telegramui.ActionStatusSettingsNode, "allowed",
@@ -75,14 +77,14 @@ func TestLegacyNodeSessionButtonsPreserveTheirNavigationContext(t *testing.T) {
 	settings := encodeCallback(t, telegramui.ActionStatusSettingsNode, settingsToken)
 	if err := fixture.handler.HandleTelegramUpdate(context.Background(), telegrambot.IncomingUpdate{
 		UpdateID: 32, Kind: telegrambot.IncomingCallback, ChatID: 7, UserID: 7,
-		CallbackID: "legacy-settings", CallbackData: settings, CallbackOrigin: origin,
+		CallbackID: "legacy-settings", CallbackData: settings, CallbackOrigin: statusOrigin,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	got := fixture.messenger.edited[len(fixture.messenger.edited)-1]
+	got := fixture.messenger.sent[len(fixture.messenger.sent)-1]
 	back := got.Grid[len(got.Grid)-1][0].Callback
-	if back.Action != telegramui.ActionSelectNode || back.Token == "" {
-		t.Fatalf("legacy settings back route=%#v", back)
+	if back.Action != telegramui.ActionStatusMode || back.Token != "settings" {
+		t.Fatalf("upgraded settings back route=%#v", back)
 	}
 }
 
@@ -96,7 +98,10 @@ func TestServersBackReturnsToSessionsInsteadOfMenu(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	selector := fixture.messenger.edited[len(fixture.messenger.edited)-1]
+	selector := fixture.messenger.sent[len(fixture.messenger.sent)-1]
+	if selector.Name != telegramui.ScreenStatus || !selector.RichMarkdown {
+		t.Fatalf("servers did not open full status screen: %#v", selector)
+	}
 	back := selector.Grid[len(selector.Grid)-1][0].Callback
 	if back.Action != telegramui.ActionSessions || back.Token != "" {
 		t.Fatalf("servers back route=%#v", back)
@@ -109,13 +114,53 @@ func TestServersBackReturnsToSessionsInsteadOfMenu(t *testing.T) {
 	if err := fixture.handler.HandleTelegramUpdate(context.Background(), telegrambot.IncomingUpdate{
 		UpdateID: 34, Kind: telegrambot.IncomingCallback, ChatID: 7, UserID: 7,
 		CallbackID: "back-sessions", CallbackData: backData,
-		CallbackOrigin: telegrambot.Message{ChatID: 7, MessageID: 12},
+		CallbackOrigin: stubMessageForScreen(1, selector),
 	}); err != nil {
 		t.Fatal(err)
 	}
-	got := fixture.messenger.edited[len(fixture.messenger.edited)-1]
+	got := fixture.messenger.sent[len(fixture.messenger.sent)-1]
 	if got.Name == telegramui.ScreenMenu {
 		t.Fatalf("servers back opened menu: %#v", got)
+	}
+}
+
+func TestServersStatusModesKeepSessionsAsBackDestination(t *testing.T) {
+	fixture := newFixture(t)
+	servers := encodeCallback(t, telegramui.ActionSessions, "servers")
+	origin := telegrambot.Message{ChatID: 7, MessageID: 13}
+	if err := fixture.handler.HandleTelegramUpdate(context.Background(), telegrambot.IncomingUpdate{
+		UpdateID: 35, Kind: telegrambot.IncomingCallback, ChatID: 7, UserID: 7,
+		CallbackID: "servers", CallbackData: servers, CallbackOrigin: origin,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	status := fixture.messenger.sent[len(fixture.messenger.sent)-1]
+	settings := ""
+	for _, row := range status.Grid {
+		for _, button := range row {
+			if button.Callback.Action == telegramui.ActionStatusMode && button.Callback.Token == "settings" {
+				encoded, encodeErr := button.Callback.Encode()
+				if encodeErr != nil {
+					t.Fatal(encodeErr)
+				}
+				settings = encoded
+			}
+		}
+	}
+	if settings == "" {
+		t.Fatal("status screen has no settings mode")
+	}
+	if err := fixture.handler.HandleTelegramUpdate(context.Background(), telegrambot.IncomingUpdate{
+		UpdateID: 36, Kind: telegrambot.IncomingCallback, ChatID: 7, UserID: 7,
+		CallbackID: "settings", CallbackData: settings,
+		CallbackOrigin: stubMessageForScreen(1, status),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got := fixture.messenger.sent[len(fixture.messenger.sent)-1]
+	back := got.Grid[len(got.Grid)-1][0].Callback
+	if back.Action != telegramui.ActionSessions || back.Token != "" {
+		t.Fatalf("status mode lost sessions return route: %#v", back)
 	}
 }
 
