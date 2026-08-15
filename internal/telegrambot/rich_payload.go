@@ -15,7 +15,61 @@ func buildRichTextMessage(text string) (richMessage, error) {
 	if !utf8.ValidString(text) || utf8.RuneCountInString(text) > MaxRichTextRunes {
 		return richMessage{}, errors.New("invalid or oversized rich screen text")
 	}
-	return richMessage{Markdown: normalizeRichTables(text)}, nil
+	return richMessage{Markdown: normalizeRichMarkdown(text)}, nil
+}
+
+func normalizeRichMarkdown(text string) string {
+	return normalizeRichTables(normalizeRichShellFences(text))
+}
+
+var copyableRichShellLanguages = map[string]struct{}{
+	"": {}, "bash": {}, "bat": {}, "batch": {}, "cmd": {}, "console": {},
+	"powershell": {}, "ps1": {}, "pwsh": {}, "sh": {}, "shell": {}, "zsh": {},
+}
+
+// Telegram Android displays fenced shell blocks literally inside Rich
+// <details>. CCBot works around that client behavior by using a multi-line
+// Rich <code> span, which also restores the native tap/copy interaction.
+func normalizeRichShellFences(text string) string {
+	lines := strings.Split(text, "\n")
+	normalized := make([]string, 0, len(lines))
+	for index := 0; index < len(lines); {
+		opener := strings.TrimSpace(lines[index])
+		if !strings.HasPrefix(opener, "```") || strings.Contains(opener[3:], "`") {
+			normalized = append(normalized, lines[index])
+			index++
+			continue
+		}
+		language := strings.ToLower(strings.TrimSpace(opener[3:]))
+		if _, ok := copyableRichShellLanguages[language]; !ok {
+			normalized = append(normalized, lines[index])
+			index++
+			continue
+		}
+		closing := index + 1
+		for closing < len(lines) && strings.TrimSpace(lines[closing]) != "```" {
+			closing++
+		}
+		if closing == len(lines) || closing == index+1 {
+			normalized = append(normalized, lines[index])
+			index++
+			continue
+		}
+		body := strings.Join(lines[index+1:closing], "\n")
+		if !strings.Contains(body, "\n") && !strings.Contains(body, "`") {
+			normalized = append(normalized, "`"+body+"`")
+		} else {
+			normalized = append(normalized, "<code>"+escapeRichCode(body)+"</code>")
+		}
+		index = closing + 1
+	}
+	return strings.Join(normalized, "\n")
+}
+
+func escapeRichCode(text string) string {
+	text = strings.ReplaceAll(text, "&", "&amp;")
+	text = strings.ReplaceAll(text, "<", "&lt;")
+	return strings.ReplaceAll(text, ">", "&gt;")
 }
 
 // normalizeRichTables mirrors the small table normalization used by CCBot.
@@ -104,7 +158,7 @@ func buildRichMessage(text string, pane telegramui.PaneImage, photoReference str
 		!utf8.ValidString(text[:pane.AnchorOffset]) {
 		return richMessage{}, errors.New("invalid rich screen text or media anchor")
 	}
-	markdown := insertPaneAnchor(text, pane.AnchorOffset)
+	markdown := normalizeRichMarkdown(insertPaneAnchor(text, pane.AnchorOffset))
 	if utf8.RuneCountInString(markdown) > MaxRichTextRunes {
 		return richMessage{}, errors.New("rich screen text exceeds Telegram limit")
 	}
