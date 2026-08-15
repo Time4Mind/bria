@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/Time4Mind/bria/internal/clusterstate"
 )
@@ -38,6 +39,19 @@ func (s *Service) TelegramNextUpdateID() int64 {
 		return 0
 	}
 	return state.TelegramNextUpdateID
+}
+
+func (s *Service) BindTelegramBot(ctx context.Context, botID int64) error {
+	state := s.reader.State()
+	if state != nil && state.TelegramBotID == botID {
+		return nil
+	}
+	scope := fmt.Sprintf("telegram-bot-%d-%d", botID, time.Now().UTC().UnixNano())
+	return s.apply(
+		WithOperationScope(ctx, scope),
+		clusterstate.CommandBindTelegramBot,
+		clusterstate.BindTelegramBot{BotID: botID},
+	)
 }
 
 func (s *Service) AdvanceTelegramCursor(ctx context.Context, nextUpdateID int64) error {

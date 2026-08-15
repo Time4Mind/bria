@@ -27,6 +27,7 @@ const (
 	CommandSetPreferences         CommandKind = "set_preferences"
 	CommandSelectNode             CommandKind = "select_node"
 	CommandSelectSession          CommandKind = "select_session"
+	CommandBindTelegramBot        CommandKind = "bind_telegram_bot"
 	CommandAdvanceTelegramCursor  CommandKind = "advance_telegram_cursor"
 	CommandRecordTelegramCard     CommandKind = "record_telegram_card"
 	CommandMarkBackgroundNotified CommandKind = "mark_background_notified"
@@ -157,6 +158,10 @@ type BindProviderSession struct {
 
 type AdvanceTelegramCursor struct {
 	NextUpdateID int64 `json:"next_update_id"`
+}
+
+type BindTelegramBot struct {
+	BotID int64 `json:"bot_id"`
 }
 
 type RecordTelegramCard struct {

@@ -10,6 +10,22 @@ type TelegramResponseCard struct {
 	PaneHash        string `json:"pane_hash,omitempty"`
 }
 
+// BindTelegramBot associates transport state with one Telegram bot. A cursor
+// and response-card message IDs are meaningful only for the bot that created
+// them, so changing bot identity must discard that transport-only state.
+func (s *State) BindTelegramBot(botID int64) error {
+	if botID <= 0 {
+		return fmt.Errorf("Telegram bot id must be positive")
+	}
+	if s.TelegramBotID == botID {
+		return nil
+	}
+	s.TelegramBotID = botID
+	s.TelegramNextUpdateID = 0
+	s.TelegramResponseCards = make(map[UserID]TelegramResponseCard)
+	return nil
+}
+
 func (s *State) AdvanceTelegramCursor(nextUpdateID int64) error {
 	if nextUpdateID < 0 {
 		return fmt.Errorf("Telegram update cursor must not be negative")

@@ -186,6 +186,11 @@ func apply(state *domain.State, command Command) (json.RawMessage, error) {
 		return nil, decodeAnd(command.Payload, &payload, func() error {
 			return state.SelectSession(payload.UserID, payload.Session, command.IssuedAt)
 		})
+	case CommandBindTelegramBot:
+		var payload BindTelegramBot
+		return nil, decodeAnd(command.Payload, &payload, func() error {
+			return state.BindTelegramBot(payload.BotID)
+		})
 	case CommandAdvanceTelegramCursor:
 		var payload AdvanceTelegramCursor
 		return nil, decodeAnd(command.Payload, &payload, func() error {

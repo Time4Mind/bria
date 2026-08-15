@@ -18,6 +18,7 @@ type PollerConfig struct {
 	LeadershipCheckInterval time.Duration
 	RetryDelay              time.Duration
 	MaxCallbackAttempts     int
+	OnLeaderActivated       func(context.Context) error
 	OnCallbackDropped       func(IncomingUpdate, error, int)
 }
 
@@ -31,6 +32,7 @@ type Poller struct {
 	retryDelay          time.Duration
 	offset              int64
 	maxCallbackAttempts int
+	onLeaderActivated   func(context.Context) error
 	onCallbackDropped   func(IncomingUpdate, error, int)
 	callbackAttempts    map[int64]int
 }
@@ -67,6 +69,7 @@ func NewPoller(config PollerConfig) (*Poller, error) {
 		handler:      config.Handler,
 		longPollSecs: int(longPoll / time.Second), leadershipTick: leadershipTick,
 		retryDelay: retryDelay, maxCallbackAttempts: maxCallbackAttempts,
+		onLeaderActivated: config.OnLeaderActivated,
 		onCallbackDropped: config.OnCallbackDropped,
 		callbackAttempts:  make(map[int64]int),
 	}, nil
@@ -88,6 +91,14 @@ func (p *Poller) Run(ctx context.Context) error {
 			continue
 		}
 		if !leaderActive {
+			if p.onLeaderActivated != nil {
+				if err := p.onLeaderActivated(ctx); err != nil {
+					if err := waitOrDone(ctx, p.retryDelay); err != nil {
+						return err
+					}
+					continue
+				}
+			}
 			offset, err := p.cursor.Load(ctx)
 			if err != nil {
 				return fmt.Errorf("load Telegram update cursor: %w", err)

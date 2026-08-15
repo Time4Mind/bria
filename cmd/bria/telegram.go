@@ -149,6 +149,9 @@ func startTelegram(
 		API: client, Leadership: node, Cursor: cursor, Handler: observedHandler,
 		LongPollTimeout: 30 * time.Second, LeadershipCheckInterval: 250 * time.Millisecond,
 		RetryDelay: time.Second, MaxCallbackAttempts: 5,
+		OnLeaderActivated: func(activationCtx context.Context) error {
+			return activateTelegramLeader(activationCtx, client, service)
+		},
 		OnCallbackDropped: func(update telegrambot.IncomingUpdate, dropErr error, attempts int) {
 			fmt.Fprintf(os.Stderr,
 				"bria telegram: update=%d kind=%s%s dropped_after=%d%s\n",

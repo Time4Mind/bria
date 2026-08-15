@@ -152,7 +152,10 @@ func TestObserveBootResultIsReplicatedValue(t *testing.T) {
 }
 
 func TestTelegramCursorIsMonotonicAndSnapshotted(t *testing.T) {
-	machine := clusterstate.NewMachine(nil)
+	initial := domain.NewState()
+	initial.TelegramBotID = 101
+	initial.TelegramResponseCards[7] = domain.TelegramResponseCard{ChatID: 7, MessageID: 9}
+	machine := clusterstate.NewMachine(initial)
 	advance := command(t, "tg-43", clusterstate.CommandAdvanceTelegramCursor, clusterstate.AdvanceTelegramCursor{NextUpdateID: 43})
 	if result := machine.Apply(advance); result.Err() != nil {
 		t.Fatal(result.Err())
@@ -160,6 +163,27 @@ func TestTelegramCursorIsMonotonicAndSnapshotted(t *testing.T) {
 	backward := command(t, "tg-42", clusterstate.CommandAdvanceTelegramCursor, clusterstate.AdvanceTelegramCursor{NextUpdateID: 42})
 	if result := machine.Apply(backward); result.Err() == nil {
 		t.Fatal("backward Telegram cursor accepted")
+	}
+	bind := command(t, "tg-bind-202", clusterstate.CommandBindTelegramBot,
+		clusterstate.BindTelegramBot{BotID: 202})
+	if result := machine.Apply(bind); result.Err() != nil {
+		t.Fatal(result.Err())
+	}
+	bound := machine.State()
+	if bound.TelegramBotID != 202 || bound.TelegramNextUpdateID != 0 ||
+		len(bound.TelegramResponseCards) != 0 {
+		t.Fatalf("bot switch did not reset transport state: %#v", bound)
+	}
+	if result := machine.Apply(command(t, "tg-12", clusterstate.CommandAdvanceTelegramCursor,
+		clusterstate.AdvanceTelegramCursor{NextUpdateID: 12})); result.Err() != nil {
+		t.Fatal(result.Err())
+	}
+	if result := machine.Apply(command(t, "tg-bind-same", clusterstate.CommandBindTelegramBot,
+		clusterstate.BindTelegramBot{BotID: 202})); result.Err() != nil {
+		t.Fatal(result.Err())
+	}
+	if got := machine.State().TelegramNextUpdateID; got != 12 {
+		t.Fatalf("same bot reset Telegram cursor=%d", got)
 	}
 	data, err := machine.MarshalSnapshot()
 	if err != nil {
@@ -169,8 +193,8 @@ func TestTelegramCursorIsMonotonicAndSnapshotted(t *testing.T) {
 	if err := restored.RestoreSnapshot(data); err != nil {
 		t.Fatal(err)
 	}
-	if got := restored.State().TelegramNextUpdateID; got != 43 {
-		t.Fatalf("restored Telegram cursor=%d", got)
+	if got := restored.State(); got.TelegramBotID != 202 || got.TelegramNextUpdateID != 12 {
+		t.Fatalf("restored Telegram transport state=%#v", got)
 	}
 }
 

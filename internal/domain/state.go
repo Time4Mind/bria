@@ -27,6 +27,7 @@ type State struct {
 	ProviderAccountAliases  map[string]string                 `json:"provider_account_aliases,omitempty"`
 	QuotaRefreshRequestedAt time.Time                         `json:"quota_refresh_requested_at,omitempty"`
 	TemporaryLeader         TemporaryLeader                   `json:"temporary_leader,omitempty"`
+	TelegramBotID           int64                             `json:"telegram_bot_id,omitempty"`
 	TelegramNextUpdateID    int64                             `json:"telegram_next_update_id,omitempty"`
 	EnrollmentInvites       map[string]EnrollmentInvite       `json:"enrollment_invites,omitempty"`
 	EnrollmentRequests      map[string]EnrollmentRequest      `json:"enrollment_requests,omitempty"`
@@ -201,6 +202,7 @@ func (s *State) SetPreferences(userID UserID, preferences UserPreferences) error
 func (s *State) Clone() *State {
 	clone := NewState()
 	clone.SchemaVersion = s.SchemaVersion
+	clone.TelegramBotID = s.TelegramBotID
 	clone.TelegramNextUpdateID = s.TelegramNextUpdateID
 	for userID, card := range s.TelegramResponseCards {
 		clone.TelegramResponseCards[userID] = card
