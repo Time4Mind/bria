@@ -9,7 +9,7 @@ import (
 	"github.com/Time4Mind/bria/internal/telegrambot"
 )
 
-const nameRefreshLimit = 35 * time.Second
+const nameRefreshLimit = 2 * time.Minute
 
 // scheduleNameRefresh updates the already-sent card once the origin node's
 // lightweight naming call has committed. It never blocks Telegram polling.

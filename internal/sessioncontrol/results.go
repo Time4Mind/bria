@@ -3,6 +3,7 @@ package sessioncontrol
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/Time4Mind/bria/internal/application"
@@ -126,33 +127,71 @@ func (c *Controller) observeNaming(
 	c.workers.Add(1)
 	go func() {
 		defer func() {
-			c.namingMu.Lock()
-			delete(c.naming, namingKey)
-			c.namingMu.Unlock()
+			c.releaseNaming(namingKey)
 			c.workers.Done()
 		}()
-		deadline := time.NewTimer(c.namingWait)
-		defer deadline.Stop()
-		ticker := time.NewTicker(c.pollInterval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-c.ctx.Done():
-				return
-			case <-deadline.C:
-				return
-			case <-ticker.C:
-				result, found, err := c.runtime.LookupResult(c.ctx, request)
-				if !found {
-					continue
+		baseOperationID := request.OperationID
+		for attempt := 0; attempt < maxNamingAttempts; attempt++ {
+			if attempt > 0 {
+				if !c.namingStillNeeded(actor, request) {
+					return
 				}
-				if err == nil && result.Delivered && result.GeneratedName != "" {
-					c.commitGeneratedName(actor, request, result.GeneratedName)
+				request.OperationID = namingRetryOperationID(baseOperationID, attempt)
+				ctx, cancel := context.WithTimeout(c.ctx, c.retryInterval)
+				_, err := c.runtime.Submit(ctx, request)
+				cancel()
+				if err != nil {
+					c.retrySubmit(actor, request, false)
 				}
+			}
+			result, found, err := c.waitForNamingResult(request)
+			if found && err == nil && result.Delivered && result.GeneratedName != "" {
+				c.commitGeneratedName(actor, request, result.GeneratedName)
 				return
 			}
 		}
 	}()
+}
+
+func (c *Controller) waitForNamingResult(
+	request runtimehost.Request,
+) (runtimehost.Result, bool, error) {
+	deadline := time.NewTimer(c.namingWait)
+	defer deadline.Stop()
+	ticker := time.NewTicker(c.pollInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-c.ctx.Done():
+			return runtimehost.Result{}, false, c.ctx.Err()
+		case <-deadline.C:
+			return runtimehost.Result{}, false, context.DeadlineExceeded
+		case <-ticker.C:
+			result, found, err := c.runtime.LookupResult(c.ctx, request)
+			if found {
+				return result, true, err
+			}
+		}
+	}
+}
+
+func (c *Controller) namingStillNeeded(
+	actor application.Principal,
+	request runtimehost.Request,
+) bool {
+	session, err := c.service.Session(actor, domain.SessionRef{
+		NodeID: domain.NodeID(request.NodeID), SessionID: domain.SessionID(request.SessionID),
+	})
+	return err == nil && session.IsLive() && session.Name == "" &&
+		session.RuntimeGeneration == request.ExpectedGeneration
+}
+
+func namingRetryOperationID(base string, attempt int) string {
+	suffix := fmt.Sprintf("-retry-%d", attempt)
+	if len(base)+len(suffix) > 128 {
+		base = base[:128-len(suffix)]
+	}
+	return base + suffix
 }
 
 func (c *Controller) commitGeneratedName(

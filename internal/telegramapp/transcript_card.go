@@ -137,6 +137,11 @@ func (h *Handler) renderSessionCard(
 	ref domain.SessionRef,
 	page int,
 ) (telegramui.Screen, error) {
+	if recovery, ok := h.controls.(interface {
+		EnsureName(application.Principal, domain.SessionRef) bool
+	}); ok {
+		recovery.EnsureName(actor, ref)
+	}
 	if screen, ok, err := h.renderInteractiveSessionCard(ctx, actor, ref); ok || err != nil {
 		return screen, err
 	}
