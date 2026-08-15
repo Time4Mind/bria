@@ -59,14 +59,7 @@ func (m *messengerStub) SendScreen(_ context.Context, _ int64, screen telegramui
 		default:
 		}
 	}
-	message := telegrambot.Message{
-		ChatID: 7, MessageID: int64(len(m.sent)),
-		Rich: screen.RichMarkdown || screen.Pane != nil,
-	}
-	if screen.Pane != nil {
-		message.PaneHash = screen.Pane.Hash
-	}
-	return message, nil
+	return stubMessageForScreen(len(m.sent), screen), nil
 }
 func (m *messengerStub) EditScreen(_ context.Context, message telegrambot.Message, screen telegramui.Screen) (telegrambot.Message, error) {
 	if m.events != nil {

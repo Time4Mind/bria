@@ -98,6 +98,7 @@ func TestReplaceResponseCardsDeletesThePreviousReplicatedCard(t *testing.T) {
 
 func TestPaneRefreshRendersFinalAnswerWhenRuntimeAlreadySettledIdle(t *testing.T) {
 	fixture := newFixture(t)
+	fixture.messenger.sendNotify = make(chan struct{}, 2)
 	ref := domain.SessionRef{NodeID: "allowed", SessionID: "live"}
 	controls := &blockingControls{ref: ref, events: []transcript.Event{
 		{Kind: transcript.EventToolResult, Head: "Bash", Body: "tool completed"},
@@ -117,9 +118,13 @@ func TestPaneRefreshRendersFinalAnswerWhenRuntimeAlreadySettledIdle(t *testing.T
 	}); err != nil {
 		t.Fatal(err)
 	}
-	deadline := time.Now().Add(2 * time.Second)
-	for len(fixture.messenger.sent) < 2 && time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
+	// The first signal is the initial plain card; the second is the completed
+	// Rich replacement. Receiving it synchronizes the assertion with the worker.
+	<-fixture.messenger.sendNotify
+	select {
+	case <-fixture.messenger.sendNotify:
+	case <-time.After(2 * time.Second):
+		t.Fatal("settled idle card was not promoted to a rich final card")
 	}
 	if len(fixture.messenger.sent) < 2 {
 		t.Fatal("settled idle card was not promoted to a rich final card")
