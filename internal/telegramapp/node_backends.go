@@ -31,13 +31,20 @@ func (h *Handler) handleNodeBackendInstallCallback(
 		return nil
 	}
 	request := backendsetup.Request{NodeID: string(nodeID), Backend: backend}
-	status, err := h.backendSetup.Start(ctx, request)
-	if err != nil {
-		return err
-	}
 	back, err := h.tokens.Node(actor.UserID, telegramui.ActionNodeSettings, nodeID)
 	if err != nil {
 		return err
+	}
+	status, err := h.backendSetup.Start(ctx, request)
+	if err != nil {
+		text := h.copy(actor).Format(
+			i18n.BackendInstallFailed, backend, nodeName, shortSetupError(err),
+		)
+		_, editErr := h.messenger.EditScreen(
+			ctx, update.CallbackOrigin,
+			telegramui.RenderBackendSetup(h.copy(actor), text, callback.Token, back),
+		)
+		return editErr
 	}
 	text := h.copy(actor).Format(
 		i18n.BackendInstalling, backend, nodeName,

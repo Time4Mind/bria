@@ -10,16 +10,18 @@ import (
 	"time"
 
 	"github.com/Time4Mind/bria/internal/runtimehost"
+	"github.com/Time4Mind/bria/internal/systemdeps"
 )
 
 const installTimeout = 15 * time.Minute
 
 type Config struct {
-	NodeID   string
-	Roots    map[string]string
-	Commands map[string]string
-	Runner   runtimehost.CommandRunner
-	Refresh  func(context.Context)
+	NodeID       string
+	Roots        map[string]string
+	Commands     map[string]string
+	Runner       runtimehost.CommandRunner
+	Refresh      func(context.Context)
+	Dependencies systemdeps.Config
 }
 
 type Manager struct {
@@ -79,6 +81,16 @@ func (m *Manager) Status(_ context.Context, request Request) (Status, error) {
 func (m *Manager) install(backend string) {
 	ctx, cancel := context.WithTimeout(context.Background(), installTimeout)
 	defer cancel()
+	if _, err := m.config.Runner.LookPath("npm"); err != nil {
+		err = systemdeps.Ensure(ctx, m.config.Dependencies, systemdeps.ProfileNodeJS, func() bool {
+			_, lookupErr := m.config.Runner.LookPath("npm")
+			return lookupErr == nil
+		})
+		if err != nil {
+			m.finishInstall(backend, fmt.Errorf("install Node.js/npm: %w", err))
+			return
+		}
+	}
 	packageName := map[string]string{
 		"claude": "@anthropic-ai/claude-code@latest",
 		"codex":  "@openai/codex@latest",
@@ -90,6 +102,10 @@ func (m *Manager) install(backend string) {
 	if err == nil && result.ExitCode != 0 {
 		err = fmt.Errorf("npm exited with %d: %s", result.ExitCode, setupDetail(result.Stderr))
 	}
+	m.finishInstall(backend, err)
+}
+
+func (m *Manager) finishInstall(backend string, err error) {
 	status := m.inspect(backend)
 	if err != nil {
 		status.Phase, status.Detail = PhaseFailed, setupDetail([]byte(err.Error()))

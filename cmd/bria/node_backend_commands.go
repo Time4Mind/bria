@@ -21,15 +21,11 @@ func prepareManagedBackendCommands(
 		"claude": filepath.Join(backendRuntime.home, ".bria", "providers", "claude"),
 		"codex":  filepath.Join(backendRuntime.home, ".bria", "providers", "codex"),
 	}
-	if strings.TrimSpace(nodeConfig.ClaudeCommand) == "claude" {
-		if _, err := backendRuntime.runner.LookPath("claude"); err != nil {
-			nodeConfig.ClaudeCommand = managedBackendCommand(roots["claude"], "claude")
-		}
+	if _, err := backendRuntime.runner.LookPath(strings.TrimSpace(nodeConfig.ClaudeCommand)); err != nil {
+		nodeConfig.ClaudeCommand = managedBackendCommand(roots["claude"], "claude")
 	}
-	if strings.TrimSpace(nodeConfig.CodexCommand) == "codex" {
-		if _, err := backendRuntime.runner.LookPath("codex"); err != nil {
-			nodeConfig.CodexCommand = managedBackendCommand(roots["codex"], "codex")
-		}
+	if _, err := backendRuntime.runner.LookPath(strings.TrimSpace(nodeConfig.CodexCommand)); err != nil {
+		nodeConfig.CodexCommand = managedBackendCommand(roots["codex"], "codex")
 	}
 	return nodeConfig, roots
 }

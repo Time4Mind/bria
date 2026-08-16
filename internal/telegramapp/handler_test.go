@@ -2,12 +2,14 @@ package telegramapp_test
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/Time4Mind/bria/internal/application"
+	"github.com/Time4Mind/bria/internal/backendsetup"
 	"github.com/Time4Mind/bria/internal/callbacktoken"
 	"github.com/Time4Mind/bria/internal/clusterstate"
 	"github.com/Time4Mind/bria/internal/domain"
@@ -16,6 +18,20 @@ import (
 	"github.com/Time4Mind/bria/internal/telegrambot"
 	"github.com/Time4Mind/bria/internal/telegramui"
 )
+
+type failingBackendSetup struct{ err error }
+
+func (s failingBackendSetup) Start(
+	context.Context, backendsetup.Request,
+) (backendsetup.Status, error) {
+	return backendsetup.Status{}, s.err
+}
+
+func (s failingBackendSetup) Status(
+	context.Context, backendsetup.Request,
+) (backendsetup.Status, error) {
+	return backendsetup.Status{}, s.err
+}
 
 type machinePort struct {
 	machine *clusterstate.Machine
@@ -227,6 +243,35 @@ func TestSpeechSetupWatcherReconcilesExistingAndNewNodes(t *testing.T) {
 	if len(fixture.messenger.sent) != 1 ||
 		!strings.Contains(fixture.messenger.sent[0].Text, "ffmpeg is not installed") {
 		t.Fatalf("terminal setup notifications=%#v", fixture.messenger.sent)
+	}
+}
+
+func TestBackendSetupConnectionFailureIsRenderedWithItsCause(t *testing.T) {
+	fixture := newFixture(t)
+	if err := fixture.handler.SetBackendSetup(failingBackendSetup{
+		err: errors.New("relay connection unavailable"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	token, err := fixture.codec.Choice(
+		7, telegramui.ActionBackendInstall, "node_backend", "allowed\x00codex",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.handler.HandleTelegramUpdate(context.Background(), telegrambot.IncomingUpdate{
+		UpdateID: 22, Kind: telegrambot.IncomingCallback, UserID: 7, ChatID: 7,
+		CallbackID:     "backend-install",
+		CallbackData:   encodeCallback(t, telegramui.ActionBackendInstall, token),
+		CallbackOrigin: telegrambot.Message{ChatID: 7, MessageID: 10},
+		LanguageCode:   "en",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(fixture.messenger.edited) != 1 || !strings.Contains(
+		fixture.messenger.edited[0].Text, "relay connection unavailable",
+	) {
+		t.Fatalf("backend setup error screen=%#v", fixture.messenger.edited)
 	}
 }
 

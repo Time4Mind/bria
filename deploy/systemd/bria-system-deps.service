@@ -1,0 +1,24 @@
+[Unit]
+Description=Install requested Bria system dependencies
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/bria/system-deps.env
+EnvironmentFile=-/etc/bria/proxy.env
+ExecStart=/usr/local/libexec/bria-install-system-deps
+TimeoutStartSec=15min
+UMask=0077
+RuntimeDirectory=bria-system-deps
+RuntimeDirectoryMode=0755
+RuntimeDirectoryPreserve=yes
+NoNewPrivileges=false
+PrivateTmp=true
+ProtectHome=true
+ProtectKernelLogs=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictRealtime=true
+LockPersonality=true

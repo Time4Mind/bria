@@ -3,27 +3,37 @@ package backendsetup
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/Time4Mind/bria/internal/runtimehost"
+	"github.com/Time4Mind/bria/internal/systemdeps"
 )
 
 type setupRunner struct {
-	mu        sync.Mutex
-	installed map[string]bool
-	fail      bool
+	mu         sync.Mutex
+	installed  map[string]bool
+	fail       bool
+	npmMissing bool
 }
 
 func (r *setupRunner) LookPath(name string) (string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if name == "npm" || r.installed[name] {
+	if (name == "npm" && !r.npmMissing) || r.installed[name] {
 		return name, nil
 	}
 	return "", errors.New("missing")
+}
+
+func (r *setupRunner) enableNPM() {
+	r.mu.Lock()
+	r.npmMissing = false
+	r.mu.Unlock()
 }
 
 func (r *setupRunner) Run(
@@ -82,6 +92,44 @@ func TestManagerReportsBoundedInstallFailure(t *testing.T) {
 	if status.Detail == "" {
 		t.Fatal("installation failure omitted its detail")
 	}
+}
+
+func TestManagerAutomaticallyRequestsNodeJSWhenNPMIsMissing(t *testing.T) {
+	root := t.TempDir()
+	runner := &setupRunner{installed: make(map[string]bool), npmMissing: true}
+	manager := newSetupManager(t, root, runner, nil)
+	requests := filepath.Join(root, "system-deps", "requests")
+	results := filepath.Join(root, "system-deps", "results")
+	if err := os.MkdirAll(results, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	manager.config.Dependencies = systemdeps.Config{RequestDir: requests, ResultDir: results}
+	helperDone := make(chan error, 1)
+	go func() {
+		deadline := time.Now().Add(time.Second)
+		for time.Now().Before(deadline) {
+			entries, err := os.ReadDir(requests)
+			if err != nil || len(entries) == 0 {
+				time.Sleep(time.Millisecond)
+				continue
+			}
+			identity := strings.TrimSuffix(entries[0].Name(), ".request")
+			runner.enableNPM()
+			helperDone <- os.WriteFile(
+				filepath.Join(results, identity+".result"), []byte("ready\n"), 0o600,
+			)
+			return
+		}
+		helperDone <- context.DeadlineExceeded
+	}()
+	request := Request{NodeID: "node", Backend: "codex"}
+	if _, err := manager.Start(context.Background(), request); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-helperDone; err != nil {
+		t.Fatal(err)
+	}
+	waitForSetupPhase(t, manager, request, PhaseReady)
 }
 
 func newSetupManager(

@@ -216,7 +216,11 @@ bria cluster set-owner --config ~/.bria/config.json \
 Every voting node that may become Telegram leader or host a media-consuming
 session needs the same token in its local `telegram_token_file`; it is never
 replicated through Raft. Voice uses `speech_engine: "whisper"` by default,
-with `ffmpeg`, `whisper-cli`, and the node-local `whisper_model_path`.
+with `ffmpeg`, `whisper-cli`, and the node-local `whisper_model_path`. On a
+systemd Linux/WSL installation, enabling Whisper automatically requests the
+fixed `speech` dependency profile; enabling Claude or Codex similarly requests
+Node.js/npm when absent. The root-owned helper accepts no arbitrary packages
+or commands from the node process.
 
 On macOS Apple Silicon, `speech_engine: "apple"` selects Apple's built-in,
 strictly on-device recognizer and does not require a Whisper model. Build the

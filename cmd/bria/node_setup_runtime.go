@@ -2,12 +2,15 @@ package main
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"runtime"
 
 	"github.com/Time4Mind/bria/internal/backendsetup"
 	"github.com/Time4Mind/bria/internal/config"
 	"github.com/Time4Mind/bria/internal/nodecontrol"
 	"github.com/Time4Mind/bria/internal/speechsetup"
+	"github.com/Time4Mind/bria/internal/systemdeps"
 )
 
 type nodeSetupRuntime struct {
@@ -26,6 +29,7 @@ func newNodeSetupRuntime(
 	client *nodecontrol.Client,
 ) (nodeSetupRuntime, error) {
 	commands := configuredBackendCommands(nodeConfig)
+	dependencies := systemDependencyConfig(nodeConfig.DataDir)
 	inventory := newNodeInventory(
 		discoverLocalBackends(ctx, backendRuntime.runner, commands),
 		backendRuntime.runner, commands,
@@ -33,7 +37,7 @@ func newNodeSetupRuntime(
 	localBackends, err := backendsetup.NewManager(backendsetup.Config{
 		NodeID: nodeConfig.NodeID, Roots: managedRoots,
 		Commands: map[string]string{"claude": commands.Claude, "codex": commands.Codex},
-		Runner:   backendRuntime.runner, Refresh: inventory.Refresh,
+		Runner:   backendRuntime.runner, Refresh: inventory.Refresh, Dependencies: dependencies,
 	})
 	if err != nil {
 		return nodeSetupRuntime{}, err
@@ -53,6 +57,7 @@ func newNodeSetupRuntime(
 		DataDir: nodeConfig.DataDir, FFmpegCommand: nodeConfig.FFmpegCommand,
 		WhisperCommand: nodeConfig.WhisperCommand, WhisperModel: nodeConfig.WhisperModelPath,
 		AppleCommand: nodeConfig.AppleSpeechCommand,
+		Dependencies: dependencies,
 	})
 	if err != nil {
 		return nodeSetupRuntime{}, err
@@ -69,4 +74,17 @@ func newNodeSetupRuntime(
 		localBackends: localBackends, backends: backends,
 		localSpeech: localSpeech, speech: speech, inventory: inventory,
 	}, nil
+}
+
+func systemDependencyConfig(dataDir string) systemdeps.Config {
+	if runtime.GOOS != "linux" {
+		return systemdeps.Config{}
+	}
+	if info, err := os.Stat("/usr/local/libexec/bria-install-system-deps"); err != nil || !info.Mode().IsRegular() || info.Mode()&0o111 == 0 {
+		return systemdeps.Config{}
+	}
+	return systemdeps.Config{
+		RequestDir: filepath.Join(dataDir, "system-deps", "requests"),
+		ResultDir:  "/run/bria-system-deps",
+	}
 }

@@ -59,6 +59,15 @@ required for signed self-updates and does not grant host administration. Hosts
 installed with an older unit need this one-time ownership and unit migration
 before Telegram rolling updates can activate a release.
 
+The installer also enables a narrowly scoped root-owned path unit for local
+dependency setup. When Whisper needs `ffmpeg`, or a provider backend needs
+Node.js/npm, the unprivileged Bria node writes a typed request file. The root
+helper accepts only the fixed `speech` and `nodejs` profiles and installs their
+fixed package lists through the host package manager. The node cannot pass
+package names, shell arguments, or arbitrary commands to this helper. Set
+`BRIA_DATA_DIR` and `BRIA_SERVICE_USER` while running `install-linux.sh` when
+the deployment does not use `/var/lib/bria` and `bria`.
+
 Do not create the configured Telegram token file until this node is intended
 to be the only poller for that bot token. Telegram permits only one active
 `getUpdates` consumer.

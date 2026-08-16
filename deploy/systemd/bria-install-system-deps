@@ -1,0 +1,110 @@
+#!/bin/sh
+set -eu
+
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+
+data_dir="${BRIA_DATA_DIR:-/var/lib/bria}"
+service_user="${BRIA_SERVICE_USER:-bria}"
+system_dir="$data_dir/system-deps"
+requests="$system_dir/requests"
+results="/run/bria-system-deps"
+
+case "$data_dir" in /*) ;; *) exit 2 ;; esac
+id "$service_user" >/dev/null 2>&1 || exit 2
+service_uid=$(id -u "$service_user")
+[ -d "$system_dir" ] && [ ! -L "$system_dir" ] || exit 2
+[ "$(stat -c %u "$system_dir")" = 0 ] || exit 2
+[ -d "$requests" ] && [ ! -L "$requests" ] || exit 2
+[ "$(stat -c %u "$requests")" = "$service_uid" ] || exit 2
+find "$results" -type f -name '*.result' -mmin +60 -delete
+
+speech_ready() {
+  command -v ffmpeg >/dev/null 2>&1 && command -v git >/dev/null 2>&1 &&
+    command -v cmake >/dev/null 2>&1 && command -v curl >/dev/null 2>&1 &&
+    { command -v c++ >/dev/null 2>&1 || command -v clang++ >/dev/null 2>&1; }
+}
+
+nodejs_ready() {
+  command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1
+}
+
+install_apt() {
+  profile="$1"
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update >&2 || return 1
+  if [ "$profile" = speech ]; then
+    apt-get install -y --no-install-recommends \
+      ffmpeg git cmake build-essential curl ca-certificates >&2
+  else
+    apt-get install -y --no-install-recommends nodejs npm ca-certificates >&2
+  fi
+}
+
+install_apk() {
+  if [ "$1" = speech ]; then
+    apk add --no-cache ffmpeg git cmake build-base curl ca-certificates >&2
+  else
+    apk add --no-cache nodejs npm ca-certificates >&2
+  fi
+}
+
+install_pacman() {
+  if [ "$1" = speech ]; then
+    pacman -Sy --noconfirm --needed ffmpeg git cmake base-devel curl ca-certificates >&2
+  else
+    pacman -Sy --noconfirm --needed nodejs npm ca-certificates >&2
+  fi
+}
+
+install_dnf() {
+  if [ "$1" = speech ]; then
+    dnf install -y ffmpeg git cmake gcc-c++ make curl ca-certificates >&2
+  else
+    dnf install -y nodejs npm ca-certificates >&2
+  fi
+}
+
+install_profile() {
+  profile="$1"
+  if { [ "$profile" = speech ] && speech_ready; } ||
+    { [ "$profile" = nodejs ] && nodejs_ready; }; then
+    printf ready
+    return
+  fi
+  if command -v apt-get >/dev/null 2>&1; then
+    install_apt "$profile" || { printf 'failed: apt could not install %s dependencies' "$profile"; return; }
+  elif command -v apk >/dev/null 2>&1; then
+    install_apk "$profile" || { printf 'failed: apk could not install %s dependencies' "$profile"; return; }
+  elif command -v pacman >/dev/null 2>&1; then
+    install_pacman "$profile" || { printf 'failed: pacman could not install %s dependencies' "$profile"; return; }
+  elif command -v dnf >/dev/null 2>&1; then
+    install_dnf "$profile" || { printf 'failed: dnf could not install %s dependencies' "$profile"; return; }
+  else
+    printf 'failed: supported package manager not found (apt, apk, pacman, or dnf required)'
+    return
+  fi
+  if { [ "$profile" = speech ] && speech_ready; } ||
+    { [ "$profile" = nodejs ] && nodejs_ready; }; then
+    printf ready
+  else
+    printf 'failed: package manager completed but %s dependencies remain unavailable' "$profile"
+  fi
+}
+
+for request in "$requests"/*.request; do
+  [ -f "$request" ] || continue
+  base=${request##*/}
+  identity=${base%.request}
+  profile=${identity%%-*}
+  nonce=${identity#*-}
+  case "$profile" in speech|nodejs) ;; *) rm -f "$request"; continue ;; esac
+  case "$nonce" in ''|*[!0-9a-f]*) rm -f "$request"; continue ;; esac
+  outcome=$(install_profile "$profile")
+  temporary="$results/$identity.$$.tmp"
+  umask 022
+  printf '%s\n' "$outcome" >"$temporary"
+  chmod 0644 "$temporary"
+  mv -f "$temporary" "$results/$identity.result"
+  rm -f "$request"
+done
