@@ -33,7 +33,7 @@ type cardRuntimeState struct {
 	cardDataMu      sync.RWMutex
 	cardContexts    map[string]cardContextEntry
 	cardTranscripts map[string][]transcript.Event
-	finalRepostMu   sync.Mutex
+	cardMutationMu  sync.Mutex
 }
 
 func newCardRuntimeState() cardRuntimeState {

@@ -213,6 +213,14 @@ func (h *Handler) refreshBackgroundPanel(ctx context.Context, userID domain.User
 	if err != nil {
 		return true
 	}
+	// Do not let the ordinary background-panel edit consume a completion
+	// revision. Completion must replace the active carrier so Telegram surfaces
+	// it as a new message; reconcileActiveFinalCards owns that transition.
+	if session.RuntimePhase == domain.RuntimeIdle &&
+		(card.Session == (domain.SessionRef{}) ||
+			(card.Session == session.Ref() && card.SessionRevision < session.Revision)) {
+		return false
+	}
 	screen, err := h.renderSessionCard(ctx, actor, session.Ref(), 0)
 	if err != nil {
 		return false
