@@ -31,7 +31,7 @@ func (h *Handler) handleNodeBackendInstallCallback(
 		return nil
 	}
 	request := backendsetup.Request{NodeID: string(nodeID), Backend: backend}
-	back, err := h.tokens.Node(actor.UserID, telegramui.ActionNodeSettings, nodeID)
+	back, err := h.nodeBackendDetailToken(actor, nodeID, backend)
 	if err != nil {
 		return err
 	}
@@ -207,11 +207,83 @@ func (h *Handler) handleNodeBackendCallback(
 			}
 		}
 	}
-	screen, err := h.projectNodeSettings(actor, nodeID)
+	screen, err := h.projector.NodeBackend(actor, nodeID, backend)
 	if err == nil {
 		_, err = h.messenger.EditScreen(ctx, update.CallbackOrigin, screen)
 	}
 	return err
+}
+
+func (h *Handler) openNodeBackends(
+	actor application.Principal,
+	token telegramui.OpaqueToken,
+) (telegramui.Screen, error) {
+	nodeID, err := h.resolveStatusNode(actor, telegramui.ActionNodeBackends, token)
+	if err != nil {
+		return telegramui.Screen{}, err
+	}
+	return h.projector.NodeBackends(actor, nodeID)
+}
+
+func (h *Handler) openNodeBackend(
+	actor application.Principal,
+	token telegramui.OpaqueToken,
+) (telegramui.Screen, error) {
+	values, err := h.nodeBackendMenuCandidates(actor)
+	if err != nil {
+		return telegramui.Screen{}, err
+	}
+	value, err := h.tokens.ResolveChoice(
+		actor.UserID, telegramui.ActionNodeBackend, "node_backend_open", token, values,
+	)
+	if err != nil {
+		return telegramui.Screen{}, err
+	}
+	node, backend, ok := strings.Cut(value, "\x00")
+	if !ok {
+		return telegramui.Screen{}, domain.ErrNotFound
+	}
+	return h.projector.NodeBackend(actor, domain.NodeID(node), backend)
+}
+
+func (h *Handler) nodeBackendMenuCandidates(
+	actor application.Principal,
+) ([]string, error) {
+	nodes, err := h.service.ListNodes(actor)
+	if err != nil {
+		return nil, err
+	}
+	values := make([]string, 0, len(nodes)*2)
+	for _, item := range nodes {
+		names := map[string]struct{}{"claude": {}, "codex": {}}
+		for _, backend := range item.Node.InstalledBackends {
+			name := strings.ToLower(strings.TrimSpace(backend.Name))
+			if name != "" {
+				names[name] = struct{}{}
+			}
+		}
+		for _, backend := range item.Node.Backends {
+			name := strings.ToLower(strings.TrimSpace(backend.Name))
+			if name != "" {
+				names[name] = struct{}{}
+			}
+		}
+		for name := range names {
+			values = append(values, string(item.Node.ID)+"\x00"+name)
+		}
+	}
+	return values, nil
+}
+
+func (h *Handler) nodeBackendDetailToken(
+	actor application.Principal,
+	nodeID domain.NodeID,
+	backend string,
+) (telegramui.OpaqueToken, error) {
+	return h.tokens.Choice(
+		actor.UserID, telegramui.ActionNodeBackend, "node_backend_open",
+		string(nodeID)+"\x00"+strings.ToLower(strings.TrimSpace(backend)),
+	)
 }
 
 func (h *Handler) resolveNodeBackend(

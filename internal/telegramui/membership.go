@@ -85,8 +85,7 @@ type NodeMembershipInput struct {
 	EnableToken           OpaqueToken
 	DeleteToken           OpaqueToken
 	RenameToken           OpaqueToken
-	ProviderAliases       []ProviderAliasItem
-	BackendChoices        []NodeBackendItem
+	BackendsToken         OpaqueToken
 	SpeechStatus          string
 	SpeechToken           OpaqueToken
 	CanManageIsolation    bool
@@ -150,29 +149,9 @@ func RenderNodeMembership(input NodeMembershipInput) Screen {
 			ActionNodeSpeechSetup, input.SpeechToken,
 		)})
 	}
-	for _, backend := range input.BackendChoices {
-		label := "＋ " + backend.Name
-		action := ActionBackendInstall
-		if !backend.Installed {
-			label += " · " + input.Copy.Text(i18n.BackendInstall)
-		} else if backend.Connected {
-			label = "✓ " + backend.Name + " · " + input.Copy.Text(i18n.BackendDisconnect)
-			action = ActionBackendDisconnect
-		} else {
-			label += " · " + input.Copy.Text(i18n.BackendConnect)
-			action = ActionBackendConnect
-		}
-		rows = append(rows, Row{button(label, action, backend.Token)})
-	}
-	for _, provider := range input.ProviderAliases {
-		label := input.Copy.Format(i18n.ProviderAliasButton, provider.Backend)
-		if provider.Alias != "" {
-			label += ": " + provider.Alias
-		}
-		rows = append(rows, Row{button(label, ActionProviderAlias, provider.Token)})
+	if input.BackendsToken != "" {
 		rows = append(rows, Row{button(
-			input.Copy.Format(i18n.ProviderAuthButton, provider.Backend),
-			ActionProviderAuth, provider.AuthToken,
+			input.Copy.Text(i18n.BackendManage), ActionNodeBackends, input.BackendsToken,
 		)})
 	}
 	backAction, backToken := input.BackAction, input.BackToken

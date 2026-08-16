@@ -63,6 +63,7 @@ type Handler struct {
 	speechWatchStarted time.Time
 	pageMu             sync.Mutex
 	cardPages          map[cardPageKey]cardPageState
+	cardEditMu         sync.Mutex
 	activity           *activityMessenger
 	clusterEventMu     sync.Mutex
 	clusterEventLogs   map[int64]clusterEventLog
@@ -300,6 +301,10 @@ func (h *Handler) handleCallback(
 		}
 	case telegramui.ActionNodeSettings:
 		screen, err = h.openNodeSettingsFromSessions(actor, callback.Token)
+	case telegramui.ActionNodeBackends:
+		screen, err = h.openNodeBackends(actor, callback.Token)
+	case telegramui.ActionNodeBackend:
+		screen, err = h.openNodeBackend(actor, callback.Token)
 	case telegramui.ActionNodeSpeechSetup:
 		screen, err = h.setupNodeSpeech(ctx, actor, callback.Token)
 	case telegramui.ActionNodeSpeechBack:
@@ -388,6 +393,15 @@ func (h *Handler) handleCallback(
 		// and tables literally. Replace it on the first transition regardless of
 		// which action exposed the rich screen (including Sessions and paging).
 	}
+	pageEdit := pageRef.Validate() == nil
+	if pageEdit {
+		// Stop the live worker before serializing the page edit. If it already
+		// owns the edit lock, it finishes first; the user's explicit page always
+		// wins and the replacement worker starts from that pinned page.
+		h.cancelPaneRefresh(actor.UserID)
+		h.cardEditMu.Lock()
+		h.rememberResolvedCardPage(actor.UserID, update.CallbackOrigin, pageRef, screen)
+	}
 	if replaceCarrier {
 		// Telegram cannot safely promote a legacy carrier to Rich in place.
 		// A Rich carrier can render a plain projection without being replaced;
@@ -398,6 +412,9 @@ func (h *Handler) handleCallback(
 		}
 	} else {
 		edited, err = h.messenger.EditScreen(ctx, update.CallbackOrigin, screen)
+	}
+	if pageEdit {
+		h.cardEditMu.Unlock()
 	}
 	if err == nil && (callback.Action == telegramui.ActionStatus ||
 		callback.Action == telegramui.ActionStatusRefresh) {
@@ -414,6 +431,9 @@ func (h *Handler) handleCallback(
 			h.rememberResolvedCardPage(actor.UserID, edited, ref, screen)
 			h.schedulePaneRefresh(ctx, actor, ref, edited)
 		}
+	}
+	if err == nil && pageEdit && h.controls != nil {
+		h.schedulePaneRefresh(ctx, actor, pageRef, edited)
 	}
 	return err
 }

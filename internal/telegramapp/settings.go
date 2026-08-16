@@ -199,9 +199,14 @@ func (h *Handler) openSettingsCategory(
 	token telegramui.OpaqueToken,
 ) (telegramui.Screen, error) {
 	category := telegramui.SettingsCategory(token)
+	// Old keyboards may still contain the former standalone voice category.
+	// Keep those callbacks useful after speech settings were folded into Interface.
+	if category == telegramui.CategoryVoice {
+		category = telegramui.CategoryInterface
+	}
 	if category != telegramui.CategoryInterface && category != telegramui.CategoryCard &&
 		category != telegramui.CategoryArchive && category != telegramui.CategoryNotifications &&
-		category != telegramui.CategoryVoice && category != telegramui.CategoryCluster {
+		category != telegramui.CategoryCluster {
 		return telegramui.Screen{}, domain.ErrNotFound
 	}
 	return h.projector.SettingsCategory(actor, category)

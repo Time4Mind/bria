@@ -12,9 +12,11 @@ func TestSettingsRootUsesCCBotCategoryFlowGolden(t *testing.T) {
 	if screen.ParseMode != ParseModeHTML || !strings.HasPrefix(screen.Text, "<b>") {
 		t.Fatalf("settings format=%q/%q", screen.ParseMode, screen.Text)
 	}
-	assertGoldenGrid(t, screen, `[🖥 Interface and language -> settings_cat@interface] | [🧾 Card content -> settings_cat@card]
-[🗄 Archive -> settings_cat@archive] | [🔔 Notifications -> settings_cat@notifications]
-[🎙 Speech recognition -> settings_cat@voice] | [🖧 Cluster -> settings_cat@cluster]
+	assertGoldenGrid(t, screen, `[🖥 Interface and language -> settings_cat@interface]
+[🧾 Card content -> settings_cat@card]
+[🗄 Sessions and archive -> settings_cat@archive]
+[🔔 Notifications -> settings_cat@notifications]
+[🖧 Cluster -> settings_cat@cluster]
 [← Back -> menu]`)
 }
 
@@ -23,8 +25,10 @@ func TestSettingsCategoryShowsCurrentValuesGolden(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertGoldenGrid(t, screen, `[Auto-archive: Unlimited -> setting@idle_archive] | [Archive retention: Unlimited -> setting@retention]
+	assertGoldenGrid(t, screen, `[Auto-archive: Unlimited -> setting@idle_archive]
+[Archive retention: Unlimited -> setting@retention]
 [On expiry: Delete files -> setting@expiry]
+[Offline-node queue: 5 -> setting@offline_queue]
 [← Back -> settings]`)
 }
 
@@ -37,15 +41,17 @@ func TestInterfaceSettingsExposeResumeSelection(t *testing.T) {
 	if !strings.Contains(grid, "Предлагать возобновление: Вкл -> setting@resume_selection") {
 		t.Fatalf("resume setting missing: %s", grid)
 	}
-	if !strings.Contains(grid, "Очередь недоступной ноды: 5 -> setting@offline_queue") {
-		t.Fatalf("offline queue setting missing: %s", grid)
+	if !strings.Contains(grid, "Распознавание речи: Вкл -> setting@voice_backend") {
+		t.Fatalf("voice setting missing: %s", grid)
 	}
 	setting, err := RenderSetting(settingsFixture("ru"), SettingOfflineQueue)
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertGoldenGrid(t, setting, `[• 5 -> set_offline_q@5] | [10 -> set_offline_q@10] | [20 -> set_offline_q@20]
-[← Назад -> settings_cat@interface]`)
+	assertGoldenGrid(t, setting, `[• 5 -> set_offline_q@5]
+[10 -> set_offline_q@10]
+[20 -> set_offline_q@20]
+[← Назад -> settings_cat@archive]`)
 }
 
 func TestSettingChoicesUseDotAndReturnToParentGolden(t *testing.T) {
@@ -53,7 +59,9 @@ func TestSettingChoicesUseDotAndReturnToParentGolden(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertGoldenGrid(t, screen, `[14 дней -> set_retention@14] | [30 дней -> set_retention@30] | [• Не ограничено -> set_retention@unlimited]
+	assertGoldenGrid(t, screen, `[14 дней -> set_retention@14]
+[30 дней -> set_retention@30]
+[• Не ограничено -> set_retention@unlimited]
 [← Назад -> settings_cat@archive]`)
 }
 
@@ -64,16 +72,20 @@ func TestCardVisibilitySettingsShowIndependentValuesGolden(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertGoldenGrid(t, screen, `[Tool calls: On -> setting@show_tool_calls] | [Tool results: Off -> setting@show_tool_results]
-[Output lines: 15 lines -> setting@tool_output_lines] | [Reasoning: On -> setting@show_thinking]
-[Response cards: Keep · paging -> setting@response_cards] | [Terminal snapshots: While working -> setting@terminal_snapshots]
+	assertGoldenGrid(t, screen, `[Tool calls: On -> setting@show_tool_calls]
+[Tool results: Off -> setting@show_tool_results]
+[Output lines: 15 lines -> setting@tool_output_lines]
+[Reasoning: On -> setting@show_thinking]
+[Response cards: Keep · paging -> setting@response_cards]
+[Terminal snapshots: While working -> setting@terminal_snapshots]
 [← Back -> settings]`)
 
 	setting, err := RenderSetting(input, SettingToolResults)
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertGoldenGrid(t, setting, `[On -> set_results@on] | [• Off -> set_results@off]
+	assertGoldenGrid(t, setting, `[On -> set_results@on]
+[• Off -> set_results@off]
 [← Back -> settings_cat@card]`)
 }
 
@@ -85,14 +97,19 @@ func TestNotificationSettingsAndDismissChoicesGolden(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertGoldenGrid(t, screen, `[Фон: задача готова: Вкл -> setting@notify_finished] | [Фон: ошибки: Выкл -> setting@notify_error]
-[Фон: требуется действие: Вкл -> setting@notify_action] | [Скрывать после переключений: 5 -> setting@background_dismiss]
+	assertGoldenGrid(t, screen, `[Фон: задача готова: Вкл -> setting@notify_finished]
+[Фон: ошибки: Выкл -> setting@notify_error]
+[Фон: требуется действие: Вкл -> setting@notify_action]
+[Скрывать после переключений: 5 -> setting@background_dismiss]
 [← Назад -> settings]`)
 	dismiss, err := RenderSetting(input, SettingBackgroundDismiss)
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertGoldenGrid(t, dismiss, `[1 -> set_bg_dismiss@1] | [3 -> set_bg_dismiss@3] | [• 5 -> set_bg_dismiss@5] | [10 -> set_bg_dismiss@10]
+	assertGoldenGrid(t, dismiss, `[1 -> set_bg_dismiss@1]
+[3 -> set_bg_dismiss@3]
+[• 5 -> set_bg_dismiss@5]
+[10 -> set_bg_dismiss@10]
 [← Назад -> settings_cat@notifications]`)
 }
 
@@ -106,9 +123,12 @@ func TestClusterSettingsExposeGlobalSortAndPollingGolden(t *testing.T) {
 	if !strings.Contains(screen.Text, input.ClusterAccounts) {
 		t.Fatalf("cluster account summary missing: %q", screen.Text)
 	}
-	assertGoldenGrid(t, screen, `[Выбор лидера: Вручную -> setting@leader_mode] | [Лидер: Не назначен -> setting@leader_node]
-[Сортировка серверов: По времени -> setting@node_sort] | [Опрос лимитов: 10 мин -> setting@quota_poll]
-[⬆ Обновить кластер -> cluster_update] | [＋ Подключить ноду -> cluster_add]
+	assertGoldenGrid(t, screen, `[Выбор лидера: Вручную -> setting@leader_mode]
+[Лидер: Не назначен -> setting@leader_node]
+[Сортировка серверов: По времени -> setting@node_sort]
+[Опрос лимитов: 10 мин -> setting@quota_poll]
+[⬆ Обновить кластер -> cluster_update]
+[＋ Подключить ноду -> cluster_add]
 [← Назад -> settings]`)
 }
 
@@ -143,18 +163,21 @@ func TestResponseCardChoicesDescribeTheThreeModesConcise(t *testing.T) {
 func TestVoiceSettingsExposeOnlyConfirmedOnOffChoice(t *testing.T) {
 	input := settingsFixture("ru")
 	input.VoiceBackend = "auto"
-	screen, err := RenderSettingsCategory(input, CategoryVoice)
+	screen, err := RenderSettingsCategory(input, CategoryInterface)
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertGoldenGrid(t, screen, `[Распознавание речи: Вкл -> setting@voice_backend]
-[← Назад -> settings]`)
+	if grid := CanonicalGrid(screen.Grid); !strings.Contains(grid,
+		"[Распознавание речи: Вкл -> setting@voice_backend]") {
+		t.Fatalf("voice setting missing from interface category:\n%s", grid)
+	}
 	setting, err := RenderSetting(input, SettingVoiceBackend)
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertGoldenGrid(t, setting, `[• Вкл -> set_voice@on] | [Выкл -> set_voice@off]
-[← Назад -> settings_cat@voice]`)
+	assertGoldenGrid(t, setting, `[• Вкл -> set_voice@on]
+[Выкл -> set_voice@off]
+[← Назад -> settings_cat@interface]`)
 }
 
 func TestEveryCatalogSettingHasScreenAndParent(t *testing.T) {

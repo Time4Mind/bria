@@ -161,6 +161,8 @@ func (h *Handler) editResponseCard(
 	message telegrambot.Message,
 	screen telegramui.Screen,
 ) (telegrambot.Message, error) {
+	h.cardEditMu.Lock()
+	defer h.cardEditMu.Unlock()
 	h.cardMutationMu.Lock()
 	defer h.cardMutationMu.Unlock()
 	// A background reconciliation may have already promoted this carrier while
@@ -171,6 +173,12 @@ func (h *Handler) editResponseCard(
 		(current.MessageID != message.MessageID || current.Rich != message.Rich ||
 			current.RichMediaFileID != message.RichMediaFileID) {
 		message = telegramMessage(current)
+	}
+	active, activeErr := h.service.ActiveSession(actor)
+	if activeErr == nil && !h.screenMatchesRememberedPage(
+		actor.UserID, message, active.Ref(), screen,
+	) {
+		return message, nil
 	}
 	if !message.Rich && (screen.RichMarkdown || screen.Pane != nil) {
 		// Rich Markdown is a distinct Telegram carrier. CCBot promotes a legacy
@@ -183,11 +191,17 @@ func (h *Handler) editResponseCard(
 		}
 		_ = h.messenger.DeleteMessage(ctx, message)
 		h.recordResponseCard(ctx, actor, replacement)
+		if activeErr == nil {
+			h.rememberResolvedCardPage(actor.UserID, replacement, active.Ref(), screen)
+		}
 		return replacement, nil
 	}
 	edited, err := h.messenger.EditScreen(ctx, message, screen)
 	if err == nil {
 		h.rememberResponseCardLocked(ctx, actor, edited)
+		if activeErr == nil {
+			h.rememberResolvedCardPage(actor.UserID, edited, active.Ref(), screen)
+		}
 	}
 	return edited, err
 }
@@ -202,6 +216,8 @@ func (h *Handler) repostFinalResponseCard(
 	// Completion can be observed both by the live worker and the heartbeat
 	// reconciler. Serialize promotion and compare the replicated carrier so one
 	// backend turn creates exactly one new Telegram message.
+	h.cardEditMu.Lock()
+	defer h.cardEditMu.Unlock()
 	h.cardMutationMu.Lock()
 	defer h.cardMutationMu.Unlock()
 	current, currentOK, currentErr := h.service.TelegramResponseCard(actor)

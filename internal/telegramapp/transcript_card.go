@@ -109,6 +109,38 @@ func (h *Handler) rememberResolvedCardPage(
 	h.pageMu.Unlock()
 }
 
+func (h *Handler) rememberedCardPage(
+	userID domain.UserID,
+	message telegrambot.Message,
+	ref domain.SessionRef,
+) int {
+	key := cardPageKey{userID: userID, chatID: message.ChatID, messageID: message.MessageID}
+	h.pageMu.Lock()
+	defer h.pageMu.Unlock()
+	state, ok := h.cardPages[key]
+	if !ok || state.ref != ref || state.page < 1 {
+		return 0
+	}
+	return state.page
+}
+
+func (h *Handler) screenMatchesRememberedPage(
+	userID domain.UserID,
+	message telegrambot.Message,
+	ref domain.SessionRef,
+	screen telegramui.Screen,
+) bool {
+	want := h.rememberedCardPage(userID, message, ref)
+	if want == 0 {
+		return true
+	}
+	if len(screen.Grid) == 0 || len(screen.Grid[0]) < 2 {
+		return false
+	}
+	page, _, ok := parseCardPageLabel(screen.Grid[0][1].Label)
+	return ok && page == want
+}
+
 func parseCardPageLabel(label string) (int, int, bool) {
 	left, right, ok := strings.Cut(strings.TrimSpace(label), "/")
 	if !ok {

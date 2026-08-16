@@ -48,7 +48,8 @@ func isStatusAction(action telegramui.Action) bool {
 	switch action {
 	case telegramui.ActionStatus, telegramui.ActionStatusRefresh, telegramui.ActionStatusMode,
 		telegramui.ActionStatusLeaderNode, telegramui.ActionStatusSettingsNode,
-		telegramui.ActionNodeSettings, telegramui.ActionConfirmLeader:
+		telegramui.ActionNodeSettings, telegramui.ActionNodeBackends,
+		telegramui.ActionNodeBackend, telegramui.ActionConfirmLeader:
 		return true
 	default:
 		return false

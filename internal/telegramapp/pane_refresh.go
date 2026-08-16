@@ -101,7 +101,8 @@ func (h *Handler) runPaneRefresh(
 			continue
 		}
 		if session.RuntimePhase == domain.RuntimeWaitingInput {
-			screen, renderErr := h.renderSessionCard(ctx, actor, ref, 0)
+			page := h.rememberedCardPage(actor.UserID, message, ref)
+			screen, renderErr := h.renderSessionCard(ctx, actor, ref, page)
 			if renderErr == nil && h.sessionIsActive(actor, ref) &&
 				h.currentPaneGeneration(actor.UserID, generation) {
 				_, _ = h.editResponseCard(ctx, actor, message, screen)
@@ -112,11 +113,16 @@ func (h *Handler) runPaneRefresh(
 		// idle before this live-card worker gets its next turn. Render once more
 		// so that race cannot leave the Telegram card on a tool result or pane.
 		if session.RuntimePhase == domain.RuntimeIdle {
-			snapshot, renderErr := h.renderSessionCardSnapshot(ctx, actor, ref, 0)
+			page := h.rememberedCardPage(actor.UserID, message, ref)
+			snapshot, renderErr := h.renderSessionCardSnapshot(ctx, actor, ref, page)
 			if renderErr == nil && h.sessionIsActive(actor, ref) &&
 				h.currentPaneGeneration(actor.UserID, generation) {
 				if finalAt, ok := finalTranscriptAt(snapshot.events); ok &&
 					transcriptFinalBelongsToCurrentTurn(session, finalAt, time.Now()) {
+					snapshot, renderErr = h.renderSessionCardSnapshot(ctx, actor, ref, 0)
+					if renderErr != nil {
+						return
+					}
 					_, _ = h.repostFinalResponseCard(
 						ctx, actor, message, ref, snapshot.screen,
 					)
@@ -128,7 +134,8 @@ func (h *Handler) runPaneRefresh(
 		}
 		if session.RuntimePhase != domain.RuntimeRunning {
 			if session.RuntimePhase == domain.RuntimeDegraded {
-				screen, renderErr := h.renderSessionCard(ctx, actor, ref, 0)
+				page := h.rememberedCardPage(actor.UserID, message, ref)
+				screen, renderErr := h.renderSessionCard(ctx, actor, ref, page)
 				if renderErr == nil && h.sessionIsActive(actor, ref) &&
 					h.currentPaneGeneration(actor.UserID, generation) {
 					_, _ = h.editResponseCard(ctx, actor, message, screen)
@@ -136,7 +143,8 @@ func (h *Handler) runPaneRefresh(
 			}
 			return
 		}
-		snapshot, err := h.renderSessionCardSnapshot(ctx, actor, ref, 0)
+		page := h.rememberedCardPage(actor.UserID, message, ref)
+		snapshot, err := h.renderSessionCardSnapshot(ctx, actor, ref, page)
 		if err != nil {
 			return
 		}
@@ -170,7 +178,9 @@ func (h *Handler) runPaneRefresh(
 			// Keep high-frequency live-pane edits local to this worker. Replicating
 			// every screenshot hash would add avoidable Raft traffic; durable
 			// transport metadata is needed only at a settled interaction boundary.
-			message, err = h.messenger.EditScreen(ctx, message, snapshot.screen)
+			message, err = h.editPaneScreen(
+				ctx, actor, ref, message, generation, snapshot.screen,
+			)
 		}
 		if err != nil {
 			return
@@ -180,6 +190,27 @@ func (h *Handler) runPaneRefresh(
 		}
 		delay = paneRefreshDelay
 	}
+}
+
+func (h *Handler) editPaneScreen(
+	ctx context.Context,
+	actor application.Principal,
+	ref domain.SessionRef,
+	message telegrambot.Message,
+	generation uint64,
+	screen telegramui.Screen,
+) (telegrambot.Message, error) {
+	h.cardEditMu.Lock()
+	defer h.cardEditMu.Unlock()
+	if !h.currentPaneGeneration(actor.UserID, generation) ||
+		!h.screenMatchesRememberedPage(actor.UserID, message, ref, screen) {
+		return message, nil
+	}
+	edited, err := h.messenger.EditScreen(ctx, message, screen)
+	if err == nil {
+		h.rememberResolvedCardPage(actor.UserID, edited, ref, screen)
+	}
+	return edited, err
 }
 
 func (h *Handler) sessionIsActive(

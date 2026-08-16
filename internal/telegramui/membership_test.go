@@ -44,38 +44,45 @@ func TestFinalAvailableNodeHasNoDisableAction(t *testing.T) {
 	}
 }
 
-func TestNodeMembershipListsProviderAliases(t *testing.T) {
+func TestNodeMembershipCollapsesBackendManagement(t *testing.T) {
 	screen := RenderNodeMembership(NodeMembershipInput{
 		Copy: englishCopy, Node: domain.Node{ID: "a", Name: "Alpha"}, Backends: "codex",
-		RenameToken: "rename", ProviderAliases: []ProviderAliasItem{
-			{Backend: "codex", Alias: "Personal", Token: "provider", AuthToken: "auth"},
-		},
+		RenameToken: "rename", BackendsToken: "backends",
 	})
 	if grid := CanonicalGrid(screen.Grid); grid != `[Rename -> node_rename@rename]
-[Account · codex: Personal -> provider_alias@provider]
-[🔐 Sign in · codex -> provider_auth@auth]
+[Backends -> node_backends@backends]
 [← Back -> status_mode@settings]` {
-		t.Fatalf("provider alias missing:\n%s", grid)
+		t.Fatalf("backend group missing:\n%s", grid)
 	}
 }
 
-func TestNodeMembershipDistinguishesInstallConnectAndDisconnect(t *testing.T) {
-	screen := RenderNodeMembership(NodeMembershipInput{
-		Copy: englishCopy, Node: domain.Node{ID: "a", Name: "Alpha"}, Backends: "codex",
-		RenameToken: "rename", BackendChoices: []NodeBackendItem{
-			{Name: "claude", Token: "install"},
-			{Name: "codex", Installed: true, Token: "connect"},
-			{Name: "other", Installed: true, Connected: true, Token: "disconnect"},
+func TestBackendMenuDistinguishesInstallConnectAndDisconnect(t *testing.T) {
+	list := RenderNodeBackends(NodeBackendsInput{
+		Copy: englishCopy, NodeName: "Alpha", BackToken: "node",
+		Items: []NodeBackendItem{
+			{Name: "claude", OpenToken: "claude"},
+			{Name: "codex", Installed: true, OpenToken: "codex"},
+			{Name: "other", Installed: true, Connected: true, OpenToken: "other"},
 		},
 	})
-	grid := CanonicalGrid(screen.Grid)
-	for _, expected := range []string{
-		"[＋ claude · install -> backend_install@install]",
-		"[＋ codex · connect -> backend_connect@connect]",
-		"[✓ other · disconnect -> backend_remove@disconnect]",
+	assertGoldenGrid(t, list, `[claude · not installed -> node_backend@claude]
+[codex · installed -> node_backend@codex]
+[other · connected -> node_backend@other]
+[← Back -> node_settings@node]`)
+
+	for _, test := range []struct {
+		item     NodeBackendItem
+		expected string
+	}{
+		{NodeBackendItem{Name: "claude", Token: "install"}, "[install -> backend_install@install]"},
+		{NodeBackendItem{Name: "codex", Installed: true, Token: "connect"}, "[connect -> backend_connect@connect]"},
+		{NodeBackendItem{Name: "other", Installed: true, Connected: true, Token: "disconnect"}, "[disconnect -> backend_remove@disconnect]"},
 	} {
-		if !strings.Contains(grid, expected) {
-			t.Fatalf("missing %s in:\n%s", expected, grid)
+		detail := RenderNodeBackendDetail(NodeBackendDetailInput{
+			Copy: englishCopy, NodeName: "Alpha", Backend: test.item, BackToken: "backends",
+		})
+		if grid := CanonicalGrid(detail.Grid); !strings.Contains(grid, test.expected) {
+			t.Fatalf("missing %s in:\n%s", test.expected, grid)
 		}
 	}
 }

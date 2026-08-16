@@ -134,6 +134,10 @@ func (p *TelegramProjector) nodeSettings(
 	if err != nil {
 		return telegramui.Screen{}, err
 	}
+	backends, err := p.tokens.Node(actor.UserID, telegramui.ActionNodeBackends, nodeID)
+	if err != nil {
+		return telegramui.Screen{}, err
+	}
 	speech, err := p.tokens.Node(actor.UserID, telegramui.ActionNodeSpeechSetup, nodeID)
 	if err != nil {
 		return telegramui.Screen{}, err
@@ -161,10 +165,6 @@ func (p *TelegramProjector) nodeSettings(
 		}
 	}
 	canDisable := state.CanDisableNode(nodeID) == nil
-	aliases, err := p.providerAliases(state, actor.UserID, node)
-	if err != nil {
-		return telegramui.Screen{}, err
-	}
 	copy := actorCopy(state, actor)
 	speechStatus := copy.Text(i18n.ValueOff)
 	if state.Preferences[actor.UserID].EffectiveVoiceBackend() != domain.VoiceOff {
@@ -174,8 +174,7 @@ func (p *TelegramProjector) nodeSettings(
 		Copy: copy, Node: node, Backends: strings.Join(names, ", "),
 		Status: projectionNodeStatus(node.Status), LiveSessions: live, CanDisable: canDisable,
 		DisableToken: disable, EnableToken: enable, DeleteToken: remove, RenameToken: rename,
-		ProviderAliases:       aliases,
-		BackendChoices:        p.backendChoices(state, actor.UserID, node),
+		BackendsToken:         backends,
 		SpeechStatus:          speechStatus,
 		SpeechToken:           speech,
 		CanManageIsolation:    canManageIsolation,

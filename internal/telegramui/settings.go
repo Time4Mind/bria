@@ -111,71 +111,63 @@ func settingChoices(input SettingsInput, id SettingID) Grid {
 	copy := input.Copy
 	switch id {
 	case SettingSessionView:
-		return Grid{Row{
+		return choiceRows(
 			button(selectedLabel(!input.AllHosts, copy.Text(i18n.ValueHostFirst)), ActionSetSessionView, "host_first"),
 			button(selectedLabel(input.AllHosts, copy.Text(i18n.ValueAllHosts)), ActionSetSessionView, "all_hosts"),
-		}}
+		)
 	case SettingResumeSelection:
 		return visibilityChoices(copy, input.ResumeSelection, ActionSetResumeSelection)
 	case SettingLanguage:
-		return Grid{Row{
+		return choiceRows(
 			button(selectedLabel(copy.Language() == "en", copy.Text(i18n.LanguageEnglish)), ActionSetLanguage, "en"),
 			button(selectedLabel(copy.Language() == "ru", copy.Text(i18n.LanguageRussian)), ActionSetLanguage, "ru"),
 			button(selectedLabel(copy.Language() == "zh", copy.Text(i18n.LanguageChinese)), ActionSetLanguage, "zh"),
-		}}
+		)
 	case SettingToolCalls:
 		return visibilityChoices(copy, input.ShowToolCalls, ActionSetToolCalls)
 	case SettingToolResults:
 		return visibilityChoices(copy, input.ShowToolResults, ActionSetToolResults)
 	case SettingToolOutputLines:
-		return Grid{
-			Row{
-				button(selectedLabel(input.ToolOutputLines == 5, "5"), ActionSetToolOutputLines, "5"),
-				button(selectedLabel(input.ToolOutputLines == 10, "10"), ActionSetToolOutputLines, "10"),
-				button(selectedLabel(input.ToolOutputLines == 15, "15"), ActionSetToolOutputLines, "15"),
-			},
-			Row{
-				button(selectedLabel(input.ToolOutputLines == 20, "20"), ActionSetToolOutputLines, "20"),
-				button(selectedLabel(input.ToolOutputLines == 25, "25"), ActionSetToolOutputLines, "25"),
-				button(selectedLabel(input.ToolOutputLines == 30, "30"), ActionSetToolOutputLines, "30"),
-			},
-		}
+		return choiceRows(
+			button(selectedLabel(input.ToolOutputLines == 5, "5"), ActionSetToolOutputLines, "5"),
+			button(selectedLabel(input.ToolOutputLines == 10, "10"), ActionSetToolOutputLines, "10"),
+			button(selectedLabel(input.ToolOutputLines == 15, "15"), ActionSetToolOutputLines, "15"),
+			button(selectedLabel(input.ToolOutputLines == 20, "20"), ActionSetToolOutputLines, "20"),
+			button(selectedLabel(input.ToolOutputLines == 25, "25"), ActionSetToolOutputLines, "25"),
+			button(selectedLabel(input.ToolOutputLines == 30, "30"), ActionSetToolOutputLines, "30"),
+		)
 	case SettingThinking:
 		return visibilityChoices(copy, input.ShowThinking, ActionSetThinking)
 	case SettingResponseCards:
-		return Grid{
-			Row{button(selectedLabel(input.ResponseCards == "keep_paginated", copy.Text(i18n.ValueCardsKeepPaginated)), ActionSetResponseCards, "keep_paginated")},
-			Row{button(selectedLabel(input.ResponseCards == "keep_latest", copy.Text(i18n.ValueCardsKeepLatest)), ActionSetResponseCards, "keep_latest")},
-			Row{button(selectedLabel(input.ResponseCards == "replace_paginated", copy.Text(i18n.ValueCardsReplace)), ActionSetResponseCards, "replace_paginated")},
-		}
+		return choiceRows(
+			button(selectedLabel(input.ResponseCards == "keep_paginated", copy.Text(i18n.ValueCardsKeepPaginated)), ActionSetResponseCards, "keep_paginated"),
+			button(selectedLabel(input.ResponseCards == "keep_latest", copy.Text(i18n.ValueCardsKeepLatest)), ActionSetResponseCards, "keep_latest"),
+			button(selectedLabel(input.ResponseCards == "replace_paginated", copy.Text(i18n.ValueCardsReplace)), ActionSetResponseCards, "replace_paginated"),
+		)
 	case SettingTerminalSnapshots:
-		return Grid{
-			Row{button(selectedLabel(input.TerminalSnapshots == "working", copy.Text(i18n.ValueTerminalWorking)), ActionSetTerminalSnapshots, "working")},
-			Row{button(selectedLabel(input.TerminalSnapshots == "always", copy.Text(i18n.ValueTerminalAlways)), ActionSetTerminalSnapshots, "always")},
-			Row{button(selectedLabel(input.TerminalSnapshots == "never", copy.Text(i18n.ValueTerminalNever)), ActionSetTerminalSnapshots, "never")},
-		}
+		return choiceRows(
+			button(selectedLabel(input.TerminalSnapshots == "working", copy.Text(i18n.ValueTerminalWorking)), ActionSetTerminalSnapshots, "working"),
+			button(selectedLabel(input.TerminalSnapshots == "always", copy.Text(i18n.ValueTerminalAlways)), ActionSetTerminalSnapshots, "always"),
+			button(selectedLabel(input.TerminalSnapshots == "never", copy.Text(i18n.ValueTerminalNever)), ActionSetTerminalSnapshots, "never"),
+		)
 	case SettingIdleArchive:
-		return Grid{
-			Row{
-				button(selectedLabel(input.IdleHours == 6, copy.Count(i18n.CountHour, 6)), ActionSetIdleArchive, "6"),
-				button(selectedLabel(input.IdleHours == 12, copy.Count(i18n.CountHour, 12)), ActionSetIdleArchive, "12"),
-			},
-			Row{
-				button(selectedLabel(input.IdleHours == 24, copy.Count(i18n.CountHour, 24)), ActionSetIdleArchive, "24"),
-				button(selectedLabel(input.IdleHours == 0, copy.Text(i18n.ValueUnlimited)), ActionSetIdleArchive, "unlimited"),
-			},
-		}
+		return choiceRows(
+			button(selectedLabel(input.IdleHours == 6, copy.Count(i18n.CountHour, 6)), ActionSetIdleArchive, "6"),
+			button(selectedLabel(input.IdleHours == 12, copy.Count(i18n.CountHour, 12)), ActionSetIdleArchive, "12"),
+			button(selectedLabel(input.IdleHours == 24, copy.Count(i18n.CountHour, 24)), ActionSetIdleArchive, "24"),
+			button(selectedLabel(input.IdleHours == 0, copy.Text(i18n.ValueUnlimited)), ActionSetIdleArchive, "unlimited"),
+		)
 	case SettingRetention:
-		return Grid{Row{
+		return choiceRows(
 			button(selectedLabel(input.RetentionDays == 14, copy.Count(i18n.CountDay, 14)), ActionSetRetention, "14"),
 			button(selectedLabel(input.RetentionDays == 30, copy.Count(i18n.CountDay, 30)), ActionSetRetention, "30"),
 			button(selectedLabel(input.RetentionDays == 0, copy.Text(i18n.ValueUnlimited)), ActionSetRetention, "unlimited"),
-		}}
+		)
 	case SettingExpiry:
-		return Grid{Row{
+		return choiceRows(
 			button(selectedLabel(!input.RemoveAllOnPurge, copy.Text(i18n.ValueRecordOnly)), ActionSetExpiry, "record"),
 			button(selectedLabel(input.RemoveAllOnPurge, copy.Text(i18n.ValueDeleteFiles)), ActionSetExpiry, "all"),
-		}}
+		)
 	case SettingNotifyFinished:
 		return visibilityChoices(copy, input.NotifyFinished, ActionSetNotifyFinished)
 	case SettingNotifyError:
@@ -183,28 +175,28 @@ func settingChoices(input SettingsInput, id SettingID) Grid {
 	case SettingNotifyAction:
 		return visibilityChoices(copy, input.NotifyAction, ActionSetNotifyAction)
 	case SettingBackgroundDismiss:
-		return Grid{Row{
+		return choiceRows(
 			button(selectedLabel(input.BackgroundDismiss == 1, "1"), ActionSetBgDismiss, "1"),
 			button(selectedLabel(input.BackgroundDismiss == 3, "3"), ActionSetBgDismiss, "3"),
 			button(selectedLabel(input.BackgroundDismiss == 5, "5"), ActionSetBgDismiss, "5"),
 			button(selectedLabel(input.BackgroundDismiss == 10, "10"), ActionSetBgDismiss, "10"),
-		}}
+		)
 	case SettingNodeSort:
-		return Grid{Row{
+		return choiceRows(
 			button(selectedLabel(input.NodeSort == "created", copy.Text(i18n.ValueNodeCreated)), ActionSetNodeSort, "created"),
 			button(selectedLabel(input.NodeSort == "name", copy.Text(i18n.ValueNodeName)), ActionSetNodeSort, "name"),
 			button(selectedLabel(input.NodeSort == "leader", copy.Text(i18n.ValueNodeLeader)), ActionSetNodeSort, "leader"),
-		}}
+		)
 	case SettingQuotaPoll:
-		return Grid{Row{
+		return choiceRows(
 			button(selectedLabel(input.QuotaPollMinutes == 5, copy.Format(i18n.ValueMinuteShort, 5)), ActionSetQuotaPoll, "5"),
 			button(selectedLabel(input.QuotaPollMinutes == 10, copy.Format(i18n.ValueMinuteShort, 10)), ActionSetQuotaPoll, "10"),
-		}}
+		)
 	case SettingLeaderMode:
-		return Grid{Row{
+		return choiceRows(
 			button(selectedLabel(!input.LeaderAutomatic, copy.Text(i18n.ValueLeaderManual)), ActionSetLeaderMode, "manual"),
 			button(selectedLabel(input.LeaderAutomatic, copy.Text(i18n.ValueLeaderAutomatic)), ActionSetLeaderMode, "automatic"),
-		}}
+		)
 	case SettingLeaderNode:
 		rows := make(Grid, 0, len(input.LeaderNodes))
 		for _, node := range input.LeaderNodes {
@@ -219,11 +211,11 @@ func settingChoices(input SettingsInput, id SettingID) Grid {
 	case SettingVoiceBackend:
 		return visibilityChoices(copy, input.VoiceBackend != "off", ActionSetVoiceBackend)
 	case SettingOfflineQueue:
-		return Grid{Row{
+		return choiceRows(
 			button(selectedLabel(input.OfflineQueueLimit == 5, "5"), ActionSetOfflineQueue, "5"),
 			button(selectedLabel(input.OfflineQueueLimit == 10, "10"), ActionSetOfflineQueue, "10"),
 			button(selectedLabel(input.OfflineQueueLimit == 20, "20"), ActionSetOfflineQueue, "20"),
-		}}
+		)
 	default:
 		return nil
 	}
@@ -339,10 +331,14 @@ func settingsCategoryText(input SettingsInput, category SettingsCategory) string
 }
 
 func visibilityChoices(copy i18n.Localizer, visible bool, action Action) Grid {
-	return Grid{Row{
+	return choiceRows(
 		button(selectedLabel(visible, copy.Text(i18n.ValueOn)), action, "on"),
 		button(selectedLabel(!visible, copy.Text(i18n.ValueOff)), action, "off"),
-	}}
+	)
+}
+
+func choiceRows(buttons ...Button) Grid {
+	return settingsRows(buttons)
 }
 
 func visibilityValue(copy i18n.Localizer, visible bool) string {

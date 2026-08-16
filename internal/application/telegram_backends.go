@@ -45,9 +45,16 @@ func (p *TelegramProjector) backendChoices(
 		if err != nil {
 			continue
 		}
+		openToken, err := p.tokens.Choice(
+			userID, telegramui.ActionNodeBackend, "node_backend_open",
+			string(node.ID)+"\x00"+name,
+		)
+		if err != nil {
+			continue
+		}
 		items = append(items, telegramui.NodeBackendItem{
 			Name: name, Version: descriptor.Version, Installed: isInstalled,
-			Connected: connected[name], Token: token,
+			Connected: connected[name], Token: token, OpenToken: openToken,
 		})
 	}
 	return items

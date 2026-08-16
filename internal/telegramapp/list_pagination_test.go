@@ -60,6 +60,89 @@ func TestMultibyteRichSessionPageReplacesLegacyCarrier(t *testing.T) {
 	}
 }
 
+func TestRunningCardRefreshKeepsTheExplicitlySelectedPage(t *testing.T) {
+	fixture := newFixture(t)
+	actor := application.Principal{UserID: 7}
+	ref := domain.SessionRef{NodeID: "allowed", SessionID: "live"}
+	session, err := fixture.service.Session(actor, ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.service.PublishSessionRuntime(
+		context.Background(), session, domain.RuntimeRunning, nil,
+	); err != nil {
+		t.Fatal(err)
+	}
+	events := make([]transcript.Event, 0, 16)
+	for index := 0; index < 8; index++ {
+		events = append(events, transcript.Event{
+			Kind: transcript.EventUserText,
+			Text: fmt.Sprintf("request %d %s", index, strings.Repeat("question ", 300)),
+		})
+		events = append(events, transcript.Event{
+			Kind: transcript.EventAssistantText,
+			Text: fmt.Sprintf("answer %d %s", index, strings.Repeat("content ", 300)),
+		})
+	}
+	controls := &blockingControls{ref: ref, events: events}
+	handler, err := telegramapp.NewHandlerWithControls(
+		fixture.service, fixture.projector, fixture.codec, fixture.messenger, controls,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	fixture.messenger.sendNotify = make(chan struct{}, 2)
+	if err := handler.HandleTelegramUpdate(ctx, telegrambot.IncomingUpdate{
+		UpdateID: 92, Kind: telegrambot.IncomingMessage,
+		ChatID: 7, UserID: 7, Text: "keep my page",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	waitTestNotification(t, fixture.messenger.sendNotify, "initial card was not sent")
+	waitTestNotification(t, fixture.messenger.sendNotify, "rich running card was not promoted")
+	if len(fixture.messenger.sent) < 2 {
+		t.Fatalf("running cards=%d", len(fixture.messenger.sent))
+	}
+	initial := fixture.messenger.sent[len(fixture.messenger.sent)-1]
+	if len(initial.Grid) == 0 || len(initial.Grid[0]) < 2 ||
+		initial.Grid[0][1].Label == "1/1" {
+		t.Fatalf("test transcript did not paginate: %#v", initial.Grid)
+	}
+	previous := callbackForAction(t, initial, telegramui.ActionPagePrevious)
+	origin := stubMessageForScreen(len(fixture.messenger.sent), initial)
+	if err := handler.HandleTelegramUpdate(ctx, telegrambot.IncomingUpdate{
+		UpdateID: 93, Kind: telegrambot.IncomingCallback,
+		ChatID: 7, UserID: 7, CallbackID: "previous-running",
+		CallbackData: previous, CallbackOrigin: origin,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(fixture.messenger.edited) == 0 {
+		t.Fatal("manual page was not rendered")
+	}
+	manual := fixture.messenger.edited[len(fixture.messenger.edited)-1]
+	want := manual.Grid[0][1].Label
+	if want == initial.Grid[0][1].Label {
+		t.Fatalf("previous page did not move: %s", want)
+	}
+	workerStart := len(fixture.messenger.edited)
+	fixture.messenger.editNotify = make(chan struct{}, 1)
+	select {
+	case <-fixture.messenger.editNotify:
+	case <-time.After(2 * time.Second):
+		t.Fatal("running card worker did not refresh the selected page")
+	}
+	cancel()
+	time.Sleep(50 * time.Millisecond)
+	for index, screen := range fixture.messenger.edited[workerStart:] {
+		if got := screen.Grid[0][1].Label; got != want {
+			t.Fatalf("worker edit %d reset page to %s, want %s", index, got, want)
+		}
+	}
+}
+
 func TestNodePaginationCallbackEditsSameCarrier(t *testing.T) {
 	fixture := newFixture(t)
 	closed := fixture.machine.Apply(commandForTest(t, "close-live", clusterstate.CommandCloseSession,

@@ -44,14 +44,23 @@ func (h *Handler) handleProviderAuthCallback(
 	if err != nil {
 		return nil
 	}
-	back := h.nodeSettingsReturn(actor)
+	backToken, err := h.nodeBackendDetailToken(actor, nodeID, backend)
+	if err != nil {
+		return err
+	}
 	starting := telegramui.RenderProviderAuthStartingWithBack(
-		h.copy(actor), backend, back.Action, back.Token,
+		h.copy(actor), backend, telegramui.ActionNodeBackend, backToken,
 	)
 	carrier, err := h.messenger.EditScreen(ctx, update.CallbackOrigin, starting)
 	if err != nil {
 		return err
 	}
+	pending := providerAuthFlow{
+		NodeID: nodeID, Backend: backend, ExpiresAt: time.Now().Add(10 * time.Minute), Carrier: carrier,
+	}
+	h.membershipMu.Lock()
+	h.providerAuthFlows[actor.UserID] = pending
+	h.membershipMu.Unlock()
 	status, err := h.providerAuth.Start(ctx, providerauth.StartRequest{
 		ActorID: int64(actor.UserID), NodeID: string(nodeID), Backend: backend,
 	})
@@ -212,7 +221,6 @@ func (h *Handler) cancelProviderAuth(
 		h.membershipMu.Unlock()
 		return nil
 	}
-	delete(h.providerAuthFlows, actor.UserID)
 	h.membershipMu.Unlock()
 	if ok && h.providerAuth != nil {
 		_ = h.providerAuth.Cancel(ctx, flow.request(actor))
@@ -242,6 +250,7 @@ func (h *Handler) editProviderAuthResult(
 	detail string,
 ) error {
 	h.membershipMu.Lock()
+	flow := h.providerAuthFlows[actor.UserID]
 	delete(h.providerAuthFlows, actor.UserID)
 	h.membershipMu.Unlock()
 	text := h.copy(actor).Text(key)
@@ -249,6 +258,11 @@ func (h *Handler) editProviderAuthResult(
 		text = h.copy(actor).Format(key, html.EscapeString(detail))
 	}
 	back := h.nodeSettingsReturn(actor)
+	if flow.NodeID != "" && flow.Backend != "" {
+		if token, tokenErr := h.nodeBackendDetailToken(actor, flow.NodeID, flow.Backend); tokenErr == nil {
+			back = settingsReturn{Action: telegramui.ActionNodeBackend, Token: token}
+		}
+	}
 	_, err := h.messenger.EditScreen(ctx, carrier, telegramui.Screen{
 		Name: telegramui.ScreenStatus, ParseMode: telegramui.ParseModeHTML,
 		Text: text, Grid: telegramui.Grid{telegramui.Row{{

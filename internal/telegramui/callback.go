@@ -25,6 +25,8 @@ const (
 	ActionStatusLeaderNode     Action = "status_leader"
 	ActionStatusSettingsNode   Action = "status_settings"
 	ActionNodeSettings         Action = "node_settings"
+	ActionNodeBackends         Action = "node_backends"
+	ActionNodeBackend          Action = "node_backend"
 	ActionConfirmLeader        Action = "confirm_leader"
 	ActionClusterAdd           Action = "cluster_add"
 	ActionClusterInvite        Action = "cluster_invite"
@@ -170,7 +172,8 @@ func knownAction(action Action) bool {
 	case ActionNoop, ActionMenu, ActionSessions, ActionNodesPrevious, ActionNodesNext,
 		ActionSessionsPrevious, ActionSessionsNext, ActionArchive, ActionStatus,
 		ActionStatusRefresh, ActionStatusMode, ActionStatusLeaderNode,
-		ActionStatusSettingsNode, ActionNodeSettings, ActionConfirmLeader,
+		ActionStatusSettingsNode, ActionNodeSettings, ActionNodeBackends,
+		ActionNodeBackend, ActionConfirmLeader,
 		ActionClusterAdd, ActionClusterInvite, ActionClusterContract,
 		ActionClusterUpdate, ActionClusterUpdateYes, ActionClusterUpdateRefresh,
 		ActionEnrollmentOpen, ActionEnrollmentApprove, ActionEnrollmentReject,

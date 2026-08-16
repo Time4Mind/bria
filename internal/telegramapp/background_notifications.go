@@ -204,11 +204,13 @@ func (h *Handler) refreshBackgroundPanel(ctx context.Context, userID domain.User
 			(card.Session == session.Ref() && card.SessionRevision < session.Revision)) {
 		return false
 	}
-	screen, err := h.renderSessionCard(ctx, actor, session.Ref(), 0)
+	message := telegramMessage(card)
+	page := h.rememberedCardPage(actor.UserID, message, session.Ref())
+	screen, err := h.renderSessionCard(ctx, actor, session.Ref(), page)
 	if err != nil {
 		return false
 	}
-	_, err = h.editResponseCard(ctx, actor, telegramMessage(card), screen)
+	_, err = h.editResponseCard(ctx, actor, message, screen)
 	return err == nil
 }
 

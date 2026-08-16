@@ -13,7 +13,6 @@ func RenderSettings(input SettingsInput) Screen {
 		button(copy.Text(i18n.SettingsCard), ActionSettingsCategory, OpaqueToken(CategoryCard)),
 		button(copy.Text(i18n.SettingsArchive), ActionSettingsCategory, OpaqueToken(CategoryArchive)),
 		button(copy.Text(i18n.SettingsNotifications), ActionSettingsCategory, OpaqueToken(CategoryNotifications)),
-		button(copy.Text(i18n.SettingsVoice), ActionSettingsCategory, OpaqueToken(CategoryVoice)),
 		button(copy.Text(i18n.SettingsCluster), ActionSettingsCategory, OpaqueToken(CategoryCluster)),
 	}
 	rows := settingsRows(categories)
@@ -48,14 +47,13 @@ func RenderSettingsCategory(input SettingsInput, category SettingsCategory) (Scr
 	}, nil
 }
 
-// settingsRows keeps long settings menus compact without coupling their
-// semantic grouping to Telegram's keyboard representation. A trailing odd
-// button remains full-width on its own row.
+// Settings values must remain readable on narrow mobile screens. Each row is
+// therefore a full-width choice; compactness comes from semantic grouping,
+// not from truncating two unrelated selectors into one Telegram row.
 func settingsRows(buttons []Button) Grid {
-	rows := make(Grid, 0, (len(buttons)+1)/2)
-	for index := 0; index < len(buttons); index += 2 {
-		end := min(index+2, len(buttons))
-		rows = append(rows, Row(buttons[index:end]))
+	rows := make(Grid, 0, len(buttons))
+	for _, item := range buttons {
+		rows = append(rows, Row{item})
 	}
 	return rows
 }

@@ -273,6 +273,50 @@ func TestBackendSetupConnectionFailureIsRenderedWithItsCause(t *testing.T) {
 	) {
 		t.Fatalf("backend setup error screen=%#v", fixture.messenger.edited)
 	}
+	back := fixture.messenger.edited[0].Grid[len(fixture.messenger.edited[0].Grid)-1][0]
+	if back.Callback.Action != telegramui.ActionNodeBackend {
+		t.Fatalf("backend setup back action=%q", back.Callback.Action)
+	}
+}
+
+func TestNodeBackendManagementUsesNestedScreens(t *testing.T) {
+	fixture := newFixture(t)
+	nodeToken, err := fixture.codec.Node(7, telegramui.ActionNodeBackends, "allowed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	openToken, err := fixture.codec.Choice(
+		7, telegramui.ActionNodeBackend, "node_backend_open", "allowed\x00codex",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index, callback := range []telegramui.Callback{
+		{Action: telegramui.ActionNodeBackends, Token: nodeToken},
+		{Action: telegramui.ActionNodeBackend, Token: openToken},
+	} {
+		if err := fixture.handler.HandleTelegramUpdate(context.Background(), telegrambot.IncomingUpdate{
+			UpdateID: 30 + int64(index), Kind: telegrambot.IncomingCallback,
+			UserID: 7, ChatID: 7, CallbackID: "backend-menu",
+			CallbackData:   encodeCallback(t, callback.Action, callback.Token),
+			CallbackOrigin: telegrambot.Message{ChatID: 7, MessageID: 10},
+			LanguageCode:   "en",
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(fixture.messenger.edited) != 2 {
+		t.Fatalf("backend menu edits=%d", len(fixture.messenger.edited))
+	}
+	list, detail := fixture.messenger.edited[0], fixture.messenger.edited[1]
+	if grid := telegramui.CanonicalGrid(list.Grid); !strings.Contains(grid,
+		"[codex · not installed -> node_backend@") {
+		t.Fatalf("backend list missing codex:\n%s", grid)
+	}
+	if grid := telegramui.CanonicalGrid(detail.Grid); !strings.Contains(grid,
+		"[install -> backend_install@") || !strings.Contains(detail.Text, "Allowed · codex") {
+		t.Fatalf("backend detail invalid:\n%s\n%s", detail.Text, grid)
+	}
 }
 
 func TestTamperedCallbackCannotResolveHiddenEntity(t *testing.T) {

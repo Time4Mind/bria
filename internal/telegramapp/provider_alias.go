@@ -46,9 +46,12 @@ func (h *Handler) beginProviderAlias(
 		NodeID: domain.NodeID(nodeID), Backend: backend, ExpiresAt: time.Now().Add(10 * time.Minute),
 	}
 	h.membershipMu.Unlock()
-	back := h.nodeSettingsReturn(actor)
+	backToken, err := h.nodeBackendDetailToken(actor, domain.NodeID(nodeID), backend)
+	if err != nil {
+		return telegramui.Screen{}, err
+	}
 	return telegramui.RenderProviderAliasPromptWithBack(
-		h.copy(actor), backend, back.Action, back.Token,
+		h.copy(actor), backend, telegramui.ActionNodeBackend, backToken,
 	), nil
 }
 
@@ -84,5 +87,9 @@ func (h *Handler) acceptProviderAlias(
 	h.membershipMu.Lock()
 	delete(h.providerAliasFlows, actor.UserID)
 	h.membershipMu.Unlock()
-	return h.sendProjected(ctx, chatID, h.nodeSettingsResult(actor, i18n.ProviderAliasSaved, ""), nil)
+	screen, err := h.projector.NodeBackend(actor, flow.NodeID, flow.Backend)
+	if err != nil {
+		return err
+	}
+	return h.sendProjected(ctx, chatID, screen, nil)
 }
