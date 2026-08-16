@@ -18,6 +18,7 @@ import (
 
 func TestMultibyteRichSessionPageReplacesLegacyCarrier(t *testing.T) {
 	fixture := newFixture(t)
+	fixture.messenger.discardEventTrace()
 	ref := domain.SessionRef{NodeID: "allowed", SessionID: "live"}
 	controls := &blockingControls{ref: ref, events: []transcript.Event{{
 		Kind: transcript.EventAssistantFinal,
@@ -46,22 +47,24 @@ func TestMultibyteRichSessionPageReplacesLegacyCarrier(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if len(fixture.messenger.edited) != 0 || len(fixture.messenger.sent) != 1 {
-		t.Fatalf("edits=%d sends=%d", len(fixture.messenger.edited), len(fixture.messenger.sent))
+	sent, edited, deleted := fixture.messenger.screensSnapshot()
+	if len(edited) != 0 || len(sent) != 1 {
+		t.Fatalf("edits=%d sends=%d", len(edited), len(sent))
 	}
-	if !fixture.messenger.sent[0].RichMarkdown {
-		t.Fatalf("replacement is not rich: %#v", fixture.messenger.sent[0])
+	if !sent[0].RichMarkdown {
+		t.Fatalf("replacement is not rich: %#v", sent[0])
 	}
-	if len(fixture.messenger.deleted) != 1 || fixture.messenger.deleted[0].MessageID != 50 {
-		t.Fatalf("obsolete carrier=%#v", fixture.messenger.deleted)
+	if len(deleted) != 1 || deleted[0].MessageID != 50 {
+		t.Fatalf("obsolete carrier=%#v", deleted)
 	}
-	if size := len(fixture.messenger.sent[0].Text); size > telegrambot.MaxMessageTextBytes {
+	if size := len(sent[0].Text); size > telegrambot.MaxMessageTextBytes {
 		t.Fatalf("session page has %d encoded bytes", size)
 	}
 }
 
 func TestRunningCardRefreshKeepsTheExplicitlySelectedPage(t *testing.T) {
 	fixture := newFixture(t)
+	fixture.messenger.discardEventTrace()
 	actor := application.Principal{UserID: 7}
 	ref := domain.SessionRef{NodeID: "allowed", SessionID: "live"}
 	session, err := fixture.service.Session(actor, ref)
@@ -93,25 +96,28 @@ func TestRunningCardRefreshKeepsTheExplicitlySelectedPage(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	fixture.messenger.sendNotify = make(chan struct{}, 2)
 	if err := handler.HandleTelegramUpdate(ctx, telegrambot.IncomingUpdate{
 		UpdateID: 92, Kind: telegrambot.IncomingMessage,
 		ChatID: 7, UserID: 7, Text: "keep my page",
 	}); err != nil {
 		t.Fatal(err)
 	}
-	waitTestNotification(t, fixture.messenger.sendNotify, "initial card was not sent")
-	waitTestNotification(t, fixture.messenger.sendNotify, "rich running card was not promoted")
-	if len(fixture.messenger.sent) < 2 {
-		t.Fatalf("running cards=%d", len(fixture.messenger.sent))
+	deadline := time.Now().Add(2 * time.Second)
+	var sent []telegramui.Screen
+	for len(sent) < 2 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+		sent, _, _ = fixture.messenger.screensSnapshot()
 	}
-	initial := fixture.messenger.sent[len(fixture.messenger.sent)-1]
+	if len(sent) < 2 {
+		t.Fatalf("running cards=%d", len(sent))
+	}
+	initial := sent[len(sent)-1]
 	if len(initial.Grid) == 0 || len(initial.Grid[0]) < 2 ||
 		initial.Grid[0][1].Label == "1/1" {
 		t.Fatalf("test transcript did not paginate: %#v", initial.Grid)
 	}
 	previous := callbackForAction(t, initial, telegramui.ActionPagePrevious)
-	origin := stubMessageForScreen(len(fixture.messenger.sent), initial)
+	origin := stubMessageForScreen(len(sent), initial)
 	if err := handler.HandleTelegramUpdate(ctx, telegrambot.IncomingUpdate{
 		UpdateID: 93, Kind: telegrambot.IncomingCallback,
 		ChatID: 7, UserID: 7, CallbackID: "previous-running",
@@ -119,24 +125,28 @@ func TestRunningCardRefreshKeepsTheExplicitlySelectedPage(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if len(fixture.messenger.edited) == 0 {
+	_, edited, _ := fixture.messenger.screensSnapshot()
+	if len(edited) == 0 {
 		t.Fatal("manual page was not rendered")
 	}
-	manual := fixture.messenger.edited[len(fixture.messenger.edited)-1]
+	manual := edited[len(edited)-1]
 	want := manual.Grid[0][1].Label
 	if want == initial.Grid[0][1].Label {
 		t.Fatalf("previous page did not move: %s", want)
 	}
-	workerStart := len(fixture.messenger.edited)
-	fixture.messenger.editNotify = make(chan struct{}, 1)
-	select {
-	case <-fixture.messenger.editNotify:
-	case <-time.After(2 * time.Second):
+	workerStart := len(edited)
+	deadline = time.Now().Add(2 * time.Second)
+	for len(edited) <= workerStart && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+		_, edited, _ = fixture.messenger.screensSnapshot()
+	}
+	if len(edited) <= workerStart {
 		t.Fatal("running card worker did not refresh the selected page")
 	}
 	cancel()
 	time.Sleep(50 * time.Millisecond)
-	for index, screen := range fixture.messenger.edited[workerStart:] {
+	_, edited, _ = fixture.messenger.screensSnapshot()
+	for index, screen := range edited[workerStart:] {
 		if got := screen.Grid[0][1].Label; got != want {
 			t.Fatalf("worker edit %d reset page to %s, want %s", index, got, want)
 		}

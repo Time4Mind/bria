@@ -432,7 +432,7 @@ func (h *Handler) handleCallback(
 			h.schedulePaneRefresh(ctx, actor, ref, edited)
 		}
 	}
-	if err == nil && pageEdit && h.controls != nil {
+	if err == nil && pageEdit && h.controls != nil && h.sessionNeedsPaneRefresh(actor, pageRef) {
 		h.schedulePaneRefresh(ctx, actor, pageRef, edited)
 	}
 	return err

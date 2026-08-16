@@ -221,6 +221,23 @@ func (h *Handler) sessionIsActive(
 	return err == nil && active.Ref() == ref
 }
 
+func (h *Handler) sessionNeedsPaneRefresh(
+	actor application.Principal,
+	ref domain.SessionRef,
+) bool {
+	session, err := h.service.Session(actor, ref)
+	if err != nil || !h.sessionIsActive(actor, ref) {
+		return false
+	}
+	switch session.RuntimePhase {
+	case domain.RuntimeStarting, domain.RuntimeRunning, domain.RuntimeWaitingInput,
+		domain.RuntimeStopping:
+		return true
+	default:
+		return false
+	}
+}
+
 func (h *Handler) finishPaneRefresh(userID domain.UserID, generation uint64) {
 	h.paneMu.Lock()
 	defer h.paneMu.Unlock()

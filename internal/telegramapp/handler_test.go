@@ -5,6 +5,7 @@ import (
 	"errors"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -47,6 +48,7 @@ func (p machinePort) Apply(_ context.Context, command clusterstate.Command) (clu
 }
 
 type messengerStub struct {
+	mu                                   sync.Mutex
 	answers                              []string
 	sent                                 []telegramui.Screen
 	edited                               []telegramui.Screen
@@ -56,6 +58,8 @@ type messengerStub struct {
 }
 
 func (m *messengerStub) AnswerCallbackQuery(_ context.Context, id, text string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.events != nil {
 		*m.events = append(*m.events, "answer")
 	}
@@ -68,6 +72,8 @@ func (m *messengerStub) SendDocument(context.Context, telegrambot.DocumentReques
 	return telegrambot.Message{ChatID: 7, MessageID: 1}, nil
 }
 func (m *messengerStub) SendScreen(_ context.Context, _ int64, screen telegramui.Screen) (telegrambot.Message, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.sent = append(m.sent, screen)
 	if m.sendNotify != nil {
 		select {
@@ -78,6 +84,8 @@ func (m *messengerStub) SendScreen(_ context.Context, _ int64, screen telegramui
 	return stubMessageForScreen(len(m.sent), screen), nil
 }
 func (m *messengerStub) EditScreen(_ context.Context, message telegrambot.Message, screen telegramui.Screen) (telegrambot.Message, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.events != nil {
 		*m.events = append(*m.events, "edit")
 	}
@@ -91,13 +99,29 @@ func (m *messengerStub) EditScreen(_ context.Context, message telegrambot.Messag
 	return message, nil
 }
 func (m *messengerStub) DeleteMessage(_ context.Context, message telegrambot.Message) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.deleted = append(m.deleted, message)
 	notifyTest(m.deleteNotify)
 	return nil
 }
 func (m *messengerStub) ClearKeyboard(_ context.Context, message telegrambot.Message) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.deleted = append(m.deleted, message)
 	return nil
+}
+
+func (m *messengerStub) screensSnapshot() (sent, edited []telegramui.Screen, deleted []telegrambot.Message) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return slices.Clone(m.sent), slices.Clone(m.edited), slices.Clone(m.deleted)
+}
+
+func (m *messengerStub) discardEventTrace() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.events = nil
 }
 
 type fixture struct {
