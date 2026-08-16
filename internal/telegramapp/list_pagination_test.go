@@ -104,11 +104,11 @@ func TestRunningCardRefreshKeepsTheExplicitlySelectedPage(t *testing.T) {
 	}
 	deadline := time.Now().Add(2 * time.Second)
 	var sent []telegramui.Screen
-	for len(sent) < 2 && time.Now().Before(deadline) {
+	for len(sent) < 1 && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)
 		sent, _, _ = fixture.messenger.screensSnapshot()
 	}
-	if len(sent) < 2 {
+	if len(sent) < 1 {
 		t.Fatalf("running cards=%d", len(sent))
 	}
 	initial := sent[len(sent)-1]

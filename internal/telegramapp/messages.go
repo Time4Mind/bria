@@ -45,11 +45,14 @@ func (h *Handler) handleMessage(
 		return h.sendProjected(ctx, update.ChatID, screen, err)
 	}
 	voiceBaseline := voicePendingBaseline{}
+	inputBaseline := inputPendingBaseline{}
 	if update.Content.Kind == telegrambot.IncomingVoice {
 		preferences, preferencesErr := h.service.Preferences(actor)
 		if preferencesErr == nil && preferences.EffectiveVoiceBackend() != domain.VoiceOff {
 			voiceBaseline = h.captureVoiceBaseline(ctx, actor)
 		}
+	} else if pendingInputText(update) != "" {
+		inputBaseline = h.captureInputBaseline(ctx, actor)
 	}
 	accepted, err := h.sendIncomingInput(ctx, actor, update)
 	if errors.Is(err, domain.ErrQueueFull) {
@@ -80,13 +83,21 @@ func (h *Handler) handleMessage(
 	if err != nil {
 		return err
 	}
-	// The prompt is already durably queued. Text and ordinary media render only
-	// replicated state here. Voice reuses the bounded pre-submit transcript
-	// snapshot so its CCBot-compatible pending user row appears immediately.
+	// The prompt is already durably queued. Reuse the exact transcript snapshot
+	// that backed the previous card and add the accepted input optimistically;
+	// provider transcripts are asynchronous and must not produce a blank card
+	// between Telegram acceptance and their first flush. Voice has its own
+	// CCBot-compatible pending transcription row.
 	screen, err := h.projector.SessionCard(actor, accepted.Session)
 	if err == nil && update.Content.Kind == telegrambot.IncomingVoice && !accepted.Deferred {
 		h.markVoicePending(actor, accepted.Session, operationIDForInput(update.UpdateID), voiceBaseline)
 		screen, err = h.pendingVoiceCard(actor, accepted.Session, voiceBaseline)
+	} else if err == nil && pendingInputText(update) != "" {
+		h.markInputPending(
+			actor, accepted.Session, operationIDForInput(update.UpdateID),
+			pendingInputText(update), inputBaseline,
+		)
+		screen, err = h.pendingInputCard(actor, accepted.Session, inputBaseline)
 	}
 	message, err := h.sendProjectedMessage(ctx, update.ChatID, screen, err)
 	if err == nil {

@@ -40,6 +40,7 @@ type Handler struct {
 
 	paneRefreshState
 	voicePendingState
+	inputPendingState
 	cardRuntimeState
 	fileMu             sync.Mutex
 	deliveredFiles     map[string]bool
@@ -84,6 +85,7 @@ func NewHandler(
 		activity:           activity,
 		paneRefreshState:   newPaneRefreshState(),
 		voicePendingState:  newVoicePendingState(),
+		inputPendingState:  newInputPendingState(),
 		cardRuntimeState:   newCardRuntimeState(),
 		deliveredFiles:     make(map[string]bool),
 		promptHashes:       make(map[domain.UserID]map[string]string),

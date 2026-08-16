@@ -21,16 +21,17 @@ import (
 )
 
 type blockingControls struct {
-	mu       sync.RWMutex
-	started  chan struct{}
-	release  chan struct{}
-	ref      domain.SessionRef
-	events   []transcript.Event
-	external *runtimehost.InputPayload
-	pane     []byte
-	key      runtimehost.InteractiveKey
-	keyHash  string
-	text     string
+	mu        sync.RWMutex
+	started   chan struct{}
+	release   chan struct{}
+	ref       domain.SessionRef
+	events    []transcript.Event
+	afterSend []transcript.Event
+	external  *runtimehost.InputPayload
+	pane      []byte
+	key       runtimehost.InteractiveKey
+	keyHash   string
+	text      string
 }
 
 type closingControls struct {
@@ -81,7 +82,12 @@ func (c *blockingControls) SendInput(
 	_ string,
 	text string,
 ) (sessioncontrol.Accepted, error) {
+	c.mu.Lock()
 	c.text = text
+	if c.afterSend != nil {
+		c.events = append([]transcript.Event(nil), c.afterSend...)
+	}
+	c.mu.Unlock()
 	return sessioncontrol.Accepted{Session: c.ref}, nil
 }
 
@@ -140,9 +146,20 @@ func TestPaneRefreshRendersFinalAnswerWhenRuntimeAlreadySettledIdle(t *testing.T
 	fixture.messenger.sendNotify = make(chan struct{}, 2)
 	fixture.messenger.deleteNotify = make(chan struct{}, 1)
 	ref := domain.SessionRef{NodeID: "allowed", SessionID: "live"}
-	controls := &blockingControls{ref: ref, events: []transcript.Event{
+	actor := application.Principal{UserID: 7}
+	session, err := fixture.service.Session(actor, ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.service.PublishSessionRuntime(
+		context.Background(), session, domain.RuntimeRunning, nil,
+	); err != nil {
+		t.Fatal(err)
+	}
+	controls := &blockingControls{ref: ref, afterSend: []transcript.Event{
 		{Kind: transcript.EventToolResult, Head: "Bash", Body: "tool completed"},
-		{Kind: transcript.EventAssistantFinal, Text: "FINAL ANSWER"},
+		{Kind: transcript.EventAssistantFinal, Text: "FINAL ANSWER",
+			Timestamp: time.Now().Add(time.Millisecond).Format(time.RFC3339Nano)},
 	}}
 	handler, err := telegramapp.NewHandlerWithControls(
 		fixture.service, fixture.projector, fixture.codec, fixture.messenger, controls,

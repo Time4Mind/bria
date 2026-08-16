@@ -107,6 +107,89 @@ func TestCurrentCardDisplayPreferencesDoNotBlockTextDelivery(t *testing.T) {
 	}
 }
 
+func TestTextInputImmediatelyPreservesHistoryAndShowsAcceptedPrompt(t *testing.T) {
+	fixture := newFixture(t)
+	ref := domain.SessionRef{NodeID: "allowed", SessionID: "live"}
+	controls := &blockingControls{ref: ref, events: []transcript.Event{
+		{Kind: transcript.EventUserText, Text: "previous prompt",
+			Timestamp: time.Now().Add(-time.Minute).Format(time.RFC3339Nano)},
+		{Kind: transcript.EventAssistantFinal, Text: "previous answer",
+			Timestamp: time.Now().Add(-30 * time.Second).Format(time.RFC3339Nano)},
+	}}
+	handler, err := telegramapp.NewHandlerWithControls(
+		fixture.service, fixture.projector, fixture.codec, fixture.messenger, controls,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := handler.HandleTelegramUpdate(ctx, telegrambot.IncomingUpdate{
+		UpdateID: 451, Kind: telegrambot.IncomingMessage, ChatID: 7, UserID: 7,
+		Text: "current prompt",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(fixture.messenger.sent) != 1 {
+		t.Fatalf("sent screens=%#v", fixture.messenger.sent)
+	}
+	text := fixture.messenger.sent[0].Text
+	previous := strings.Index(text, "previous answer")
+	current := strings.Index(text, "👤 current prompt")
+	if previous < 0 || current < 0 || previous > current {
+		t.Fatalf("initial card lost history or accepted prompt:\n%s", text)
+	}
+}
+
+func TestPendingTextSurvivesTranscriptFlushLag(t *testing.T) {
+	fixture := newFixture(t)
+	actor := application.Principal{UserID: 7}
+	ref := domain.SessionRef{NodeID: "allowed", SessionID: "live"}
+	session, err := fixture.service.Session(actor, ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.service.PublishSessionRuntime(
+		context.Background(), session, domain.RuntimeRunning, nil,
+	); err != nil {
+		t.Fatal(err)
+	}
+	controls := &blockingControls{ref: ref, events: []transcript.Event{{
+		Kind: transcript.EventAssistantFinal, Text: "previous answer",
+		Timestamp: time.Now().Add(-time.Minute).Format(time.RFC3339Nano),
+	}}}
+	handler, err := telegramapp.NewHandlerWithControls(
+		fixture.service, fixture.projector, fixture.codec, fixture.messenger, controls,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture.messenger.editNotify = make(chan struct{}, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := handler.HandleTelegramUpdate(ctx, telegrambot.IncomingUpdate{
+		UpdateID: 452, Kind: telegrambot.IncomingMessage, ChatID: 7, UserID: 7,
+		Text: "current prompt",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	waitTestNotification(t, fixture.messenger.editNotify, "lagging transcript was not refreshed")
+	edited := fixture.messenger.edited[len(fixture.messenger.edited)-1].Text
+	if !strings.Contains(edited, "previous answer") ||
+		!strings.Contains(edited, "👤 current prompt") {
+		t.Fatalf("pending prompt disappeared during transcript lag:\n%s", edited)
+	}
+	controls.appendTranscriptEvent(transcript.Event{
+		Kind: transcript.EventUserText, Text: "current prompt",
+		Timestamp: time.Now().Format(time.RFC3339Nano),
+	})
+	waitTestNotification(t, fixture.messenger.editNotify, "flushed transcript was not refreshed")
+	edited = fixture.messenger.edited[len(fixture.messenger.edited)-1].Text
+	if count := strings.Count(edited, "👤 current prompt"); count != 1 {
+		t.Fatalf("accepted prompt was duplicated after transcript flush (%d):\n%s", count, edited)
+	}
+}
+
 func TestVoiceInputIsRejectedBeforeNodeTransferWhenRecognitionIsOff(t *testing.T) {
 	fixture := newFixture(t)
 	ref := domain.SessionRef{NodeID: "allowed", SessionID: "live"}
