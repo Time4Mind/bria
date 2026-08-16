@@ -20,35 +20,18 @@ func (h *Handler) RunBackgroundNotifications(ctx context.Context, interval time.
 		interval = 1200 * time.Millisecond
 	}
 	panelFingerprints := make(map[domain.UserID]string)
-	var reconciliation sync.WaitGroup
-	reconciliation.Add(1)
-	go func() {
-		defer reconciliation.Done()
-		h.runBackgroundReconciliation(ctx, interval)
-	}()
-	defer reconciliation.Wait()
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
 		if h.canRefresh() {
-			h.scanBackgroundNotifications(ctx, panelFingerprints)
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-		}
-	}
-}
-
-func (h *Handler) runBackgroundReconciliation(ctx context.Context, interval time.Duration) {
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-	for {
-		if h.canRefresh() {
+			// Keep runtime settlement and card delivery in one ordered pass. Two
+			// independent loops can observe the same revision in opposite order,
+			// allowing a routine panel edit to consume a just-finished turn before
+			// the completion carrier is reposted.
 			h.settleRunningSessions(ctx)
 			h.reconcileActiveFinalCards(ctx)
 			h.restoreActivePaneRefreshes(ctx)
+			h.scanBackgroundNotifications(ctx, panelFingerprints)
 		}
 		select {
 		case <-ctx.Done():
