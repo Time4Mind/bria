@@ -115,7 +115,7 @@ the pragmatic Go engineering contract in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Build and verify
 
-The current pinned toolchain is Go 1.26.5.
+The current pinned toolchain is Go 1.26.6.
 
 ```bash
 go test ./...
