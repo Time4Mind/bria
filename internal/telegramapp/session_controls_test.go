@@ -45,6 +45,19 @@ type delayedTranscriptControls struct {
 	once    sync.Once
 }
 
+type transcriptErrorControls struct {
+	*blockingControls
+	err error
+}
+
+func (c *transcriptErrorControls) Transcript(
+	context.Context,
+	application.Principal,
+	domain.SessionRef,
+) ([]transcript.Event, error) {
+	return nil, c.err
+}
+
 func (c *delayedTranscriptControls) Transcript(
 	ctx context.Context,
 	actor application.Principal,
@@ -163,6 +176,55 @@ func TestPaneRefreshRendersFinalAnswerWhenRuntimeAlreadySettledIdle(t *testing.T
 	}
 	if len(fixture.messenger.deleted) == 0 || fixture.messenger.deleted[0].MessageID != 1 {
 		t.Fatalf("old active carrier was not deleted: %#v", fixture.messenger.deleted)
+	}
+}
+
+func TestFreshClaudeSessionRendersBeforeTranscriptExists(t *testing.T) {
+	fixture := newFixture(t)
+	fixture.messenger.editNotify = make(chan struct{}, 2)
+	actor := application.Principal{UserID: 7}
+	ref := domain.SessionRef{NodeID: "allowed", SessionID: "live"}
+	session, err := fixture.service.Session(actor, ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.service.BindProviderSession(
+		context.Background(), actor, session, "fresh-claude-provider-id",
+	); err != nil {
+		t.Fatal(err)
+	}
+	controls := &transcriptErrorControls{
+		blockingControls: &blockingControls{ref: ref},
+		err:              transcript.ErrTranscriptNotFound,
+	}
+	handler, err := telegramapp.NewHandlerWithControls(
+		fixture.service, fixture.projector, fixture.codec, fixture.messenger, controls,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, err := fixture.codec.Session(7, telegramui.ActionSelectSession, ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := (telegramui.Callback{
+		Action: telegramui.ActionSelectSession, Token: token,
+	}).Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := handler.HandleTelegramUpdate(context.Background(), telegrambot.IncomingUpdate{
+		UpdateID: 40, Kind: telegrambot.IncomingCallback, ChatID: 7, UserID: 7,
+		CallbackID: "select-fresh-claude", CallbackData: data,
+		CallbackOrigin: telegrambot.Message{ChatID: 7, MessageID: 1},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	waitTestNotification(t, fixture.messenger.editNotify, "fresh Claude card was not rendered")
+	waitTestNotification(t, fixture.messenger.editNotify, "fresh Claude card refresh did not settle")
+	if len(fixture.messenger.edited) != 2 ||
+		fixture.messenger.edited[1].Name != telegramui.ScreenSessionCard {
+		t.Fatalf("fresh Claude card was not rendered: %#v", fixture.messenger.edited)
 	}
 }
 

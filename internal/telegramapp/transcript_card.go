@@ -2,6 +2,7 @@ package telegramapp
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"strings"
 	"time"
@@ -180,7 +181,12 @@ func (h *Handler) renderSessionCardSnapshot(
 		// existing Telegram card untouched until the transcript is reachable.
 		if cached, ok := h.cachedCardTranscript(ref); ok {
 			events = cached
-		} else if session.ProviderSessionID == "" {
+		} else if session.ProviderSessionID == "" ||
+			(session.IsLive() && errors.Is(err, transcript.ErrTranscriptNotFound)) {
+			// Claude assigns the provider session ID before its first prompt, but
+			// does not create the JSONL transcript until that prompt is accepted.
+			// A freshly provisioned live session therefore has a legitimate empty
+			// transcript and must still receive its usable Telegram card.
 			screen, projectErr := h.projector.SessionCard(actor, ref)
 			if projectErr == nil {
 				h.appendPendingVoiceRows(actor, ref, &screen)
