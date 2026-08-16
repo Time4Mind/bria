@@ -17,7 +17,7 @@ import (
 	"github.com/Time4Mind/bria/internal/config"
 )
 
-func TestProcessChaosTwoLiveNodesLoseReadinessDuringPartition(t *testing.T) {
+func TestProcessChaosManualLeaderSurvivesReplicaPartition(t *testing.T) {
 	if !processChaosEnabled() {
 		t.Skip("set BRIA_PROCESS_CHAOS=1 to run process-level chaos")
 	}
@@ -37,18 +37,24 @@ func TestProcessChaosTwoLiveNodesLoseReadinessDuringPartition(t *testing.T) {
 		}
 	})
 	client := chaosProbeClient(t, configs, certificates["node-1"], roots)
-	waitForSingleProcessLeader(t, client, configs, 35*time.Second)
+	leader := waitForSingleProcessLeader(t, client, configs, 35*time.Second)
 	for _, relay := range relays {
 		relay.pause()
 	}
 	for _, item := range configs {
+		if item.NodeID == leader {
+			waitForNodeReadyWithLeader(t, client, item.NodeID, leader, 10*time.Second)
+			continue
+		}
 		waitForNodeNotReady(t, client, item.NodeID, 10*time.Second)
 	}
 	for _, relay := range relays {
 		relay.resume()
 	}
 	waitForAllReady(t, client, configs, 20*time.Second)
-	waitForSingleProcessLeader(t, client, configs, 5*time.Second)
+	if got := waitForSingleProcessLeader(t, client, configs, 5*time.Second); got != leader {
+		t.Fatalf("partition changed manual leader: got %s, want %s", got, leader)
+	}
 }
 
 func processChaosEnabled() bool {

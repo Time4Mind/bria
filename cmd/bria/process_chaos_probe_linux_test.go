@@ -123,6 +123,27 @@ func waitForNodeNotReady(
 	t.Fatalf("node %s retained readiness without quorum", nodeID)
 }
 
+func waitForNodeReadyWithLeader(
+	t *testing.T,
+	client *nodecontrol.Client,
+	nodeID string,
+	leaderID string,
+	timeout time.Duration,
+) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		status, err := client.Probe(ctx, nodeID, true)
+		cancel()
+		if err == nil && status.Status == "ready" && status.LeaderID == leaderID {
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	t.Fatalf("node %s did not remain ready with leader %s", nodeID, leaderID)
+}
+
 func configByID(t *testing.T, configs []config.Config, nodeID string) config.Config {
 	t.Helper()
 	for _, item := range configs {

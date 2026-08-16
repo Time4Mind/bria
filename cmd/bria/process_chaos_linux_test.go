@@ -31,7 +31,7 @@ func TestBriaNodeProcessHelper(t *testing.T) {
 	}
 }
 
-func TestProcessChaosLeaderFailureAndDiskRejoin(t *testing.T) {
+func TestProcessChaosManualLeaderWaitsForDiskRejoin(t *testing.T) {
 	if os.Getenv(processChaosEnvironment) != "1" {
 		t.Skip("set BRIA_PROCESS_CHAOS=1 to run process-level chaos")
 	}
@@ -50,18 +50,19 @@ func TestProcessChaosLeaderFailureAndDiskRejoin(t *testing.T) {
 	client := chaosProbeClient(t, configs, certificates["node-1"], roots)
 	leader := waitForSingleProcessLeader(t, client, configs, 35*time.Second)
 	processes[leader].kill(t)
-	newLeader := waitForSingleProcessLeader(t, client, configs, 20*time.Second)
-	if newLeader == leader {
-		t.Fatal("abruptly stopped node remained leader")
+	for _, item := range configs {
+		if item.NodeID != leader {
+			waitForNodeNotReady(t, client, item.NodeID, 10*time.Second)
+		}
 	}
 	processes[leader] = startChaosNode(t, root, configByID(t, configs, leader))
 	waitForAllReady(t, client, configs, 20*time.Second)
-	if got := waitForSingleProcessLeader(t, client, configs, 5*time.Second); got != newLeader {
-		t.Fatalf("rejoining node disrupted leader: got %s, want %s", got, newLeader)
+	if got := waitForSingleProcessLeader(t, client, configs, 5*time.Second); got != leader {
+		t.Fatalf("manual leader did not reclaim leadership: got %s, want %s", got, leader)
 	}
 }
 
-func TestProcessChaosQuorumLossRejectsReadiness(t *testing.T) {
+func TestProcessChaosManualLeaderIgnoresReplicaLoss(t *testing.T) {
 	if os.Getenv(processChaosEnvironment) != "1" {
 		t.Skip("set BRIA_PROCESS_CHAOS=1 to run process-level chaos")
 	}
@@ -87,7 +88,7 @@ func TestProcessChaosQuorumLossRejectsReadiness(t *testing.T) {
 		processes[item.NodeID].kill(t)
 		stopped++
 	}
-	waitForNodeNotReady(t, client, leader, 10*time.Second)
+	waitForNodeReadyWithLeader(t, client, leader, leader, 10*time.Second)
 }
 
 type chaosProcess struct {
