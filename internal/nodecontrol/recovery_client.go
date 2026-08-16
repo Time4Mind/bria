@@ -12,6 +12,12 @@ import (
 
 const recoveryPath = "/v1/node/recovery"
 
+// ErrRecoveryAlreadySettled means the leader no longer accepts a recovery
+// transition because the referenced session has already moved on. A follower
+// can observe this after an update rollback: its local Raft view may briefly
+// predate a close/archive transition that the leader has already committed.
+var ErrRecoveryAlreadySettled = errors.New("recovery transition already settled")
+
 func (c *Client) ReportRecovery(
 	ctx context.Context,
 	leaderID string,
@@ -51,6 +57,9 @@ func (c *Client) ReportRecovery(
 		return errors.New("invalid recovery response")
 	}
 	if response.StatusCode != http.StatusNoContent {
+		if response.StatusCode == http.StatusConflict {
+			return ErrRecoveryAlreadySettled
+		}
 		return fmt.Errorf("recovery report rejected with status %d", response.StatusCode)
 	}
 	return nil

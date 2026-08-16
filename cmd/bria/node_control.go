@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"fmt"
 	"net"
 	"path/filepath"
@@ -305,6 +306,12 @@ func archiveMissingLocalSessions(
 			result, err = node.Apply(ctx, command)
 		} else {
 			result, err = remote.Apply(ctx, command)
+		}
+		if errors.Is(err, nodecontrol.ErrRecoveryAlreadySettled) {
+			// The leader has already closed or archived this session while this
+			// follower was restarting. Let Raft catch the local projection up;
+			// keeping the node offline cannot make that convergence happen.
+			continue
 		}
 		if err != nil {
 			return fmt.Errorf("archive missing runtime %s: %w", ref.Key(), err)
