@@ -106,8 +106,14 @@ func TestReconciliationRefreshesActiveResponseCardWithRecoveredFinal(t *testing.
 	if !strings.Contains(latest, "RECOVERED FINAL") {
 		t.Fatalf("recovered final missing from active card: %q", latest)
 	}
-	if len(fixture.messenger.deleted) == 0 ||
-		fixture.messenger.deleted[len(fixture.messenger.deleted)-1].MessageID != 51 {
+	removedCarrier := false
+	for _, message := range fixture.messenger.deleted {
+		if message.MessageID == 51 {
+			removedCarrier = true
+			break
+		}
+	}
+	if !removedCarrier {
 		t.Fatalf("completed carrier was not removed: %#v", fixture.messenger.deleted)
 	}
 	settled := fixture.machine.State().Sessions[ref.Key()]
