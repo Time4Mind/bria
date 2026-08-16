@@ -49,9 +49,10 @@ func runRunner(arguments []string) error {
 	}
 	select {
 	case <-releaseChanged:
-		// bria-runner.service uses Restart=on-failure.  Returning an error makes
-		// systemd start the runner from the newly activated release.
-		return errors.New("runner activation changed")
+		// Re-exec in place instead of exiting.  bria-node.service requires the
+		// runner service; letting systemd observe a runner failure can stop the
+		// node and leave it inactive after an otherwise successful update.
+		return reexecRunnerActivation()
 	default:
 		return nil
 	}
