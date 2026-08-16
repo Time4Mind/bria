@@ -1,6 +1,9 @@
 package domain
 
-import "fmt"
+import (
+	"fmt"
+	"time"
+)
 
 type TelegramResponseCard struct {
 	ChatID          int64      `json:"chat_id"`
@@ -10,6 +13,7 @@ type TelegramResponseCard struct {
 	PaneHash        string     `json:"pane_hash,omitempty"`
 	Session         SessionRef `json:"session,omitempty"`
 	SessionRevision uint64     `json:"session_revision,omitempty"`
+	SessionEventAt  time.Time  `json:"session_event_at,omitempty"`
 }
 
 // BindTelegramBot associates transport state with one Telegram bot. A cursor
@@ -57,8 +61,8 @@ func (s *State) RecordTelegramResponseCard(userID UserID, card TelegramResponseC
 			!s.CanViewSession(userID, card.Session) {
 			return ErrAccessDenied
 		}
-	} else if card.SessionRevision != 0 {
-		return fmt.Errorf("Telegram response card session revision has no session")
+	} else if card.SessionRevision != 0 || !card.SessionEventAt.IsZero() {
+		return fmt.Errorf("Telegram response card session checkpoint has no session")
 	}
 	if s.TelegramResponseCards == nil {
 		s.TelegramResponseCards = make(map[UserID]TelegramResponseCard)

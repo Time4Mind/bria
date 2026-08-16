@@ -63,7 +63,7 @@ func (h *Handler) reconcileActiveFinalCards(ctx context.Context) {
 		if card.Session != (domain.SessionRef{}) && card.Session != session.Ref() {
 			continue
 		}
-		if card.Session == session.Ref() && card.SessionRevision >= session.Revision {
+		if responseCardCoversSession(card, session) {
 			continue
 		}
 		snapshot, err := h.renderSessionCardSnapshot(ctx, actor, session.Ref(), 0)
@@ -199,9 +199,7 @@ func (h *Handler) refreshBackgroundPanel(ctx context.Context, userID domain.User
 	// Do not let the ordinary background-panel edit consume a completion
 	// revision. Completion must replace the active carrier so Telegram surfaces
 	// it as a new message; reconcileActiveFinalCards owns that transition.
-	if session.RuntimePhase == domain.RuntimeIdle &&
-		(card.Session == (domain.SessionRef{}) ||
-			(card.Session == session.Ref() && card.SessionRevision < session.Revision)) {
+	if session.RuntimePhase == domain.RuntimeIdle && !responseCardCoversSession(card, session) {
 		return false
 	}
 	message := telegramMessage(card)
@@ -212,6 +210,14 @@ func (h *Handler) refreshBackgroundPanel(ctx context.Context, userID domain.User
 	}
 	_, err = h.editResponseCard(ctx, actor, message, screen)
 	return err == nil
+}
+
+func responseCardCoversSession(
+	card domain.TelegramResponseCard,
+	session domain.Session,
+) bool {
+	return card.Session == session.Ref() && card.SessionRevision >= session.Revision &&
+		!card.SessionEventAt.IsZero() && !card.SessionEventAt.Before(session.LastEventAt)
 }
 
 func (h *Handler) settleRunningSessions(ctx context.Context) {

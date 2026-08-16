@@ -7,6 +7,7 @@ package telegramui
 import (
 	"fmt"
 	"strings"
+	"time"
 	"unicode/utf8"
 )
 
@@ -46,6 +47,15 @@ type PaneImage struct {
 	AnchorOffset int
 }
 
+// SessionCheckpoint identifies the exact replicated session state rendered
+// into a card. It is handler metadata and is never sent to Telegram.
+type SessionCheckpoint struct {
+	NodeID    string
+	SessionID string
+	Revision  uint64
+	EventAt   time.Time
+}
+
 type Screen struct {
 	Name         ScreenName
 	Text         string
@@ -53,6 +63,7 @@ type Screen struct {
 	RichMarkdown bool
 	Grid         Grid
 	Pane         *PaneImage
+	Checkpoint   *SessionCheckpoint
 }
 
 // Validate checks constraints that the eventual Telegram adapter must honor.
@@ -77,6 +88,11 @@ func (s Screen) Validate() error {
 			!utf8.ValidString(s.Text[:s.Pane.AnchorOffset]) {
 			return fmt.Errorf("pane image anchor is not a UTF-8 text boundary")
 		}
+	}
+	if s.Checkpoint != nil && (strings.TrimSpace(s.Checkpoint.NodeID) == "" ||
+		strings.TrimSpace(s.Checkpoint.SessionID) == "" || s.Checkpoint.Revision == 0 ||
+		s.Checkpoint.EventAt.IsZero()) {
+		return fmt.Errorf("session checkpoint is incomplete")
 	}
 	for rowIndex, row := range s.Grid {
 		if len(row) == 0 {

@@ -8,24 +8,27 @@ import (
 	"github.com/Time4Mind/bria/internal/application"
 	"github.com/Time4Mind/bria/internal/domain"
 	"github.com/Time4Mind/bria/internal/telegrambot"
+	"github.com/Time4Mind/bria/internal/telegramui"
 )
 
 func (h *Handler) rememberResponseCard(
 	ctx context.Context,
 	actor application.Principal,
 	message telegrambot.Message,
+	screen telegramui.Screen,
 ) {
 	h.cardMutationMu.Lock()
 	defer h.cardMutationMu.Unlock()
-	h.rememberResponseCardLocked(ctx, actor, message)
+	h.rememberResponseCardLocked(ctx, actor, message, screen)
 }
 
 func (h *Handler) rememberResponseCardLocked(
 	ctx context.Context,
 	actor application.Principal,
 	message telegrambot.Message,
+	screen telegramui.Screen,
 ) {
-	previous, exists, changed := h.recordResponseCard(ctx, actor, message)
+	previous, exists, changed := h.recordResponseCard(ctx, actor, message, screen)
 	if !changed {
 		return
 	}
@@ -48,6 +51,7 @@ func (h *Handler) recordResponseCard(
 	ctx context.Context,
 	actor application.Principal,
 	message telegrambot.Message,
+	screen telegramui.Screen,
 ) (domain.TelegramResponseCard, bool, bool) {
 	previous, exists, err := h.service.TelegramResponseCard(actor)
 	if err != nil {
@@ -57,16 +61,20 @@ func (h *Handler) recordResponseCard(
 		ChatID: message.ChatID, MessageID: message.MessageID, Rich: message.Rich,
 		RichMediaFileID: message.RichMediaFileID, PaneHash: message.PaneHash,
 	}
-	if session, sessionErr := h.service.ActiveSession(actor); sessionErr == nil {
-		card.Session = session.Ref()
-		card.SessionRevision = session.Revision
+	if checkpoint := screen.Checkpoint; checkpoint != nil {
+		card.Session = domain.SessionRef{
+			NodeID: domain.NodeID(checkpoint.NodeID), SessionID: domain.SessionID(checkpoint.SessionID),
+		}
+		card.SessionRevision = checkpoint.Revision
+		card.SessionEventAt = checkpoint.EventAt
 	}
 	if exists && previous == card {
 		return previous, true, false
 	}
 	fingerprint := sha256.Sum256([]byte(fmt.Sprintf(
-		"%d:%d:%t:%s:%s:%s:%d", card.ChatID, card.MessageID, card.Rich,
+		"%d:%d:%t:%s:%s:%s:%d:%d", card.ChatID, card.MessageID, card.Rich,
 		card.RichMediaFileID, card.PaneHash, card.Session.Key(), card.SessionRevision,
+		card.SessionEventAt.UnixNano(),
 	)))
 	recordCtx := application.WithOperationScope(
 		ctx, fmt.Sprintf("telegram-response-card-%d-%d-%x",

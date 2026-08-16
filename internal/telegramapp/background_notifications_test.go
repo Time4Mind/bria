@@ -134,17 +134,24 @@ func TestReconciliationRepublishesFinalSettledByHeartbeat(t *testing.T) {
 	ref := domain.SessionRef{NodeID: "allowed", SessionID: "live"}
 	session := fixture.machine.State().Sessions[ref.Key()]
 	finalAt := time.Now().Add(-time.Second).UTC()
+	beforeFinal := fixture.machine.State().Sessions[ref.Key()]
 	applyBackgroundCommand(t, fixture, "heartbeat-settled-final",
 		clusterstate.CommandPublishSessionRuntime, finalAt,
 		clusterstate.PublishSessionRuntime{
 			Session: ref, Generation: session.RuntimeGeneration,
 			Phase: domain.RuntimeIdle,
 		})
-	// Legacy cards do not have session revision metadata. They must be healed
-	// once after an upgrade instead of remaining permanently stale.
+	settledBeforeCard := fixture.machine.State().Sessions[ref.Key()]
+	// This is the production failure mode: a live card already checkpointed the
+	// settled revision while its rendered content still predates the final.
+	// Revision equality alone must not suppress recovery.
 	if err := fixture.service.RecordTelegramResponseCard(
 		application.WithOperationScope(context.Background(), "stale-active-card"), actor,
-		domain.TelegramResponseCard{ChatID: 7, MessageID: 81, Rich: true},
+		domain.TelegramResponseCard{
+			ChatID: 7, MessageID: 81, Rich: true, Session: ref,
+			SessionRevision: settledBeforeCard.Revision,
+			SessionEventAt:  beforeFinal.LastEventAt,
+		},
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -172,7 +179,8 @@ func TestReconciliationRepublishesFinalSettledByHeartbeat(t *testing.T) {
 		t.Fatalf("response card missing: %#v / %v", card, cardErr)
 	}
 	settled := fixture.machine.State().Sessions[ref.Key()]
-	if card.Session != ref || card.SessionRevision != settled.Revision {
+	if card.Session != ref || card.SessionRevision != settled.Revision ||
+		card.SessionEventAt.Before(settled.LastEventAt) {
 		t.Fatalf("card checkpoint = %#v, session revision = %d", card, settled.Revision)
 	}
 }

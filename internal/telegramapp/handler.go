@@ -426,7 +426,7 @@ func (h *Handler) handleCallback(
 		h.rememberCardPage(actor.UserID, edited, screen)
 	}
 	if err == nil && callback.Action == telegramui.ActionSelectSession && h.controls != nil {
-		h.rememberResponseCard(ctx, actor, edited)
+		h.rememberResponseCard(ctx, actor, edited, screen)
 		if ref, resolveErr := h.resolveSession(actor, callback.Action, callback.Token); resolveErr == nil {
 			h.rememberResolvedCardPage(actor.UserID, edited, ref, screen)
 			h.schedulePaneRefresh(ctx, actor, ref, edited)

@@ -94,7 +94,7 @@ func (h *Handler) handleMessage(
 		if accepted.NamingQueued {
 			h.scheduleNameRefresh(ctx, actor, accepted.Session, message)
 		}
-		h.rememberResponseCard(ctx, actor, message)
+		h.rememberResponseCard(ctx, actor, message, screen)
 	}
 	return err
 }
@@ -190,7 +190,7 @@ func (h *Handler) editResponseCard(
 			return telegrambot.Message{}, err
 		}
 		_ = h.messenger.DeleteMessage(ctx, message)
-		h.recordResponseCard(ctx, actor, replacement)
+		h.recordResponseCard(ctx, actor, replacement, screen)
 		if activeErr == nil {
 			h.rememberResolvedCardPage(actor.UserID, replacement, active.Ref(), screen)
 		}
@@ -198,7 +198,7 @@ func (h *Handler) editResponseCard(
 	}
 	edited, err := h.messenger.EditScreen(ctx, message, screen)
 	if err == nil {
-		h.rememberResponseCardLocked(ctx, actor, edited)
+		h.rememberResponseCardLocked(ctx, actor, edited, screen)
 		if activeErr == nil {
 			h.rememberResolvedCardPage(actor.UserID, edited, active.Ref(), screen)
 		}
@@ -246,7 +246,7 @@ func (h *Handler) repostFinalResponseCard(
 		}
 		return previous, nil
 	}
-	h.recordResponseCard(ctx, actor, replacement)
+	h.recordResponseCard(ctx, actor, replacement, screen)
 	current, ok, recordErr := h.service.TelegramResponseCard(actor)
 	if recordErr != nil || !ok || current.ChatID != replacement.ChatID ||
 		current.MessageID != replacement.MessageID {

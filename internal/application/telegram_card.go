@@ -170,7 +170,7 @@ func (p *TelegramProjector) SessionCardPageWithContext(
 		}
 	}
 	text := strings.Join(parts, "\n\n")
-	return telegramui.RenderSessionCard(telegramui.CardInput{
+	screen := telegramui.RenderSessionCard(telegramui.CardInput{
 		Copy: actorCopy(state, actor), Text: text, Access: access,
 		RichMarkdown: richMarkdown != "",
 		Owner:        state.CanPerformSessionAction(actor.UserID, session.Ref(), domain.ActionRename),
@@ -188,7 +188,12 @@ func (p *TelegramProjector) SessionCardPageWithContext(
 		HidePagination: cardMode == domain.ResponseCardsKeepLatest,
 		Page:           page, Pages: len(pages.Pages), Tokens: tokens,
 		Sessions: switcher, AllHosts: allHosts,
-	}), nil
+	})
+	screen.Checkpoint = &telegramui.SessionCheckpoint{
+		NodeID: string(session.NodeID), SessionID: string(session.ID),
+		Revision: session.Revision, EventAt: session.LastEventAt,
+	}
+	return screen, nil
 }
 
 func wrappedPage(page, pages int) int {

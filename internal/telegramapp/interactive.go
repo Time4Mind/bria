@@ -76,10 +76,12 @@ func (h *Handler) interactiveScreen(
 		tokens[action] = token
 	}
 	h.rememberPrompt(actor.UserID, ref, prompt.Hash)
-	return telegramui.RenderInteractiveCard(telegramui.InteractiveInput{
+	screen := telegramui.RenderInteractiveCard(telegramui.InteractiveInput{
 		Copy: h.copy(actor), Text: base.Text + "\n\n" + prompt.Content,
 		Control: control, VerticalOnly: prompt.VerticalOnly(), Tokens: tokens,
-	}), nil
+	})
+	screen.Checkpoint = base.Checkpoint
+	return screen, nil
 }
 
 func interactiveActions(control, verticalOnly bool) []telegramui.Action {
