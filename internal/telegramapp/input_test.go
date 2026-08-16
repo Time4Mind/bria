@@ -2,11 +2,13 @@ package telegramapp_test
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/Time4Mind/bria/internal/application"
+	"github.com/Time4Mind/bria/internal/clusterstate"
 	"github.com/Time4Mind/bria/internal/domain"
 	"github.com/Time4Mind/bria/internal/runtimehost"
 	"github.com/Time4Mind/bria/internal/telegramapp"
@@ -251,5 +253,63 @@ func TestVoicePendingRowMatchesCCBotUntilTranscriptArrives(t *testing.T) {
 	if strings.Contains(latest, "Голосовое распознаётся") ||
 		!strings.Contains(latest, "👤 распознанный запрос") {
 		t.Fatalf("transcribed voice did not replace pending row: %q", latest)
+	}
+}
+
+func TestVoicePendingWithoutTranscriptStaysBeforeBackgroundPanel(t *testing.T) {
+	fixture := newFixture(t)
+	actor := application.Principal{UserID: 7}
+	created := time.Unix(90, 0).UTC()
+	addBackground, err := clusterstate.NewCommand(
+		"add-background-for-voice", clusterstate.CommandAddSession, created,
+		domain.Session{
+			ID: "background", NodeID: "allowed", OwnerID: 7, Name: "Background",
+			Backend: "codex", State: domain.SessionLive, RuntimePhase: domain.RuntimeIdle,
+			CreatedAt: created, LiveSinceAt: created,
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result := fixture.machine.Apply(addBackground); result.Err() != nil {
+		t.Fatal(result.Err())
+	}
+	if err := fixture.service.SelectSession(
+		context.Background(), actor, domain.SessionRef{NodeID: "allowed", SessionID: "live"},
+	); err != nil {
+		t.Fatal(err)
+	}
+	preferences, err := fixture.service.Preferences(actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	preferences.Language = domain.LanguageRussian
+	preferences.VoiceBackend = domain.VoiceAuto
+	if err := fixture.service.SetPreferences(context.Background(), actor, preferences); err != nil {
+		t.Fatal(err)
+	}
+	ref := domain.SessionRef{NodeID: "allowed", SessionID: "live"}
+	controls := &transcriptErrorControls{
+		blockingControls: &blockingControls{ref: ref}, err: errors.New("not created yet"),
+	}
+	handler, err := telegramapp.NewHandlerWithControls(
+		fixture.service, fixture.projector, fixture.codec, fixture.messenger, controls,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := handler.HandleTelegramUpdate(context.Background(), telegrambot.IncomingUpdate{
+		UpdateID: 50, Kind: telegrambot.IncomingMessage, ChatID: 7, UserID: 7,
+		Content: telegrambot.ContentDescriptor{
+			Kind: telegrambot.IncomingVoice, FileID: "voice-id", FileUniqueID: "voice-unique",
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	text := fixture.messenger.sent[len(fixture.messenger.sent)-1].Text
+	pending := strings.Index(text, "👤 🎙 Голосовое распознаётся…")
+	background := strings.Index(text, "фон")
+	if pending < 0 || background < 0 || pending > background {
+		t.Fatalf("pending voice row is outside active content:\n%s", text)
 	}
 }

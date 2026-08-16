@@ -142,7 +142,8 @@ func (s *State) CloseSession(
 	if err := requireRevision(session, expectedRevision); err != nil {
 		return err
 	}
-	if session.RuntimePhase != RuntimeIdle && session.RuntimePhase != RuntimeWaitingInput {
+	if session.RuntimePhase != RuntimeStarting && session.RuntimePhase != RuntimeIdle &&
+		session.RuntimePhase != RuntimeWaitingInput {
 		return ErrInvalidState
 	}
 	if strings.TrimSpace(archiveID) == "" || len(archiveID) > 128 || strings.ContainsAny(archiveID, "/\\") {

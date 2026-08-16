@@ -155,6 +155,17 @@ func TestIdleOwnerCardUsesCloseButtonGolden(t *testing.T) {
 [+ new -> new] | [Servers -> sessions@servers] | [≡ Menu -> menu]`)
 }
 
+func TestStartingOwnerCardCanCloseWithoutClear(t *testing.T) {
+	screen := RenderSessionCard(CardInput{
+		Text: "new session", Access: SharedControl, Owner: true, Starting: true,
+		Tokens: cardTokens(),
+	})
+	assertGoldenGrid(t, screen, `[◀ -> page_prev@prev] | [1/1 -> page_latest@latest] | [▶ -> page_next@next]
+[✖ Close -> close@close]
+[+ new -> new] | [Servers -> sessions@servers] | [≡ Menu -> menu]`)
+	assertActionAbsent(t, screen.Grid, ActionClear)
+}
+
 func TestIdleSharedControllerHasNoLifecycleControls(t *testing.T) {
 	screen := RenderSessionCard(CardInput{
 		Text: "shared", Access: SharedControl, Tokens: cardTokens(),

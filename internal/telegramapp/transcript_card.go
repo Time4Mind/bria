@@ -187,10 +187,10 @@ func (h *Handler) renderSessionCardSnapshot(
 			// does not create the JSONL transcript until that prompt is accepted.
 			// A freshly provisioned live session therefore has a legitimate empty
 			// transcript and must still receive its usable Telegram card.
-			screen, projectErr := h.projector.SessionCard(actor, ref)
-			if projectErr == nil {
-				h.appendPendingVoiceRows(actor, ref, &screen)
-			}
+			renderedEvents := h.withPendingVoiceRows(actor, ref, session, nil)
+			screen, projectErr := h.projector.SessionCardPageWithContext(
+				actor, ref, cardEvents(renderedEvents), page, h.cardContext(ref),
+			)
 			return sessionCardSnapshot{screen: screen}, projectErr
 		} else {
 			return sessionCardSnapshot{}, err

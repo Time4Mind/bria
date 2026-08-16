@@ -45,7 +45,7 @@ func RenderSessionCard(input CardInput) Screen {
 			button("▶", ActionPageNext, input.Tokens[ActionPageNext]),
 		})
 	}
-	if input.Access == SharedControl && !input.Starting {
+	if input.Access == SharedControl {
 		firstLabel, firstAction := copy.Text(i18n.ButtonClose), ActionClose
 		if input.Busy {
 			firstLabel, firstAction = copy.Text(i18n.ButtonStop), ActionStop
@@ -54,11 +54,13 @@ func RenderSessionCard(input CardInput) Screen {
 			button(firstLabel, firstAction, input.Tokens[firstAction]),
 		}
 		if input.Owner {
-			controls = append(controls,
-				button(copy.Text(i18n.ButtonClear), ActionClear, input.Tokens[ActionClear]))
-			if input.CanOpenTerminal {
+			if !input.Starting {
 				controls = append(controls,
-					button(copy.Text(i18n.ButtonTerminal), ActionTerminal, input.Tokens[ActionTerminal]))
+					button(copy.Text(i18n.ButtonClear), ActionClear, input.Tokens[ActionClear]))
+				if input.CanOpenTerminal {
+					controls = append(controls,
+						button(copy.Text(i18n.ButtonTerminal), ActionTerminal, input.Tokens[ActionTerminal]))
+				}
 			}
 		} else if !input.Busy {
 			// A controller may interrupt a running turn but lifecycle remains

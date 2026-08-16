@@ -126,7 +126,8 @@ func (c *Controller) Close(
 	if err := c.service.RequireSessionAction(actor, ref, domain.ActionClose); err != nil {
 		return Accepted{}, err
 	}
-	if session.RuntimePhase != domain.RuntimeIdle &&
+	if session.RuntimePhase != domain.RuntimeStarting &&
+		session.RuntimePhase != domain.RuntimeIdle &&
 		session.RuntimePhase != domain.RuntimeWaitingInput {
 		return Accepted{}, domain.ErrInvalidState
 	}

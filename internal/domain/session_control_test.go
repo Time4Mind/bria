@@ -122,6 +122,24 @@ func TestSharedControlMayStopButCannotClearOrClose(t *testing.T) {
 	}
 }
 
+func TestStartingSessionCanBeClosedBeforeItsFirstPrompt(t *testing.T) {
+	state := fixtureState(t)
+	ref := addSession(t, state, "empty-starting", "alpha", 1, time.Unix(10, 0).UTC())
+	session := state.Sessions[ref.Key()]
+	session.RuntimePhase = domain.RuntimeStarting
+	state.Sessions[ref.Key()] = session
+
+	if err := state.CloseSession(
+		1, ref, session.Revision, "archive-empty-starting", time.Unix(20, 0).UTC(),
+	); err != nil {
+		t.Fatal(err)
+	}
+	closed := state.Sessions[ref.Key()]
+	if closed.State != domain.SessionArchived || closed.ArchiveID != "archive-empty-starting" {
+		t.Fatalf("closed starting session=%#v", closed)
+	}
+}
+
 func TestCloseSelectsEachUsersMostRecentAvailableBackgroundSession(t *testing.T) {
 	state := fixtureState(t)
 	created := time.Unix(10, 0).UTC()

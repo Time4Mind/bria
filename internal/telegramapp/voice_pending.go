@@ -146,32 +146,19 @@ func (h *Handler) pendingVoiceCard(
 	ref domain.SessionRef,
 	baseline voicePendingBaseline,
 ) (telegramui.Screen, error) {
+	session, err := h.service.Session(actor, ref)
+	if err != nil {
+		return telegramui.Screen{}, err
+	}
 	if baseline.known && baseline.ref == ref {
-		session, err := h.service.Session(actor, ref)
-		if err == nil {
-			events := h.withPendingVoiceRows(actor, ref, session, baseline.events)
-			return h.projector.SessionCardPage(actor, ref, cardEvents(events), 0)
-		}
+		events := h.withPendingVoiceRows(actor, ref, session, baseline.events)
+		return h.projector.SessionCardPage(actor, ref, cardEvents(events), 0)
 	}
-	screen, err := h.projector.SessionCard(actor, ref)
-	if err == nil {
-		h.appendPendingVoiceRows(actor, ref, &screen)
-	}
-	return screen, err
-}
-
-func (h *Handler) appendPendingVoiceRows(
-	actor application.Principal,
-	ref domain.SessionRef,
-	screen *telegramui.Screen,
-) {
-	key := voicePendingKey{userID: actor.UserID, ref: ref}
-	h.voiceMu.Lock()
-	count := len(h.pendingVoices[key])
-	h.voiceMu.Unlock()
-	for index := 0; index < count; index++ {
-		screen.Text += "\n\n👤 " + h.copy(actor).Text(i18n.VoiceTranscribing)
-	}
+	// A brand-new provider may not have created its transcript yet. Still feed
+	// the pending voice row through the normal card event renderer so it stays
+	// with the active session content and before the background-session panel.
+	events := h.withPendingVoiceRows(actor, ref, session, nil)
+	return h.projector.SessionCardPage(actor, ref, cardEvents(events), 0)
 }
 
 func lastTranscriptUserEvent(events []transcript.Event) string {
