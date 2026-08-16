@@ -72,3 +72,23 @@ func TestClaudeStringContentAndEventLimit(t *testing.T) {
 		t.Fatalf("unexpected bounded events: %#v", events)
 	}
 }
+
+func TestClaudeSyntheticProviderErrorIsFinal(t *testing.T) {
+	layout := newTestLayout(t)
+	workdir := "/tmp/project"
+	sessionID := "provider-error"
+	path := filepath.Join(layout.claude, encodeClaudeWorkdir(workdir), sessionID+".jsonl")
+	writeTestFile(t, path, `{"type":"user","timestamp":"2026-08-16T15:08:45Z","message":{"content":"hello"}}
+{"type":"assistant","timestamp":"2026-08-16T15:08:46Z","error":"oauth_org_not_allowed","message":{"model":"<synthetic>","stop_reason":"stop_sequence","content":[{"type":"text","text":"Subscription access is disabled"}]}}
+`)
+	events, err := newTestReader(t, layout, nil).Read(context.Background(), Request{
+		Backend: BackendClaude, ProviderSessionID: sessionID, Workdir: workdir,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 2 || events[1].Kind != EventAssistantFinal ||
+		!events[1].Error || events[1].Text != "Subscription access is disabled" {
+		t.Fatalf("provider error was not emitted as a failed final: %#v", events)
+	}
+}

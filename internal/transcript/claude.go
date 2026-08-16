@@ -10,6 +10,7 @@ import (
 type claudeRow struct {
 	Type      string          `json:"type"`
 	Timestamp string          `json:"timestamp"`
+	Error     string          `json:"error"`
 	Message   json.RawMessage `json:"message"`
 }
 
@@ -55,7 +56,9 @@ func parseClaude(lines [][]byte, maxBodyBytes int) []Event {
 			events = append(events, claudeUserEvents(blocks, row.Timestamp, maxBodyBytes)...)
 			continue
 		}
-		events = append(events, claudeAssistantEvents(blocks, row.Timestamp, message.StopReason, maxBodyBytes)...)
+		events = append(events, claudeAssistantEvents(
+			blocks, row.Timestamp, message.StopReason, row.Error, maxBodyBytes,
+		)...)
 		if percent := claudeContextPercent(message); percent != nil {
 			contextPercent = percent
 		}
@@ -112,6 +115,7 @@ func claudeAssistantEvents(
 	blocks []claudeBlock,
 	timestamp string,
 	stopReason string,
+	errorCode string,
 	maxBodyBytes int,
 ) []Event {
 	events := make([]Event, 0, len(blocks))
@@ -123,10 +127,13 @@ func claudeAssistantEvents(
 				continue
 			}
 			kind := EventAssistantText
-			if stopReason == "end_turn" || stopReason == "stop" {
+			if stopReason == "end_turn" || stopReason == "stop" || errorCode != "" {
 				kind = EventAssistantFinal
 			}
-			events = append(events, Event{Kind: kind, Text: bounded(text, maxBodyBytes), Timestamp: timestamp})
+			events = append(events, Event{
+				Kind: kind, Text: bounded(text, maxBodyBytes), Timestamp: timestamp,
+				Error: errorCode != "",
+			})
 		case "thinking":
 			thinking := strings.TrimSpace(block.Thinking)
 			if thinking != "" {

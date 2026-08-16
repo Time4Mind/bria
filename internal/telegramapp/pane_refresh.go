@@ -3,7 +3,9 @@ package telegramapp
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Time4Mind/bria/internal/application"
 	"github.com/Time4Mind/bria/internal/domain"
@@ -153,6 +155,9 @@ func (h *Handler) runPaneRefresh(
 		panePhase := session.RuntimePhase
 		if settled {
 			panePhase = domain.RuntimeIdle
+			if final, ok := finalTranscriptEvent(snapshot.events); ok && final.Error {
+				panePhase = domain.RuntimeDegraded
+			}
 		}
 		if preferencesErr == nil && shouldAttachPane(preferences, panePhase) {
 			h.attachPane(ctx, actor, ref, message, generation, attempt, &snapshot.screen)
@@ -264,18 +269,43 @@ func (h *Handler) settleFromTranscript(
 	if session.RuntimePhase != domain.RuntimeRunning {
 		return false
 	}
-	finalAt, ok := finalTranscriptAt(events)
-	if !ok || !transcriptFinalBelongsToCurrentTurn(session, finalAt, time.Now()) {
+	final, ok := finalTranscriptEvent(events)
+	if !ok {
+		return false
+	}
+	finalAt, err := time.Parse(time.RFC3339Nano, final.Timestamp)
+	if err != nil || !transcriptFinalBelongsToCurrentTurn(session, finalAt, time.Now()) {
 		return false
 	}
 	settleCtx := application.WithOperationScope(
 		ctx, fmt.Sprintf("transcript-final-%s-%d", session.Ref().Key(), finalAt.UnixNano()),
 	)
-	if h.service.PublishSessionRuntime(settleCtx, session, domain.RuntimeIdle, nil) != nil {
+	phase := domain.RuntimeIdle
+	var result *domain.SessionOperationResult
+	if final.Error {
+		phase = domain.RuntimeDegraded
+		result = &domain.SessionOperationResult{
+			OperationID: fmt.Sprintf("transcript-error-%d", finalAt.UnixNano()),
+			Action:      domain.ActionSendInput, Status: domain.OperationFailed,
+			Detail: boundedOperationDetail(final.Text),
+		}
+	}
+	if h.service.PublishSessionRuntime(settleCtx, session, phase, result) != nil {
 		return false
 	}
-	go h.deliverFinalFiles(ctx, actor, session.Ref(), events)
+	if !final.Error {
+		go h.deliverFinalFiles(ctx, actor, session.Ref(), events)
+	}
 	return true
+}
+
+func boundedOperationDetail(value string) string {
+	value = strings.TrimSpace(value)
+	for len(value) > 512 {
+		_, size := utf8.DecodeLastRuneInString(value)
+		value = value[:len(value)-size]
+	}
+	return value
 }
 
 const deliveredInputTimestampSkew = 2 * time.Minute

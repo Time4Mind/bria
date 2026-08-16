@@ -253,18 +253,26 @@ func cardEventKind(kind transcript.EventKind) (application.CardEventKind, bool) 
 }
 
 func finalTranscriptAt(events []transcript.Event) (time.Time, bool) {
+	final, ok := finalTranscriptEvent(events)
+	if !ok {
+		return time.Time{}, false
+	}
+	at, err := time.Parse(time.RFC3339Nano, final.Timestamp)
+	return at, err == nil
+}
+
+func finalTranscriptEvent(events []transcript.Event) (transcript.Event, bool) {
 	for index := len(events) - 1; index >= 0; index-- {
 		if events[index].Kind != transcript.EventAssistantFinal {
 			if events[index].Kind == transcript.EventUserText ||
 				events[index].Kind == transcript.EventAssistantText ||
 				events[index].Kind == transcript.EventThinking ||
 				events[index].Kind == transcript.EventToolCall {
-				return time.Time{}, false
+				return transcript.Event{}, false
 			}
 			continue
 		}
-		at, err := time.Parse(time.RFC3339Nano, events[index].Timestamp)
-		return at, err == nil
+		return events[index], true
 	}
-	return time.Time{}, false
+	return transcript.Event{}, false
 }

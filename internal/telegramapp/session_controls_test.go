@@ -179,6 +179,52 @@ func TestPaneRefreshRendersFinalAnswerWhenRuntimeAlreadySettledIdle(t *testing.T
 	}
 }
 
+func TestPaneRefreshSettlesClaudeProviderErrorAsDegraded(t *testing.T) {
+	fixture := newFixture(t)
+	fixture.messenger.sendNotify = make(chan struct{}, 2)
+	fixture.messenger.deleteNotify = make(chan struct{}, 1)
+	ref := domain.SessionRef{NodeID: "allowed", SessionID: "live"}
+	session, err := fixture.service.Session(application.Principal{UserID: 7}, ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.service.PublishSessionRuntime(
+		context.Background(), session, domain.RuntimeRunning, nil,
+	); err != nil {
+		t.Fatal(err)
+	}
+	controls := &blockingControls{ref: ref, events: []transcript.Event{{
+		Kind: transcript.EventAssistantFinal, Text: "subscription access is disabled",
+		Error: true, Timestamp: time.Now().Add(time.Second).UTC().Format(time.RFC3339Nano),
+	}}}
+	handler, err := telegramapp.NewHandlerWithControls(
+		fixture.service, fixture.projector, fixture.codec, fixture.messenger, controls,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := handler.HandleTelegramUpdate(ctx, telegrambot.IncomingUpdate{
+		UpdateID: 4, Kind: telegrambot.IncomingMessage,
+		ChatID: 7, UserID: 7, Text: "prompt",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	waitTestNotification(t, fixture.messenger.sendNotify, "initial Claude card was not sent")
+	waitTestNotification(t, fixture.messenger.sendNotify, "Claude error card was not reposted")
+	waitTestNotification(t, fixture.messenger.deleteNotify, "initial Claude carrier was not retired")
+	session, err = fixture.service.Session(application.Principal{UserID: 7}, ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if session.RuntimePhase != domain.RuntimeDegraded || session.LastOperation == nil ||
+		session.LastOperation.Status != domain.OperationFailed ||
+		session.LastOperation.Detail != "subscription access is disabled" {
+		t.Fatalf("provider failure was not settled: %#v", session)
+	}
+}
+
 func TestFreshClaudeSessionRendersBeforeTranscriptExists(t *testing.T) {
 	fixture := newFixture(t)
 	fixture.messenger.editNotify = make(chan struct{}, 2)
