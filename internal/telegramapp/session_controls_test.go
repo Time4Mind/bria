@@ -38,6 +38,30 @@ type closingControls struct {
 	service *application.Service
 }
 
+type delayedTranscriptControls struct {
+	*blockingControls
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (c *delayedTranscriptControls) Transcript(
+	ctx context.Context,
+	actor application.Principal,
+	ref domain.SessionRef,
+) ([]transcript.Event, error) {
+	if ref != c.ref {
+		return nil, nil
+	}
+	c.once.Do(func() { close(c.started) })
+	select {
+	case <-c.release:
+		return c.blockingControls.Transcript(ctx, actor, ref)
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
 func (c *blockingControls) SendInput(
 	_ context.Context,
 	_ application.Principal,
@@ -139,6 +163,90 @@ func TestPaneRefreshRendersFinalAnswerWhenRuntimeAlreadySettledIdle(t *testing.T
 	}
 	if len(fixture.messenger.deleted) == 0 || fixture.messenger.deleted[0].MessageID != 1 {
 		t.Fatalf("old active carrier was not deleted: %#v", fixture.messenger.deleted)
+	}
+}
+
+func TestBackgroundedSessionWorkerCannotRepostOverSelectedSession(t *testing.T) {
+	fixture := newFixture(t)
+	actor := application.Principal{UserID: 7}
+	created := time.Unix(200, 0).UTC()
+	command, err := clusterstate.NewCommand(
+		"add-second-live-session", clusterstate.CommandAddSession, created,
+		domain.Session{
+			ID: "second", NodeID: "allowed", OwnerID: 7, Name: "Second", Backend: "codex",
+			State: domain.SessionActive, CreatedAt: created, LiveSinceAt: created,
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result := fixture.machine.Apply(command); result.Err() != nil {
+		t.Fatal(result.Err())
+	}
+	oldRef := domain.SessionRef{NodeID: "allowed", SessionID: "live"}
+	oldSession, err := fixture.service.Session(actor, oldRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.service.PublishSessionRuntime(
+		context.Background(), oldSession, domain.RuntimeRunning, nil,
+	); err != nil {
+		t.Fatal(err)
+	}
+	controls := &delayedTranscriptControls{
+		blockingControls: &blockingControls{ref: oldRef, events: []transcript.Event{
+			{Kind: transcript.EventAssistantFinal, Text: "OLD FINAL"},
+		}},
+		started: make(chan struct{}), release: make(chan struct{}),
+	}
+	handler, err := telegramapp.NewHandlerWithControls(
+		fixture.service, fixture.projector, fixture.codec, fixture.messenger, controls,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := handler.HandleTelegramUpdate(ctx, telegrambot.IncomingUpdate{
+		UpdateID: 41, Kind: telegrambot.IncomingMessage,
+		ChatID: 7, UserID: 7, Text: "prompt",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-controls.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("old session worker did not reach transcript capture")
+	}
+	secondRef := domain.SessionRef{NodeID: "allowed", SessionID: "second"}
+	token, err := fixture.codec.Session(7, telegramui.ActionSelectSession, secondRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := (telegramui.Callback{
+		Action: telegramui.ActionSelectSession, Token: token,
+	}).Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := handler.HandleTelegramUpdate(ctx, telegrambot.IncomingUpdate{
+		UpdateID: 42, Kind: telegrambot.IncomingCallback, ChatID: 7, UserID: 7,
+		CallbackID: "select-second", CallbackData: data,
+		CallbackOrigin: telegrambot.Message{ChatID: 7, MessageID: 1},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	close(controls.release)
+	time.Sleep(100 * time.Millisecond)
+	active, err := fixture.service.ActiveSession(actor)
+	if err != nil || active.Ref() != secondRef {
+		t.Fatalf("active=%#v err=%v, want second session", active.Ref(), err)
+	}
+	if len(fixture.messenger.sent) != 1 {
+		t.Fatalf("old worker recreated a card: %#v", fixture.messenger.sent)
+	}
+	if len(fixture.messenger.deleted) != 0 {
+		t.Fatalf("old worker deleted selected carrier: %#v", fixture.messenger.deleted)
 	}
 }
 

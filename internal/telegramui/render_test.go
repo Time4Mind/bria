@@ -50,10 +50,10 @@ func TestNodeSessionAndArchiveSurfacesGolden(t *testing.T) {
 		{Token: "one", Name: "api", Status: "⏳"},
 		{
 			Token: "two", Name: "web", NodeName: "must-not-render", Marker: "🟥",
-			Status: "🟢", ContextPct: &percent, Selected: true,
+			ContextPct: &percent, Selected: true,
 		},
 	})
-	assertGoldenGrid(t, sessions, `[api ⏳ -> session@one] | [✓ web 🟢 · 42% -> session@two]
+	assertGoldenGrid(t, sessions, `[api ⏳ -> session@one] | [✓ web · 42% -> session@two]
 [Servers -> sessions@servers] | [≡ Menu -> menu]`)
 	archives := RenderArchives(ArchiveListInput{
 		Copy: englishCopy, Title: "Build · archive", Page: 1, Pages: 1, Total: 1,
@@ -96,12 +96,12 @@ func TestAllHostSessionsUseThreeButtonsPerRowGolden(t *testing.T) {
 		{Token: "s1", Name: "api", NodeName: "Build", Marker: "🟦", Status: "⏳"},
 		{
 			Token: "s2", Name: "web", NodeName: "Laptop", Marker: "🟩",
-			Status: "🟢", ContextPct: &percent, Selected: true,
+			ContextPct: &percent, Selected: true,
 		},
 		{Token: "s3", Name: "train", NodeName: "GPU", Marker: "🟨", Status: "❓"},
 		{Token: "s4", Name: "docs", NodeName: "Build", Marker: "🟧", Status: "❌"},
 	})
-	assertGoldenGrid(t, screen, `[🟦 api · Build ⏳ -> session@s1] | [✓ 🟩 web · Laptop 🟢 · 37% -> session@s2] | [🟨 train · GPU ❓ -> session@s3]
+	assertGoldenGrid(t, screen, `[🟦 api · Build ⏳ -> session@s1] | [✓ 🟩 web · Laptop · 37% -> session@s2] | [🟨 train · GPU ❓ -> session@s3]
 [🟧 docs · Build ❌ -> session@s4]
 [🆕 New -> new] | [Servers -> sessions@servers] | [≡ Menu -> menu]`)
 	if got := len(screen.Grid[0]); got != sessionsPerRow {

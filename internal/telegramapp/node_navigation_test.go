@@ -81,7 +81,7 @@ func TestLegacyNodeSessionButtonsUpgradeToStatusNavigation(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	got := fixture.messenger.sent[len(fixture.messenger.sent)-1]
+	got := fixture.messenger.edited[len(fixture.messenger.edited)-1]
 	back := got.Grid[len(got.Grid)-1][0].Callback
 	if back.Action != telegramui.ActionStatusMode || back.Token != "settings" {
 		t.Fatalf("upgraded settings back route=%#v", back)

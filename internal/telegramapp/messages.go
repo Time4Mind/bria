@@ -204,7 +204,15 @@ func (h *Handler) repostFinalResponseCard(
 	// backend turn creates exactly one new Telegram message.
 	h.cardMutationMu.Lock()
 	defer h.cardMutationMu.Unlock()
-	if current, ok, err := h.service.TelegramResponseCard(actor); err == nil && ok {
+	current, currentOK, currentErr := h.service.TelegramResponseCard(actor)
+	if active, activeErr := h.service.ActiveSession(actor); activeErr != nil ||
+		active.Ref() != ref {
+		if currentErr == nil && currentOK {
+			return telegramMessage(current), nil
+		}
+		return previous, nil
+	}
+	if currentErr == nil && currentOK {
 		if current.ChatID != previous.ChatID || current.MessageID != previous.MessageID ||
 			current.Rich != previous.Rich || current.RichMediaFileID != previous.RichMediaFileID {
 			return telegramMessage(current), nil
@@ -213,6 +221,14 @@ func (h *Handler) repostFinalResponseCard(
 	replacement, err := h.messenger.SendScreen(ctx, previous.ChatID, screen)
 	if err != nil {
 		return telegrambot.Message{}, err
+	}
+	if active, activeErr := h.service.ActiveSession(actor); activeErr != nil ||
+		active.Ref() != ref {
+		_ = h.messenger.DeleteMessage(ctx, replacement)
+		if currentErr == nil && currentOK {
+			return telegramMessage(current), nil
+		}
+		return previous, nil
 	}
 	h.recordResponseCard(ctx, actor, replacement)
 	current, ok, recordErr := h.service.TelegramResponseCard(actor)

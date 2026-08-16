@@ -146,7 +146,10 @@ func allHostSessionLabel(item SessionItem) string {
 	if item.Marker != "" {
 		parts = append(parts, item.Marker)
 	}
-	parts = append(parts, item.Name+" · "+item.NodeName, item.Status)
+	parts = append(parts, item.Name+" · "+item.NodeName)
+	if item.Status != "" {
+		parts = append(parts, item.Status)
+	}
 	if item.ContextPct != nil {
 		parts = append(parts, "·", fmt.Sprintf("%d%%", *item.ContextPct))
 	}

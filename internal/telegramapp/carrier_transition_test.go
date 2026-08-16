@@ -8,7 +8,7 @@ import (
 	"github.com/Time4Mind/bria/internal/telegramui"
 )
 
-func TestMenuFromRichCardUsesNewLegacyCarrier(t *testing.T) {
+func TestMenuFromRichCardKeepsExistingCarrier(t *testing.T) {
 	fixture := newFixture(t)
 	data, err := (telegramui.Callback{Action: telegramui.ActionMenu}).Encode()
 	if err != nil {
@@ -21,14 +21,14 @@ func TestMenuFromRichCardUsesNewLegacyCarrier(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if len(fixture.messenger.sent) != 1 || fixture.messenger.sent[0].RichMarkdown ||
-		fixture.messenger.sent[0].Name != telegramui.ScreenMenu {
-		t.Fatalf("sent=%#v", fixture.messenger.sent)
+	if len(fixture.messenger.sent) != 0 {
+		t.Fatalf("rich carrier was unnecessarily replaced: %#v", fixture.messenger.sent)
 	}
-	if len(fixture.messenger.edited) != 0 {
-		t.Fatalf("rich card was edited into legacy menu: %#v", fixture.messenger.edited)
+	if len(fixture.messenger.edited) != 1 ||
+		fixture.messenger.edited[0].Name != telegramui.ScreenMenu {
+		t.Fatalf("edited=%#v", fixture.messenger.edited)
 	}
-	if len(fixture.messenger.deleted) != 1 || fixture.messenger.deleted[0].MessageID != 10 {
-		t.Fatalf("obsolete rich carrier=%#v", fixture.messenger.deleted)
+	if len(fixture.messenger.deleted) != 0 {
+		t.Fatalf("rich carrier was deleted: %#v", fixture.messenger.deleted)
 	}
 }

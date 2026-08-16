@@ -195,7 +195,7 @@ func TestLiveCardCarriesThreePerRowModeAwareSessionSwitcher(t *testing.T) {
 	}
 	hostGrid := telegramui.CanonicalGrid(hostFirst.Grid)
 	if !strings.Contains(hostGrid,
-		"[a-old 🟢 · 21% -> session@s-ao] | [✓ a-new 🟢 · 34% -> session@s-an] | [shared 🟢 · 55% -> session@s-as]") {
+		"[a-old · 21% -> session@s-ao] | [✓ a-new · 34% -> session@s-an] | [shared · 55% -> session@s-as]") {
 		t.Fatalf("host-first switcher=%s", hostGrid)
 	}
 	preferences := state.Preferences[2]
@@ -207,8 +207,8 @@ func TestLiveCardCarriesThreePerRowModeAwareSessionSwitcher(t *testing.T) {
 	}
 	allGrid := telegramui.CanonicalGrid(allHosts.Grid)
 	if !strings.Contains(allGrid, "a-old · Alpha") ||
-		!strings.Contains(allGrid, "g-new · Gamma 🟢 · 13%") ||
-		!strings.Contains(allGrid, "✓ 🟥 a-new · Alpha 🟢 · 34%") {
+		!strings.Contains(allGrid, "g-new · Gamma · 13%") ||
+		!strings.Contains(allGrid, "✓ 🟥 a-new · Alpha · 34%") {
 		t.Fatalf("all-host switcher=%s", allGrid)
 	}
 }
@@ -295,7 +295,7 @@ func TestEveryCardDisplayCombinationPreservesValidSessionNavigation(t *testing.T
 				if err := screen.Validate(); err != nil {
 					t.Fatalf("%s/%s/%v: invalid card: %v", cardMode, terminalMode, hidden, err)
 				}
-				if !strings.Contains(telegramui.CanonicalGrid(screen.Grid), "[… 🟢 -> session@s-ao]") {
+				if !strings.Contains(telegramui.CanonicalGrid(screen.Grid), "[… -> session@s-ao]") {
 					t.Fatalf("%s/%s/%v: session switcher disappeared", cardMode, terminalMode, hidden)
 				}
 			}

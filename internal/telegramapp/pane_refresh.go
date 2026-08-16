@@ -83,6 +83,9 @@ func (h *Handler) runPaneRefresh(
 		if err != nil {
 			return
 		}
+		if !h.sessionIsActive(actor, ref) {
+			return
+		}
 		if (session.RuntimePhase == domain.RuntimeStarting ||
 			session.RuntimePhase == domain.RuntimeRunning) &&
 			time.Since(lastTyping) >= typingRefreshDelay {
@@ -97,7 +100,8 @@ func (h *Handler) runPaneRefresh(
 		}
 		if session.RuntimePhase == domain.RuntimeWaitingInput {
 			screen, renderErr := h.renderSessionCard(ctx, actor, ref, 0)
-			if renderErr == nil {
+			if renderErr == nil && h.sessionIsActive(actor, ref) &&
+				h.currentPaneGeneration(actor.UserID, generation) {
 				_, _ = h.editResponseCard(ctx, actor, message, screen)
 			}
 			return
@@ -107,7 +111,8 @@ func (h *Handler) runPaneRefresh(
 		// so that race cannot leave the Telegram card on a tool result or pane.
 		if session.RuntimePhase == domain.RuntimeIdle {
 			snapshot, renderErr := h.renderSessionCardSnapshot(ctx, actor, ref, 0)
-			if renderErr == nil {
+			if renderErr == nil && h.sessionIsActive(actor, ref) &&
+				h.currentPaneGeneration(actor.UserID, generation) {
 				if finalAt, ok := finalTranscriptAt(snapshot.events); ok &&
 					transcriptFinalBelongsToCurrentTurn(session, finalAt, time.Now()) {
 					_, _ = h.repostFinalResponseCard(
@@ -122,7 +127,8 @@ func (h *Handler) runPaneRefresh(
 		if session.RuntimePhase != domain.RuntimeRunning {
 			if session.RuntimePhase == domain.RuntimeDegraded {
 				screen, renderErr := h.renderSessionCard(ctx, actor, ref, 0)
-				if renderErr == nil {
+				if renderErr == nil && h.sessionIsActive(actor, ref) &&
+					h.currentPaneGeneration(actor.UserID, generation) {
 					_, _ = h.editResponseCard(ctx, actor, message, screen)
 				}
 			}
@@ -138,6 +144,10 @@ func (h *Handler) runPaneRefresh(
 			if err != nil {
 				return
 			}
+		}
+		if !h.sessionIsActive(actor, ref) ||
+			!h.currentPaneGeneration(actor.UserID, generation) {
+			return
 		}
 		preferences, preferencesErr := h.service.Preferences(actor)
 		panePhase := session.RuntimePhase
@@ -165,6 +175,14 @@ func (h *Handler) runPaneRefresh(
 		}
 		delay = paneRefreshDelay
 	}
+}
+
+func (h *Handler) sessionIsActive(
+	actor application.Principal,
+	ref domain.SessionRef,
+) bool {
+	active, err := h.service.ActiveSession(actor)
+	return err == nil && active.Ref() == ref
 }
 
 func (h *Handler) finishPaneRefresh(userID domain.UserID, generation uint64) {

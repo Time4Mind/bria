@@ -92,6 +92,10 @@ func (h *Handler) selectSession(
 	if err != nil {
 		return telegramui.Screen{}, err
 	}
+	// Revoke the old live-card worker before changing navigation. Otherwise a
+	// final refresh already in flight can repaint or repost the session that the
+	// user has just left.
+	h.cancelPaneRefresh(actor.UserID)
 	if err := h.service.SelectSession(ctx, actor, ref); err != nil {
 		return telegramui.Screen{}, err
 	}

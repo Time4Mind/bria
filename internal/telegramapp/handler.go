@@ -381,18 +381,17 @@ func (h *Handler) handleCallback(
 	}
 	var edited telegrambot.Message
 	targetRich := screen.RichMarkdown || screen.Pane != nil
-	replaceCarrier := update.CallbackOrigin.Rich && !targetRich
-	if !update.CallbackOrigin.Rich && targetRich {
+	replaceCarrier := !update.CallbackOrigin.Rich && targetRich
+	if replaceCarrier {
 		// A legacy card cannot acquire Rich Markdown by being edited through the
 		// legacy endpoint: Telegram accepts the text but shows details, fences,
 		// and tables literally. Replace it on the first transition regardless of
 		// which action exposed the rich screen (including Sessions and paging).
-		replaceCarrier = true
 	}
 	if replaceCarrier {
-		// Telegram cannot safely change carrier type in place. In particular,
-		// legacy-to-rich flattens details and media, while rich-to-legacy can
-		// retain stale media. Replace atomically so settings never corrupt a card.
+		// Telegram cannot safely promote a legacy carrier to Rich in place.
+		// A Rich carrier can render a plain projection without being replaced;
+		// retaining it keeps the keyboard that the user just tapped valid.
 		edited, err = h.messenger.SendScreen(ctx, update.ChatID, screen)
 		if err == nil {
 			_ = h.messenger.DeleteMessage(ctx, update.CallbackOrigin)
