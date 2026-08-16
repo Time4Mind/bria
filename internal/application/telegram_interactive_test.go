@@ -9,7 +9,7 @@ import (
 	"github.com/Time4Mind/bria/internal/telegramui"
 )
 
-func TestWaitingPromptDoesNotDecorateSessionSelectorNames(t *testing.T) {
+func TestWaitingPromptShowsNeedsInputStateInSessionSelectors(t *testing.T) {
 	projector, state, _ := projectorFixture(t)
 	session := state.Sessions["alpha/a-old"]
 	session.RuntimePhase = domain.RuntimeWaitingInput
@@ -22,8 +22,7 @@ func TestWaitingPromptDoesNotDecorateSessionSelectorNames(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if grid := telegramui.CanonicalGrid(nodeScreen.Grid); !strings.Contains(grid, "[a-old ->") ||
-		strings.Contains(grid, "❗ a-old") {
+	if grid := telegramui.CanonicalGrid(nodeScreen.Grid); !strings.Contains(grid, "[a-old ❓ ->") {
 		t.Fatalf("node grid=%s", grid)
 	}
 	preferences := state.Preferences[2]
@@ -33,8 +32,7 @@ func TestWaitingPromptDoesNotDecorateSessionSelectorNames(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if grid := telegramui.CanonicalGrid(allScreen.Grid); !strings.Contains(grid, "🟥 a-old · Alpha") ||
-		strings.Contains(grid, "❗ a-old") {
+	if grid := telegramui.CanonicalGrid(allScreen.Grid); !strings.Contains(grid, "🟥 a-old · Alpha ❓") {
 		t.Fatalf("all-host grid=%s", grid)
 	}
 }

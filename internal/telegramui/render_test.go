@@ -45,11 +45,12 @@ func TestHostFirstNodePickerGolden(t *testing.T) {
 }
 
 func TestNodeSessionAndArchiveSurfacesGolden(t *testing.T) {
+	percent := 42
 	sessions := RenderNodeSessions(englishCopy, NodeItem{Name: "Build", Status: NodeOnline}, []SessionItem{
-		{Token: "one", Name: "api"},
-		{Token: "two", Name: "web", Selected: true},
+		{Token: "one", Name: "api", Status: "⏳"},
+		{Token: "two", Name: "web", Status: "🟢", ContextPct: &percent},
 	})
-	assertGoldenGrid(t, sessions, `[api -> session@one] | [✓ web -> session@two]
+	assertGoldenGrid(t, sessions, `[api ⏳ -> session@one] | [web 🟢 · 42% -> session@two]
 [Servers -> sessions@servers] | [≡ Menu -> menu]`)
 	archives := RenderArchives(ArchiveListInput{
 		Copy: englishCopy, Title: "Build · archive", Page: 1, Pages: 1, Total: 1,
@@ -87,17 +88,18 @@ func TestNodeIsolationControlIsAdministrative(t *testing.T) {
 }
 
 func TestAllHostSessionsUseThreeButtonsPerRowGolden(t *testing.T) {
+	percent := 37
 	screen := RenderAllHostSessions(englishCopy, []SessionItem{
-		{Token: "s1", Name: "api", NodeName: "Build", Marker: "🟦"},
+		{Token: "s1", Name: "api", NodeName: "Build", Marker: "🟦", Status: "⏳"},
 		{
 			Token: "s2", Name: "web", NodeName: "Laptop", Marker: "🟩",
-			Selected: true,
+			Status: "🟢", ContextPct: &percent,
 		},
-		{Token: "s3", Name: "train", NodeName: "GPU", Marker: "🟨"},
-		{Token: "s4", Name: "docs", NodeName: "Build", Marker: "🟧"},
+		{Token: "s3", Name: "train", NodeName: "GPU", Marker: "🟨", Status: "❓"},
+		{Token: "s4", Name: "docs", NodeName: "Build", Marker: "🟧", Status: "❌"},
 	})
-	assertGoldenGrid(t, screen, `[🟦 api · Build -> session@s1] | [✓ 🟩 web · Laptop -> session@s2] | [🟨 train · GPU -> session@s3]
-[🟧 docs · Build -> session@s4]
+	assertGoldenGrid(t, screen, `[🟦 api · Build ⏳ -> session@s1] | [🟩 web · Laptop 🟢 · 37% -> session@s2] | [🟨 train · GPU ❓ -> session@s3]
+[🟧 docs · Build ❌ -> session@s4]
 [🆕 New -> new] | [Servers -> sessions@servers] | [≡ Menu -> menu]`)
 	if got := len(screen.Grid[0]); got != sessionsPerRow {
 		t.Fatalf("first session row has %d buttons, want %d", got, sessionsPerRow)

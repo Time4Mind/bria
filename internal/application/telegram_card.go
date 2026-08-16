@@ -154,7 +154,9 @@ func (p *TelegramProjector) SessionCardPageWithContext(
 		if allHosts {
 			nodeFilter = ""
 		}
-		switcher, err = p.sessionItems(state, actor, nodeFilter, allHosts)
+		switcher, err = p.sessionItems(
+			state, actor, nodeFilter, allHosts, context.BackgroundPercent,
+		)
 		if err != nil {
 			return telegramui.Screen{}, err
 		}

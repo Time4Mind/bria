@@ -66,6 +66,18 @@ func (h *Handler) cardContext(ref domain.SessionRef) application.CardContext {
 	}
 }
 
+func (h *Handler) cachedContextPercents() map[string]int {
+	h.cardDataMu.RLock()
+	result := make(map[string]int, len(h.cardContexts))
+	for key, entry := range h.cardContexts {
+		if entry.present {
+			result[key] = entry.percent
+		}
+	}
+	h.cardDataMu.RUnlock()
+	return result
+}
+
 func (h *Handler) backgroundContextCurrent(ref domain.SessionRef, revision uint64) bool {
 	h.cardDataMu.RLock()
 	entry, ok := h.cardContexts[ref.Key()]

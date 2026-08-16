@@ -185,26 +185,30 @@ func TestLiveCardCarriesThreePerRowModeAwareSessionSwitcher(t *testing.T) {
 	projector, state, _ := projectorFixture(t)
 	actor := application.Principal{UserID: 2}
 	ref := domain.SessionRef{NodeID: "alpha", SessionID: "a-new"}
-	hostFirst, err := projector.SessionCard(actor, ref)
+	context := application.CardContext{BackgroundPercent: map[string]int{
+		"alpha/a-old": 21, "alpha/a-new": 34, "alpha/shared": 55,
+		"gamma/g-old": 8, "gamma/g-new": 13,
+	}}
+	hostFirst, err := projector.SessionCardPageWithContext(actor, ref, nil, 0, context)
 	if err != nil {
 		t.Fatal(err)
 	}
 	hostGrid := telegramui.CanonicalGrid(hostFirst.Grid)
 	if !strings.Contains(hostGrid,
-		"[a-old -> session@s-ao] | [✓ a-new -> session@s-an] | [shared -> session@s-as]") {
+		"[a-old 🟢 · 21% -> session@s-ao] | [a-new 🟢 · 34% -> session@s-an] | [shared 🟢 · 55% -> session@s-as]") {
 		t.Fatalf("host-first switcher=%s", hostGrid)
 	}
 	preferences := state.Preferences[2]
 	preferences.SessionView = domain.ViewAllHosts
 	state.Preferences[2] = preferences
-	allHosts, err := projector.SessionCard(actor, ref)
+	allHosts, err := projector.SessionCardPageWithContext(actor, ref, nil, 0, context)
 	if err != nil {
 		t.Fatal(err)
 	}
 	allGrid := telegramui.CanonicalGrid(allHosts.Grid)
 	if !strings.Contains(allGrid, "a-old · Alpha") ||
-		!strings.Contains(allGrid, "g-new · Gamma") ||
-		!strings.Contains(allGrid, "✓ 🟥 a-new · Alpha") {
+		!strings.Contains(allGrid, "g-new · Gamma 🟢 · 13%") ||
+		!strings.Contains(allGrid, "🟥 a-new · Alpha 🟢 · 34%") {
 		t.Fatalf("all-host switcher=%s", allGrid)
 	}
 }
@@ -251,7 +255,7 @@ func TestLiveCardRemainsValidWithUnnamedStartingSessionAndHiddenEvents(t *testin
 		t.Fatalf("card settings must never produce an invalid screen: %v\n%s", err,
 			telegramui.CanonicalGrid(screen.Grid))
 	}
-	if !strings.Contains(telegramui.CanonicalGrid(screen.Grid), "[… -> session@s-ao]") {
+	if !strings.Contains(telegramui.CanonicalGrid(screen.Grid), "[… ⏳ -> session@s-ao]") {
 		t.Fatalf("unnamed session did not get a safe label: %s", telegramui.CanonicalGrid(screen.Grid))
 	}
 }
@@ -291,7 +295,7 @@ func TestEveryCardDisplayCombinationPreservesValidSessionNavigation(t *testing.T
 				if err := screen.Validate(); err != nil {
 					t.Fatalf("%s/%s/%v: invalid card: %v", cardMode, terminalMode, hidden, err)
 				}
-				if !strings.Contains(telegramui.CanonicalGrid(screen.Grid), "[… -> session@s-ao]") {
+				if !strings.Contains(telegramui.CanonicalGrid(screen.Grid), "[… 🟢 -> session@s-ao]") {
 					t.Fatalf("%s/%s/%v: session switcher disappeared", cardMode, terminalMode, hidden)
 				}
 			}

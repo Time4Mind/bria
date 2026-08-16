@@ -54,10 +54,16 @@ func (h *Handler) openListPage(
 		return telegramui.Screen{}, domain.ErrNotFound
 	}
 	if action == telegramui.ActionNodesPrevious || action == telegramui.ActionNodesNext {
-		return h.projector.OpenSessionsPage(actor, page)
+		return h.projector.OpenSessionsPageWithContext(
+			actor, page, h.cachedContextPercents(),
+		)
 	}
 	if preferences.SessionView == domain.ViewHostFirst {
-		return h.projector.NodeSessionsPage(actor, nodeID, page)
+		return h.projector.NodeSessionsPageWithContext(
+			actor, nodeID, page, h.cachedContextPercents(),
+		)
 	}
-	return h.projector.OpenSessionsPage(actor, page)
+	return h.projector.OpenSessionsPageWithContext(
+		actor, page, h.cachedContextPercents(),
+	)
 }

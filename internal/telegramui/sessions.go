@@ -1,6 +1,7 @@
 package telegramui
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/Time4Mind/bria/internal/i18n"
@@ -13,7 +14,8 @@ type SessionItem struct {
 	Name       string
 	NodeName   string
 	Marker     string
-	Selected   bool
+	Status     string
+	ContextPct *int
 	NeedsInput bool
 }
 
@@ -136,20 +138,21 @@ func RenderUnavailableNode(copy i18n.Localizer, node NodeItem, last *SessionItem
 }
 
 func allHostSessionLabel(item SessionItem) string {
-	parts := make([]string, 0, 3)
-	if item.Selected {
-		parts = append(parts, "✓")
-	}
+	parts := make([]string, 0, 7)
 	if item.Marker != "" {
 		parts = append(parts, item.Marker)
 	}
-	parts = append(parts, item.Name+" · "+item.NodeName)
+	parts = append(parts, item.Name+" · "+item.NodeName, item.Status)
+	if item.ContextPct != nil {
+		parts = append(parts, "·", fmt.Sprintf("%d%%", *item.ContextPct))
+	}
 	return strings.Join(parts, " ")
 }
 
 func selectedSessionLabel(item SessionItem) string {
-	if item.Selected {
-		return "✓ " + item.Name
+	parts := []string{item.Name, item.Status}
+	if item.ContextPct != nil {
+		parts = append(parts, "·", fmt.Sprintf("%d%%", *item.ContextPct))
 	}
-	return item.Name
+	return strings.Join(nonEmpty(parts), " ")
 }

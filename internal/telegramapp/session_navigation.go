@@ -23,14 +23,14 @@ func (h *Handler) openSessions(
 		} else if !errors.Is(activeErr, domain.ErrNotFound) {
 			return telegramui.Screen{}, activeErr
 		}
-		return h.projector.OpenSessions(actor)
+		return h.projector.OpenSessionsWithContext(actor, h.cachedContextPercents())
 	}
 	selected, found, err := h.service.SelectedNode(actor)
 	if err != nil {
 		return telegramui.Screen{}, err
 	}
 	if !found {
-		return h.projector.OpenSessions(actor)
+		return h.projector.OpenSessionsWithContext(actor, h.cachedContextPercents())
 	}
 	if nodeAvailableForCard(selected.Node) {
 		session, activeErr := h.service.ActiveSession(actor)
@@ -41,7 +41,9 @@ func (h *Handler) openSessions(
 			return telegramui.Screen{}, activeErr
 		}
 	}
-	return h.projector.NodeSessions(actor, selected.Node.ID)
+	return h.projector.NodeSessionsWithContext(
+		actor, selected.Node.ID, h.cachedContextPercents(),
+	)
 }
 
 func nodeAvailableForCard(node domain.Node) bool {
@@ -77,7 +79,7 @@ func (h *Handler) selectNode(
 			return telegramui.Screen{}, activeErr
 		}
 	}
-	return h.projector.NodeSessions(actor, nodeID)
+	return h.projector.NodeSessionsWithContext(actor, nodeID, h.cachedContextPercents())
 }
 
 func (h *Handler) selectSession(

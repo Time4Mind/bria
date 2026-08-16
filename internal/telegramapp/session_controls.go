@@ -130,9 +130,13 @@ func (h *Handler) handleSessionControlCallback(
 			var preferences domain.UserPreferences
 			preferences, err = h.service.Preferences(actor)
 			if err == nil && preferences.SessionView == domain.ViewAllHosts {
-				screen, err = h.projector.OpenSessions(actor)
+				screen, err = h.projector.OpenSessionsWithContext(
+					actor, h.cachedContextPercents(),
+				)
 			} else if err == nil {
-				screen, err = h.projector.NodeSessions(actor, ref.NodeID)
+				screen, err = h.projector.NodeSessionsWithContext(
+					actor, ref.NodeID, h.cachedContextPercents(),
+				)
 			}
 		} else {
 			err = activeErr

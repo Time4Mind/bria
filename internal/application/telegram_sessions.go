@@ -19,7 +19,14 @@ const (
 func (p *TelegramProjector) OpenSessions(
 	actor Principal,
 ) (telegramui.Screen, error) {
-	return p.OpenSessionsPage(actor, 1)
+	return p.OpenSessionsPageWithContext(actor, 1, nil)
+}
+
+func (p *TelegramProjector) OpenSessionsWithContext(
+	actor Principal,
+	contextPercent map[string]int,
+) (telegramui.Screen, error) {
+	return p.OpenSessionsPageWithContext(actor, 1, contextPercent)
 }
 
 // OpenNodeSelector always renders the host selector. It is used by the
@@ -30,12 +37,20 @@ func (p *TelegramProjector) OpenNodeSelector(actor Principal) (telegramui.Screen
 	if err != nil {
 		return telegramui.Screen{}, err
 	}
-	return p.projectNodesPage(state, actor, 1, false)
+	return p.projectNodesPage(state, actor, 1, false, nil)
 }
 
 func (p *TelegramProjector) OpenSessionsPage(
 	actor Principal,
 	page int,
+) (telegramui.Screen, error) {
+	return p.OpenSessionsPageWithContext(actor, page, nil)
+}
+
+func (p *TelegramProjector) OpenSessionsPageWithContext(
+	actor Principal,
+	page int,
+	contextPercent map[string]int,
 ) (telegramui.Screen, error) {
 	state, err := p.actorState(actor)
 	if err != nil {
@@ -47,9 +62,9 @@ func (p *TelegramProjector) OpenSessionsPage(
 	}
 	switch preferences.SessionView {
 	case domain.ViewHostFirst:
-		return p.projectNodes(state, actor, page)
+		return p.projectNodes(state, actor, page, contextPercent)
 	case domain.ViewAllHosts:
-		return p.projectAllSessions(state, actor, page)
+		return p.projectAllSessions(state, actor, page, contextPercent)
 	default:
 		return telegramui.Screen{}, fmt.Errorf(
 			"%w: unsupported session view", domain.ErrInvalidState,
@@ -61,13 +76,30 @@ func (p *TelegramProjector) NodeSessions(
 	actor Principal,
 	nodeID domain.NodeID,
 ) (telegramui.Screen, error) {
-	return p.NodeSessionsPage(actor, nodeID, 1)
+	return p.NodeSessionsPageWithContext(actor, nodeID, 1, nil)
+}
+
+func (p *TelegramProjector) NodeSessionsWithContext(
+	actor Principal,
+	nodeID domain.NodeID,
+	contextPercent map[string]int,
+) (telegramui.Screen, error) {
+	return p.NodeSessionsPageWithContext(actor, nodeID, 1, contextPercent)
 }
 
 func (p *TelegramProjector) NodeSessionsPage(
 	actor Principal,
 	nodeID domain.NodeID,
 	page int,
+) (telegramui.Screen, error) {
+	return p.NodeSessionsPageWithContext(actor, nodeID, page, nil)
+}
+
+func (p *TelegramProjector) NodeSessionsPageWithContext(
+	actor Principal,
+	nodeID domain.NodeID,
+	page int,
+	contextPercent map[string]int,
 ) (telegramui.Screen, error) {
 	state, err := p.actorState(actor)
 	if err != nil {
@@ -100,7 +132,7 @@ func (p *TelegramProjector) NodeSessionsPage(
 		}
 		return telegramui.RenderUnavailableNode(actorCopy(state, actor), nodeItem, last), nil
 	}
-	items, err := p.sessionItems(state, actor, nodeID, false)
+	items, err := p.sessionItems(state, actor, nodeID, false, contextPercent)
 	if err != nil {
 		return telegramui.Screen{}, err
 	}
@@ -142,8 +174,9 @@ func (p *TelegramProjector) projectNodes(
 	state *domain.State,
 	actor Principal,
 	page int,
+	contextPercent map[string]int,
 ) (telegramui.Screen, error) {
-	return p.projectNodesPage(state, actor, page, true)
+	return p.projectNodesPage(state, actor, page, true, contextPercent)
 }
 
 func (p *TelegramProjector) projectNodesPage(
@@ -151,11 +184,12 @@ func (p *TelegramProjector) projectNodesPage(
 	actor Principal,
 	page int,
 	collapseSingle bool,
+	contextPercent map[string]int,
 ) (telegramui.Screen, error) {
 	selected := state.Navigation.ActiveNodeByUser[actor.UserID]
 	nodes := visibleNodes(state, actor)
 	if collapseSingle && len(nodes) == 1 {
-		return p.projectSingleNodeSessions(state, actor, nodes[0])
+		return p.projectSingleNodeSessions(state, actor, nodes[0], contextPercent)
 	}
 	page, pages, start, end := pageBounds(len(nodes), page, nodePageSize)
 	items := make([]telegramui.NodeItem, 0, end-start)
@@ -187,6 +221,7 @@ func (p *TelegramProjector) projectSingleNodeSessions(
 	state *domain.State,
 	actor Principal,
 	node domain.Node,
+	contextPercent map[string]int,
 ) (telegramui.Screen, error) {
 	item := telegramui.NodeItem{
 		Name: node.Name, Status: projectionNodeStatus(node.Status), Selected: true,
@@ -208,7 +243,7 @@ func (p *TelegramProjector) projectSingleNodeSessions(
 		}
 		return telegramui.RenderUnavailableNode(actorCopy(state, actor), item, last), nil
 	}
-	items, err := p.sessionItems(state, actor, node.ID, false)
+	items, err := p.sessionItems(state, actor, node.ID, false, contextPercent)
 	if err != nil {
 		return telegramui.Screen{}, err
 	}
@@ -227,8 +262,9 @@ func (p *TelegramProjector) projectAllSessions(
 	state *domain.State,
 	actor Principal,
 	page int,
+	contextPercent map[string]int,
 ) (telegramui.Screen, error) {
-	items, err := p.sessionItems(state, actor, "", true)
+	items, err := p.sessionItems(state, actor, "", true, contextPercent)
 	if err != nil {
 		return telegramui.Screen{}, err
 	}
@@ -305,6 +341,7 @@ func (p *TelegramProjector) sessionItems(
 	actor Principal,
 	nodeFilter domain.NodeID,
 	withNode bool,
+	contextPercent map[string]int,
 ) ([]telegramui.SessionItem, error) {
 	sessions := state.VisibleSessions(actor.UserID, true)
 	items := make([]telegramui.SessionItem, 0, len(sessions))
@@ -320,11 +357,13 @@ func (p *TelegramProjector) sessionItems(
 		if err != nil {
 			return nil, err
 		}
-		selected := state.Navigation.ActiveNodeByUser[actor.UserID] == session.NodeID &&
-			state.Navigation.ActiveSessionByUserNode[actor.UserID][session.NodeID] == session.ID
 		item := telegramui.SessionItem{
-			Token: token, Name: displaySessionName(session), Selected: selected,
+			Token: token, Name: displaySessionName(session), Status: sessionStatusGlyph(session),
 			NeedsInput: session.InteractivePrompt != nil,
+		}
+		if percent, present := contextPercent[session.Ref().Key()]; present {
+			value := percent
+			item.ContextPct = &value
 		}
 		if withNode {
 			item.NodeName = node.Name
@@ -333,6 +372,25 @@ func (p *TelegramProjector) sessionItems(
 		items = append(items, item)
 	}
 	return items, nil
+}
+
+func sessionStatusGlyph(session domain.Session) string {
+	switch session.RuntimePhase {
+	case domain.RuntimeStarting, domain.RuntimeRunning, domain.RuntimeStopping:
+		return "⏳"
+	case domain.RuntimeWaitingInput:
+		return "❓"
+	case domain.RuntimeDegraded:
+		if session.LastOperation != nil &&
+			session.LastOperation.Status == domain.OperationFailed {
+			return "❌"
+		}
+		return "⚠️"
+	case domain.RuntimeIdle:
+		return "🟢"
+	default:
+		return "⚪"
+	}
 }
 
 func visibleLiveCount(
