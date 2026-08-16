@@ -90,6 +90,12 @@ func (p *TelegramProjector) sessionItems(
 			Token: token, Name: displaySessionName(session), Status: sessionStatusGlyph(session),
 			NeedsInput: session.InteractivePrompt != nil,
 		}
+		activeSession := state.Navigation.ActiveSessionByUserNode[actor.UserID][session.NodeID]
+		item.Selected = activeSession == session.ID
+		if withNode {
+			item.Selected = item.Selected &&
+				state.Navigation.ActiveNodeByUser[actor.UserID] == session.NodeID
+		}
 		if percent, present := contextPercent[session.Ref().Key()]; present {
 			value := percent
 			item.ContextPct = &value

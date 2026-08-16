@@ -17,6 +17,7 @@ type SessionItem struct {
 	Status     string
 	ContextPct *int
 	NeedsInput bool
+	Selected   bool
 }
 
 // RenderAllHostSessions keeps CCBot's three-session row density. Every label
@@ -139,6 +140,9 @@ func RenderUnavailableNode(copy i18n.Localizer, node NodeItem, last *SessionItem
 
 func allHostSessionLabel(item SessionItem) string {
 	parts := make([]string, 0, 7)
+	if item.Selected {
+		parts = append(parts, "✓")
+	}
 	if item.Marker != "" {
 		parts = append(parts, item.Marker)
 	}
@@ -150,7 +154,11 @@ func allHostSessionLabel(item SessionItem) string {
 }
 
 func selectedSessionLabel(item SessionItem) string {
-	parts := []string{item.Name, item.Status}
+	parts := make([]string, 0, 4)
+	if item.Selected {
+		parts = append(parts, "✓")
+	}
+	parts = append(parts, item.Name, item.Status)
 	if item.ContextPct != nil {
 		parts = append(parts, "·", fmt.Sprintf("%d%%", *item.ContextPct))
 	}

@@ -194,7 +194,7 @@ func TestHostFirstNodeSessionsPreserveStableOrderingGolden(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertProjectionGolden(t, screen, `[a-old 🟢 · 21% -> session@s-ao] | [a-new 🟢 · 34% -> session@s-an] | [shared 🟢 · 55% -> session@s-as]
+	assertProjectionGolden(t, screen, `[a-old 🟢 · 21% -> session@s-ao] | [✓ a-new 🟢 · 34% -> session@s-an] | [shared 🟢 · 55% -> session@s-as]
 [🆕 New -> new@n-alpha] | [Servers -> sessions@servers] | [≡ Menu -> menu]`)
 	assertNoTokenCall(t, tokens.calls, "private")
 }
@@ -227,7 +227,7 @@ func TestAllHostsGridExcludesOfflineAndUnauthorizedSessionsGolden(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertProjectionGolden(t, screen, `[🟥 a-old · Alpha 🟢 · 21% -> session@s-ao] | [🟦 g-old · Gamma 🟢 -> session@s-go] | [🟥 a-new · Alpha 🟢 -> session@s-an]
+	assertProjectionGolden(t, screen, `[🟥 a-old · Alpha 🟢 · 21% -> session@s-ao] | [🟦 g-old · Gamma 🟢 -> session@s-go] | [✓ 🟥 a-new · Alpha 🟢 -> session@s-an]
 [🟥 shared · Alpha 🟢 -> session@s-as] | [🟦 g-new · Gamma 🟢 · 13% -> session@s-gn]
 [🆕 New -> new] | [Servers -> sessions@servers] | [≡ Menu -> menu]`)
 	if len(screen.Grid[0]) != 3 {
