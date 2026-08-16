@@ -66,9 +66,6 @@ func (h *Handler) confirmVoiceEnable(
 	lines := make([]string, 0, len(nodes))
 	target := h.takeSpeechTarget(actor.UserID)
 	for _, item := range nodes {
-		h.speechMu.Lock()
-		h.knownSpeechNodes[item.Node.ID] = true
-		h.speechMu.Unlock()
 		if target != "" && item.Node.ID != target {
 			continue
 		}
@@ -84,6 +81,9 @@ func (h *Handler) confirmVoiceEnable(
 		if startErr != nil {
 			lines = append(lines, item.Node.Name+": postponed ("+shortSetupError(startErr)+")")
 			continue
+		}
+		if status.Phase == speechsetup.PhaseReady {
+			h.markSpeechNodeKnown(item.Node.ID)
 		}
 		lines = append(lines, item.Node.Name+": "+speechStatusText(status))
 	}

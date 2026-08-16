@@ -3,6 +3,7 @@ package telegramapp_test
 import (
 	"context"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -13,21 +14,56 @@ import (
 	"github.com/Time4Mind/bria/internal/telegramui"
 )
 
-type speechSetupStub struct{ requests []speechsetup.Request }
+type speechSetupStub struct {
+	mu       sync.Mutex
+	requests []speechsetup.Request
+	statuses map[string]speechsetup.Status
+}
 
 func (s *speechSetupStub) Start(
 	_ context.Context, request speechsetup.Request,
 ) (speechsetup.Status, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.requests = append(s.requests, request)
-	return speechsetup.Status{
+	status := speechsetup.Status{
 		NodeID: request.NodeID, Engine: "whisper", Phase: speechsetup.PhaseInstalling,
-	}, nil
+		UpdatedAt: time.Now(),
+	}
+	if s.statuses == nil {
+		s.statuses = make(map[string]speechsetup.Status)
+	}
+	s.statuses[request.NodeID] = status
+	return status, nil
 }
 
 func (s *speechSetupStub) Status(
 	_ context.Context, request speechsetup.Request,
 ) (speechsetup.Status, error) {
-	return speechsetup.Status{NodeID: request.NodeID, Engine: "whisper"}, nil
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if status, ok := s.statuses[request.NodeID]; ok {
+		return status, nil
+	}
+	return speechsetup.Status{
+		NodeID: request.NodeID, Engine: "whisper", Phase: speechsetup.PhaseMissing,
+		UpdatedAt: time.Now(),
+	}, nil
+}
+
+func (s *speechSetupStub) setStatus(status speechsetup.Status) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.statuses == nil {
+		s.statuses = make(map[string]speechsetup.Status)
+	}
+	s.statuses[status.NodeID] = status
+}
+
+func (s *speechSetupStub) requestCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.requests)
 }
 
 func TestBackgroundNotificationAndDismissSettingsAreReplicated(t *testing.T) {

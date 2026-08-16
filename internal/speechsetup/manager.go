@@ -2,6 +2,7 @@ package speechsetup
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -51,7 +52,7 @@ func NewManager(config Config) (*Manager, error) {
 		config.Runner = execRunner{}
 	}
 	manager := &Manager{config: config, runner: config.Runner}
-	manager.status = manager.inspect()
+	manager.status = manager.initialStatus()
 	return manager, nil
 }
 
@@ -61,8 +62,7 @@ func (m *Manager) Status(_ context.Context, request Request) (Status, error) {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.status.Phase != PhaseInstalling && m.status.Phase != PhaseReady &&
-		m.status.Phase != PhasePermissionRequired {
+	if m.status.Phase == PhaseMissing || m.status.Phase == PhaseReady {
 		m.status = m.inspect()
 	}
 	return m.status, nil
@@ -82,6 +82,7 @@ func (m *Manager) Start(_ context.Context, request Request) (Status, error) {
 		NodeID: m.config.NodeID, Engine: m.engine(), Phase: PhaseInstalling,
 		Detail: "preparing local speech recognition", UpdatedAt: time.Now(),
 	}
+	m.persistStatus(m.status)
 	status := m.status
 	m.mu.Unlock()
 	go m.install()
@@ -89,7 +90,7 @@ func (m *Manager) Start(_ context.Context, request Request) (Status, error) {
 }
 
 func (m *Manager) install() {
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Hour)
 	defer cancel()
 	var err error
 	phase := PhaseReady
@@ -111,6 +112,7 @@ func (m *Manager) install() {
 	}
 	m.mu.Lock()
 	m.status = status
+	m.persistStatus(status)
 	m.mu.Unlock()
 }
 
@@ -130,10 +132,10 @@ func (m *Manager) installWhisper(ctx context.Context) error {
 		return fmt.Errorf("create speech model directory: %w", err)
 	}
 	temporary := m.config.WhisperModel + ".partial"
-	defer os.Remove(temporary)
 	url := "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/" +
 		filepath.Base(m.config.WhisperModel)
 	if _, err := m.runner.Run(ctx, "curl", "--fail", "--location", "--retry", "3",
+		"--continue-at", "-",
 		"--output", temporary, url); err != nil {
 		return fmt.Errorf("download Whisper model: %w", err)
 	}
@@ -141,6 +143,69 @@ func (m *Manager) installWhisper(ctx context.Context) error {
 		return fmt.Errorf("activate Whisper model: %w", err)
 	}
 	return nil
+}
+
+func (m *Manager) initialStatus() Status {
+	inspected := m.inspect()
+	persisted, ok := m.loadStatus()
+	if !ok {
+		return inspected
+	}
+	if persisted.Phase == PhaseInstalling {
+		if inspected.Phase == PhaseReady {
+			return inspected
+		}
+		persisted.Phase = PhaseMissing
+		persisted.Detail = "speech setup was interrupted and can be resumed"
+		persisted.UpdatedAt = time.Now()
+		m.persistStatus(persisted)
+		return persisted
+	}
+	if persisted.Phase == PhaseFailed || persisted.Phase == PhasePermissionRequired {
+		if inspected.Phase != PhaseReady {
+			return persisted
+		}
+	}
+	if persisted.Phase == PhaseReady && persisted.Engine == "apple" {
+		if _, err := executable(m.applePath()); err == nil {
+			return persisted
+		}
+	}
+	return inspected
+}
+
+func (m *Manager) statusPath() string {
+	return filepath.Join(m.config.DataDir, "speech", "setup-status.json")
+}
+
+func (m *Manager) loadStatus() (Status, bool) {
+	data, err := os.ReadFile(m.statusPath())
+	if err != nil {
+		return Status{}, false
+	}
+	var status Status
+	if json.Unmarshal(data, &status) != nil || !status.Validate(m.config.NodeID) {
+		return Status{}, false
+	}
+	return status, true
+}
+
+func (m *Manager) persistStatus(status Status) {
+	directory := filepath.Dir(m.statusPath())
+	if os.MkdirAll(directory, 0o700) != nil {
+		return
+	}
+	data, err := json.Marshal(status)
+	if err != nil {
+		return
+	}
+	temporary := m.statusPath() + ".tmp"
+	if os.WriteFile(temporary, data, 0o600) != nil {
+		return
+	}
+	if os.Rename(temporary, m.statusPath()) != nil {
+		_ = os.Remove(temporary)
+	}
 }
 
 func (m *Manager) buildWhisper(ctx context.Context) error {

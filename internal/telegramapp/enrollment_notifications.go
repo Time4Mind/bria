@@ -72,21 +72,33 @@ func (h *Handler) scanNewNodeSpeechSetup(ctx context.Context, actor application.
 		if err != nil {
 			continue
 		}
-		notify := status.Phase == speechsetup.PhasePermissionRequired
-		if status.Phase == speechsetup.PhaseReady || status.Phase == speechsetup.PhaseInstalling {
+		switch status.Phase {
+		case speechsetup.PhaseReady:
 			h.markSpeechNodeKnown(item.Node.ID)
 			continue
-		}
-		if !notify {
-			status, err = h.speechSetup.Start(ctx, request)
+		case speechsetup.PhaseInstalling:
+			continue
+		case speechsetup.PhaseFailed, speechsetup.PhasePermissionRequired:
+			if status.UpdatedAt.Before(h.speechWatchStarted) {
+				h.markSpeechNodeKnown(item.Node.ID)
+				continue
+			}
+			_, _ = h.messenger.SendScreen(ctx, int64(actor.UserID), telegramui.RenderVoiceSetupStarted(
+				h.copy(actor), []string{item.Node.Name + ": " + speechStatusText(status)},
+			))
+			h.markSpeechNodeKnown(item.Node.ID)
+			continue
+		case speechsetup.PhaseMissing:
+			_, err = h.speechSetup.Start(ctx, request)
 			if err != nil {
 				continue
 			}
+			// Automatic provisioning is silent. The watcher reports one actionable
+			// terminal failure or permission request, and nothing on success.
+			continue
+		default:
+			continue
 		}
-		h.markSpeechNodeKnown(item.Node.ID)
-		_, _ = h.messenger.SendScreen(ctx, int64(actor.UserID), telegramui.RenderVoiceSetupStarted(
-			h.copy(actor), []string{item.Node.Name + ": " + speechStatusText(status)},
-		))
 	}
 }
 

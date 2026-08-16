@@ -11,6 +11,7 @@ import (
 	"github.com/Time4Mind/bria/internal/callbacktoken"
 	"github.com/Time4Mind/bria/internal/clusterstate"
 	"github.com/Time4Mind/bria/internal/domain"
+	"github.com/Time4Mind/bria/internal/speechsetup"
 	"github.com/Time4Mind/bria/internal/telegramapp"
 	"github.com/Time4Mind/bria/internal/telegrambot"
 	"github.com/Time4Mind/bria/internal/telegramui"
@@ -168,8 +169,8 @@ func TestStatusFromLegacyMenuUsesNewRichCarrier(t *testing.T) {
 
 func TestSpeechSetupWatcherReconcilesExistingAndNewNodes(t *testing.T) {
 	fixture := newFixture(t)
-	fixture.messenger.sendNotify = make(chan struct{}, 2)
-	if err := fixture.handler.SetSpeechSetup(&speechSetupStub{}); err != nil {
+	setup := &speechSetupStub{}
+	if err := fixture.handler.SetSpeechSetup(setup); err != nil {
 		t.Fatal(err)
 	}
 	actor := application.Principal{UserID: 7}
@@ -187,9 +188,11 @@ func TestSpeechSetupWatcherReconcilesExistingAndNewNodes(t *testing.T) {
 		defer close(done)
 		fixture.handler.RunEnrollmentNotifications(ctx, 5*time.Millisecond)
 	}()
-	select {
-	case <-fixture.messenger.sendNotify:
-	case <-time.After(time.Second):
+	deadline := time.Now().Add(time.Second)
+	for setup.requestCount() != 1 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if setup.requestCount() != 1 {
 		t.Fatal("existing node was not reconciled after handler start")
 	}
 	newNode := domain.Node{ID: "new-node", Name: "New node", Status: domain.NodeOnline}
@@ -198,16 +201,32 @@ func TestSpeechSetupWatcherReconcilesExistingAndNewNodes(t *testing.T) {
 	)); result.Err() != nil {
 		t.Fatal(result.Err())
 	}
+	deadline = time.Now().Add(time.Second)
+	for setup.requestCount() != 2 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if setup.requestCount() != 2 {
+		t.Fatal("new node was not provisioned")
+	}
+	if len(fixture.messenger.sent) != 0 {
+		t.Fatalf("automatic provisioning sent progress notifications=%#v", fixture.messenger.sent)
+	}
+	fixture.messenger.sendNotify = make(chan struct{}, 1)
+	setup.setStatus(speechsetup.Status{
+		NodeID: "new-node", Engine: "whisper", Phase: speechsetup.PhaseFailed,
+		Detail: "ffmpeg is not installed", UpdatedAt: time.Now(),
+	})
 	select {
 	case <-fixture.messenger.sendNotify:
 	case <-time.After(time.Second):
-		t.Fatal("new node did not generate setup notification")
+		t.Fatal("terminal setup failure was not reported")
 	}
+	time.Sleep(20 * time.Millisecond)
 	cancel()
 	<-done
-	if len(fixture.messenger.sent) != 2 ||
-		!strings.Contains(fixture.messenger.sent[1].Text, "New node") {
-		t.Fatalf("new-node setup notifications=%#v", fixture.messenger.sent)
+	if len(fixture.messenger.sent) != 1 ||
+		!strings.Contains(fixture.messenger.sent[0].Text, "ffmpeg is not installed") {
+		t.Fatalf("terminal setup notifications=%#v", fixture.messenger.sent)
 	}
 }
 

@@ -60,6 +60,7 @@ type Handler struct {
 	speechMu           sync.Mutex
 	speechTargets      map[domain.UserID]domain.NodeID
 	knownSpeechNodes   map[domain.NodeID]bool
+	speechWatchStarted time.Time
 	pageMu             sync.Mutex
 	cardPages          map[cardPageKey]cardPageState
 	activity           *activityMessenger
@@ -95,6 +96,7 @@ func NewHandler(
 		statusBack:         make(map[domain.UserID]settingsReturn),
 		speechTargets:      make(map[domain.UserID]domain.NodeID),
 		knownSpeechNodes:   make(map[domain.NodeID]bool),
+		speechWatchStarted: time.Now(),
 		cardPages:          make(map[cardPageKey]cardPageState),
 		clusterEventLogs:   make(map[int64]clusterEventLog),
 	}, nil
