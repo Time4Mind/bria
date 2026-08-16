@@ -121,12 +121,19 @@ func (h *Handler) handleSessionControlCallback(
 	var screen telegramui.Screen
 	if callback.Action == telegramui.ActionConfirmClose {
 		// CloseSession may select the most recently used live session on the same
-		// node. If that node is now empty, keep its Sessions screen open rather
-		// than switching hosts or leaving the archived card on screen.
+		// node. If that node is now empty, preserve the configured session scope:
+		// all-hosts returns to the cluster-wide grid, while host-first keeps the
+		// closed session's node open.
 		if fallback, activeErr := h.service.ActiveSession(actor); activeErr == nil && fallback.NodeID == ref.NodeID {
 			screen, err = h.renderSessionCard(ctx, actor, fallback.Ref(), 0)
 		} else if activeErr == nil || errors.Is(activeErr, domain.ErrNotFound) {
-			screen, err = h.projector.NodeSessions(actor, ref.NodeID)
+			var preferences domain.UserPreferences
+			preferences, err = h.service.Preferences(actor)
+			if err == nil && preferences.SessionView == domain.ViewAllHosts {
+				screen, err = h.projector.OpenSessions(actor)
+			} else if err == nil {
+				screen, err = h.projector.NodeSessions(actor, ref.NodeID)
+			}
 		} else {
 			err = activeErr
 		}
