@@ -2,6 +2,7 @@ package application_test
 
 import (
 	"context"
+	"reflect"
 	"testing"
 	"time"
 
@@ -10,6 +11,41 @@ import (
 	"github.com/Time4Mind/bria/internal/domain"
 	"github.com/Time4Mind/bria/internal/security"
 )
+
+func TestProviderAliasCandidatesHaveStableOrder(t *testing.T) {
+	state := domain.NewState()
+	for _, node := range []domain.Node{
+		{ID: "zulu", Name: "Zulu", Status: domain.NodeOnline,
+			Backends: []domain.BackendDescriptor{{Name: "codex"}}},
+		{ID: "alpha", Name: "Alpha", Status: domain.NodeOnline,
+			Backends: []domain.BackendDescriptor{{Name: "codex"}, {Name: "claude"}}},
+	} {
+		if err := state.AddNode(node); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := state.SetNodeAccess(1, domain.RoleOwner, "alpha", "zulu"); err != nil {
+		t.Fatal(err)
+	}
+	machine := clusterstate.NewMachine(state)
+	port := localMachine{machine: machine}
+	service, err := application.NewService(port, port)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := service.ProviderAliasCandidates(application.Principal{UserID: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []application.ProviderAliasCandidate{
+		{NodeID: "alpha", Backend: "claude"},
+		{NodeID: "alpha", Backend: "codex"},
+		{NodeID: "zulu", Backend: "codex"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("candidates = %#v, want %#v", got, want)
+	}
+}
 
 func TestInvitationReplayProducesOnlyUsableInvitations(t *testing.T) {
 	state := domain.NewState()

@@ -255,6 +255,12 @@ func (s *Service) ProviderAliasCandidates(actor Principal) ([]ProviderAliasCandi
 			}
 		}
 	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].NodeID != result[j].NodeID {
+			return result[i].NodeID < result[j].NodeID
+		}
+		return strings.ToLower(result[i].Backend) < strings.ToLower(result[j].Backend)
+	})
 	return result, nil
 }
 
