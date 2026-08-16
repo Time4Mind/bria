@@ -129,10 +129,14 @@ func runNode(arguments []string) error {
 			if err := applyPendingClusterRestore(ctx, node, nodeConfig); err != nil {
 				return err
 			}
-			if err := reconcileConfiguredVoters(ctx, node, nodeConfig); err != nil {
+			// Commit the peer identity and network metadata while the existing
+			// cluster still has its old quorum. Raft mTLS consults this replicated
+			// admission state during snapshot transfer; adding a member first can
+			// strand a one-node cluster before the new peer is trusted.
+			if err := registerConfiguredNodes(ctx, node, nodeConfig); err != nil {
 				return err
 			}
-			if err := registerConfiguredNodes(ctx, node, nodeConfig); err != nil {
+			if err := reconcileConfiguredVoters(ctx, node, nodeConfig); err != nil {
 				return err
 			}
 			plan, err := registerLocalNode(ctx, node, nodeConfig, localFingerprint, backendRuntime.runner)

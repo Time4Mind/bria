@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -176,7 +177,8 @@ func registerConfiguredNodes(
 		if err != nil {
 			return fmt.Errorf("register configured node %s: %w", peer.NodeID, err)
 		}
-		if err := result.Err(); err != nil {
+		if err := result.Err(); err != nil && !errors.Is(err, domain.ErrAlreadyExists) &&
+			err.Error() != domain.ErrAlreadyExists.Error() {
 			return fmt.Errorf("register configured node %s: %w", peer.NodeID, err)
 		}
 	}

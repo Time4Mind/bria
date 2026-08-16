@@ -33,7 +33,7 @@ func maintainDynamicMembership(
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Raft membership read: %v\n", err)
 		} else {
-			syncMembershipResolver(resolver, state, knownAddresses, configured)
+			syncMembershipResolverIfReady(resolver, state, knownAddresses, configured)
 		}
 		if err == nil && node.IsLeader() {
 			if err := reconcileDesiredMembership(node, state); err != nil {
@@ -46,6 +46,28 @@ func maintainDynamicMembership(
 		case <-ticker.C:
 		}
 	}
+}
+
+func syncMembershipResolverIfReady(
+	resolver *consensus.StaticPeerResolver,
+	state *domain.State,
+	known map[domain.NodeID]string,
+	configured map[string]string,
+) bool {
+	// A joining node starts with an empty replicated state and can briefly report
+	// an empty Raft configuration before the leader sends its first snapshot.
+	// Keep the statically seeded identities during that window; revoking them here
+	// rejects the very peer that must deliver the snapshot.
+	// A fresh non-bootstrap Raft store can already list the joining node itself
+	// before it has received any replicated product state.  That self-only
+	// configuration is not evidence that the initial snapshot arrived, so keep
+	// all statically seeded peer identities until at least one replicated node
+	// record is present.
+	if len(state.Nodes) == 0 {
+		return false
+	}
+	syncMembershipResolver(resolver, state, known, configured)
+	return true
 }
 
 func syncMembershipResolver(

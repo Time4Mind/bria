@@ -8,6 +8,44 @@ import (
 	"github.com/hashicorp/raft"
 )
 
+func TestResolverKeepsSeedPeersUntilInitialStateArrives(t *testing.T) {
+	resolver := consensus.NewStaticPeerResolver()
+	resolver.Set("android.bria.internal:17946", "android")
+	resolver.ApproveNodeID("android")
+	known := map[domain.NodeID]string{"android": "android.bria.internal:17946"}
+
+	if syncMembershipResolverIfReady(resolver, domain.NewState(), known, map[string]string{}) {
+		t.Fatal("empty joining state was treated as authoritative")
+	}
+
+	if !resolver.IsApprovedNodeID("android") {
+		t.Fatal("seed peer was revoked before the initial Raft snapshot")
+	}
+	if nodeID, ok := resolver.ExpectedNodeID("android.bria.internal:17946"); !ok || nodeID != "android" {
+		t.Fatalf("seed peer address=%q/%v", nodeID, ok)
+	}
+}
+
+func TestResolverKeepsSeedPeersWithSelfOnlyRaftConfiguration(t *testing.T) {
+	resolver := consensus.NewStaticPeerResolver()
+	resolver.Set("android.bria.internal:17946", "android")
+	resolver.ApproveNodeID("android")
+	resolver.Set("new-node.internal:47946", "new-node")
+	resolver.ApproveNodeID("new-node")
+	known := map[domain.NodeID]string{
+		"android":  "android.bria.internal:17946",
+		"new-node": "new-node.internal:47946",
+	}
+
+	configured := map[string]string{"new-node": "new-node.internal:47946"}
+	if syncMembershipResolverIfReady(resolver, domain.NewState(), known, configured) {
+		t.Fatal("self-only Raft configuration was treated as replicated state")
+	}
+	if !resolver.IsApprovedNodeID("android") {
+		t.Fatal("seed peer was revoked before the initial snapshot")
+	}
+}
+
 func TestResolverKeepsDisabledVoterUntilRaftRemovalCommits(t *testing.T) {
 	resolver := consensus.NewStaticPeerResolver()
 	state := domain.NewState()
