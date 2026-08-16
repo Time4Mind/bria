@@ -47,6 +47,7 @@ func (h *Handler) runBackgroundReconciliation(ctx context.Context, interval time
 	for {
 		if h.canRefresh() {
 			h.settleRunningSessions(ctx)
+			h.reconcileActiveFinalCards(ctx)
 			h.restoreActivePaneRefreshes(ctx)
 		}
 		select {
@@ -54,6 +55,45 @@ func (h *Handler) runBackgroundReconciliation(ctx context.Context, interval time
 			return
 		case <-ticker.C:
 		}
+	}
+}
+
+// reconcileActiveFinalCards closes the race between node heartbeat settlement
+// and Telegram settlement. A heartbeat can observe the provider final first and
+// move the runtime to idle; that removes it from RunningSessions before the live
+// card worker has published the final answer. The replicated card revision makes
+// the repair durable across worker, leader, and process restarts.
+func (h *Handler) reconcileActiveFinalCards(ctx context.Context) {
+	if h.controls == nil {
+		return
+	}
+	for _, userID := range h.service.BackgroundPanelUsers() {
+		actor := application.Principal{UserID: userID}
+		card, ok, err := h.service.TelegramResponseCard(actor)
+		if err != nil || !ok {
+			continue
+		}
+		session, err := h.service.ActiveSession(actor)
+		if err != nil || session.RuntimePhase != domain.RuntimeIdle {
+			continue
+		}
+		if card.Session != (domain.SessionRef{}) && card.Session != session.Ref() {
+			continue
+		}
+		if card.Session == session.Ref() && card.SessionRevision >= session.Revision {
+			continue
+		}
+		snapshot, err := h.renderSessionCardSnapshot(ctx, actor, session.Ref(), 0)
+		if err != nil {
+			continue
+		}
+		finalAt, final := finalTranscriptAt(snapshot.events)
+		if !final || !transcriptFinalBelongsToCurrentTurn(session, finalAt, time.Now()) {
+			continue
+		}
+		_, _ = h.repostFinalResponseCard(
+			ctx, actor, telegramMessage(card), session.Ref(), snapshot.screen,
+		)
 	}
 }
 

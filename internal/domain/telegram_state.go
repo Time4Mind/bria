@@ -3,11 +3,13 @@ package domain
 import "fmt"
 
 type TelegramResponseCard struct {
-	ChatID          int64  `json:"chat_id"`
-	MessageID       int64  `json:"message_id"`
-	Rich            bool   `json:"rich,omitempty"`
-	RichMediaFileID string `json:"rich_media_file_id,omitempty"`
-	PaneHash        string `json:"pane_hash,omitempty"`
+	ChatID          int64      `json:"chat_id"`
+	MessageID       int64      `json:"message_id"`
+	Rich            bool       `json:"rich,omitempty"`
+	RichMediaFileID string     `json:"rich_media_file_id,omitempty"`
+	PaneHash        string     `json:"pane_hash,omitempty"`
+	Session         SessionRef `json:"session,omitempty"`
+	SessionRevision uint64     `json:"session_revision,omitempty"`
 }
 
 // BindTelegramBot associates transport state with one Telegram bot. A cursor
@@ -49,6 +51,14 @@ func (s *State) RecordTelegramResponseCard(userID UserID, card TelegramResponseC
 	}
 	if len(card.RichMediaFileID) > 1024 || len(card.PaneHash) > 128 {
 		return fmt.Errorf("Telegram response card transport metadata is invalid")
+	}
+	if card.Session != (SessionRef{}) {
+		if err := card.Session.Validate(); err != nil || card.SessionRevision == 0 ||
+			!s.CanViewSession(userID, card.Session) {
+			return ErrAccessDenied
+		}
+	} else if card.SessionRevision != 0 {
+		return fmt.Errorf("Telegram response card session revision has no session")
 	}
 	if s.TelegramResponseCards == nil {
 		s.TelegramResponseCards = make(map[UserID]TelegramResponseCard)

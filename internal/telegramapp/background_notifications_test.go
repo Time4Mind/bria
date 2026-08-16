@@ -128,6 +128,55 @@ func TestReconciliationRefreshesActiveResponseCardWithRecoveredFinal(t *testing.
 	}
 }
 
+func TestReconciliationRepublishesFinalSettledByHeartbeat(t *testing.T) {
+	fixture := newFixture(t)
+	actor := application.Principal{UserID: 7}
+	ref := domain.SessionRef{NodeID: "allowed", SessionID: "live"}
+	session := fixture.machine.State().Sessions[ref.Key()]
+	finalAt := time.Now().Add(-time.Second).UTC()
+	applyBackgroundCommand(t, fixture, "heartbeat-settled-final",
+		clusterstate.CommandPublishSessionRuntime, finalAt,
+		clusterstate.PublishSessionRuntime{
+			Session: ref, Generation: session.RuntimeGeneration,
+			Phase: domain.RuntimeIdle,
+		})
+	// Legacy cards do not have session revision metadata. They must be healed
+	// once after an upgrade instead of remaining permanently stale.
+	if err := fixture.service.RecordTelegramResponseCard(
+		application.WithOperationScope(context.Background(), "stale-active-card"), actor,
+		domain.TelegramResponseCard{ChatID: 7, MessageID: 81, Rich: true},
+	); err != nil {
+		t.Fatal(err)
+	}
+	controls := &blockingControls{ref: ref, events: []transcript.Event{{
+		Kind: transcript.EventAssistantFinal, Text: "HEARTBEAT FINAL",
+		Timestamp: finalAt.Format(time.RFC3339Nano),
+	}}}
+	handler, err := telegramapp.NewHandlerWithControls(
+		fixture.service, fixture.projector, fixture.codec, fixture.messenger, controls,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	handler.RunBackgroundNotifications(ctx, 5*time.Millisecond)
+	if len(fixture.messenger.sent) != 1 {
+		t.Fatalf("replacement cards = %d", len(fixture.messenger.sent))
+	}
+	if !strings.Contains(fixture.messenger.sent[0].Text, "HEARTBEAT FINAL") {
+		t.Fatalf("final missing from replacement: %q", fixture.messenger.sent[0].Text)
+	}
+	card, ok, cardErr := fixture.service.TelegramResponseCard(actor)
+	if cardErr != nil || !ok {
+		t.Fatalf("response card missing: %#v / %v", card, cardErr)
+	}
+	settled := fixture.machine.State().Sessions[ref.Key()]
+	if card.Session != ref || card.SessionRevision != settled.Revision {
+		t.Fatalf("card checkpoint = %#v, session revision = %d", card, settled.Revision)
+	}
+}
+
 func TestReconciliationAcceptsFastFinalBeforeLegacyDeliveryAck(t *testing.T) {
 	fixture := newFixture(t)
 	actor := application.Principal{UserID: 7}

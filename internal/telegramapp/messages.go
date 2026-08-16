@@ -193,12 +193,16 @@ func (h *Handler) recordResponseCard(
 		ChatID: message.ChatID, MessageID: message.MessageID, Rich: message.Rich,
 		RichMediaFileID: message.RichMediaFileID, PaneHash: message.PaneHash,
 	}
+	if session, sessionErr := h.service.ActiveSession(actor); sessionErr == nil {
+		card.Session = session.Ref()
+		card.SessionRevision = session.Revision
+	}
 	if exists && previous == card {
 		return previous, true, false
 	}
 	fingerprint := sha256.Sum256([]byte(fmt.Sprintf(
-		"%d:%d:%t:%s:%s", card.ChatID, card.MessageID, card.Rich,
-		card.RichMediaFileID, card.PaneHash,
+		"%d:%d:%t:%s:%s:%s:%d", card.ChatID, card.MessageID, card.Rich,
+		card.RichMediaFileID, card.PaneHash, card.Session.Key(), card.SessionRevision,
 	)))
 	recordCtx := application.WithOperationScope(
 		ctx, fmt.Sprintf("telegram-response-card-%d-%d-%x",
