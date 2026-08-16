@@ -50,11 +50,7 @@ func TestProcessChaosManualLeaderWaitsForDiskRejoin(t *testing.T) {
 	client := chaosProbeClient(t, configs, certificates["node-1"], roots)
 	leader := waitForSingleProcessLeader(t, client, configs, 35*time.Second)
 	processes[leader].kill(t)
-	for _, item := range configs {
-		if item.NodeID != leader {
-			waitForNodeNotReady(t, client, item.NodeID, 10*time.Second)
-		}
-	}
+	assertNoReplacementProcessLeader(t, client, configs, leader, 3*time.Second)
 	processes[leader] = startChaosNode(t, root, configByID(t, configs, leader))
 	waitForAllReady(t, client, configs, 20*time.Second)
 	if got := waitForSingleProcessLeader(t, client, configs, 5*time.Second); got != leader {

@@ -144,6 +144,31 @@ func waitForNodeReadyWithLeader(
 	t.Fatalf("node %s did not remain ready with leader %s", nodeID, leaderID)
 }
 
+func assertNoReplacementProcessLeader(
+	t *testing.T,
+	client *nodecontrol.Client,
+	configs []config.Config,
+	excludedNodeID string,
+	duration time.Duration,
+) {
+	t.Helper()
+	deadline := time.Now().Add(duration)
+	for time.Now().Before(deadline) {
+		for _, item := range configs {
+			if item.NodeID == excludedNodeID {
+				continue
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			status, err := client.Probe(ctx, item.NodeID, false)
+			cancel()
+			if err == nil && status.RaftState == "Leader" && status.LeaderID == item.NodeID {
+				t.Fatalf("manual replica %s replaced unavailable leader %s", item.NodeID, excludedNodeID)
+			}
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
 func configByID(t *testing.T, configs []config.Config, nodeID string) config.Config {
 	t.Helper()
 	for _, item := range configs {

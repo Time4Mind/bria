@@ -41,13 +41,8 @@ func TestProcessChaosManualLeaderSurvivesReplicaPartition(t *testing.T) {
 	for _, relay := range relays {
 		relay.pause()
 	}
-	for _, item := range configs {
-		if item.NodeID == leader {
-			waitForNodeReadyWithLeader(t, client, item.NodeID, leader, 10*time.Second)
-			continue
-		}
-		waitForNodeNotReady(t, client, item.NodeID, 10*time.Second)
-	}
+	waitForNodeReadyWithLeader(t, client, leader, leader, 10*time.Second)
+	assertNoReplacementProcessLeader(t, client, configs, leader, 3*time.Second)
 	for _, relay := range relays {
 		relay.resume()
 	}
