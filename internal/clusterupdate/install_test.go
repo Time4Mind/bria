@@ -11,6 +11,45 @@ import (
 	"time"
 )
 
+func TestExtractReleaseAllowsIsolatedRunnerToTraverseRelease(t *testing.T) {
+	archivePath := filepath.Join(t.TempDir(), "release.tar.gz")
+	file, err := os.Create(archivePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gzipWriter := gzip.NewWriter(file)
+	tarWriter := tar.NewWriter(gzipWriter)
+	data := []byte("binary")
+	if err := tarWriter.WriteHeader(&tar.Header{
+		Name: "bria", Mode: 0o755, Size: int64(len(data)), Typeflag: tar.TypeReg,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tarWriter.Write(data); err != nil {
+		t.Fatal(err)
+	}
+	if err := tarWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gzipWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	destination := filepath.Join(t.TempDir(), "release")
+	if err := extractRelease(archivePath, destination); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(destination)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0o755 {
+		t.Fatalf("release directory mode = %o, want 755", got)
+	}
+}
+
 func TestExtractReleaseRejectsTraversal(t *testing.T) {
 	archivePath := filepath.Join(t.TempDir(), "bad.tar.gz")
 	file, err := os.Create(archivePath)

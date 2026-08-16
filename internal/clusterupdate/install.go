@@ -90,6 +90,15 @@ func extractRelease(archivePath, destination string) error {
 			return fmt.Errorf("update tar contains unsupported entry %q", name)
 		}
 	}
+	// The control process owns the staged release, but an isolated backend
+	// runner normally has a different uid.  Keep the release immutable while
+	// allowing that runner to traverse the directory and execute the binary.
+	// Without this, the node can restart into the new release while the runner
+	// remains on the old executable and then fails with EACCES on its next
+	// restart.
+	if err := os.Chmod(stage, 0o755); err != nil {
+		return err
+	}
 	if err := os.Rename(stage, destination); err != nil {
 		return err
 	}

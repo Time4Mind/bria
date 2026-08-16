@@ -33,12 +33,26 @@ func runRunner(arguments []string) error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	releaseChanged := watchRunnerActivation(ctx)
 	go func() {
-		<-ctx.Done()
+		select {
+		case <-ctx.Done():
+		case <-releaseChanged:
+		}
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
 		_ = server.Shutdown(shutdownCtx)
 	}()
 	fmt.Printf("bria runner serving on %s\n", *socket)
-	return server.Serve(*socket)
+	if err := server.Serve(*socket); err != nil {
+		return err
+	}
+	select {
+	case <-releaseChanged:
+		// bria-runner.service uses Restart=on-failure.  Returning an error makes
+		// systemd start the runner from the newly activated release.
+		return errors.New("runner activation changed")
+	default:
+		return nil
+	}
 }
