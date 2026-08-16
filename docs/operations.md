@@ -1,28 +1,41 @@
 # Operations
 
-Bria changes one cluster member at a time. An operator must not restart enough
-voters concurrently to lose quorum. The commands below modify only explicit
-paths and never change host routes, DNS, firewall, or proxy settings.
+Bria changes one cluster member at a time. In automatic mode, an operator must
+not restart enough voters concurrently to lose quorum. The commands below
+modify only explicit paths and never change host routes, DNS, firewall, or
+proxy settings.
 
 ## Leader policy
 
 Open **Settings → Cluster → Leader selection**. Bria defaults to **Manual**:
 choose one online, enabled node and confirm it. The assignment is replicated
-and persistent. A non-selected node does not consume interaction updates or run
-leader-only work; if the selected node is unavailable, the others wait. Choose
-**Automatic** only when ordinary Raft leader failover should immediately move
-that work to the elected node.
+and persistent. The selected node becomes the sole voter; other enabled nodes
+remain nonvoters that can receive Raft log entries but cannot start elections.
+The leader continues committing when all replicas disconnect. If it becomes
+unavailable, the others wait. Choose **Automatic** only when ordinary Raft
+quorum and leader failover should immediately move work to an elected node.
 
-On a new cluster with no assignment, the current Raft leader exposes a bounded
-setup screen so the owner can select a node or enable automatic mode. The
-**Status** screen does not change leader policy.
+On a new cluster with no assignment, the bootstrap leader is the provisional
+sole voter and exposes a bounded setup screen so the owner can select a node or
+enable automatic mode. The **Status** screen does not change leader policy.
 
-This setting never creates quorum. Before taking the selected leader offline,
-verify enough voters remain reachable and, when needed, select another healthy
-node while quorum still exists. One member left from a three-voter configuration
-cannot commit or make itself leader. Convert to an intentional single-voter
-topology only through the normal disable/removal workflow; never force-bootstrap
-live Raft storage to work around an outage.
+To change a manual leader, keep the old leader and target online. Bria promotes
+the target, transfers leadership through upstream Raft, then demotes the old
+voter. If the old leader is already unavailable, transfer is deliberately
+blocked until it returns; never force-bootstrap live Raft storage to work
+around the outage. Automatic mode still follows ordinary quorum rules: one
+member left from a three-voter configuration cannot commit or elect itself.
+
+## Provider CLI setup
+
+Open **Settings → Servers → _node_**. Claude Code and Codex are listed even
+when absent. **Install** runs the official npm package under the provider
+runtime user's `~/.bria/providers` tree, probes the resulting command, refreshes
+the node inventory, and connects it to Bria. Isolated Linux nodes perform every
+step inside the runner identity. The flow never invokes `sudo` or writes a
+system npm prefix. The node or isolated runner must already provide a working
+`npm`; if it does not, the setup screen reports that prerequisite instead of
+changing the host package manager.
 
 ## Authenticated metrics
 
@@ -202,18 +215,20 @@ is unavailable:
    leader and for the cluster status to show it online at the expected version.
 4. Repeat for the remaining followers, never taking down a quorum. In a
    three-voter cluster, only one node may be unavailable at a time.
-5. Transfer leadership to an already updated healthy node, then update the old
-   leader last. Confirm Telegram polling moves to the new leader before stopping
-   the old one.
+5. In automatic mode, transfer leadership to an already updated healthy voter,
+   then update the old leader last. In manual mode, keep the selected leader as
+   sole voter and restart it last; expect a short interaction outage while it
+   returns and resumes the update coordinator.
 6. Verify all probes, versions, provider status ages, session cards, and one
    harmless session round trip. Keep the previous binary and config available
    until this succeeds.
 
-A single-node cluster necessarily has a short Telegram outage. A two-voter
-cluster cannot commit while either voter is restarting; Bria commits the next
-phase before stopping a node and continues only after quorum returns. Do not
-mistake process health for quorum readiness, force-bootstrap, or rewrite Raft
-storage during a normal update.
+A manual sole-voter cluster necessarily has a short interaction outage while
+its leader restarts, but nonvoting replicas do not block its commits. An
+automatic two-voter cluster cannot commit while either voter is restarting;
+Bria commits the next phase before stopping a node and continues only after
+quorum returns. Do not mistake process health for quorum readiness,
+force-bootstrap, or rewrite Raft storage during a normal update.
 
 ## External canary without Telegram UI automation
 

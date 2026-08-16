@@ -179,7 +179,8 @@ func (c *Coordinator) startNext(
 	ctx context.Context, update domain.ClusterUpdate, nodeID domain.NodeID,
 ) {
 	leaderID := domain.NodeID(c.consensus.LeaderID())
-	if nodeID == leaderID && len(update.Order) > 1 {
+	manual := c.reader.State().LeaderPolicy.EffectiveMode() == domain.LeaderSelectionManual
+	if nodeID == leaderID && len(update.Order) > 1 && !manual {
 		for _, candidate := range update.Order {
 			node := c.reader.State().Nodes[candidate]
 			if candidate != leaderID && node.Status == domain.NodeOnline &&

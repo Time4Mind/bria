@@ -96,3 +96,52 @@ func TestEnsureVoterUpdatesSameIDAddress(t *testing.T) {
 	}
 	t.Fatalf("updated server %q missing from configuration", targetID)
 }
+
+func TestDemoteVoterKeepsReplicationMember(t *testing.T) {
+	cluster := newThreeNodeCluster(t)
+	leaderID := cluster.waitForLeader(t)
+	leader := cluster.nodes[leaderID]
+	targetID := ""
+	for _, id := range cluster.ids {
+		if id != leaderID {
+			targetID = id
+			break
+		}
+	}
+	if err := leader.DemoteVoter(targetID, 3*time.Second); err != nil {
+		t.Fatalf("demote voter: %v", err)
+	}
+	configuration, err := leader.Configuration()
+	if err != nil {
+		t.Fatalf("configuration: %v", err)
+	}
+	for _, server := range configuration.Servers {
+		if string(server.ID) != targetID {
+			continue
+		}
+		if server.Suffrage != raft.Nonvoter {
+			t.Fatalf("demoted server = %+v", server)
+		}
+		if err := leader.EnsureNonvoter(targetID, string(server.Address), time.Second); err != nil {
+			t.Fatalf("ensure exact nonvoter: %v", err)
+		}
+		return
+	}
+	t.Fatalf("demoted server %q missing", targetID)
+}
+
+func TestEnsureNonvoterRefusesImplicitDemotion(t *testing.T) {
+	cluster := newThreeNodeCluster(t)
+	leaderID := cluster.waitForLeader(t)
+	leader := cluster.nodes[leaderID]
+	configuration, err := leader.Configuration()
+	if err != nil {
+		t.Fatalf("configuration: %v", err)
+	}
+	target := configuration.Servers[0]
+	if err := leader.EnsureNonvoter(
+		string(target.ID), string(target.Address), time.Second,
+	); err == nil {
+		t.Fatal("voter was implicitly demoted")
+	}
+}

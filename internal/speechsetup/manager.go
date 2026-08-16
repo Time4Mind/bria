@@ -61,7 +61,8 @@ func (m *Manager) Status(_ context.Context, request Request) (Status, error) {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.status.Phase != PhaseInstalling {
+	if m.status.Phase != PhaseInstalling && m.status.Phase != PhaseReady &&
+		m.status.Phase != PhasePermissionRequired {
 		m.status = m.inspect()
 	}
 	return m.status, nil

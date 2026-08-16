@@ -195,36 +195,6 @@ func canAdministerNodes(state *domain.State, userID domain.UserID) bool {
 	return ok && (access.Role == domain.RoleOwner || access.Role == domain.RoleAdmin)
 }
 
-func (p *TelegramProjector) backendChoices(
-	state *domain.State, userID domain.UserID, node domain.Node,
-) []telegramui.NodeBackendItem {
-	connected := make(map[string]bool, len(node.Backends))
-	for _, backend := range node.Backends {
-		connected[strings.ToLower(backend.Name)] = true
-	}
-	items := make([]telegramui.NodeBackendItem, 0, len(node.InstalledBackends))
-	for _, backend := range node.InstalledBackends {
-		name := strings.ToLower(strings.TrimSpace(backend.Name))
-		if name == "" {
-			continue
-		}
-		action := telegramui.ActionBackendConnect
-		if connected[name] {
-			action = telegramui.ActionBackendDisconnect
-		}
-		token, err := p.tokens.Choice(
-			userID, action, "node_backend", string(node.ID)+"\x00"+name,
-		)
-		if err != nil {
-			continue
-		}
-		items = append(items, telegramui.NodeBackendItem{
-			Name: name, Version: backend.Version, Connected: connected[name], Token: token,
-		})
-	}
-	return items
-}
-
 func (p *TelegramProjector) providerAliases(
 	state *domain.State,
 	userID domain.UserID,

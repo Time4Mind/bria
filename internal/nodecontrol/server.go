@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Time4Mind/bria/internal/backendsetup"
 	"github.com/Time4Mind/bria/internal/clusterstate"
 	"github.com/Time4Mind/bria/internal/clusterupdate"
 	"github.com/Time4Mind/bria/internal/domain"
@@ -41,6 +42,7 @@ type ServerConfig struct {
 	SessionFiles SessionFileReader
 	Starts       sessionstart.Service
 	ProviderAuth providerauth.Service
+	BackendSetup backendsetup.Service
 	SpeechSetup  speechsetup.Service
 	Updates      clusterupdate.Service
 	Enrollments  EnrollmentCommitter
@@ -65,6 +67,7 @@ type Server struct {
 	sessionFiles       SessionFileReader
 	starts             sessionstart.Service
 	providerAuth       providerauth.Service
+	backendSetup       backendsetup.Service
 	speechSetup        speechsetup.Service
 	updates            clusterupdate.Service
 	enrollments        EnrollmentCommitter
@@ -92,7 +95,7 @@ func NewServer(config ServerConfig) (*Server, error) {
 		backupCertificate: config.Certificate,
 		heartbeats:        config.Heartbeats, recovery: config.Recovery,
 		transcripts: config.Transcripts, sessionFiles: config.SessionFiles, starts: config.Starts,
-		providerAuth: config.ProviderAuth, tlsConfig: tlsConfig,
+		providerAuth: config.ProviderAuth, backendSetup: config.BackendSetup, tlsConfig: tlsConfig,
 		speechSetup: config.SpeechSetup,
 		updates:     config.Updates,
 		enrollments: config.Enrollments, enrollmentIssuerID: config.EnrollmentIssuerID,
@@ -147,14 +150,14 @@ func (s *Server) handleMembershipRelocation(writer http.ResponseWriter, request 
 	}
 	// The dynamic membership loop learns the new authenticated address from
 	// the replicated state, updates the TLS resolver, and only then asks Raft
-	// to move the voter. Waiting for the exact committed address prevents a
+	// to move the member. Waiting for the exact committed address prevents a
 	// successful API response from leaving state and membership divergent.
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
-	for !s.admin.IsVoterAt(relocation.NodeID, relocation.RaftAddress) {
+	for !s.admin.IsMemberAt(relocation.NodeID, relocation.RaftAddress) {
 		select {
 		case <-request.Context().Done():
-			http.Error(writer, "voter relocation timed out", http.StatusGatewayTimeout)
+			http.Error(writer, "member relocation timed out", http.StatusGatewayTimeout)
 			return
 		case <-ticker.C:
 		}

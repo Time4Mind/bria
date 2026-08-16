@@ -59,6 +59,27 @@ func TestNodeMembershipListsProviderAliases(t *testing.T) {
 	}
 }
 
+func TestNodeMembershipDistinguishesInstallConnectAndDisconnect(t *testing.T) {
+	screen := RenderNodeMembership(NodeMembershipInput{
+		Copy: englishCopy, Node: domain.Node{ID: "a", Name: "Alpha"}, Backends: "codex",
+		RenameToken: "rename", BackendChoices: []NodeBackendItem{
+			{Name: "claude", Token: "install"},
+			{Name: "codex", Installed: true, Token: "connect"},
+			{Name: "other", Installed: true, Connected: true, Token: "disconnect"},
+		},
+	})
+	grid := CanonicalGrid(screen.Grid)
+	for _, expected := range []string{
+		"[＋ claude · install -> backend_install@install]",
+		"[＋ codex · connect -> backend_connect@connect]",
+		"[✓ other · disconnect -> backend_remove@disconnect]",
+	} {
+		if !strings.Contains(grid, expected) {
+			t.Fatalf("missing %s in:\n%s", expected, grid)
+		}
+	}
+}
+
 func TestNodeMembershipCanReturnToCallingNode(t *testing.T) {
 	screen := RenderNodeMembership(NodeMembershipInput{
 		Copy: englishCopy, Node: domain.Node{ID: "a", Name: "Alpha"}, Backends: "—",

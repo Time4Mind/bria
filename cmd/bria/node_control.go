@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net"
 	"path/filepath"
-	"runtime"
 	"time"
 
 	"github.com/Time4Mind/bria/internal/archive"
@@ -20,7 +19,6 @@ import (
 	"github.com/Time4Mind/bria/internal/platform"
 	"github.com/Time4Mind/bria/internal/runtimehost"
 	"github.com/Time4Mind/bria/internal/sessionname"
-	"github.com/Time4Mind/bria/internal/speechsetup"
 	"github.com/Time4Mind/bria/internal/transcript"
 )
 
@@ -32,6 +30,7 @@ func startNodeRuntimeControl(
 	certificate tls.Certificate,
 	roots *x509.CertPool,
 	backendRuntime backendRuntime,
+	managedBackendRoots map[string]string,
 ) (*nodeRuntimeControl, error) {
 	driver, err := runtimehost.NewTmuxDriver(
 		backendRuntime.runner, 8*time.Second, 400*time.Millisecond, nil,
@@ -192,21 +191,8 @@ func startNodeRuntimeControl(
 	if err != nil {
 		return closeFailedRuntime(executor, store, err)
 	}
-	localSpeechSetup, err := speechsetup.NewManager(speechsetup.Config{
-		NodeID: nodeConfig.NodeID, OS: runtime.GOOS, Arch: runtime.GOARCH,
-		DataDir: nodeConfig.DataDir, FFmpegCommand: nodeConfig.FFmpegCommand,
-		WhisperCommand: nodeConfig.WhisperCommand, WhisperModel: nodeConfig.WhisperModelPath,
-		AppleCommand: nodeConfig.AppleSpeechCommand,
-	})
-	if err != nil {
-		return closeFailedRuntime(executor, store, err)
-	}
-	remoteSpeechSetup, err := nodecontrol.NewSpeechSetupClient(client)
-	if err != nil {
-		return closeFailedRuntime(executor, store, err)
-	}
-	speechSetupRouter, err := nodecontrol.NewSpeechSetupRouter(
-		nodeConfig.NodeID, localSpeechSetup, remoteSpeechSetup,
+	setups, err := newNodeSetupRuntime(
+		ctx, nodeConfig, managedBackendRoots, backendRuntime, client,
 	)
 	if err != nil {
 		return closeFailedRuntime(executor, store, err)
@@ -226,7 +212,8 @@ func startNodeRuntimeControl(
 		Membership: guard, Service: local, Heartbeats: heartbeats, Recovery: heartbeats,
 		Transcripts: localTranscripts, SessionFiles: localSessionFiles, Starts: localStarts,
 		ProviderAuth: localProviderAuth,
-		SpeechSetup:  localSpeechSetup,
+		BackendSetup: setups.localBackends,
+		SpeechSetup:  setups.localSpeech,
 		Updates:      updates.local,
 		Enrollments:  enrollments, EnrollmentIssuerID: nodeConfig.EffectiveEnrollmentIssuerID(),
 	})
@@ -245,9 +232,10 @@ func startNodeRuntimeControl(
 		router: router, transcripts: transcriptRouter, sessionFiles: sessionFileRouter,
 		starts:       startRouter,
 		providerAuth: providerAuthRouter, localProviderAuth: localProviderAuth,
-		speechSetup: speechSetupRouter,
-		updates:     updates,
-		executor:    executor, store: store, client: client,
+		backendSetup: setups.backends,
+		speechSetup:  setups.speech,
+		updates:      updates,
+		executor:     executor, store: store, client: client,
 		server: server, listener: listener, errors: make(chan error, 1),
 	}
 	control.enrollment, err = startEnrollmentRuntime(
@@ -268,6 +256,7 @@ func startNodeRuntimeControl(
 	if err := startNodeHeartbeatLoops(
 		ctx, node, nodeConfig, client, executor, archiveWriter, transcriptReader,
 		backendRuntime.runner,
+		setups.inventory,
 	); err != nil {
 		_ = control.Close()
 		return nil, err

@@ -2,13 +2,167 @@ package telegramapp
 
 import (
 	"context"
+	"fmt"
 	"strings"
+	"time"
 
 	"github.com/Time4Mind/bria/internal/application"
+	"github.com/Time4Mind/bria/internal/backendsetup"
 	"github.com/Time4Mind/bria/internal/domain"
+	"github.com/Time4Mind/bria/internal/i18n"
 	"github.com/Time4Mind/bria/internal/telegrambot"
 	"github.com/Time4Mind/bria/internal/telegramui"
 )
+
+func (h *Handler) handleNodeBackendInstallCallback(
+	ctx context.Context,
+	actor application.Principal,
+	update telegrambot.IncomingUpdate,
+	callback telegramui.Callback,
+) error {
+	if err := h.messenger.AnswerCallbackQuery(ctx, update.CallbackID, ""); err != nil {
+		return err
+	}
+	if h.backendSetup == nil {
+		return domain.ErrInvalidState
+	}
+	nodeID, backend, nodeName, err := h.resolveNodeBackendInstall(actor, callback.Token)
+	if err != nil {
+		return nil
+	}
+	request := backendsetup.Request{NodeID: string(nodeID), Backend: backend}
+	status, err := h.backendSetup.Start(ctx, request)
+	if err != nil {
+		return err
+	}
+	back, err := h.tokens.Node(actor.UserID, telegramui.ActionNodeSettings, nodeID)
+	if err != nil {
+		return err
+	}
+	text := h.copy(actor).Format(
+		i18n.BackendInstalling, backend, nodeName,
+	)
+	message, err := h.messenger.EditScreen(
+		ctx, update.CallbackOrigin, telegramui.RenderBackendSetup(h.copy(actor), text, "", back),
+	)
+	if err != nil {
+		return err
+	}
+	if status.Phase != backendsetup.PhaseReady {
+		go h.watchBackendSetup(actor, request, nodeName, callback.Token, back, message)
+		return nil
+	}
+	go h.watchBackendSetup(actor, request, nodeName, callback.Token, back, message)
+	return nil
+}
+
+func (h *Handler) watchBackendSetup(
+	actor application.Principal,
+	request backendsetup.Request,
+	nodeName string,
+	retry telegramui.OpaqueToken,
+	back telegramui.OpaqueToken,
+	message telegrambot.Message,
+) {
+	ctx, cancel := context.WithTimeout(context.Background(), 16*time.Minute)
+	defer cancel()
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for {
+		status, err := h.backendSetup.Status(ctx, request)
+		if err != nil {
+			return
+		}
+		switch status.Phase {
+		case backendsetup.PhaseFailed:
+			text := h.copy(actor).Format(
+				i18n.BackendInstallFailed, request.Backend, nodeName, status.Detail,
+			)
+			_, _ = h.messenger.EditScreen(
+				ctx, message, telegramui.RenderBackendSetup(h.copy(actor), text, retry, back),
+			)
+			return
+		case backendsetup.PhaseReady:
+			if h.connectInstalledBackend(ctx, actor, domain.NodeID(request.NodeID), request.Backend) {
+				text := h.copy(actor).Format(
+					i18n.BackendInstallReady, request.Backend, nodeName,
+				)
+				_, _ = h.messenger.EditScreen(
+					ctx, message, telegramui.RenderBackendSetup(h.copy(actor), text, "", back),
+				)
+				return
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+func (h *Handler) connectInstalledBackend(
+	ctx context.Context,
+	actor application.Principal,
+	nodeID domain.NodeID,
+	backend string,
+) bool {
+	nodes, err := h.service.ListNodes(actor)
+	if err != nil {
+		return false
+	}
+	for _, item := range nodes {
+		if item.Node.ID != nodeID {
+			continue
+		}
+		for _, installed := range item.Node.InstalledBackends {
+			if strings.EqualFold(installed.Name, backend) {
+				scope := fmt.Sprintf("backend-setup-connect-%s-%s", nodeID, backend)
+				err = h.service.SetNodeBackendConnected(
+					application.WithOperationScope(ctx, scope), actor, nodeID, backend, true,
+				)
+				return err == nil
+			}
+		}
+	}
+	return false
+}
+
+func (h *Handler) resolveNodeBackendInstall(
+	actor application.Principal,
+	token telegramui.OpaqueToken,
+) (domain.NodeID, string, string, error) {
+	nodes, err := h.service.ListNodes(actor)
+	if err != nil {
+		return "", "", "", err
+	}
+	values := make([]string, 0)
+	names := make(map[string]string, len(nodes))
+	for _, item := range nodes {
+		installed := make(map[string]bool, len(item.Node.InstalledBackends))
+		for _, descriptor := range item.Node.InstalledBackends {
+			installed[strings.ToLower(descriptor.Name)] = true
+		}
+		for _, backend := range []string{"claude", "codex"} {
+			if !installed[backend] {
+				value := string(item.Node.ID) + "\x00" + backend
+				values = append(values, value)
+				names[value] = item.Node.Name
+			}
+		}
+	}
+	value, err := h.tokens.ResolveChoice(
+		actor.UserID, telegramui.ActionBackendInstall, "node_backend", token, values,
+	)
+	if err != nil {
+		return "", "", "", err
+	}
+	nodeID, backend, ok := strings.Cut(value, "\x00")
+	if !ok {
+		return "", "", "", domain.ErrNotFound
+	}
+	return domain.NodeID(nodeID), backend, names[value], nil
+}
 
 func (h *Handler) handleNodeBackendCallback(
 	ctx context.Context,

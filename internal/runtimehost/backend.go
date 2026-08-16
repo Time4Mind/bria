@@ -49,9 +49,15 @@ type executableBackendProbe struct {
 }
 
 func NewClaudeProbe(runner CommandRunner, timeout time.Duration) BackendProbe {
+	return NewClaudeCommandProbe(runner, "claude", timeout)
+}
+
+func NewClaudeCommandProbe(
+	runner CommandRunner, executable string, timeout time.Duration,
+) BackendProbe {
 	return &executableBackendProbe{
 		name:        "claude",
-		executable:  "claude",
+		executable:  executable,
 		versionArgs: []string{"--version"},
 		capabilities: []Capability{
 			CapabilitySessionCreate,
@@ -67,9 +73,15 @@ func NewClaudeProbe(runner CommandRunner, timeout time.Duration) BackendProbe {
 }
 
 func NewCodexProbe(runner CommandRunner, timeout time.Duration) BackendProbe {
+	return NewCodexCommandProbe(runner, "codex", timeout)
+}
+
+func NewCodexCommandProbe(
+	runner CommandRunner, executable string, timeout time.Duration,
+) BackendProbe {
 	return &executableBackendProbe{
 		name:        "codex",
-		executable:  "codex",
+		executable:  executable,
 		versionArgs: []string{"--version"},
 		capabilities: []Capability{
 			CapabilitySessionCreate,

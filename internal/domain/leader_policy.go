@@ -9,9 +9,10 @@ const (
 	LeaderSelectionAutomatic LeaderSelectionMode = "automatic"
 )
 
-// LeaderPolicy controls which consensus leader may expose interactive adapters.
+// LeaderPolicy controls which consensus member may expose interactive adapters.
 // Manual is deliberately the zero/default mode for snapshots created before the
-// policy existed. Raft quorum rules remain authoritative in either mode.
+// policy existed. Membership reconciliation makes that member the sole voter;
+// automatic mode restores the ordinary all-voter Raft topology.
 type LeaderPolicy struct {
 	Mode   LeaderSelectionMode `json:"mode,omitempty"`
 	NodeID NodeID              `json:"node_id,omitempty"`

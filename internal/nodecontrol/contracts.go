@@ -34,7 +34,7 @@ type MembershipAdmin interface {
 	Apply(context.Context, clusterstate.Command) (clusterstate.Result, error)
 	LeaderID() string
 	IsMember(string) bool
-	IsVoterAt(string, string) bool
+	IsMemberAt(string, string) bool
 }
 
 type Membership interface {

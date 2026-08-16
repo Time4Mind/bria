@@ -166,9 +166,12 @@ func TestStatusFromLegacyMenuUsesNewRichCarrier(t *testing.T) {
 	}
 }
 
-func TestSpeechSetupWatcherSeedsExistingNodesWithoutRestartSpam(t *testing.T) {
+func TestSpeechSetupWatcherReconcilesExistingAndNewNodes(t *testing.T) {
 	fixture := newFixture(t)
-	fixture.messenger.sendNotify = make(chan struct{}, 1)
+	fixture.messenger.sendNotify = make(chan struct{}, 2)
+	if err := fixture.handler.SetSpeechSetup(&speechSetupStub{}); err != nil {
+		t.Fatal(err)
+	}
 	actor := application.Principal{UserID: 7}
 	preferences, err := fixture.service.Preferences(actor)
 	if err != nil {
@@ -186,8 +189,8 @@ func TestSpeechSetupWatcherSeedsExistingNodesWithoutRestartSpam(t *testing.T) {
 	}()
 	select {
 	case <-fixture.messenger.sendNotify:
-		t.Fatal("existing nodes generated setup spam")
-	case <-time.After(30 * time.Millisecond):
+	case <-time.After(time.Second):
+		t.Fatal("existing node was not reconciled after handler start")
 	}
 	newNode := domain.Node{ID: "new-node", Name: "New node", Status: domain.NodeOnline}
 	if result := fixture.machine.Apply(commandForTest(
@@ -202,8 +205,8 @@ func TestSpeechSetupWatcherSeedsExistingNodesWithoutRestartSpam(t *testing.T) {
 	}
 	cancel()
 	<-done
-	if len(fixture.messenger.sent) != 1 ||
-		!strings.Contains(fixture.messenger.sent[0].Text, "New node") {
+	if len(fixture.messenger.sent) != 2 ||
+		!strings.Contains(fixture.messenger.sent[1].Text, "New node") {
 		t.Fatalf("new-node setup notifications=%#v", fixture.messenger.sent)
 	}
 }

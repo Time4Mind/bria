@@ -113,8 +113,11 @@
 - Leader selection is manual by default and is configured under
   `Settings → Cluster`. The first interactive entry requires the owner to pick
   a leader or explicitly enable automatic selection. A manual assignment is
-  persistent; non-selected nodes wait when it is unavailable. Automatic mode
-  lets the current Raft leader serve. Neither mode weakens Raft quorum.
+  persistent and makes that node the sole voter; other nodes replicate as
+  nonvoters and wait when it is unavailable. The selected leader keeps working
+  if every replica disconnects. Changing it requires the old leader to remain
+  reachable for promotion and transfer. Automatic mode restores ordinary
+  all-voter Raft quorum and lets the elected leader serve.
 - Menu → Status always opens in `Select` mode. Its Rich Markdown table contains
   every server/backend pair, cached quota values, reset time and age in minutes;
   offline rows retain their last value and carry an unavailable marker. Refresh
@@ -138,9 +141,19 @@
   node lifecycle and advertised backend on every auth operation. Credential
   files, child processes, codes and raw CLI output remain node-local and are
   never replicated.
+- Node settings list Claude Code and Codex even when they are not installed.
+  An explicit install action uses npm with the official package name and a
+  node/runner-owned prefix, verifies the CLI version, refreshes inventory, and
+  connects it to Bria. No `sudo`, system-wide package mutation, or implicit
+  connection based only on host discovery is allowed.
+- Speech recognition remains globally off by default. Once enabled, it is a
+  desired-state setting: every current or newly enrolled enabled node starts
+  its platform setup automatically; macOS permission-required state remains
+  visible for the owner to complete.
 - Safe automatic failover uses one node or an odd quorum (normally three). Two
-  connected nodes may operate, but one survivor cannot self-elect; the phone
-  node is the recommended third full voting/runtime node.
+  connected voters may operate, but one survivor cannot self-elect. This limit
+  applies to automatic mode, not to a manual sole-voter leader with nonvoting
+  replicas.
 - Every running node watches Raft's authenticated leader identity locally. A
   15-second loss emits one short owner notification for that node; a later
   leader observation emits one recovery notification. These messages bypass

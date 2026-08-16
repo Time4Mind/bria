@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"runtime"
@@ -34,12 +35,15 @@ func startNodeHeartbeatLoops(
 	archiveVerifier archiveVerifier,
 	transcripts transcriptEventReader,
 	runner runtimehost.JSONRPCCommandRunner,
+	inventory *nodeInventory,
 ) error {
 	bootID, err := platform.NewBootIDProvider().Current(ctx)
 	if err != nil {
 		return fmt.Errorf("read host boot id for heartbeat: %w", err)
 	}
-	inventory := newNodeInventory(discoverLocalBackends(ctx, runner), runner)
+	if inventory == nil {
+		return errors.New("node inventory is required")
+	}
 	claudeQuota, err := quota.NewClaudeCollector(
 		runner, nodeConfig.TmuxSession, nodeConfig.ClaudeCommand, nodeConfig.EffectiveClaudeFlags(),
 	)
@@ -220,13 +224,17 @@ type nodeInventory struct {
 	mu       sync.RWMutex
 	backends []domain.BackendDescriptor
 	runner   runtimehost.CommandRunner
+	commands backendCommands
 }
 
 func newNodeInventory(
 	backends []domain.BackendDescriptor,
 	runner runtimehost.CommandRunner,
+	commands backendCommands,
 ) *nodeInventory {
-	return &nodeInventory{backends: cloneBackends(backends), runner: runner}
+	return &nodeInventory{
+		backends: cloneBackends(backends), runner: runner, commands: commands,
+	}
 }
 
 func (i *nodeInventory) Backends() []domain.BackendDescriptor {
@@ -243,12 +251,16 @@ func (i *nodeInventory) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			backends := discoverLocalBackends(ctx, i.runner)
-			i.mu.Lock()
-			i.backends = cloneBackends(backends)
-			i.mu.Unlock()
+			i.Refresh(ctx)
 		}
 	}
+}
+
+func (i *nodeInventory) Refresh(ctx context.Context) {
+	backends := discoverLocalBackends(ctx, i.runner, i.commands)
+	i.mu.Lock()
+	i.backends = cloneBackends(backends)
+	i.mu.Unlock()
 }
 
 func cloneBackends(backends []domain.BackendDescriptor) []domain.BackendDescriptor {

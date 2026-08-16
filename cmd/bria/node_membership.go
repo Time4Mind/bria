@@ -40,12 +40,12 @@ func maintainConfiguredMembership(
 		if converged || !node.IsLeader() {
 			continue
 		}
-		if err := reconcileConfiguredVoters(ctx, node, nodeConfig); err != nil {
-			fmt.Fprintf(os.Stderr, "Raft membership reconciliation: %v\n", err)
-			continue
-		}
 		if err := registerConfiguredNodes(ctx, node, nodeConfig); err != nil {
 			fmt.Fprintf(os.Stderr, "Raft node registration: %v\n", err)
+			continue
+		}
+		if err := reconcileConfiguredVoters(ctx, node, nodeConfig); err != nil {
+			fmt.Fprintf(os.Stderr, "Raft membership reconciliation: %v\n", err)
 			continue
 		}
 		converged = true
@@ -84,7 +84,7 @@ func setPeerResolverAddresses(
 }
 
 func reconcileConfiguredVoters(
-	ctx context.Context,
+	_ context.Context,
 	node *consensus.Node,
 	nodeConfig config.Config,
 ) error {
@@ -95,26 +95,22 @@ func reconcileConfiguredVoters(
 	if err != nil {
 		return fmt.Errorf("read Raft configuration: %w", err)
 	}
-	for _, peer := range missingConfiguredVoters(configuration, nodeConfig) {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
+	action := nextMembershipAction(configuration, node.State().State(), node.LeaderID())
+	// Startup must finish publishing the local runtime before handing leadership
+	// elsewhere. The continuously running reconciler performs the transfer as
+	// soon as the node is fully ready.
+	if action.kind != membershipTransferLeadership {
+		if err := applyMembershipAction(node, action); err != nil {
+			return fmt.Errorf("reconcile bootstrap Raft membership: %w", err)
 		}
-		// Static peers bootstrap a fresh cluster. Once a voter exists, replicated
-		// dynamic membership owns its address and may have relocated it.
-		if err := node.EnsureVoter(peer.NodeID, peer.Address, membershipChangeTimeout); err != nil {
-			return fmt.Errorf("ensure Raft voter %s: %w", peer.NodeID, err)
-		}
-		fmt.Printf("Raft voter ready: %s at %s\n", peer.NodeID, peer.Address)
 	}
 	configuration, err = node.Configuration()
 	if err != nil {
 		return fmt.Errorf("read reconciled Raft configuration: %w", err)
 	}
-	// Additional voters are expected after invitation-based enrollment. Static
+	// Additional members are expected after invitation-based enrollment. Static
 	// bootstrap peers are seeds, not an exact assertion over durable Raft state.
-	fmt.Printf("Raft membership ready: %d voters\n", len(configuration.Servers))
+	fmt.Printf("Raft membership ready: %d servers\n", len(configuration.Servers))
 	return nil
 }
 

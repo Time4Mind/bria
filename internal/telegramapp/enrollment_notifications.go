@@ -6,6 +6,7 @@ import (
 
 	"github.com/Time4Mind/bria/internal/application"
 	"github.com/Time4Mind/bria/internal/domain"
+	"github.com/Time4Mind/bria/internal/speechsetup"
 	"github.com/Time4Mind/bria/internal/telegramui"
 )
 
@@ -56,34 +57,41 @@ func (h *Handler) scanNewNodeSpeechSetup(ctx context.Context, actor application.
 	if err != nil {
 		return
 	}
-	h.speechMu.Lock()
-	if !h.speechNodesSeeded {
-		for _, item := range nodes {
-			h.knownSpeechNodes[item.Node.ID] = true
-		}
-		h.speechNodesSeeded = true
-		h.speechMu.Unlock()
-		return
-	}
-	h.speechMu.Unlock()
 	for _, item := range nodes {
 		if !item.Node.Enabled() || item.Node.Status == domain.NodeOffline {
 			continue
 		}
 		h.speechMu.Lock()
 		known := h.knownSpeechNodes[item.Node.ID]
-		h.knownSpeechNodes[item.Node.ID] = true
 		h.speechMu.Unlock()
-		if known {
+		if known || h.speechSetup == nil {
 			continue
 		}
-		token, err := h.tokens.Node(
-			actor.UserID, telegramui.ActionNodeSpeechSetup, item.Node.ID,
-		)
+		request := speechsetup.Request{NodeID: string(item.Node.ID)}
+		status, err := h.speechSetup.Status(ctx, request)
 		if err != nil {
 			continue
 		}
-		_, _ = h.messenger.SendScreen(ctx, int64(actor.UserID),
-			telegramui.RenderNewNodeVoiceSetup(h.copy(actor), item.Node.Name, token))
+		notify := status.Phase == speechsetup.PhasePermissionRequired
+		if status.Phase == speechsetup.PhaseReady || status.Phase == speechsetup.PhaseInstalling {
+			h.markSpeechNodeKnown(item.Node.ID)
+			continue
+		}
+		if !notify {
+			status, err = h.speechSetup.Start(ctx, request)
+			if err != nil {
+				continue
+			}
+		}
+		h.markSpeechNodeKnown(item.Node.ID)
+		_, _ = h.messenger.SendScreen(ctx, int64(actor.UserID), telegramui.RenderVoiceSetupStarted(
+			h.copy(actor), []string{item.Node.Name + ": " + speechStatusText(status)},
+		))
 	}
+}
+
+func (h *Handler) markSpeechNodeKnown(nodeID domain.NodeID) {
+	h.speechMu.Lock()
+	h.knownSpeechNodes[nodeID] = true
+	h.speechMu.Unlock()
 }

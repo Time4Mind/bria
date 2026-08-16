@@ -13,13 +13,14 @@ import (
 func discoverLocalBackends(
 	ctx context.Context,
 	runner runtimehost.CommandRunner,
+	commands backendCommands,
 ) []domain.BackendDescriptor {
 	if descriptor, err := runtimehost.NewTmuxProbe(runner, 3*time.Second).Probe(ctx); err != nil || !descriptor.Available {
 		return nil
 	}
 	probes := []runtimehost.BackendProbe{
-		runtimehost.NewClaudeProbe(runner, 3*time.Second),
-		runtimehost.NewCodexProbe(runner, 3*time.Second),
+		runtimehost.NewClaudeCommandProbe(runner, commands.Claude, 3*time.Second),
+		runtimehost.NewCodexCommandProbe(runner, commands.Codex, 3*time.Second),
 	}
 	backends := make([]domain.BackendDescriptor, 0, len(probes))
 	for _, probe := range probes {

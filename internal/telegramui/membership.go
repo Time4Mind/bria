@@ -100,13 +100,6 @@ type NodeMembershipInput struct {
 	BackToken             OpaqueToken
 }
 
-type NodeBackendItem struct {
-	Name      string
-	Version   string
-	Connected bool
-	Token     OpaqueToken
-}
-
 type ProviderAliasItem struct {
 	Backend   string
 	Alias     string
@@ -159,12 +152,15 @@ func RenderNodeMembership(input NodeMembershipInput) Screen {
 	}
 	for _, backend := range input.BackendChoices {
 		label := "＋ " + backend.Name
-		action := ActionBackendConnect
-		if backend.Connected {
+		action := ActionBackendInstall
+		if !backend.Installed {
+			label += " · " + input.Copy.Text(i18n.BackendInstall)
+		} else if backend.Connected {
 			label = "✓ " + backend.Name + " · " + input.Copy.Text(i18n.BackendDisconnect)
 			action = ActionBackendDisconnect
 		} else {
 			label += " · " + input.Copy.Text(i18n.BackendConnect)
+			action = ActionBackendConnect
 		}
 		rows = append(rows, Row{button(label, action, backend.Token)})
 	}

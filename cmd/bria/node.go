@@ -74,6 +74,7 @@ func runNode(arguments []string) error {
 		return fmt.Errorf("open backend runtime: %w", err)
 	}
 	defer backendRuntime.closer.Close()
+	nodeConfig, managedBackendRoots := prepareManagedBackendCommands(nodeConfig, backendRuntime)
 	certificate, roots, err := loadNodeTLS(nodeConfig)
 	if err != nil {
 		return err
@@ -168,6 +169,7 @@ func runNode(arguments []string) error {
 	go maintainDynamicMembership(ctx, node, resolver, nodeConfig)
 	runtimeControl, err := startNodeRuntimeControl(
 		ctx, node, nodeConfig, absoluteConfigPath, certificate, roots, backendRuntime,
+		managedBackendRoots,
 	)
 	if err != nil {
 		return fmt.Errorf("start node runtime control: %w", err)
@@ -258,7 +260,8 @@ func registerLocalNode(
 		clusterstate.UpdateNodeRuntime{
 			NodeID: domain.NodeID(nodeConfig.NodeID), Status: domain.NodeOnline,
 			Version: localBuildVersion(), Backends: connectedLocalBackends(
-				node.State().State(), domain.NodeID(nodeConfig.NodeID), discoverLocalBackends(ctx, runner)),
+				node.State().State(), domain.NodeID(nodeConfig.NodeID),
+				discoverLocalBackends(ctx, runner, configuredBackendCommands(nodeConfig))),
 		},
 	)
 	if err != nil {

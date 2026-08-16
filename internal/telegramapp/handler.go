@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Time4Mind/bria/internal/application"
+	"github.com/Time4Mind/bria/internal/backendsetup"
 	"github.com/Time4Mind/bria/internal/callbacktoken"
 	"github.com/Time4Mind/bria/internal/domain"
 	"github.com/Time4Mind/bria/internal/i18n"
@@ -50,6 +51,7 @@ type Handler struct {
 	renameFlows        map[domain.UserID]nodeRenameFlow
 	providerAliasFlows map[domain.UserID]providerAliasFlow
 	providerAuth       providerauth.Service
+	backendSetup       backendsetup.Service
 	speechSetup        speechsetup.Service
 	clusterUpdater     clusterUpdater
 	providerAuthFlows  map[domain.UserID]providerAuthFlow
@@ -58,7 +60,6 @@ type Handler struct {
 	speechMu           sync.Mutex
 	speechTargets      map[domain.UserID]domain.NodeID
 	knownSpeechNodes   map[domain.NodeID]bool
-	speechNodesSeeded  bool
 	pageMu             sync.Mutex
 	cardPages          map[cardPageKey]cardPageState
 	activity           *activityMessenger
@@ -211,6 +212,9 @@ func (h *Handler) handleCallback(
 	if callback.Action == telegramui.ActionBackendConnect ||
 		callback.Action == telegramui.ActionBackendDisconnect {
 		return h.handleNodeBackendCallback(ctx, actor, update, callback)
+	}
+	if callback.Action == telegramui.ActionBackendInstall {
+		return h.handleNodeBackendInstallCallback(ctx, actor, update, callback)
 	}
 	if callback.Action == telegramui.ActionSelectSession {
 		// Validate the target before the early acknowledgement below. A session

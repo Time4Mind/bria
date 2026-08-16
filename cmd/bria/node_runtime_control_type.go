@@ -14,6 +14,7 @@ type nodeRuntimeControl struct {
 	sessionFiles      *nodecontrol.SessionFileRouter
 	starts            *nodecontrol.StartRouter
 	providerAuth      *nodecontrol.ProviderAuthRouter
+	backendSetup      *nodecontrol.BackendSetupRouter
 	speechSetup       *nodecontrol.SpeechSetupRouter
 	updates           *nodeUpdateControl
 	localProviderAuth *providerauth.Manager

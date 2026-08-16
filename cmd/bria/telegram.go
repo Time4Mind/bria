@@ -102,6 +102,9 @@ func newTelegramAdapter(
 	if err := handler.SetProviderAuth(runtimeControl.providerAuth); err != nil {
 		return nil, err
 	}
+	if err := handler.SetBackendSetup(runtimeControl.backendSetup); err != nil {
+		return nil, err
+	}
 	if err := handler.SetSpeechSetup(runtimeControl.speechSetup); err != nil {
 		return nil, err
 	}

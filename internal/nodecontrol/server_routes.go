@@ -16,6 +16,8 @@ func (s *Server) registerHandlers(mux *http.ServeMux) {
 	mux.HandleFunc(providerAuthSubmitPath, s.handleProviderAuthSubmit)
 	mux.HandleFunc(providerAuthStatusPath, s.handleProviderAuthStatus)
 	mux.HandleFunc(providerAuthCancelPath, s.handleProviderAuthCancel)
+	mux.HandleFunc(backendSetupStartPath, s.handleBackendSetupStart)
+	mux.HandleFunc(backendSetupStatusPath, s.handleBackendSetupStatus)
 	mux.HandleFunc(speechSetupStartPath, s.handleSpeechSetupStart)
 	mux.HandleFunc(speechSetupStatusPath, s.handleSpeechSetupStatus)
 	s.registerUpdateHandlers(mux)

@@ -20,6 +20,14 @@ over a bounded Unix-socket protocol. The runner receives no node certificate,
 Raft state, Telegram token, callback key, updater access, or ACL operation;
 see [Linux backend isolation](linux-runner-isolation.md).
 
+Node settings always expose the supported `claude` and `codex` backends. An
+explicit install action invokes npm with a fixed official package name and a
+user-owned prefix under the provider runtime home; Bria never uses `sudo` or a
+system package directory. With runner isolation enabled, installation and
+later execution both occur inside the separate runner identity. Only a
+successful version probe refreshes inventory and permits the explicit Bria
+connection; host discovery alone never grants provider access.
+
 A no-init supervisor or a
 platform service manager is an operational wrapper, not a second application
 authority. Linux systemd support is independent of AMD64 versus ARM64;
@@ -66,6 +74,11 @@ while macOS may invoke the separately signed Apple Speech helper with
 on-device recognition enforced. All of those steps execute inside the existing
 per-session FIFO, so a slow voice message cannot be overtaken by later text or
 redirected by navigation.
+
+Speech recognition is off by default. Once the owner enables it, the setting
+is treated as desired state: the active interaction adapter reconciles every
+current and newly enrolled enabled node, starts missing local setup, and keeps
+macOS permission-required state visible for manual completion.
 
 When a session's origin node is unavailable, the leader commits input to its
 replicated per-session queue instead of attempting delivery. The global owner
@@ -124,9 +137,11 @@ The invitation contains the public CA certificate, issuer identity, endpoint,
 and one-use secret. A joining node generates its Ed25519 key locally, submits a
 signed contract over pinned TLS, and proves possession on every status poll.
 Approval adds the node to desired membership; a leader-only reconciler changes
-HashiCorp Raft one voter at a time. The issuer returns a certificate for that
-exact public key and never receives the private key. Only that configured
-issuer identity may forward a validated enrollment request to the leader.
+HashiCorp Raft membership one server at a time. In manual mode it enrolls other
+nodes as nonvoters; automatic mode promotes them to voters. The issuer returns
+a certificate for that exact public key and never receives the private key.
+Only that configured issuer identity may forward a validated enrollment
+request to the leader.
 
 `Disabled` is a replicated administrative state distinct from temporary
 offline reachability. Disabled nodes cannot create or control sessions, leave
@@ -156,21 +171,22 @@ or modify the Raft algorithm.
 
 ## Safe topology
 
-A single node is a valid standalone cluster. Automatic failover requires an odd
-quorum, normally three voting nodes; the always-on phone node can be the third
-full Bria node and remains capable of hosting its own sessions. A two-node
-cluster may operate while both members are connected, but after either member
-is lost the survivor cannot safely elect itself without risking split brain.
-Bria never bypasses this Raft safety rule or implements forced two-node
-election logic.
+A single node is a valid standalone cluster. Manual mode makes the selected
+leader the sole voter and keeps every other enabled node as a nonvoter. The
+leader therefore continues committing when every replica disconnects. A
+nonvoter never starts an election, so an unavailable selected leader is not
+replaced and cannot be changed until it returns. Normal nonvoter log catch-up
+is best effort; provider transcripts remain origin-local.
 
-The leader policy does not alter quorum. A manually selected node must still
-win or receive legitimate Raft leadership before it can serve adapters. If the
-selected node is unavailable, followers wait; they do not elect a replacement
-for product work unless the owner enabled automatic selection. In a three-voter
-configuration, one surviving voter still cannot commit even when it is the
-preferred node. An intentionally reduced standalone deployment must first use
-the normal membership lifecycle to become a one-voter cluster.
+Changing the manual leader while the old leader is reachable first promotes
+the target, transfers leadership, and then demotes the old voter. No forced
+transfer or recovery election occurs after the old leader becomes unavailable.
+
+Automatic mode promotes enabled nodes to ordinary voters. Its failover safety
+requires an odd quorum, normally three voting nodes. A two-voter automatic
+cluster may operate while both members are connected, but after either member
+is lost the survivor cannot safely elect itself. Bria uses upstream Raft
+membership transitions and never implements forced two-node election logic.
 
 ## Go engineering standard
 

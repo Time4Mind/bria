@@ -100,6 +100,7 @@ func TestCoordinatorDoesNotReinstallCurrentRelease(t *testing.T) {
 
 func TestCoordinatorUpdatesFollowersThenTransfersLeadership(t *testing.T) {
 	state := domain.NewState()
+	state.LeaderPolicy.Mode = domain.LeaderSelectionAutomatic
 	for index, id := range []domain.NodeID{"leader", "follower-a", "follower-b"} {
 		if err := state.AddNode(domain.Node{
 			ID: id, Name: string(id), Status: domain.NodeOnline, Lifecycle: domain.NodeActive,
@@ -154,6 +155,43 @@ func TestCoordinatorUpdatesFollowersThenTransfersLeadership(t *testing.T) {
 	coordinator.reconcile(ctx)
 	if current := machine.State().ClusterUpdate; current == nil || current.Phase != domain.ClusterUpdateCompleted {
 		t.Fatalf("update did not complete: %#v", current)
+	}
+}
+
+func TestCoordinatorRestartsManualSoleVoterWithoutTransfer(t *testing.T) {
+	state := domain.NewState()
+	state.LeaderPolicy.NodeID = "leader"
+	for index, id := range []domain.NodeID{"leader", "replica"} {
+		if err := state.AddNode(domain.Node{
+			ID: id, Name: string(id), Status: domain.NodeOnline, Lifecycle: domain.NodeActive,
+			Version: "v1", OS: "linux", Arch: "amd64", CreatedAt: time.Unix(int64(index+1), 0),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	machine := clusterstate.NewMachine(state)
+	consensus := &coordinatorConsensus{machine: machine, leader: "leader", local: "leader"}
+	nodes := &coordinatorNodes{manifest: VerifiedManifest{
+		Manifest: Manifest{Version: "v2", Artifacts: []Artifact{{OS: "linux", Arch: "amd64"}}},
+		SHA256:   "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+	}}
+	coordinator, err := NewCoordinator("leader", machine, consensus, nodes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	coordinator.now = func() time.Time { return time.Unix(100, 0) }
+	if _, err := coordinator.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	coordinator.reconcile(context.Background())
+	publishVersion(t, machine, "replica", "v2")
+	coordinator.reconcile(context.Background())
+	coordinator.reconcile(context.Background())
+	if consensus.leader != "leader" {
+		t.Fatalf("manual leadership transferred to %s", consensus.leader)
+	}
+	if nodes.started[len(nodes.started)-1] != "leader" {
+		t.Fatalf("manual leader was not restarted last: %v", nodes.started)
 	}
 }
 

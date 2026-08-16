@@ -13,9 +13,10 @@ cluster foundation.
 
 ## Product invariants
 
-- every enabled node is a voting member and may become Raft leader;
-- leader selection is manual by default; the owner assigns it under
-  `Settings → Cluster`, while automatic selection is an explicit option;
+- leader selection is manual by default; the selected leader is the sole Raft
+  voter, while other enabled nodes are replication-only members;
+- the owner assigns the leader under `Settings → Cluster`; automatic selection
+  is an explicit mode that promotes enabled nodes to ordinary Raft voters;
 - only the selected node, while it is also the current Raft leader, runs
   interactive adapters and cluster work; other nodes wait for it;
 - global metadata is replicated through Raft; raw provider transcripts remain
@@ -53,7 +54,7 @@ the pragmatic Go engineering contract in [CONTRIBUTING.md](CONTRIBUTING.md).
   node identity, independent of IP address;
 - Telegram-approved enrollment with one-use 30-minute invitations,
   node-generated keys, pinned TLS certificate delivery, signed-contract/manual-claim
-  fallback, 24-hour pending requests, and dynamic Raft voter reconciliation;
+  fallback, 24-hour pending requests, and dynamic Raft suffrage reconciliation;
 - explicit Active → Disabled → Deleted lifecycle, restricted maintenance mode,
   close-and-archive error reporting, identity tombstones, and renameable node
   names with automatic duplicate suffixes;
@@ -68,6 +69,9 @@ the pragmatic Go engineering contract in [CONTRIBUTING.md](CONTRIBUTING.md).
   untrusted Linux provider agents, keeping node keys, Telegram secrets, Raft,
   updates, and access decisions in a separate control identity, with an
   owner/admin-enforced policy selected independently for each node;
+- node-settings installation of missing Claude Code or Codex CLIs into a
+  user-owned node/runner prefix, followed by a version probe and explicit Bria
+  connection; host discovery alone never grants access to a provider;
 - a transport-neutral interaction lifecycle plus CCBot-compatible Telegram
   grids, actor-bound opaque callbacks, a bounded Bot API client, private-DM
   parser, and leader-gated durable polling;
@@ -97,15 +101,16 @@ the pragmatic Go engineering contract in [CONTRIBUTING.md](CONTRIBUTING.md).
   snapshots, five/ten-minute polling, daily budget tracking, unique-account
   threshold alerts, and no provider credentials or raw terminal output in
   Raft;
-- three-voter Raft replication and leader-failover integration coverage;
+- sole-voter continuity plus three-voter Raft replication and automatic
+  leader-failover integration coverage;
 - follower-safe, node-local Telegram warnings when a running node loses and
-  later restores cluster connectivity, without weakening Raft quorum rules;
+  later restores cluster connectivity;
 - authenticated health/readiness probes that distinguish a live process from
   a node with a current Raft leader, an mTLS-only Prometheus metrics endpoint,
   plus process-level disk/mTLS failover chaos coverage;
 - owner-initiated signed rolling updates with per-node HTTPS downloads,
-  followers-first ordering, leadership transfer, replicated progress, and a
-  detached automatic rollback watchdog;
+  replicas-first ordering, automatic-mode leadership transfer, manual-mode
+  sole-leader restart, replicated progress, and a detached rollback watchdog;
 - bootstrap CLI and a persistent single-node daemon vertical slice.
 
 ## Build and verify

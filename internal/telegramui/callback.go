@@ -48,6 +48,7 @@ const (
 	ActionProviderAuthCancel   Action = "provider_auth_cancel"
 	ActionBackendConnect       Action = "backend_connect"
 	ActionBackendDisconnect    Action = "backend_remove"
+	ActionBackendInstall       Action = "backend_install"
 	ActionNewSession           Action = "new"
 	ActionNewNode              Action = "new_node"
 	ActionNewBackend           Action = "new_backend"
@@ -177,7 +178,7 @@ func knownAction(action Action) bool {
 		ActionNodeDelete, ActionNodeDeleteYes,
 		ActionNodeRename, ActionNodeIsolationRequire, ActionNodeIsolationAllow,
 		ActionProviderAlias, ActionProviderAuth, ActionProviderAuthCancel,
-		ActionBackendConnect, ActionBackendDisconnect,
+		ActionBackendConnect, ActionBackendDisconnect, ActionBackendInstall,
 		ActionNewSession, ActionNewNode, ActionNewBackend, ActionNewDirectory,
 		ActionNewDirectoryUp, ActionNewDirectoryPick, ActionNewDirectoryBack,
 		ActionNewDirectoryPrev, ActionNewDirectoryFirst,

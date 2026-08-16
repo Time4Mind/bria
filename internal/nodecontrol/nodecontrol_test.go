@@ -78,7 +78,7 @@ func (a *membershipAdminRecorder) LeaderID() string { return a.leader }
 func (a *membershipAdminRecorder) IsMember(nodeID string) bool {
 	return a.members[nodeID]
 }
-func (a *membershipAdminRecorder) IsVoterAt(nodeID, address string) bool {
+func (a *membershipAdminRecorder) IsMemberAt(nodeID, address string) bool {
 	return a.members[nodeID] && a.addresses[nodeID] == address
 }
 
@@ -327,7 +327,7 @@ func TestMembershipRelocationPublishesAddressBeforeWaitingForRaft(t *testing.T) 
 	server.handleMembershipRelocation(recorder, request)
 	if recorder.Code != http.StatusNoContent ||
 		admin.command.Kind != clusterstate.CommandUpdateNodeMetadata ||
-		!admin.IsVoterAt("target", "target.bria.internal:7946") {
+		!admin.IsMemberAt("target", "target.bria.internal:7946") {
 		t.Fatalf("status=%d kind=%q address=%q", recorder.Code, admin.command.Kind,
 			admin.addresses["target"])
 	}

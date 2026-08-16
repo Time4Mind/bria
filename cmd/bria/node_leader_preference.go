@@ -29,17 +29,9 @@ func maintainLeaderPolicy(ctx context.Context, node *consensus.Node) {
 func reconcileLeaderPolicy(ctx context.Context, node *consensus.Node) {
 	state := node.State().State()
 	if state.LeaderPolicy.EffectiveMode() == domain.LeaderSelectionManual {
-		targetID := state.LeaderPolicy.NodeID
-		if targetID == "" || node.LeaderID() == string(targetID) {
-			return
-		}
-		target, exists := state.Nodes[targetID]
-		if !exists || !target.Enabled() || target.Status == domain.NodeOffline {
-			return
-		}
-		if err := node.TransferLeadershipTo(string(targetID)); err != nil {
-			fmt.Fprintf(os.Stderr, "bria preferred leader: %v\n", err)
-		}
+		// Manual transfer is coupled to voter promotion/demotion by the
+		// membership reconciler. Running a second transfer loop here can race the
+		// transitional two-voter configuration.
 		return
 	}
 	reconcileTemporaryLeader(ctx, node)
