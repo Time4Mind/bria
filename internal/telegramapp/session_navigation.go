@@ -103,7 +103,7 @@ func (h *Handler) selectSession(
 		return telegramui.Screen{}, err
 	}
 	page := h.rememberedCardPage(actor.UserID, ref)
-	return h.renderSessionCard(ctx, actor, ref, page)
+	return h.renderSelectedSessionCard(ctx, actor, ref, page)
 }
 
 func (h *Handler) resolveSession(

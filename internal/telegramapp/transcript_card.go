@@ -179,6 +179,25 @@ func (h *Handler) renderSessionCard(
 	ref domain.SessionRef,
 	page int,
 ) (telegramui.Screen, error) {
+	return h.renderSessionCardForSelection(ctx, actor, ref, page, false)
+}
+
+func (h *Handler) renderSelectedSessionCard(
+	ctx context.Context,
+	actor application.Principal,
+	ref domain.SessionRef,
+	page int,
+) (telegramui.Screen, error) {
+	return h.renderSessionCardForSelection(ctx, actor, ref, page, true)
+}
+
+func (h *Handler) renderSessionCardForSelection(
+	ctx context.Context,
+	actor application.Principal,
+	ref domain.SessionRef,
+	page int,
+	acknowledgeFinal bool,
+) (telegramui.Screen, error) {
 	if recovery, ok := h.controls.(interface {
 		EnsureName(application.Principal, domain.SessionRef) bool
 	}); ok {
@@ -187,7 +206,18 @@ func (h *Handler) renderSessionCard(
 	if screen, ok, err := h.renderInteractiveSessionCard(ctx, actor, ref); ok || err != nil {
 		return screen, err
 	}
-	return h.renderRegularSessionCard(ctx, actor, ref, page)
+	snapshot, err := h.renderSessionCardSnapshot(ctx, actor, ref, page)
+	if err == nil && acknowledgeFinal && snapshot.screen.Checkpoint != nil {
+		if finalAt, final := finalTranscriptAt(snapshot.events); final {
+			// Explicitly selecting a completed session renders its existing card,
+			// even when the user left that session on a historical page. Treat that
+			// selection as delivery of the already-settled final; otherwise switching
+			// away discards the current-card watermark and reconciliation reposts a
+			// duplicate carrier as soon as the user switches back.
+			snapshot.screen.Checkpoint.RenderedFinalAt = finalAt
+		}
+	}
+	return snapshot.screen, err
 }
 
 func (h *Handler) renderRegularSessionCard(

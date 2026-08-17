@@ -688,6 +688,7 @@ func TestCompletedSessionSwitchKeepsReplicatedRichCarrier(t *testing.T) {
 
 func TestSessionSwitchRestoresEachSessionsPageAndFollowMode(t *testing.T) {
 	fixture := newFixture(t)
+	actor := application.Principal{UserID: 7}
 	firstRef := domain.SessionRef{NodeID: "allowed", SessionID: "live"}
 	second := domain.Session{
 		ID: "page-second", NodeID: "allowed", OwnerID: 7, Name: "Page Second",
@@ -699,10 +700,14 @@ func TestSessionSwitchRestoresEachSessionsPageAndFollowMode(t *testing.T) {
 	)); result.Err() != nil {
 		t.Fatal(result.Err())
 	}
+	finalAt := time.Now().Add(-time.Second).UTC()
 	controls := &blockingControls{events: []transcript.Event{
-		{Kind: transcript.EventAssistantFinal, Text: "Answer one"},
-		{Kind: transcript.EventAssistantFinal, Text: "Answer two"},
-		{Kind: transcript.EventAssistantFinal, Text: "Answer three"},
+		{Kind: transcript.EventAssistantFinal, Text: "Answer one",
+			Timestamp: finalAt.Add(-2 * time.Second).Format(time.RFC3339Nano)},
+		{Kind: transcript.EventAssistantFinal, Text: "Answer two",
+			Timestamp: finalAt.Add(-time.Second).Format(time.RFC3339Nano)},
+		{Kind: transcript.EventAssistantFinal, Text: "Answer three",
+			Timestamp: finalAt.Format(time.RFC3339Nano)},
 	}}
 	handler, err := telegramapp.NewHandlerWithControls(
 		fixture.service, fixture.projector, fixture.codec, fixture.messenger, controls,
@@ -770,6 +775,18 @@ func TestSessionSwitchRestoresEachSessionsPageAndFollowMode(t *testing.T) {
 	}
 	if restored := selectSession(second.Ref()); restored.Grid[0][1].Label != "1/3" {
 		t.Fatalf("second restored page = %s", restored.Grid[0][1].Label)
+	}
+	card, ok, cardErr := fixture.service.TelegramResponseCard(actor)
+	if cardErr != nil || !ok || card.Session != second.Ref() ||
+		!card.RenderedFinalAt.Equal(finalAt) {
+		t.Fatalf("restored completed session lost final delivery: %#v / %v / %v",
+			card, ok, cardErr)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	handler.RunBackgroundNotifications(ctx, 5*time.Millisecond)
+	if len(fixture.messenger.sent) != 0 {
+		t.Fatalf("restored historical page reposted final: %#v", fixture.messenger.sent)
 	}
 
 	latestData, err := secondScreen.Grid[0][1].Callback.Encode()
