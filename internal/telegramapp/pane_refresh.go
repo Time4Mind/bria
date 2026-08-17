@@ -20,17 +20,19 @@ const (
 	paneRefreshDelay   = 1200 * time.Millisecond
 	paneRefreshLimit   = 1500
 	paneCaptureLimit   = time.Second
+	immediatePaneCache = 5 * time.Second
 	typingRefreshDelay = 4 * time.Second
 )
 
 type paneAttachTiming struct {
+	cache   time.Duration
 	capture time.Duration
 	render  time.Duration
 	outcome string
 }
 
 func (timing paneAttachTiming) total() time.Duration {
-	return timing.capture + timing.render
+	return timing.cache + timing.capture + timing.render
 }
 
 // schedulePaneRefresh never delays an update handler. A newer card generation
@@ -319,6 +321,7 @@ func (h *Handler) attachPane(
 	screen.Pane = &telegramui.PaneImage{
 		PNG: rendered.PNG, Hash: rendered.Hash, AnchorOffset: paneAnchorOffset(*screen),
 	}
+	h.rememberPaneImage(ref, *screen.Pane)
 }
 
 func (h *Handler) attachImmediatePane(
@@ -328,9 +331,18 @@ func (h *Handler) attachImmediatePane(
 	screen *telegramui.Screen,
 ) paneAttachTiming {
 	timing := paneAttachTiming{outcome: "capture_error"}
+	startedAt := time.Now()
+	if cached, ok := h.cachedPaneImage(ref, immediatePaneCache); ok {
+		timing.cache = time.Since(startedAt)
+		timing.outcome = "cache"
+		cached.AnchorOffset = paneAnchorOffset(*screen)
+		screen.Pane = &cached
+		return timing
+	}
+	timing.cache = time.Since(startedAt)
 	captureCtx, cancel := context.WithTimeout(ctx, paneCaptureLimit)
 	defer cancel()
-	startedAt := time.Now()
+	startedAt = time.Now()
 	pane, err := h.controls.CapturePane(captureCtx, actor,
 		fmt.Sprintf("pane-open-%d", time.Now().UnixNano()), ref)
 	timing.capture = time.Since(startedAt)
@@ -348,6 +360,7 @@ func (h *Handler) attachImmediatePane(
 	screen.Pane = &telegramui.PaneImage{
 		PNG: rendered.PNG, Hash: rendered.Hash, AnchorOffset: paneAnchorOffset(*screen),
 	}
+	h.rememberPaneImage(ref, *screen.Pane)
 	return timing
 }
 

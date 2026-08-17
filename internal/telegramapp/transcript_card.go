@@ -41,13 +41,14 @@ func (timing sessionCardTiming) log(ref domain.SessionRef, page int) {
 	log.Printf(
 		"bria telegram: card_timing ref=%q page=%d total_ms=%d session_ms=%d "+
 			"transcript_ms=%d cache_ms=%d pending_ms=%d projection_ms=%d "+
-			"preferences_ms=%d pane_ms=%d pane_capture_ms=%d pane_render_ms=%d "+
+			"preferences_ms=%d pane_ms=%d pane_cache_ms=%d pane_capture_ms=%d pane_render_ms=%d "+
 			"events=%d transcript_source=%s pane_outcome=%s outcome=%s",
 		ref.Key(), page, total.Milliseconds(), timing.session.Milliseconds(),
 		timing.transcript.Milliseconds(), timing.cache.Milliseconds(),
 		timing.pending.Milliseconds(), timing.projection.Milliseconds(),
 		timing.preferences.Milliseconds(), timing.pane.total().Milliseconds(),
-		timing.pane.capture.Milliseconds(), timing.pane.render.Milliseconds(),
+		timing.pane.cache.Milliseconds(), timing.pane.capture.Milliseconds(),
+		timing.pane.render.Milliseconds(),
 		timing.events, timing.transcriptSource, timing.pane.outcome, timing.outcome,
 	)
 }

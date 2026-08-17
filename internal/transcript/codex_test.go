@@ -58,6 +58,47 @@ func TestReaderParsesCodexEvents(t *testing.T) {
 	}
 }
 
+func TestReaderCachesOnlyUnchangedTranscriptVersion(t *testing.T) {
+	layout := newTestLayout(t)
+	workdir := "/srv/project"
+	sessionID := "codex-cache-session"
+	path := filepath.Join(layout.codex, "2026", "08", "17", "rollout-cache.jsonl")
+	initial := `{"type":"session_meta","payload":{"id":"codex-cache-session","cwd":"/srv/project"}}
+{"timestamp":"t1","type":"event_msg","payload":{"type":"user_message","message":"first"}}
+`
+	writeTestFile(t, path, initial)
+	reader := newTestReader(t, layout, nil)
+	request := Request{Backend: BackendCodex, ProviderSessionID: sessionID, Workdir: workdir}
+
+	first, err := reader.Read(context.Background(), request)
+	if err != nil || len(first) != 1 || first[0].Text != "first" {
+		t.Fatalf("first read = %#v, %v", first, err)
+	}
+	first[0].Text = "mutated by caller"
+	second, err := reader.Read(context.Background(), request)
+	if err != nil || len(second) != 1 || second[0].Text != "first" {
+		t.Fatalf("cached read = %#v, %v", second, err)
+	}
+
+	handle, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := handle.WriteString(
+		`{"timestamp":"t2","type":"event_msg","payload":{"type":"agent_message","message":"second","phase":"final"}}` + "\n",
+	); err != nil {
+		handle.Close()
+		t.Fatal(err)
+	}
+	if err := handle.Close(); err != nil {
+		t.Fatal(err)
+	}
+	third, err := reader.Read(context.Background(), request)
+	if err != nil || len(third) != 2 || third[1].Text != "second" {
+		t.Fatalf("updated read = %#v, %v", third, err)
+	}
+}
+
 func TestReaderFormatsCodexExecWrapperAsBash(t *testing.T) {
 	layout := newTestLayout(t)
 	path := filepath.Join(layout.codex, "2026", "08", "15", "rollout-exec.jsonl")

@@ -3,6 +3,7 @@ package transcript
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -18,6 +19,9 @@ type Reader struct {
 	config       Config
 	resolveMu    sync.Mutex
 	resolveCache map[resolveCacheKey]resolveCacheEntry
+	readMu       sync.Mutex
+	readCache    map[string]readCacheEntry
+	readOrder    []string
 }
 
 type resolveCacheKey struct {
@@ -31,7 +35,14 @@ type resolveCacheEntry struct {
 	expiresAt time.Time
 }
 
+type readCacheEntry struct {
+	size       int64
+	modifiedAt time.Time
+	events     []Event
+}
+
 const negativeResolveTTL = time.Second
+const maxReadCacheEntries = 32
 
 func NewReader(config Config) (*Reader, error) {
 	normalized, err := config.normalized()
@@ -41,10 +52,18 @@ func NewReader(config Config) (*Reader, error) {
 	return &Reader{
 		config:       normalized,
 		resolveCache: make(map[resolveCacheKey]resolveCacheEntry),
+		readCache:    make(map[string]readCacheEntry),
 	}, nil
 }
 
 func (r *Reader) Read(ctx context.Context, request Request) ([]Event, error) {
+	startedAt := time.Now()
+	cacheHit := false
+	eventCount := 0
+	defer func() {
+		log.Printf("bria transcript: read_timing backend=%s total_ms=%d cache=%t events=%d",
+			request.Backend, time.Since(startedAt).Milliseconds(), cacheHit, eventCount)
+	}()
 	if err := validateRequest(request); err != nil {
 		return nil, err
 	}
@@ -65,6 +84,15 @@ func (r *Reader) Read(ctx context.Context, request Request) ([]Event, error) {
 	if err != nil {
 		return nil, err
 	}
+	before, err := os.Stat(path)
+	if err != nil {
+		return nil, fmt.Errorf("stat transcript: %w", err)
+	}
+	if events, ok := r.cachedRead(path, before); ok {
+		cacheHit = true
+		eventCount = len(events)
+		return events, nil
+	}
 
 	lines, err := readRecentJSONLLines(path, r.config.MaxReadBytes, r.config.MaxLineBytes)
 	if err != nil {
@@ -80,7 +108,56 @@ func (r *Reader) Read(ctx context.Context, request Request) ([]Event, error) {
 	if len(events) > r.config.MaxEvents {
 		events = events[len(events)-r.config.MaxEvents:]
 	}
+	eventCount = len(events)
+	if after, statErr := os.Stat(path); statErr == nil && sameTranscriptFileVersion(before, after) {
+		r.rememberRead(path, after, events)
+	}
 	return events, nil
+}
+
+func sameTranscriptFileVersion(left, right os.FileInfo) bool {
+	return left.Size() == right.Size() && left.ModTime().Equal(right.ModTime())
+}
+
+func (r *Reader) cachedRead(path string, info os.FileInfo) ([]Event, bool) {
+	r.readMu.Lock()
+	defer r.readMu.Unlock()
+	entry, ok := r.readCache[path]
+	if !ok || entry.size != info.Size() || !entry.modifiedAt.Equal(info.ModTime()) {
+		return nil, false
+	}
+	return cloneEvents(entry.events), true
+}
+
+func (r *Reader) rememberRead(path string, info os.FileInfo, events []Event) {
+	r.readMu.Lock()
+	defer r.readMu.Unlock()
+	for index, existing := range r.readOrder {
+		if existing == path {
+			r.readOrder = append(r.readOrder[:index], r.readOrder[index+1:]...)
+			break
+		}
+	}
+	r.readCache[path] = readCacheEntry{
+		size: info.Size(), modifiedAt: info.ModTime(), events: cloneEvents(events),
+	}
+	r.readOrder = append(r.readOrder, path)
+	for len(r.readOrder) > maxReadCacheEntries {
+		oldest := r.readOrder[0]
+		r.readOrder = r.readOrder[1:]
+		delete(r.readCache, oldest)
+	}
+}
+
+func cloneEvents(events []Event) []Event {
+	result := append([]Event(nil), events...)
+	for index := range result {
+		if result[index].ContextPercent != nil {
+			value := *result[index].ContextPercent
+			result[index].ContextPercent = &value
+		}
+	}
+	return result
 }
 
 func validateRequest(request Request) error {
