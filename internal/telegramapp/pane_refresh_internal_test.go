@@ -7,6 +7,7 @@ import (
 
 	"github.com/Time4Mind/bria/internal/application"
 	"github.com/Time4Mind/bria/internal/domain"
+	"github.com/Time4Mind/bria/internal/telegramui"
 	"github.com/Time4Mind/bria/internal/transcript"
 )
 
@@ -53,5 +54,13 @@ func TestCardEventsHideOnlyTrailingAssistantMemoryMetadata(t *testing.T) {
 	}
 	if events[3].Text != "Visible answer" {
 		t.Fatalf("trailing assistant metadata remained: %q", events[3].Text)
+	}
+}
+
+func TestPaneAnchorUsesSessionContentBoundary(t *testing.T) {
+	text := "answer\n\ncontext: 42%\n\nbackground"
+	screen := telegramui.Screen{Text: text, PaneAnchorOffset: len("answer")}
+	if got := paneAnchorOffset(screen); got != len("answer") {
+		t.Fatalf("pane anchor = %d", got)
 	}
 }

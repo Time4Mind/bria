@@ -166,6 +166,26 @@ func TestCardRendererPaginationIsBoundedDeterministicAndLatest(t *testing.T) {
 	}
 }
 
+func TestCardRendererTracksBeginningOfLatestResponse(t *testing.T) {
+	result := application.RenderCardEventPages(
+		domain.DefaultUserPreferences(), []application.CardEvent{
+			{Kind: application.CardEventAssistantText, Text: "older answer", PageBreak: true},
+			{Kind: application.CardEventAssistantText,
+				Text:      "LATEST RESPONSE START " + strings.Repeat("middle ", 30) + "LATEST RESPONSE END",
+				PageBreak: true},
+		}, fixedCardOptions(80),
+	)
+	if result.LatestResponseStart.Number < 2 ||
+		result.LatestResponseStart.Number >= result.Latest.Number {
+		t.Fatalf("latest response pages = start %#v, latest %#v",
+			result.LatestResponseStart, result.Latest)
+	}
+	if !strings.Contains(result.LatestResponseStart.RichMarkdown, "LATEST RESPONSE START") ||
+		strings.Contains(result.LatestResponseStart.RichMarkdown, "LATEST RESPONSE END") {
+		t.Fatalf("latest response start page = %q", result.LatestResponseStart.RichMarkdown)
+	}
+}
+
 func TestCardRendererBoundsMultibytePagesForTelegramFallback(t *testing.T) {
 	events := []application.CardEvent{{
 		Kind: application.CardEventAssistantText,

@@ -5,12 +5,22 @@ import (
 	"unicode/utf8"
 )
 
-func packCardEventPages(blocks []cardEventBlock, runeLimit, byteLimit int) []string {
+type packedCardEventPages struct {
+	pages               []string
+	latestResponseStart int
+}
+
+func packCardEventPages(
+	blocks []cardEventBlock,
+	runeLimit int,
+	byteLimit int,
+) packedCardEventPages {
 	if len(blocks) == 0 {
-		return []string{""}
+		return packedCardEventPages{pages: []string{""}}
 	}
 	pages := make([]string, 0, 1)
 	current := ""
+	latestResponseStart := 0
 	for _, block := range blocks {
 		if block.pageBreak && current != "" {
 			pages = append(pages, current)
@@ -22,15 +32,20 @@ func packCardEventPages(blocks []cardEventBlock, runeLimit, byteLimit int) []str
 		}
 		if current != "" && cardTextTooLong(candidate, runeLimit, byteLimit) {
 			pages = append(pages, current)
-			current = block.text
-		} else {
-			current = candidate
+			current = ""
+			candidate = block.text
 		}
+		if block.responseStart {
+			latestResponseStart = len(pages) + 1
+		}
+		current = candidate
 	}
 	if current != "" {
 		pages = append(pages, current)
 	}
-	return pages
+	return packedCardEventPages{
+		pages: pages, latestResponseStart: latestResponseStart,
+	}
 }
 
 func splitCardPlainText(text string, runeLimit, byteLimit int) []string {

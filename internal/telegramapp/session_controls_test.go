@@ -158,7 +158,8 @@ func TestPaneRefreshRendersFinalAnswerWhenRuntimeAlreadySettledIdle(t *testing.T
 	}
 	controls := &blockingControls{ref: ref, afterSend: []transcript.Event{
 		{Kind: transcript.EventToolResult, Head: "Bash", Body: "tool completed"},
-		{Kind: transcript.EventAssistantFinal, Text: "FINAL ANSWER",
+		{Kind: transcript.EventAssistantFinal,
+			Text:      "FINAL ANSWER START " + strings.Repeat("middle ", 1000) + "FINAL ANSWER END",
 			Timestamp: time.Now().Add(time.Millisecond).Format(time.RFC3339Nano)},
 	}}
 	handler, err := telegramapp.NewHandlerWithControls(
@@ -187,9 +188,15 @@ func TestPaneRefreshRendersFinalAnswerWhenRuntimeAlreadySettledIdle(t *testing.T
 	if len(fixture.messenger.sent) < 2 {
 		t.Fatal("settled idle card was not promoted to a rich final card")
 	}
-	latest := fixture.messenger.sent[len(fixture.messenger.sent)-1].Text
-	if !strings.Contains(latest, "FINAL ANSWER") {
-		t.Fatalf("final answer missing from settled card: %q", latest)
+	latest := fixture.messenger.sent[len(fixture.messenger.sent)-1]
+	if !strings.Contains(latest.Text, "FINAL ANSWER START") ||
+		strings.Contains(latest.Text, "FINAL ANSWER END") {
+		t.Fatalf("final response did not open at its beginning: %q", latest.Text)
+	}
+	label := latest.Grid[0][1].Label
+	parts := strings.SplitN(label, "/", 2)
+	if len(parts) != 2 || parts[0] == parts[1] {
+		t.Fatalf("final response start page = %s", label)
 	}
 	if len(fixture.messenger.deleted) == 0 || fixture.messenger.deleted[0].MessageID != 1 {
 		t.Fatalf("old active carrier was not deleted: %#v", fixture.messenger.deleted)
@@ -747,6 +754,56 @@ func TestTranscriptPageButtonsResolveOpaqueTargetPage(t *testing.T) {
 	if !strings.Contains(last.Text, "Second answer") ||
 		!strings.Contains(telegramui.CanonicalGrid(last.Grid), "2/2") {
 		t.Fatalf("wrapped last page=%#v", last)
+	}
+}
+
+func TestStaleLatestButtonRestoresFollowAtCurrentLatestPage(t *testing.T) {
+	fixture := newFixture(t)
+	ref := domain.SessionRef{NodeID: "allowed", SessionID: "live"}
+	controls := &blockingControls{events: []transcript.Event{
+		{Kind: transcript.EventAssistantFinal, Text: "First answer"},
+		{Kind: transcript.EventAssistantFinal, Text: "Second answer"},
+	}}
+	handler, err := telegramapp.NewHandlerWithControls(
+		fixture.service, fixture.projector, fixture.codec, fixture.messenger, controls,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	selectToken, err := fixture.codec.Session(7, telegramui.ActionSelectSession, ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	selectData, err := (telegramui.Callback{
+		Action: telegramui.ActionSelectSession, Token: selectToken,
+	}).Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	origin := telegrambot.Message{ChatID: 7, MessageID: 10, Rich: true}
+	if err := handler.HandleTelegramUpdate(context.Background(), telegrambot.IncomingUpdate{
+		UpdateID: 93, Kind: telegrambot.IncomingCallback, ChatID: 7, UserID: 7,
+		CallbackID: "select", CallbackData: selectData, CallbackOrigin: origin,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	current := fixture.messenger.edited[len(fixture.messenger.edited)-1]
+	staleLatest, err := current.Grid[0][1].Callback.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	controls.appendTranscriptEvent(transcript.Event{
+		Kind: transcript.EventAssistantFinal, Text: "Third answer",
+	})
+	if err := handler.HandleTelegramUpdate(context.Background(), telegrambot.IncomingUpdate{
+		UpdateID: 94, Kind: telegrambot.IncomingCallback, ChatID: 7, UserID: 7,
+		CallbackID: "latest", CallbackData: staleLatest, CallbackOrigin: origin,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	latest := fixture.messenger.edited[len(fixture.messenger.edited)-1]
+	if !strings.Contains(latest.Text, "Third answer") || latest.Grid[0][1].Label != "3/3" {
+		t.Fatalf("stale latest button did not reach current latest: %#v", latest)
 	}
 }
 

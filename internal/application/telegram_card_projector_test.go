@@ -52,6 +52,14 @@ func TestSessionCardSeparatesContextAndBackgroundLikeCCBot(t *testing.T) {
 	if !strings.Contains(screen.Text, want) {
 		t.Fatalf("card metadata layout differs from CCBot:\n%q\nwant tail:\n%q", screen.Text, want)
 	}
+	if screen.PaneAnchorOffset <= 0 ||
+		!strings.HasSuffix(screen.Text[:screen.PaneAnchorOffset], "answer") ||
+		strings.Contains(screen.Text[:screen.PaneAnchorOffset], "context:") ||
+		!strings.Contains(screen.Text[screen.PaneAnchorOffset:], "context: 24%") ||
+		!strings.Contains(screen.Text[screen.PaneAnchorOffset:], "─── background ───") {
+		t.Fatalf("terminal anchor does not precede context/background: offset=%d text=%q",
+			screen.PaneAnchorOffset, screen.Text)
+	}
 }
 
 func TestSessionCardUsesAgentTimestampAsRecordedByBackend(t *testing.T) {

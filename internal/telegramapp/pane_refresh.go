@@ -119,7 +119,9 @@ func (h *Handler) runPaneRefresh(
 				h.currentPaneGeneration(actor.UserID, generation) {
 				if finalAt, ok := finalTranscriptAt(snapshot.events); ok &&
 					transcriptFinalBelongsToCurrentTurn(session, finalAt, time.Now()) {
-					snapshot, renderErr = h.renderSessionCardSnapshot(ctx, actor, ref, 0)
+					snapshot, renderErr = h.renderSessionCardSnapshot(
+						ctx, actor, ref, application.CardPageLatestResponseStart,
+					)
 					if renderErr != nil {
 						return
 					}
@@ -150,7 +152,9 @@ func (h *Handler) runPaneRefresh(
 		}
 		settled := h.settleFromTranscript(ctx, actor, session, snapshot.events)
 		if settled {
-			snapshot, err = h.renderSessionCardSnapshot(ctx, actor, ref, 0)
+			snapshot, err = h.renderSessionCardSnapshot(
+				ctx, actor, ref, application.CardPageLatestResponseStart,
+			)
 			if err != nil {
 				return
 			}
@@ -286,7 +290,7 @@ func (h *Handler) attachPane(
 		return
 	}
 	screen.Pane = &telegramui.PaneImage{
-		PNG: rendered.PNG, Hash: rendered.Hash, AnchorOffset: len(screen.Text),
+		PNG: rendered.PNG, Hash: rendered.Hash, AnchorOffset: paneAnchorOffset(*screen),
 	}
 }
 
@@ -308,8 +312,16 @@ func (h *Handler) attachImmediatePane(
 		return
 	}
 	screen.Pane = &telegramui.PaneImage{
-		PNG: rendered.PNG, Hash: rendered.Hash, AnchorOffset: len(screen.Text),
+		PNG: rendered.PNG, Hash: rendered.Hash, AnchorOffset: paneAnchorOffset(*screen),
 	}
+}
+
+func paneAnchorOffset(screen telegramui.Screen) int {
+	if screen.PaneAnchorOffset > 0 && screen.PaneAnchorOffset <= len(screen.Text) &&
+		utf8.ValidString(screen.Text[:screen.PaneAnchorOffset]) {
+		return screen.PaneAnchorOffset
+	}
+	return len(screen.Text)
 }
 
 func (h *Handler) settleFromTranscript(

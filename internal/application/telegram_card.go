@@ -12,6 +12,11 @@ import (
 	"github.com/Time4Mind/bria/internal/telegramui"
 )
 
+// CardPageLatestResponseStart selects the page containing the beginning of
+// the most recent completed assistant response. It is used only for the final
+// response carrier; zero continues to mean the live latest page.
+const CardPageLatestResponseStart = -1
+
 func (p *TelegramProjector) SessionCard(
 	actor Principal,
 	ref domain.SessionRef,
@@ -64,6 +69,9 @@ func (p *TelegramProjector) SessionCardPageWithContext(
 	queueLimit := preferences.EffectiveOfflineInputQueueLimit()
 	pages := RenderCardEventPages(preferences, events, CardRenderOptions{})
 	page := requestedPage
+	if page == CardPageLatestResponseStart && pages.LatestResponseStart.Number > 0 {
+		page = pages.LatestResponseStart.Number
+	}
 	cardMode := preferences.EffectiveResponseCards()
 	if cardMode == domain.ResponseCardsKeepLatest {
 		page = pages.Latest.Number
@@ -142,6 +150,7 @@ func (p *TelegramProjector) SessionCardPageWithContext(
 		session.LastOperation.Status == domain.OperationFailed {
 		parts = append(parts, actorCopy(state, actor).Text(i18n.InputFailed))
 	}
+	paneAnchorOffset := len(strings.Join(parts, "\n\n"))
 	if context.ActivePercent != nil {
 		parts = append(parts, "\u00a0", fmt.Sprintf("context: %d%%", *context.ActivePercent))
 	}
@@ -187,6 +196,7 @@ func (p *TelegramProjector) SessionCardPageWithContext(
 		Page:           page, Pages: len(pages.Pages), Tokens: tokens,
 		Sessions: switcher, AllHosts: allHosts,
 	})
+	screen.PaneAnchorOffset = paneAnchorOffset
 	screen.Checkpoint = &telegramui.SessionCheckpoint{
 		NodeID: string(session.NodeID), SessionID: string(session.ID),
 		Revision: session.Revision, EventAt: session.LastEventAt,

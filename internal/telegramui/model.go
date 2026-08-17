@@ -59,13 +59,14 @@ type SessionCheckpoint struct {
 }
 
 type Screen struct {
-	Name         ScreenName
-	Text         string
-	ParseMode    ParseMode
-	RichMarkdown bool
-	Grid         Grid
-	Pane         *PaneImage
-	Checkpoint   *SessionCheckpoint
+	Name             ScreenName
+	Text             string
+	ParseMode        ParseMode
+	RichMarkdown     bool
+	Grid             Grid
+	Pane             *PaneImage
+	PaneAnchorOffset int
+	Checkpoint       *SessionCheckpoint
 }
 
 // Validate checks constraints that the eventual Telegram adapter must honor.
@@ -81,6 +82,10 @@ func (s Screen) Validate() error {
 	}
 	if s.RichMarkdown && s.ParseMode != "" {
 		return fmt.Errorf("rich Markdown and parse mode cannot be combined")
+	}
+	if s.PaneAnchorOffset < 0 || s.PaneAnchorOffset > len(s.Text) ||
+		!utf8.ValidString(s.Text[:s.PaneAnchorOffset]) {
+		return fmt.Errorf("pane anchor is not a UTF-8 text boundary")
 	}
 	if s.Pane != nil {
 		if len(s.Pane.PNG) == 0 && strings.TrimSpace(s.Pane.FileID) == "" {

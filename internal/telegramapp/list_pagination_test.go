@@ -131,6 +131,7 @@ func TestRunningCardRefreshKeepsTheExplicitlySelectedPage(t *testing.T) {
 	}
 	manual := edited[len(edited)-1]
 	want := manual.Grid[0][1].Label
+	wantPage := strings.SplitN(want, "/", 2)[0]
 	if want == initial.Grid[0][1].Label {
 		t.Fatalf("previous page did not move: %s", want)
 	}
@@ -143,14 +144,119 @@ func TestRunningCardRefreshKeepsTheExplicitlySelectedPage(t *testing.T) {
 	if len(edited) <= workerStart {
 		t.Fatal("running card worker did not refresh the selected page")
 	}
+	turnAt := time.Now()
+	controls.appendTranscriptEvent(transcript.Event{
+		Kind: transcript.EventUserText, Text: "keep my page",
+		Timestamp: turnAt.Format(time.RFC3339Nano),
+	})
+	controls.appendTranscriptEvent(transcript.Event{
+		Kind:      transcript.EventAssistantText,
+		Text:      "new page " + strings.Repeat("later content ", 400),
+		Timestamp: turnAt.Add(time.Millisecond).Format(time.RFC3339Nano),
+	})
+	previousTotal := strings.SplitN(want, "/", 2)[1]
+	grew := false
+	deadline = time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		_, edited, _ = fixture.messenger.screensSnapshot()
+		latestLabel := edited[len(edited)-1].Grid[0][1].Label
+		parts := strings.SplitN(latestLabel, "/", 2)
+		if len(parts) == 2 && parts[1] != previousTotal {
+			grew = true
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !grew {
+		t.Fatalf("pinned card did not observe transcript growth: edits=%#v", edited)
+	}
+	sent, _, _ = fixture.messenger.screensSnapshot()
+	if len(sent) != 1 {
+		t.Fatalf("pinned running page created a carrier before final: sent=%d", len(sent))
+	}
+	controls.appendTranscriptEvent(transcript.Event{
+		Kind: transcript.EventAssistantFinal, Text: "PINNED FINAL ANSWER",
+		Timestamp: time.Now().Add(time.Millisecond).Format(time.RFC3339Nano),
+	})
+	deadline = time.Now().Add(3 * time.Second)
+	for len(sent) < 2 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+		sent, _, _ = fixture.messenger.screensSnapshot()
+	}
 	cancel()
 	time.Sleep(50 * time.Millisecond)
 	_, edited, _ = fixture.messenger.screensSnapshot()
+	if len(sent) < 2 || !strings.Contains(sent[len(sent)-1].Text, "PINNED FINAL ANSWER") {
+		t.Fatalf("pinned page did not publish final carrier after completion: sent=%#v", sent)
+	}
 	for index, screen := range edited[workerStart:] {
-		if got := screen.Grid[0][1].Label; got != want {
-			t.Fatalf("worker edit %d reset page to %s, want %s", index, got, want)
+		got := screen.Grid[0][1].Label
+		if strings.SplitN(got, "/", 2)[0] != wantPage {
+			t.Fatalf("worker edit %d reset page to %s, want page %s", index, got, wantPage)
 		}
 	}
+}
+
+func TestRunningCardLatestPageFollowsTranscriptGrowth(t *testing.T) {
+	fixture := newFixture(t)
+	actor := application.Principal{UserID: 7}
+	ref := domain.SessionRef{NodeID: "allowed", SessionID: "live"}
+	session, err := fixture.service.Session(actor, ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.service.PublishSessionRuntime(
+		context.Background(), session, domain.RuntimeRunning, nil,
+	); err != nil {
+		t.Fatal(err)
+	}
+	controls := &blockingControls{ref: ref, events: []transcript.Event{{
+		Kind: transcript.EventAssistantText,
+		Text: "initial " + strings.Repeat("content ", 600),
+	}}}
+	handler, err := telegramapp.NewHandlerWithControls(
+		fixture.service, fixture.projector, fixture.codec, fixture.messenger, controls,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := handler.HandleTelegramUpdate(ctx, telegrambot.IncomingUpdate{
+		UpdateID: 94, Kind: telegrambot.IncomingMessage,
+		ChatID: 7, UserID: 7, Text: "follow latest",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	var edited []telegramui.Screen
+	for len(edited) == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+		_, edited, _ = fixture.messenger.screensSnapshot()
+	}
+	if len(edited) == 0 {
+		t.Fatal("latest page was not refreshed")
+	}
+	before := edited[len(edited)-1].Grid[0][1].Label
+	beforeParts := strings.SplitN(before, "/", 2)
+	if len(beforeParts) != 2 || beforeParts[0] != beforeParts[1] {
+		t.Fatalf("card did not start in follow mode: %s", before)
+	}
+	controls.appendTranscriptEvent(transcript.Event{
+		Kind: transcript.EventAssistantText,
+		Text: "growth " + strings.Repeat("new content ", 600),
+	})
+	deadline = time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		_, edited, _ = fixture.messenger.screensSnapshot()
+		label := edited[len(edited)-1].Grid[0][1].Label
+		parts := strings.SplitN(label, "/", 2)
+		if len(parts) == 2 && parts[1] != beforeParts[1] && parts[0] == parts[1] {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("latest card did not follow transcript growth: before=%s edits=%#v", before, edited)
 }
 
 func TestNodePaginationCallbackEditsSameCarrier(t *testing.T) {

@@ -29,9 +29,10 @@ type cardPageKey struct {
 }
 
 type cardPageState struct {
-	ref   domain.SessionRef
-	page  int
-	pages int
+	ref    domain.SessionRef
+	page   int
+	pages  int
+	follow bool
 }
 
 func (h *Handler) openSessionPage(
@@ -56,7 +57,12 @@ func (h *Handler) openSessionPage(
 		return telegramui.Screen{}, domain.SessionRef{}, err
 	}
 	page := target.Page
-	if action == telegramui.ActionPagePrevious || action == telegramui.ActionPageNext {
+	if action == telegramui.ActionPageLatest {
+		// The token carries the page count from the rendered keyboard and may be
+		// stale by the time it is tapped. Zero resolves against the current
+		// transcript and explicitly restores follow mode.
+		page = 0
+	} else if action == telegramui.ActionPagePrevious || action == telegramui.ActionPageNext {
 		key := cardPageKey{userID: actor.UserID, chatID: origin.ChatID, messageID: origin.MessageID}
 		h.pageMu.Lock()
 		state, ok := h.cardPages[key]
@@ -90,6 +96,7 @@ func (h *Handler) rememberCardPage(
 	h.pageMu.Lock()
 	state := h.cardPages[key]
 	state.page, state.pages = page, pages
+	state.follow = page == pages
 	h.cardPages[key] = state
 	h.pageMu.Unlock()
 }
@@ -119,6 +126,9 @@ func (h *Handler) rememberedCardPage(
 	defer h.pageMu.Unlock()
 	state, ok := h.cardPages[key]
 	if !ok || state.ref != ref || state.page < 1 {
+		return 0
+	}
+	if state.follow {
 		return 0
 	}
 	return state.page
@@ -234,8 +244,8 @@ func (h *Handler) renderSessionCardSnapshot(
 		actor, ref, cardEvents(renderedEvents), page, h.cardContext(ref),
 	)
 	if err == nil {
-		if finalAt, final := finalTranscriptAt(events); final &&
-			screenShowsLatestCardPage(screen) && screen.Checkpoint != nil {
+		if finalAt, final := finalTranscriptAt(events); final && screen.Checkpoint != nil &&
+			(screenShowsLatestCardPage(screen) || page == application.CardPageLatestResponseStart) {
 			screen.Checkpoint.RenderedFinalAt = finalAt
 		}
 		preferences, preferencesErr := h.service.Preferences(actor)

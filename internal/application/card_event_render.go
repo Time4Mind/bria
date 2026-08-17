@@ -36,8 +36,9 @@ type CardEventPage struct {
 }
 
 type CardEventPages struct {
-	Pages  []CardEventPage
-	Latest CardEventPage
+	Pages               []CardEventPage
+	Latest              CardEventPage
+	LatestResponseStart CardEventPage
 }
 
 // RenderCardEventPages renders a stable, bounded live-card history. Technical
@@ -54,18 +55,21 @@ func RenderCardEventPages(
 	options = normalizedCardRenderOptions(options)
 	prepared := prepareCardEvents(preferences, events)
 	blocks := renderCardEventBlocks(prepared, options)
-	renderedPages := packCardEventPages(blocks, options.MaxPageRunes, options.MaxPageBytes)
-	pages := make([]CardEventPage, len(renderedPages))
-	for index, text := range renderedPages {
+	packed := packCardEventPages(blocks, options.MaxPageRunes, options.MaxPageBytes)
+	pages := make([]CardEventPage, len(packed.pages))
+	for index, text := range packed.pages {
 		pages[index] = CardEventPage{
 			RichMarkdown: text,
 			Number:       index + 1,
-			Count:        len(renderedPages),
+			Count:        len(packed.pages),
 		}
 	}
 	result := CardEventPages{Pages: pages}
 	if len(pages) > 0 {
 		result.Latest = pages[len(pages)-1]
+	}
+	if packed.latestResponseStart > 0 && packed.latestResponseStart <= len(pages) {
+		result.LatestResponseStart = pages[packed.latestResponseStart-1]
 	}
 	return result
 }
@@ -92,8 +96,9 @@ func normalizedCardRenderOptions(options CardRenderOptions) CardRenderOptions {
 }
 
 type cardEventBlock struct {
-	text      string
-	pageBreak bool
+	text          string
+	pageBreak     bool
+	responseStart bool
 }
 
 func renderCardEventBlocks(events []CardEvent, options CardRenderOptions) []cardEventBlock {
@@ -110,6 +115,7 @@ func renderCardEventBlocks(events []CardEvent, options CardRenderOptions) []card
 			for chunkIndex, chunk := range chunks {
 				blocks = append(blocks, cardEventBlock{
 					text: chunk, pageBreak: event.PageBreak || chunkIndex > 0,
+					responseStart: event.PageBreak && chunkIndex == 0,
 				})
 			}
 			continue

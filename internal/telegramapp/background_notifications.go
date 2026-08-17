@@ -67,7 +67,9 @@ func (h *Handler) reconcileActiveFinalCards(ctx context.Context) {
 			!card.RenderedFinalAt.IsZero() {
 			continue
 		}
-		snapshot, err := h.renderSessionCardSnapshot(ctx, actor, session.Ref(), 0)
+		snapshot, err := h.renderSessionCardSnapshot(
+			ctx, actor, session.Ref(), application.CardPageLatestResponseStart,
+		)
 		if err != nil {
 			continue
 		}
@@ -283,7 +285,9 @@ func (h *Handler) repostActiveFinal(
 	if err != nil || !ok || card.Session != ref {
 		return
 	}
-	screen, err := h.renderSessionCard(ctx, actor, ref, 0)
+	screen, err := h.renderSessionCard(
+		ctx, actor, ref, application.CardPageLatestResponseStart,
+	)
 	if err != nil {
 		return
 	}
