@@ -8,7 +8,7 @@ import (
 )
 
 const (
-	SessionNameFormatVersion = 2
+	SessionNameFormatVersion = 3
 	MaxSessionNameRunes      = 12
 )
 
