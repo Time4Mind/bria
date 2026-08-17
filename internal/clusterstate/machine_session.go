@@ -20,9 +20,9 @@ func applySessionLifecycle(state *domain.State, command Command) (json.RawMessag
 	case CommandRenameSession:
 		var payload RenameSession
 		return nil, decodeAnd(command.Payload, &payload, func() error {
-			return state.RenameSession(
+			return state.RenameSessionWithFormat(
 				payload.ActorID, payload.Session, payload.ExpectedRevision,
-				payload.Name, command.IssuedAt,
+				payload.Name, payload.NameFormatVersion, command.IssuedAt,
 			)
 		})
 	case CommandCloseSession:

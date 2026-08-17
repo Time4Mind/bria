@@ -233,10 +233,11 @@ type SessionRevision struct {
 }
 
 type RenameSession struct {
-	ActorID          domain.UserID     `json:"actor_id"`
-	Session          domain.SessionRef `json:"session"`
-	ExpectedRevision uint64            `json:"expected_revision"`
-	Name             string            `json:"name"`
+	ActorID           domain.UserID     `json:"actor_id"`
+	Session           domain.SessionRef `json:"session"`
+	ExpectedRevision  uint64            `json:"expected_revision"`
+	Name              string            `json:"name"`
+	NameFormatVersion int               `json:"name_format_version,omitempty"`
 }
 
 type ArchiveSession struct {

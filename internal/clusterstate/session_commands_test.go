@@ -77,6 +77,34 @@ func TestCloseAndAutomaticArchiveCommandsUseDifferentAuthority(t *testing.T) {
 	}
 }
 
+func TestRenameCommandPersistsNameFormatVersionForDeterministicReplay(t *testing.T) {
+	machine, ref := sessionMachine(t)
+	session := machine.State().Sessions[ref.Key()]
+	legacy := command(t, "legacy-rename", clusterstate.CommandRenameSession,
+		clusterstate.RenameSession{
+			ActorID: 1, Session: ref, ExpectedRevision: session.Revision,
+			Name: "legacy context",
+		})
+	if result := machine.Apply(legacy); result.Err() != nil {
+		t.Fatal(result.Err())
+	}
+	legacySession := machine.State().Sessions[ref.Key()]
+	if legacySession.NameFormatVersion != 0 || legacySession.Name != "legacy context" {
+		t.Fatalf("legacy rename=%#v", legacySession)
+	}
+	current := command(t, "current-rename", clusterstate.CommandRenameSession,
+		clusterstate.RenameSession{
+			ActorID: 1, Session: ref, ExpectedRevision: legacySession.Revision,
+			Name: "short name", NameFormatVersion: domain.SessionNameFormatVersion,
+		})
+	if result := machine.Apply(current); result.Err() != nil {
+		t.Fatal(result.Err())
+	}
+	if got := machine.State().Sessions[ref.Key()]; got.NameFormatVersion != domain.SessionNameFormatVersion || got.Name != "short name" {
+		t.Fatalf("current rename=%#v", got)
+	}
+}
+
 func TestSchemaV1SnapshotWithMixedSessionStateRestoresNormalized(t *testing.T) {
 	legacy := map[string]any{
 		"version": 1,

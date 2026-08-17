@@ -139,7 +139,7 @@ func (s *Service) RenameSession(
 ) error {
 	return s.apply(ctx, clusterstate.CommandRenameSession, clusterstate.RenameSession{
 		ActorID: actor.UserID, Session: session.Ref(), ExpectedRevision: session.Revision,
-		Name: name,
+		Name: name, NameFormatVersion: domain.SessionNameFormatVersion,
 	})
 }
 

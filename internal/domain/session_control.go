@@ -102,6 +102,19 @@ func (s *State) RenameSession(
 	name string,
 	at time.Time,
 ) error {
+	return s.RenameSessionWithFormat(
+		actorID, ref, expectedRevision, name, SessionNameFormatVersion, at,
+	)
+}
+
+func (s *State) RenameSessionWithFormat(
+	actorID UserID,
+	ref SessionRef,
+	expectedRevision uint64,
+	name string,
+	formatVersion int,
+	at time.Time,
+) error {
 	if !s.CanPerformSessionAction(actorID, ref, ActionRename) {
 		return ErrAccessDenied
 	}
@@ -112,18 +125,29 @@ func (s *State) RenameSession(
 	if err := requireRevision(session, expectedRevision); err != nil {
 		return err
 	}
-	name, err = NormalizeSessionName(name)
-	if err != nil {
-		return err
-	}
-	if s.sessionNameTaken(session.OwnerID, ref, name) {
-		return fmt.Errorf("%w: session name already exists", ErrAlreadyExists)
+	if formatVersion == SessionNameFormatVersion {
+		name, err = NormalizeSessionName(name)
+		if err != nil {
+			return err
+		}
+		if s.sessionNameTaken(session.OwnerID, ref, name) {
+			return fmt.Errorf("%w: session name already exists", ErrAlreadyExists)
+		}
+	} else {
+		// Commands written before name_format_version became part of the Raft
+		// payload must replay with their historical validation and remain marked
+		// legacy. Startup migration will replace them from the first prompt.
+		formatVersion = 0
+		name = strings.TrimSpace(name)
+		if name == "" || len(name) > 64 || strings.ContainsAny(name, "\r\n\t") {
+			return fmt.Errorf("%w: session name is invalid", ErrInvalidState)
+		}
 	}
 	if session.Revision == math.MaxUint64 {
 		return fmt.Errorf("%w: session revision exhausted", ErrInvalidState)
 	}
 	session.Name = name
-	session.NameFormatVersion = SessionNameFormatVersion
+	session.NameFormatVersion = formatVersion
 	session.LastEventAt = at
 	session.Revision++
 	s.Sessions[ref.Key()] = session
