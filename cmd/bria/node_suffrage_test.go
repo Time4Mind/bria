@@ -2,6 +2,7 @@ package main
 
 import (
 	"testing"
+	"time"
 
 	"github.com/Time4Mind/bria/internal/domain"
 	"github.com/hashicorp/raft"
@@ -78,6 +79,71 @@ func TestManualMembershipAddsEnabledReplicaAsNonvoter(t *testing.T) {
 
 	action := nextMembershipAction(configuration, state, "leader")
 	assertMembershipAction(t, action, membershipEnsureNonvoter, "replica")
+}
+
+func TestManualMembershipParksStaleOfflineNonvoter(t *testing.T) {
+	now := time.Unix(1_000, 0).UTC()
+	state := membershipTestState(domain.LeaderPolicy{NodeID: "leader"})
+	replica := membershipTestNode("replica", domain.NodeOffline)
+	replica.LastSeenAt = now.Add(-manualReplicaParkDelay)
+	state.Nodes["replica"] = replica
+	configuration := membershipTestConfiguration(
+		raft.Server{ID: "leader", Address: "leader:7946", Suffrage: raft.Voter},
+		raft.Server{ID: "replica", Address: "replica:7946", Suffrage: raft.Nonvoter},
+	)
+
+	action := nextMembershipActionAt(configuration, state, "leader", now)
+	assertMembershipAction(t, action, membershipRemoveServer, "replica")
+}
+
+func TestManualMembershipRetainsOfflineNonvoterDuringParkGrace(t *testing.T) {
+	now := time.Unix(1_000, 0).UTC()
+	state := membershipTestState(domain.LeaderPolicy{NodeID: "leader"})
+	replica := membershipTestNode("replica", domain.NodeOffline)
+	replica.LastSeenAt = now.Add(-manualReplicaParkDelay + time.Second)
+	state.Nodes["replica"] = replica
+	configuration := membershipTestConfiguration(
+		raft.Server{ID: "leader", Address: "leader:7946", Suffrage: raft.Voter},
+		raft.Server{ID: "replica", Address: "replica:7946", Suffrage: raft.Nonvoter},
+	)
+
+	action := nextMembershipActionAt(configuration, state, "leader", now)
+	assertMembershipAction(t, action, membershipNoop, "")
+}
+
+func TestManualMembershipDoesNotReaddParkedReplicaUntilHeartbeat(t *testing.T) {
+	now := time.Unix(1_000, 0).UTC()
+	state := membershipTestState(domain.LeaderPolicy{NodeID: "leader"})
+	replica := membershipTestNode("replica", domain.NodeOffline)
+	replica.LastSeenAt = now.Add(-manualReplicaParkDelay)
+	state.Nodes["replica"] = replica
+	configuration := membershipTestConfiguration(
+		raft.Server{ID: "leader", Address: "leader:7946", Suffrage: raft.Voter},
+	)
+
+	action := nextMembershipActionAt(configuration, state, "leader", now)
+	assertMembershipAction(t, action, membershipNoop, "")
+
+	replica.Status = domain.NodeOnline
+	replica.LastSeenAt = now
+	state.Nodes["replica"] = replica
+	action = nextMembershipActionAt(configuration, state, "leader", now)
+	assertMembershipAction(t, action, membershipEnsureNonvoter, "replica")
+}
+
+func TestAutomaticMembershipDoesNotParkOfflineVoter(t *testing.T) {
+	now := time.Unix(1_000, 0).UTC()
+	state := membershipTestState(domain.LeaderPolicy{Mode: domain.LeaderSelectionAutomatic})
+	replica := membershipTestNode("replica", domain.NodeOffline)
+	replica.LastSeenAt = now.Add(-manualReplicaParkDelay)
+	state.Nodes["replica"] = replica
+	configuration := membershipTestConfiguration(
+		raft.Server{ID: "leader", Address: "leader:7946", Suffrage: raft.Voter},
+		raft.Server{ID: "replica", Address: "replica:7946", Suffrage: raft.Nonvoter},
+	)
+
+	action := nextMembershipActionAt(configuration, state, "leader", now)
+	assertMembershipAction(t, action, membershipEnsureVoter, "replica")
 }
 
 func TestAutomaticMembershipPromotesEveryEnabledNode(t *testing.T) {

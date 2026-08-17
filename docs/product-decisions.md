@@ -117,7 +117,10 @@
   nonvoters and wait when it is unavailable. The selected leader keeps working
   if every replica disconnects. Changing it requires the old leader to remain
   reachable for promotion and transfer. Automatic mode restores ordinary
-  all-voter Raft quorum and lets the elected leader serve.
+  all-voter Raft quorum and lets the elected leader serve. In manual mode an
+  offline nonleader is parked outside Raft after two minutes without changing
+  its enabled lifecycle; a fresh authenticated heartbeat restores it as a
+  nonvoter.
 - Menu → Status always opens in `Select` mode. Its Rich Markdown table contains
   every server/backend pair, cached quota values, reset time and age in minutes;
   offline rows retain their last value and carry an unavailable marker. Refresh

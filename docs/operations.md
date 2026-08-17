@@ -15,6 +15,14 @@ The leader continues committing when all replicas disconnect. If it becomes
 unavailable, the others wait. Choose **Automatic** only when ordinary Raft
 quorum and leader failover should immediately move work to an elected node.
 
+In manual mode an enabled nonleader that remains offline for two minutes is
+automatically parked outside Raft replication. Parking is not `Disable`: the
+server, sessions, settings and certificate identity remain registered. The
+leader does not poll a parked host. When the host can again send an authenticated
+heartbeat, Bria adds it back as a nonvoter and normal log catch-up resumes.
+Failed heartbeat attempts on the returning host use a bounded 5–60 second
+backoff, so reconnection can take up to one minute after network recovery.
+
 On a new cluster with no assignment, the bootstrap leader is the provisional
 sole voter and exposes a bounded setup screen so the owner can select a node or
 enable automatic mode. The **Status** screen does not change leader policy.

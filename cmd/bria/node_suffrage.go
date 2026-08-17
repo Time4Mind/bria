@@ -3,11 +3,14 @@ package main
 import (
 	"fmt"
 	"sort"
+	"time"
 
 	"github.com/Time4Mind/bria/internal/consensus"
 	"github.com/Time4Mind/bria/internal/domain"
 	"github.com/hashicorp/raft"
 )
+
+const manualReplicaParkDelay = 2 * time.Minute
 
 type membershipActionKind uint8
 
@@ -58,9 +61,18 @@ func nextMembershipAction(
 	state *domain.State,
 	leaderID string,
 ) membershipAction {
+	return nextMembershipActionAt(configuration, state, leaderID, time.Now().UTC())
+}
+
+func nextMembershipActionAt(
+	configuration raft.Configuration,
+	state *domain.State,
+	leaderID string,
+	now time.Time,
+) membershipAction {
 	servers := indexRaftServers(configuration)
 	if state.LeaderPolicy.EffectiveMode() == domain.LeaderSelectionManual {
-		return nextManualMembershipAction(state, servers, leaderID)
+		return nextManualMembershipAction(state, servers, leaderID, now)
 	}
 	return nextAutomaticMembershipAction(state, configuration, servers, leaderID)
 }
@@ -69,6 +81,7 @@ func nextManualMembershipAction(
 	state *domain.State,
 	servers map[string]raft.Server,
 	leaderID string,
+	now time.Time,
 ) membershipAction {
 	preferredID := string(state.LeaderPolicy.NodeID)
 	if preferredID == "" {
@@ -109,6 +122,9 @@ func nextManualMembershipAction(
 			continue
 		}
 		desired := state.Nodes[domain.NodeID(nodeID)]
+		if manualReplicaParked(desired, now) {
+			continue
+		}
 		server, configured := servers[nodeID]
 		if configured && server.Suffrage == raft.Nonvoter &&
 			string(server.Address) == desired.Network.RaftAddress {
@@ -119,7 +135,21 @@ func nextManualMembershipAction(
 			address: desired.Network.RaftAddress,
 		}
 	}
+	for _, server := range orderedRaftServers(servers) {
+		if string(server.ID) == preferredID || server.Suffrage != raft.Nonvoter {
+			continue
+		}
+		desired, exists := state.Nodes[domain.NodeID(server.ID)]
+		if exists && manualReplicaParked(desired, now) {
+			return membershipAction{kind: membershipRemoveServer, nodeID: string(server.ID)}
+		}
+	}
 	return nextRemovedMemberAction(state, servers, leaderID)
+}
+
+func manualReplicaParked(node domain.Node, now time.Time) bool {
+	return node.Enabled() && node.Status == domain.NodeOffline && !node.LastSeenAt.IsZero() &&
+		!now.Before(node.LastSeenAt) && now.Sub(node.LastSeenAt) >= manualReplicaParkDelay
 }
 
 func nextAutomaticMembershipAction(

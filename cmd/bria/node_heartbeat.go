@@ -20,8 +20,8 @@ import (
 )
 
 const (
-	nodeHeartbeatInterval = 2 * time.Second
-	nodeOfflineTimeout    = 8 * time.Second
+	nodeHeartbeatInterval = 5 * time.Second
+	nodeOfflineTimeout    = 15 * time.Second
 	nodeOfflineSweep      = time.Second
 	nodeInventoryRefresh  = 30 * time.Second
 )
@@ -77,7 +77,8 @@ func startNodeHeartbeatLoops(
 			},
 		}, nil
 	}
-	agent, err := nodecontrol.NewHeartbeatAgent(node, client, snapshot, nodeHeartbeatInterval)
+	leaders := heartbeatLeaderResolver{raft: node, state: node.State()}
+	agent, err := nodecontrol.NewHeartbeatAgent(leaders, client, snapshot, nodeHeartbeatInterval)
 	if err != nil {
 		return err
 	}
@@ -102,6 +103,39 @@ func startNodeHeartbeatLoops(
 	go runRecoveryPlans(ctx, recoveryExecutor, recoveryPlans, loopErrors)
 	go logHeartbeatErrors(ctx, loopErrors)
 	return nil
+}
+
+type heartbeatLeaderSource interface {
+	LeaderID() string
+}
+
+type heartbeatStateSource interface {
+	State() *domain.State
+}
+
+// heartbeatLeaderResolver lets a parked manual replica report its return even
+// after Raft has applied the configuration that removed it. Normal operation
+// always follows Raft; the replicated manual preference is only a no-leader
+// fallback and the destination still rejects heartbeats unless it is leader.
+type heartbeatLeaderResolver struct {
+	raft  heartbeatLeaderSource
+	state heartbeatStateSource
+}
+
+func (r heartbeatLeaderResolver) LeaderID() string {
+	if leaderID := r.raft.LeaderID(); leaderID != "" {
+		return leaderID
+	}
+	state := r.state.State()
+	if state == nil || state.LeaderPolicy.EffectiveMode() != domain.LeaderSelectionManual {
+		return ""
+	}
+	leaderID := state.LeaderPolicy.NodeID
+	leader, exists := state.Nodes[leaderID]
+	if leaderID == "" || !exists || !leader.Enabled() {
+		return ""
+	}
+	return string(leaderID)
 }
 
 func newFollowerRecoveryExecutor(

@@ -24,8 +24,11 @@ type HeartbeatAgent struct {
 	publish  HeartbeatPublisher
 	snapshot HeartbeatSnapshot
 	interval time.Duration
+	maxRetry time.Duration
 	newID    func() (string, error)
 }
+
+const heartbeatMaxRetry = time.Minute
 
 func NewHeartbeatAgent(
 	leaders Leadership,
@@ -41,7 +44,8 @@ func NewHeartbeatAgent(
 	}
 	return &HeartbeatAgent{
 		leaders: leaders, publish: publish, snapshot: snapshot,
-		interval: interval, newID: heartbeatReportID,
+		interval: interval, maxRetry: max(interval, heartbeatMaxRetry),
+		newID: heartbeatReportID,
 	}, nil
 }
 
@@ -66,8 +70,7 @@ func (a *HeartbeatAgent) Run(
 	errorsOut chan<- error,
 	recoveryOut chan<- domain.BootRecoveryPlan,
 ) {
-	ticker := time.NewTicker(a.interval)
-	defer ticker.Stop()
+	retry := a.interval
 	for {
 		ack, err := a.PublishOnce(ctx)
 		if err != nil && ctx.Err() == nil && errorsOut != nil {
@@ -87,12 +90,30 @@ func (a *HeartbeatAgent) Run(
 				}
 			}
 		}
+		delay, nextRetry := heartbeatRetryDelay(retry, a.interval, a.maxRetry, err != nil)
+		retry = nextRetry
+		timer := time.NewTimer(delay)
 		select {
 		case <-ctx.Done():
+			if !timer.Stop() {
+				<-timer.C
+			}
 			return
-		case <-ticker.C:
+		case <-timer.C:
 		}
 	}
+}
+
+func heartbeatRetryDelay(
+	retry time.Duration,
+	interval time.Duration,
+	maximum time.Duration,
+	failed bool,
+) (time.Duration, time.Duration) {
+	if !failed {
+		return interval, interval
+	}
+	return retry, min(retry*2, maximum)
 }
 
 func heartbeatReportID() (string, error) {

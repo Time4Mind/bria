@@ -176,7 +176,17 @@ leader the sole voter and keeps every other enabled node as a nonvoter. The
 leader therefore continues committing when every replica disconnects. A
 nonvoter never starts an election, so an unavailable selected leader is not
 replaced and cannot be changed until it returns. Normal nonvoter log catch-up
-is best effort; provider transcripts remain origin-local.
+is best effort; provider transcripts remain origin-local. To avoid continuously
+dialing an absent host, a nonvoter that has remained offline for two minutes is
+parked by removing only its Raft replication membership. Its enabled lifecycle,
+identity, settings and sessions remain intact. A new authenticated heartbeat
+returns it as a nonvoter. The leader's one-second offline sweep reads replicated
+timestamps in memory and never probes parked hosts over the network.
+
+Runtime heartbeats normally run every five seconds and mark a node offline after
+15 seconds without evidence. A node that cannot reach the leader backs its own
+heartbeat attempts off through 5, 10, 20, 40 and 60 seconds, capped at one
+attempt per minute. Any success resets the normal five-second interval.
 
 Changing the manual leader while the old leader is reachable first promotes
 the target, transfers leadership, and then demotes the old voter. No forced
