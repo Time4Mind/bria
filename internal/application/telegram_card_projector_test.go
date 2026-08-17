@@ -92,6 +92,31 @@ func TestFailedStopKeepsStopInsteadOfShowingClose(t *testing.T) {
 	}
 }
 
+func TestFailedInputNoticeFollowsTranscriptOnLatestPage(t *testing.T) {
+	projector, state, _ := projectorFixture(t)
+	ref := domain.SessionRef{NodeID: "alpha", SessionID: "a-new"}
+	session := state.Sessions[ref.Key()]
+	session.LastOperation = &domain.SessionOperationResult{
+		OperationID: "input-failed", Action: domain.ActionSendInput,
+		Status: domain.OperationFailed, At: time.Unix(50, 0).UTC(),
+	}
+	state.Sessions[ref.Key()] = session
+	screen, err := projector.SessionCardPage(
+		application.Principal{UserID: 2}, ref,
+		[]application.CardEvent{{
+			Kind: application.CardEventAssistantText, Text: "earlier transcript event",
+		}}, 1,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	eventAt := strings.Index(screen.Text, "earlier transcript event")
+	failureAt := strings.Index(screen.Text, "The message could not be delivered")
+	if eventAt < 0 || failureAt <= eventAt {
+		t.Fatalf("failed-input notice is not chronological: %q", screen.Text)
+	}
+}
+
 func TestReconnectingNodeCardIsReadOnlyAndMarkedUnavailable(t *testing.T) {
 	projector, state, _ := projectorFixture(t)
 	node := state.Nodes["alpha"]

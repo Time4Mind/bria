@@ -127,13 +127,6 @@ func (p *TelegramProjector) SessionCardPageWithContext(
 			)
 		}
 	}
-	if session.LastOperation != nil && session.LastOperation.Action == domain.ActionSendInput &&
-		session.LastOperation.Status == domain.OperationFailed {
-		if metadata != "" {
-			metadata += "\n"
-		}
-		metadata += actorCopy(state, actor).Text(i18n.InputFailed)
-	}
 	if metadata != "" {
 		parts = append(parts, metadata)
 	}
@@ -143,6 +136,11 @@ func (p *TelegramProjector) SessionCardPageWithContext(
 	}
 	if richMarkdown != "" {
 		parts = append(parts, richMarkdown)
+	}
+	if page == pages.Latest.Number && session.LastOperation != nil &&
+		session.LastOperation.Action == domain.ActionSendInput &&
+		session.LastOperation.Status == domain.OperationFailed {
+		parts = append(parts, actorCopy(state, actor).Text(i18n.InputFailed))
 	}
 	if context.ActivePercent != nil {
 		parts = append(parts, "\u00a0", fmt.Sprintf("context: %d%%", *context.ActivePercent))
