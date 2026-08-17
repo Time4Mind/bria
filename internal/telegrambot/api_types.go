@@ -17,6 +17,7 @@ type apiUpdate struct {
 
 type apiMessage struct {
 	MessageID       int64                 `json:"message_id"`
+	Date            int64                 `json:"date,omitempty"`
 	From            *apiUser              `json:"from,omitempty"`
 	Chat            apiChat               `json:"chat"`
 	Text            string                `json:"text,omitempty"`
@@ -225,6 +226,7 @@ type Update struct {
 
 type UpdateMessage struct {
 	MessageID       int64
+	Date            int64
 	FromID          int64
 	LanguageCode    string
 	ChatID          int64
@@ -269,6 +271,7 @@ func fromAPIMessage(raw *apiMessage) *UpdateMessage {
 	content, text, links := contentFromAPIMessage(raw)
 	return &UpdateMessage{
 		MessageID:       raw.MessageID,
+		Date:            raw.Date,
 		FromID:          fromID,
 		LanguageCode:    languageCode,
 		ChatID:          raw.Chat.ID,

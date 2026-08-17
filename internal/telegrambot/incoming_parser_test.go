@@ -11,7 +11,7 @@ func TestParsePrivateDMForwardedTextPreservesContext(t *testing.T) {
 	update := parseRawPrivateDM(t, `{
   "update_id": 91,
   "message": {
-    "message_id": 7,
+    "message_id": 7, "date": 1786975200,
     "from": {"id": 42, "is_bot": false, "language_code": "ru"},
     "chat": {"id": 42, "type": "private"},
     "text": "😀 docs",
@@ -32,6 +32,9 @@ func TestParsePrivateDMForwardedTextPreservesContext(t *testing.T) {
 	if update.Text != wantText || update.Content.Kind != IncomingText ||
 		len(update.Content.HiddenLinks) != 1 || update.Content.HiddenLinks[0] != "https://example.test/docs" {
 		t.Fatalf("content = %#v, text = %q", update.Content, update.Text)
+	}
+	if update.MessageDate != 1786975200 {
+		t.Fatalf("message date = %d", update.MessageDate)
 	}
 	if len(update.Links) != 1 || update.Links[0].Text != "docs" ||
 		update.Links[0].OffsetUTF16 != 3 {

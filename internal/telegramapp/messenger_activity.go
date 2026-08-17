@@ -2,11 +2,15 @@ package telegramapp
 
 import (
 	"context"
+	"log"
 	"sync"
+	"time"
 
 	"github.com/Time4Mind/bria/internal/telegrambot"
 	"github.com/Time4Mind/bria/internal/telegramui"
 )
+
+const slowTelegramOperation = 750 * time.Millisecond
 
 // activityMessenger records only message ordering information. It never reads
 // message contents and exists so a compact service log is edited only while it
@@ -24,7 +28,10 @@ func newActivityMessenger(inner Messenger) *activityMessenger {
 func (m *activityMessenger) AnswerCallbackQuery(
 	ctx context.Context, callbackID string, text string,
 ) error {
-	return m.inner.AnswerCallbackQuery(ctx, callbackID, text)
+	startedAt := time.Now()
+	err := m.inner.AnswerCallbackQuery(ctx, callbackID, text)
+	logSlowTelegramOperation("answer_callback", startedAt, err)
+	return err
 }
 
 func (m *activityMessenger) SendTyping(ctx context.Context, chatID int64) error {
@@ -46,9 +53,13 @@ func (m *activityMessenger) SendDocument(
 func (m *activityMessenger) SendScreen(
 	ctx context.Context, chatID int64, screen telegramui.Screen,
 ) (telegrambot.Message, error) {
+	queuedAt := time.Now()
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	logSlowTelegramOperation("send_screen_queue", queuedAt, nil)
+	startedAt := time.Now()
 	message, err := m.inner.SendScreen(ctx, chatID, screen)
+	logSlowTelegramOperation("send_screen", startedAt, err)
 	if err == nil {
 		m.observeLocked(message.ChatID, message.MessageID)
 	}
@@ -58,9 +69,27 @@ func (m *activityMessenger) SendScreen(
 func (m *activityMessenger) EditScreen(
 	ctx context.Context, message telegrambot.Message, screen telegramui.Screen,
 ) (telegrambot.Message, error) {
+	queuedAt := time.Now()
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.inner.EditScreen(ctx, message, screen)
+	logSlowTelegramOperation("edit_screen_queue", queuedAt, nil)
+	startedAt := time.Now()
+	edited, err := m.inner.EditScreen(ctx, message, screen)
+	logSlowTelegramOperation("edit_screen", startedAt, err)
+	return edited, err
+}
+
+func logSlowTelegramOperation(operation string, startedAt time.Time, err error) {
+	duration := time.Since(startedAt)
+	if duration < slowTelegramOperation {
+		return
+	}
+	outcome := "ok"
+	if err != nil {
+		outcome = "failed"
+	}
+	log.Printf("bria telegram: slow_outbound operation=%s duration_ms=%d outcome=%s",
+		operation, duration.Milliseconds(), outcome)
 }
 
 func (m *activityMessenger) DeleteMessage(

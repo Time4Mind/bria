@@ -23,6 +23,7 @@ func ParsePrivateDM(update Update) (IncomingUpdate, error) {
 		return IncomingUpdate{
 			UpdateID:      update.UpdateID,
 			Kind:          IncomingMessage,
+			MessageDate:   message.Date,
 			ChatID:        message.ChatID,
 			UserID:        message.FromID,
 			LanguageCode:  message.LanguageCode,

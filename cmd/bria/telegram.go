@@ -138,13 +138,16 @@ func newTelegramAdapter(
 		updateCtx context.Context,
 		update telegrambot.IncomingUpdate,
 	) error {
+		startedAt := time.Now()
 		handleErr := handler.HandleTelegramUpdate(updateCtx, update)
+		finishedAt := time.Now()
 		outcome := "processed"
 		if handleErr != nil {
 			outcome = "failed"
 		}
-		fmt.Fprintf(os.Stderr, "bria telegram: update=%d kind=%s%s %s%s\n",
+		fmt.Fprintf(os.Stderr, "bria telegram: update=%d kind=%s%s %s%s%s\n",
 			update.UpdateID, update.Kind, telegramCallbackLogSuffix(update), outcome,
+			telegramTimingLogSuffix(update, startedAt, finishedAt),
 			telegramErrorSuffix(handleErr, token))
 		return handleErr
 	})
@@ -198,6 +201,25 @@ func newTelegramAdapter(
 		return nil, err
 	}
 	return interaction.Func{AdapterName: "telegram", RunFunc: poller.Run}, nil
+}
+
+func telegramTimingLogSuffix(
+	update telegrambot.IncomingUpdate,
+	startedAt time.Time,
+	finishedAt time.Time,
+) string {
+	if finishedAt.Before(startedAt) {
+		finishedAt = startedAt
+	}
+	suffix := fmt.Sprintf(" at=%s handle_ms=%d",
+		finishedAt.UTC().Format(time.RFC3339Nano), finishedAt.Sub(startedAt).Milliseconds())
+	if update.Kind == telegrambot.IncomingMessage && update.MessageDate > 0 {
+		messageAt := time.Unix(update.MessageDate, 0)
+		if !finishedAt.Before(messageAt) {
+			suffix += fmt.Sprintf(" telegram_age_ms=%d", finishedAt.Sub(messageAt).Milliseconds())
+		}
+	}
+	return suffix
 }
 
 // telegramCallbackLogSuffix identifies a failed UI route without persisting

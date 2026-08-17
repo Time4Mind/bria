@@ -167,6 +167,7 @@ type RemoteFile struct {
 type IncomingUpdate struct {
 	UpdateID       int64
 	Kind           IncomingKind
+	MessageDate    int64
 	ChatID         int64
 	UserID         int64
 	LanguageCode   string

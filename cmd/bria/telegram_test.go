@@ -6,9 +6,23 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Time4Mind/bria/internal/telegrambot"
 )
+
+func TestTelegramTimingLogSuffixMeasuresHandlerAndMessageAge(t *testing.T) {
+	startedAt := time.Unix(102, 250_000_000)
+	finishedAt := time.Unix(102, 700_000_000)
+	suffix := telegramTimingLogSuffix(telegrambot.IncomingUpdate{
+		Kind: telegrambot.IncomingMessage, MessageDate: 100,
+	}, startedAt, finishedAt)
+	if !strings.Contains(suffix, "handle_ms=450") ||
+		!strings.Contains(suffix, "telegram_age_ms=2700") ||
+		!strings.Contains(suffix, "at=1970-01-01T00:01:42.7Z") {
+		t.Fatalf("timing suffix = %q", suffix)
+	}
+}
 
 func TestLoadOptionalTelegramToken(t *testing.T) {
 	directory := t.TempDir()
