@@ -149,7 +149,7 @@ func escapeRichCode(text string) string {
 
 // normalizeRichTables mirrors the small table normalization used by CCBot.
 // Telegram's Rich Markdown parser requires a blank line before a GFM table;
-// <sub> keeps four-column status tables readable on narrow phone screens.
+// <sub> keeps compact status tables readable on narrow phone screens.
 func normalizeRichTables(text string) string {
 	lines := strings.Split(text, "\n")
 	withBlanks := make([]string, 0, len(lines)+1)

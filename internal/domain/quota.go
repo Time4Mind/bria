@@ -12,15 +12,26 @@ type QuotaWindow struct {
 	ResetsAt    time.Time `json:"resets_at,omitempty"`
 }
 
+// QuotaDailyBudget preserves the start-of-day baseline used to divide a
+// weekly quota over the remaining local calendar days. It travels with the
+// quota snapshot so a node restart cannot silently reset today's allowance.
+type QuotaDailyBudget struct {
+	Date         string    `json:"date"`
+	ResetsAt     time.Time `json:"resets_at"`
+	DayStartUsed int       `json:"day_start_used"`
+	Budget       float64   `json:"budget"`
+}
+
 type QuotaSnapshot struct {
-	NodeID         NodeID       `json:"node_id"`
-	Backend        string       `json:"backend"`
-	AccountID      string       `json:"account_id,omitempty"`
-	AccountLabel   string       `json:"account_label,omitempty"`
-	FiveHour       *QuotaWindow `json:"five_hour,omitempty"`
-	Weekly         *QuotaWindow `json:"weekly,omitempty"`
-	TodayRemaining *float64     `json:"today_remaining,omitempty"`
-	CollectedAt    time.Time    `json:"collected_at"`
+	NodeID         NodeID            `json:"node_id"`
+	Backend        string            `json:"backend"`
+	AccountID      string            `json:"account_id,omitempty"`
+	AccountLabel   string            `json:"account_label,omitempty"`
+	FiveHour       *QuotaWindow      `json:"five_hour,omitempty"`
+	Weekly         *QuotaWindow      `json:"weekly,omitempty"`
+	TodayRemaining *float64          `json:"today_remaining,omitempty"`
+	DailyBudget    *QuotaDailyBudget `json:"daily_budget,omitempty"`
+	CollectedAt    time.Time         `json:"collected_at"`
 }
 
 type TemporaryLeader struct {
@@ -46,8 +57,17 @@ func (q QuotaSnapshot) Validate() error {
 		}
 	}
 	if q.TodayRemaining != nil && (math.IsNaN(*q.TodayRemaining) ||
-		math.IsInf(*q.TodayRemaining, 0) || *q.TodayRemaining < 0 || *q.TodayRemaining > 100) {
-		return fmt.Errorf("%w: remaining daily quota must be between 0 and 100", ErrInvalidState)
+		math.IsInf(*q.TodayRemaining, 0) || *q.TodayRemaining < -100 || *q.TodayRemaining > 100) {
+		return fmt.Errorf("%w: remaining daily quota must be between -100 and 100", ErrInvalidState)
+	}
+	if q.DailyBudget != nil {
+		budget := q.DailyBudget
+		_, dateErr := time.Parse("2006-01-02", budget.Date)
+		if dateErr != nil || budget.ResetsAt.IsZero() || budget.DayStartUsed < 0 ||
+			budget.DayStartUsed > 100 || math.IsNaN(budget.Budget) ||
+			math.IsInf(budget.Budget, 0) || budget.Budget < 0 || budget.Budget > 100 {
+			return fmt.Errorf("%w: invalid daily quota budget", ErrInvalidState)
+		}
 	}
 	return nil
 }
@@ -108,6 +128,10 @@ func cloneQuota(snapshot QuotaSnapshot) QuotaSnapshot {
 	if snapshot.TodayRemaining != nil {
 		remaining := *snapshot.TodayRemaining
 		snapshot.TodayRemaining = &remaining
+	}
+	if snapshot.DailyBudget != nil {
+		budget := *snapshot.DailyBudget
+		snapshot.DailyBudget = &budget
 	}
 	return snapshot
 }

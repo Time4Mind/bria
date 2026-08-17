@@ -1,9 +1,6 @@
 package quota
 
-import (
-	"math"
-	"time"
-)
+import "time"
 
 type dailyState struct {
 	Date         string
@@ -40,6 +37,6 @@ func dailyRemainder(
 		}
 	}
 	spent := max(0, used-previous.DayStartUsed)
-	remaining := max(0, previous.Budget-float64(spent))
-	return math.Round(remaining*10) / 10, previous, true
+	remaining := previous.Budget - float64(spent)
+	return remaining, previous, true
 }

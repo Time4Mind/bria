@@ -123,7 +123,7 @@ func statusNodeAction(mode StatusMode) Action {
 
 func statusTable(copy i18n.Localizer, items []StatusItem, now time.Time) string {
 	header := strings.TrimSpace(strings.ReplaceAll(copy.Text(i18n.StatusQuotaHeader), "\\|", "|"))
-	lines := []string{header, "|---|---|---|---:|"}
+	lines := []string{header, "|---|---|---|---:|---:|---|"}
 	for _, item := range items {
 		name := markdownTableCell(item.Name)
 		if item.Disabled {
@@ -135,17 +135,32 @@ func statusTable(copy i18n.Localizer, items []StatusItem, now time.Time) string 
 			name = "👑 " + name
 		}
 		if len(item.Quotas) == 0 {
-			lines = append(lines, fmt.Sprintf("| %s | — | — | %d |",
+			lines = append(lines, fmt.Sprintf("| %s | — | — | %d | — | — |",
 				name, ageMinutes(now, item.ObservedAt)))
 			continue
 		}
 		for _, quota := range item.Quotas {
-			lines = append(lines, fmt.Sprintf("| %s | %s | %s | %d |",
+			lines = append(lines, fmt.Sprintf("| %s | %s | %s | %d | %s | %s |",
 				name, markdownTableCell(quota.Backend), markdownTableCell(quotaUsage(copy, quota)),
-				quotaAgeMinutes(now, quota.CollectedAt, item.ObservedAt)))
+				quotaAgeMinutes(now, quota.CollectedAt, item.ObservedAt),
+				quotaTodayRemaining(quota), quotaResetAt(quota, now)))
 		}
 	}
 	return strings.Join(lines, "\n")
+}
+
+func quotaTodayRemaining(snapshot domain.QuotaSnapshot) string {
+	if snapshot.TodayRemaining == nil {
+		return "—"
+	}
+	return fmt.Sprintf("%.1f%%", *snapshot.TodayRemaining)
+}
+
+func quotaResetAt(snapshot domain.QuotaSnapshot, now time.Time) string {
+	if snapshot.Weekly == nil || snapshot.Weekly.ResetsAt.IsZero() {
+		return "—"
+	}
+	return snapshot.Weekly.ResetsAt.In(now.Location()).Format("02.01 15:04")
 }
 
 func stripMarkdownTable(value string) string {

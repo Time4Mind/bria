@@ -94,13 +94,13 @@ the pragmatic Go engineering contract in [CONTRIBUTING.md](CONTRIBUTING.md).
   error, and action-required notifications, and configurable replicated
   dismissal after 1, 3, 5, or 10 switches into the session;
 - a cluster-wide Rich Markdown status table with per-node/provider quota
-  snapshots, data age, offline cache, async refresh, leader marking, and global
-  node sorting; persistent manual/automatic leader policy lives in cluster
-  settings rather than Status;
+  snapshots, data age, today's remaining weekly allowance, reset time, offline
+  cache, async refresh, leader marking, and global node sorting; persistent
+  manual/automatic leader policy lives in cluster settings rather than Status;
 - node-local Claude and Codex quota collectors with replicated normalized
-  snapshots, five/ten-minute polling, daily budget tracking, unique-account
-  threshold alerts, and no provider credentials or raw terminal output in
-  Raft;
+  snapshots, five/ten-minute polling, CCBot-compatible persistent daily budget
+  tracking, unique-account threshold alerts, and no provider credentials or raw
+  terminal output in Raft;
 - sole-voter continuity plus three-voter Raft replication and automatic
   leader-failover integration coverage;
 - follower-safe, node-local Telegram warnings when a running node loses and

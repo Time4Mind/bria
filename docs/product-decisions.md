@@ -122,12 +122,19 @@
   its enabled lifecycle; a fresh authenticated heartbeat restores it as a
   nonvoter.
 - Menu → Status always opens in `Select` mode. Its Rich Markdown table contains
-  every server/backend pair, cached quota values, reset time and age in minutes;
+  every server/backend pair, cached quota values, age in minutes, today's
+  remaining weekly allowance and reset time;
   offline rows retain their last value and carry an unavailable marker. Refresh
   polls nodes asynchronously. Status contains server selection and node
   settings; leader policy is not a Status mode. Server sorting is globally
   configurable as creation time (default), name, or leader first; quota polling
   is 5 or 10 minutes (default 10).
+- The daily allowance uses the CCBot calculation: at the first observation on
+  each local calendar day, remaining weekly quota is divided over all calendar
+  days through the reset date (inclusive). The baseline stays fixed during that
+  day, overspend is shown as a negative remainder, and redistribution happens
+  only on the next day. The baseline is replicated with the quota snapshot so a
+  process restart does not reset it.
 - Telegram is an interaction adapter, not a core dependency. Replacing it must
   require a new adapter and presentation mapping, not changes to domain,
   consensus, membership, or node runtime behavior.

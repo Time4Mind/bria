@@ -13,10 +13,14 @@ func TestQuotaSnapshotValidationAndCloneIsolation(t *testing.T) {
 	if err := state.AddNode(domain.Node{ID: "node", Name: "Node"}); err != nil {
 		t.Fatal(err)
 	}
-	remaining := 81.5
+	remaining := -4.0
 	snapshot := domain.QuotaSnapshot{
 		NodeID: "node", Backend: "codex", AccountID: "acct",
 		FiveHour: &domain.QuotaWindow{UsedPercent: 25}, TodayRemaining: &remaining,
+		DailyBudget: &domain.QuotaDailyBudget{
+			Date: "2026-08-17", ResetsAt: time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC),
+			DayStartUsed: 50, Budget: 10,
+		},
 		CollectedAt: time.Unix(100, 0),
 	}
 	if err := state.PublishNodeQuotas("node", []domain.QuotaSnapshot{snapshot}); err != nil {
@@ -25,7 +29,8 @@ func TestQuotaSnapshotValidationAndCloneIsolation(t *testing.T) {
 	snapshot.FiveHour.UsedPercent = 99
 	remaining = 0
 	got := state.Quotas["node/codex"]
-	if got.FiveHour.UsedPercent != 25 || *got.TodayRemaining != 81.5 {
+	if got.FiveHour.UsedPercent != 25 || *got.TodayRemaining != -4 ||
+		got.DailyBudget == nil || got.DailyBudget.Budget != 10 {
 		t.Fatalf("quota aliased caller: %#v", got)
 	}
 	invalid := got

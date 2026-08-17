@@ -97,13 +97,22 @@ func (s *Store) collect(ctx context.Context) {
 			}
 			s.mu.Lock()
 			if snapshot.Weekly != nil {
+				key := strings.ToLower(strings.TrimSpace(collector.Backend()))
+				previous := s.daily[key]
+				if previous.Date == "" {
+					previous = replicatedDailyState(s.state.State(), snapshot.Key())
+				}
 				remaining, state, ok := dailyRemainder(
 					snapshot.Weekly.UsedPercent, snapshot.Weekly.ResetsAt,
-					s.daily[collector.Backend()], time.Now(),
+					previous, time.Now(),
 				)
 				if ok {
 					snapshot.TodayRemaining = &remaining
-					s.daily[collector.Backend()] = state
+					snapshot.DailyBudget = &domain.QuotaDailyBudget{
+						Date: state.Date, ResetsAt: state.ResetsAt,
+						DayStartUsed: state.DayStartUsed, Budget: state.Budget,
+					}
+					s.daily[key] = state
 				}
 			}
 			s.snapshots[collector.Backend()] = snapshot
@@ -115,10 +124,25 @@ func (s *Store) collect(ctx context.Context) {
 	for backend := range s.snapshots {
 		if !connected[strings.ToLower(backend)] {
 			delete(s.snapshots, backend)
-			delete(s.daily, backend)
+			delete(s.daily, strings.ToLower(backend))
 		}
 	}
 	s.mu.Unlock()
+}
+
+func replicatedDailyState(state *domain.State, key string) dailyState {
+	if state == nil {
+		return dailyState{}
+	}
+	snapshot, ok := state.Quotas[key]
+	if !ok || snapshot.DailyBudget == nil {
+		return dailyState{}
+	}
+	budget := snapshot.DailyBudget
+	return dailyState{
+		Date: budget.Date, ResetsAt: budget.ResetsAt,
+		DayStartUsed: budget.DayStartUsed, Budget: budget.Budget,
+	}
 }
 
 func (s *Store) connectedBackends() map[string]bool {
