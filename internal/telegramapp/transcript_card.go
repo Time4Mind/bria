@@ -268,6 +268,28 @@ func (h *Handler) renderSessionCardSnapshot(
 	ref domain.SessionRef,
 	page int,
 ) (sessionCardSnapshot, error) {
+	return h.renderSessionCardSnapshotWithPane(ctx, actor, ref, page, true)
+}
+
+// renderSessionCardSnapshotWithoutPane is used by the live worker immediately
+// before attachPane. Keeping that capture in one place avoids rendering the
+// same changing terminal twice in a single refresh iteration.
+func (h *Handler) renderSessionCardSnapshotWithoutPane(
+	ctx context.Context,
+	actor application.Principal,
+	ref domain.SessionRef,
+	page int,
+) (sessionCardSnapshot, error) {
+	return h.renderSessionCardSnapshotWithPane(ctx, actor, ref, page, false)
+}
+
+func (h *Handler) renderSessionCardSnapshotWithPane(
+	ctx context.Context,
+	actor application.Principal,
+	ref domain.SessionRef,
+	page int,
+	attachPane bool,
+) (sessionCardSnapshot, error) {
 	if h.controls == nil {
 		screen, err := h.projector.SessionCard(actor, ref)
 		return sessionCardSnapshot{screen: screen}, err
@@ -346,7 +368,7 @@ func (h *Handler) renderSessionCardSnapshot(
 		phaseStarted = time.Now()
 		preferences, preferencesErr := h.service.Preferences(actor)
 		timing.preferences = time.Since(phaseStarted)
-		if preferencesErr == nil &&
+		if attachPane && preferencesErr == nil &&
 			preferences.EffectiveTerminalSnapshots() == domain.TerminalSnapshotAlways {
 			timing.pane = h.attachImmediatePane(ctx, actor, session, &screen)
 		}

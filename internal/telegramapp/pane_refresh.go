@@ -157,13 +157,13 @@ func (h *Handler) runPaneRefresh(
 			return
 		}
 		page := h.rememberedCardPage(actor.UserID, ref)
-		snapshot, err := h.renderSessionCardSnapshot(ctx, actor, ref, page)
+		snapshot, err := h.renderSessionCardSnapshotWithoutPane(ctx, actor, ref, page)
 		if err != nil {
 			return
 		}
 		settled := h.settleFromTranscript(ctx, actor, session, snapshot.events)
 		if settled {
-			snapshot, err = h.renderSessionCardSnapshot(
+			snapshot, err = h.renderSessionCardSnapshotWithoutPane(
 				ctx, actor, ref, application.CardPageLatestResponseStart,
 			)
 			if err != nil {
