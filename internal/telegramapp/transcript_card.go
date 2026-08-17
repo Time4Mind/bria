@@ -348,7 +348,7 @@ func (h *Handler) renderSessionCardSnapshot(
 		timing.preferences = time.Since(phaseStarted)
 		if preferencesErr == nil &&
 			preferences.EffectiveTerminalSnapshots() == domain.TerminalSnapshotAlways {
-			timing.pane = h.attachImmediatePane(ctx, actor, ref, &screen)
+			timing.pane = h.attachImmediatePane(ctx, actor, session, &screen)
 		}
 	}
 	return sessionCardSnapshot{screen: screen, events: events}, err

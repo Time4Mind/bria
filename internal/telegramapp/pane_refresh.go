@@ -323,24 +323,29 @@ func (h *Handler) attachPane(
 	screen.Pane = &telegramui.PaneImage{
 		PNG: rendered.PNG, Hash: rendered.Hash, AnchorOffset: paneAnchorOffset(*screen),
 	}
-	h.rememberPaneImage(ref, *screen.Pane)
+	remembered := h.rememberPaneImage(ref, *screen.Pane)
+	screen.Pane = &remembered
+	if remembered.FileID != "" {
+		timing.outcome = "verified_cache"
+	}
 }
 
 func (h *Handler) attachImmediatePane(
 	ctx context.Context,
 	actor application.Principal,
-	ref domain.SessionRef,
+	session domain.Session,
 	screen *telegramui.Screen,
 ) paneAttachTiming {
 	timing := paneAttachTiming{outcome: "capture_error"}
 	startedAt := time.Now()
-	// Navigation reuses the latest known pane immediately. The live worker owns
-	// freshness and replaces it asynchronously; blocking an explicit session or
-	// page switch on another capture only adds latency and can never make the
-	// transcript/card projection more current.
-	if cached, ok := h.cachedPaneImage(ref, 0); ok {
+	ref := session.Ref()
+	cached, hasCached := h.cachedPaneImage(ref, 0)
+	// An idle or archived terminal cannot be changing on behalf of Bria, so its
+	// latest image is safe to reuse without a capture. A working session must be
+	// captured and rendered first: only an equal image hash may reuse file_id.
+	if hasCached && paneCacheMaySkipCapture(session) {
 		timing.cache = time.Since(startedAt)
-		timing.outcome = "cache"
+		timing.outcome = "stable_cache"
 		cached.AnchorOffset = paneAnchorOffset(*screen)
 		screen.Pane = &cached
 		return timing
@@ -362,12 +367,27 @@ func (h *Handler) attachImmediatePane(
 	if err != nil {
 		return timing
 	}
-	timing.outcome = "attached"
-	screen.Pane = &telegramui.PaneImage{
+	image := telegramui.PaneImage{
 		PNG: rendered.PNG, Hash: rendered.Hash, AnchorOffset: paneAnchorOffset(*screen),
 	}
-	h.rememberPaneImage(ref, *screen.Pane)
+	sameImage := hasCached && cached.Hash == image.Hash
+	image = h.rememberPaneImage(ref, image)
+	screen.Pane = &image
+	switch {
+	case sameImage && image.FileID != "":
+		timing.outcome = "verified_cache"
+	case sameImage:
+		timing.outcome = "verified_png"
+	case hasCached:
+		timing.outcome = "changed"
+	default:
+		timing.outcome = "attached"
+	}
 	return timing
+}
+
+func paneCacheMaySkipCapture(session domain.Session) bool {
+	return session.State == domain.SessionArchived || session.RuntimePhase == domain.RuntimeIdle
 }
 
 func paneAnchorOffset(screen telegramui.Screen) int {

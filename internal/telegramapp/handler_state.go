@@ -34,11 +34,18 @@ func newPaneRefreshState() paneRefreshState {
 func (s *paneRefreshState) rememberPaneImage(
 	ref domain.SessionRef,
 	image telegramui.PaneImage,
-) {
+) telegramui.PaneImage {
 	key := ref.Key()
 	image.PNG = append([]byte(nil), image.PNG...)
 	s.paneMu.Lock()
 	defer s.paneMu.Unlock()
+	if previous, ok := s.paneImages[key]; ok &&
+		previous.image.Hash == image.Hash && previous.image.FileID != "" {
+		// Rendering the current terminal produced the same image. Keep the
+		// Telegram-side upload instead of uploading identical PNG bytes again.
+		image.PNG = nil
+		image.FileID = previous.image.FileID
+	}
 	for index, existing := range s.paneImageOrder {
 		if existing == key {
 			s.paneImageOrder = append(s.paneImageOrder[:index], s.paneImageOrder[index+1:]...)
@@ -52,6 +59,8 @@ func (s *paneRefreshState) rememberPaneImage(
 		s.paneImageOrder = s.paneImageOrder[1:]
 		delete(s.paneImages, oldest)
 	}
+	image.PNG = append([]byte(nil), image.PNG...)
+	return image
 }
 
 func (s *paneRefreshState) cachedPaneImage(
