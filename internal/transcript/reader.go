@@ -43,6 +43,7 @@ type readCacheEntry struct {
 
 const negativeResolveTTL = time.Second
 const maxReadCacheEntries = 32
+const initialParseLines = 256
 
 func NewReader(config Config) (*Reader, error) {
 	normalized, err := config.normalized()
@@ -60,9 +61,15 @@ func (r *Reader) Read(ctx context.Context, request Request) ([]Event, error) {
 	startedAt := time.Now()
 	cacheHit := false
 	eventCount := 0
+	lineCount := 0
+	parsedLineCount := 0
 	defer func() {
-		log.Printf("bria transcript: read_timing backend=%s total_ms=%d cache=%t events=%d",
-			request.Backend, time.Since(startedAt).Milliseconds(), cacheHit, eventCount)
+		log.Printf(
+			"bria transcript: read_timing backend=%s total_ms=%d cache=%t "+
+				"lines=%d parsed_lines=%d events=%d",
+			request.Backend, time.Since(startedAt).Milliseconds(), cacheHit,
+			lineCount, parsedLineCount, eventCount,
+		)
 	}()
 	if err := validateRequest(request); err != nil {
 		return nil, err
@@ -98,21 +105,51 @@ func (r *Reader) Read(ctx context.Context, request Request) ([]Event, error) {
 	if err != nil {
 		return nil, err
 	}
-	var events []Event
-	switch request.Backend {
-	case BackendClaude:
-		events = parseClaude(lines, r.config.MaxBodyBytes)
-	case BackendCodex:
-		events = parseCodex(lines, r.config.MaxBodyBytes)
-	}
-	if len(events) > r.config.MaxEvents {
-		events = events[len(events)-r.config.MaxEvents:]
-	}
+	lineCount = len(lines)
+	events, parsedLineCount := parseRecentEvents(
+		request.Backend, lines, r.config.MaxBodyBytes, r.config.MaxEvents,
+	)
 	eventCount = len(events)
 	if after, statErr := os.Stat(path); statErr == nil && sameTranscriptFileVersion(before, after) {
 		r.rememberRead(path, after, events)
 	}
 	return events, nil
+}
+
+func parseRecentEvents(
+	backend Backend,
+	lines [][]byte,
+	maxBodyBytes int,
+	maxEvents int,
+) ([]Event, int) {
+	if len(lines) == 0 {
+		return nil, 0
+	}
+	count := min(initialParseLines, len(lines))
+	for {
+		suffix := lines[len(lines)-count:]
+		var events []Event
+		switch backend {
+		case BackendClaude:
+			events = parseClaude(suffix, maxBodyBytes)
+		case BackendCodex:
+			events = parseCodex(suffix, maxBodyBytes)
+		}
+		hasContext := false
+		for index := len(events) - 1; index >= 0; index-- {
+			if events[index].ContextPercent != nil {
+				hasContext = true
+				break
+			}
+		}
+		if count == len(lines) || (len(events) >= maxEvents && hasContext) {
+			if len(events) > maxEvents {
+				events = events[len(events)-maxEvents:]
+			}
+			return events, count
+		}
+		count = min(len(lines), count*2)
+	}
 }
 
 func sameTranscriptFileVersion(left, right os.FileInfo) bool {

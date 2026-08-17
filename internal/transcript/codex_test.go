@@ -3,6 +3,7 @@ package transcript
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -96,6 +97,32 @@ func TestReaderCachesOnlyUnchangedTranscriptVersion(t *testing.T) {
 	third, err := reader.Read(context.Background(), request)
 	if err != nil || len(third) != 2 || third[1].Text != "second" {
 		t.Fatalf("updated read = %#v, %v", third, err)
+	}
+}
+
+func TestParseRecentEventsExpandsOnlyToLatestBoundedContext(t *testing.T) {
+	lines := make([][]byte, 0, 900)
+	for index := 0; index < 900; index++ {
+		line := fmt.Sprintf(
+			`{"timestamp":"t%d","type":"event_msg","payload":{"type":"user_message","message":"event-%d"}}`,
+			index, index,
+		)
+		if index == 700 {
+			line = `{"timestamp":"t700","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"total_tokens":500},"model_context_window":1000}}}`
+		}
+		lines = append(lines, []byte(line))
+	}
+	events, parsedLines := parseRecentEvents(BackendCodex, lines, 1<<20, 200)
+	if parsedLines >= len(lines) {
+		t.Fatalf("parsed all %d lines", parsedLines)
+	}
+	if len(events) != 200 || events[0].Text != "event-699" || events[199].Text != "event-899" {
+		t.Fatalf("unexpected bounded events: first=%q last=%q count=%d",
+			events[0].Text, events[len(events)-1].Text, len(events))
+	}
+	if events[len(events)-1].ContextPercent == nil ||
+		*events[len(events)-1].ContextPercent != 50 {
+		t.Fatalf("context percent = %#v", events[len(events)-1].ContextPercent)
 	}
 }
 
