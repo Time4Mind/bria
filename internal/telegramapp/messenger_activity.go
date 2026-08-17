@@ -11,6 +11,7 @@ import (
 )
 
 const slowTelegramOperation = 750 * time.Millisecond
+const tracedTelegramOperation = 25 * time.Millisecond
 
 // activityMessenger records only message ordering information. It never reads
 // message contents and exists so a compact service log is edited only while it
@@ -81,12 +82,17 @@ func (m *activityMessenger) EditScreen(
 
 func logSlowTelegramOperation(operation string, startedAt time.Time, err error) {
 	duration := time.Since(startedAt)
-	if duration < slowTelegramOperation {
+	if duration < tracedTelegramOperation {
 		return
 	}
 	outcome := "ok"
 	if err != nil {
 		outcome = "failed"
+	}
+	log.Printf("bria telegram: outbound_timing operation=%s duration_ms=%d outcome=%s",
+		operation, duration.Milliseconds(), outcome)
+	if duration < slowTelegramOperation {
+		return
 	}
 	log.Printf("bria telegram: slow_outbound operation=%s duration_ms=%d outcome=%s",
 		operation, duration.Milliseconds(), outcome)

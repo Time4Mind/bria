@@ -23,6 +23,16 @@ const (
 	typingRefreshDelay = 4 * time.Second
 )
 
+type paneAttachTiming struct {
+	capture time.Duration
+	render  time.Duration
+	outcome string
+}
+
+func (timing paneAttachTiming) total() time.Duration {
+	return timing.capture + timing.render
+}
+
 // schedulePaneRefresh never delays an update handler. A newer card generation
 // supersedes the old finite worker, and the poller context owns cancellation.
 func (h *Handler) schedulePaneRefresh(
@@ -276,19 +286,36 @@ func (h *Handler) attachPane(
 	attempt int,
 	screen *telegramui.Screen,
 ) {
+	timing := paneAttachTiming{outcome: "capture_error"}
+	defer func() {
+		if timing.total() >= 25*time.Millisecond {
+			fmt.Printf(
+				"bria telegram: pane_timing mode=refresh ref=%q total_ms=%d "+
+					"capture_ms=%d render_ms=%d outcome=%s\n",
+				ref.Key(), timing.total().Milliseconds(), timing.capture.Milliseconds(),
+				timing.render.Milliseconds(), timing.outcome,
+			)
+		}
+	}()
 	captureCtx, cancel := context.WithTimeout(ctx, paneCaptureLimit)
 	defer cancel()
+	startedAt := time.Now()
 	pane, err := h.controls.CapturePane(
 		captureCtx, actor,
 		fmt.Sprintf("pane-%d-%d-%d", message.MessageID, generation, attempt), ref,
 	)
+	timing.capture = time.Since(startedAt)
 	if err != nil {
 		return
 	}
+	timing.outcome = "render_error"
+	startedAt = time.Now()
 	rendered, err := terminalimage.Render(string(pane), terminalimage.Options{})
+	timing.render = time.Since(startedAt)
 	if err != nil {
 		return
 	}
+	timing.outcome = "attached"
 	screen.Pane = &telegramui.PaneImage{
 		PNG: rendered.PNG, Hash: rendered.Hash, AnchorOffset: paneAnchorOffset(*screen),
 	}
@@ -299,21 +326,29 @@ func (h *Handler) attachImmediatePane(
 	actor application.Principal,
 	ref domain.SessionRef,
 	screen *telegramui.Screen,
-) {
+) paneAttachTiming {
+	timing := paneAttachTiming{outcome: "capture_error"}
 	captureCtx, cancel := context.WithTimeout(ctx, paneCaptureLimit)
 	defer cancel()
+	startedAt := time.Now()
 	pane, err := h.controls.CapturePane(captureCtx, actor,
 		fmt.Sprintf("pane-open-%d", time.Now().UnixNano()), ref)
+	timing.capture = time.Since(startedAt)
 	if err != nil {
-		return
+		return timing
 	}
+	timing.outcome = "render_error"
+	startedAt = time.Now()
 	rendered, err := terminalimage.Render(string(pane), terminalimage.Options{})
+	timing.render = time.Since(startedAt)
 	if err != nil {
-		return
+		return timing
 	}
+	timing.outcome = "attached"
 	screen.Pane = &telegramui.PaneImage{
 		PNG: rendered.PNG, Hash: rendered.Hash, AnchorOffset: paneAnchorOffset(*screen),
 	}
+	return timing
 }
 
 func paneAnchorOffset(screen telegramui.Screen) int {

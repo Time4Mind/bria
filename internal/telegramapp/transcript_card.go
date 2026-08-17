@@ -3,6 +3,7 @@ package telegramapp
 import (
 	"context"
 	"errors"
+	"log"
 	"strconv"
 	"strings"
 	"time"
@@ -19,6 +20,36 @@ const maxCallbackCardPages = 512
 type sessionCardSnapshot struct {
 	screen telegramui.Screen
 	events []transcript.Event
+}
+
+type sessionCardTiming struct {
+	startedAt        time.Time
+	session          time.Duration
+	transcript       time.Duration
+	cache            time.Duration
+	pending          time.Duration
+	projection       time.Duration
+	preferences      time.Duration
+	pane             paneAttachTiming
+	transcriptSource string
+	outcome          string
+	events           int
+}
+
+func (timing sessionCardTiming) log(ref domain.SessionRef, page int) {
+	total := time.Since(timing.startedAt)
+	log.Printf(
+		"bria telegram: card_timing ref=%q page=%d total_ms=%d session_ms=%d "+
+			"transcript_ms=%d cache_ms=%d pending_ms=%d projection_ms=%d "+
+			"preferences_ms=%d pane_ms=%d pane_capture_ms=%d pane_render_ms=%d "+
+			"events=%d transcript_source=%s pane_outcome=%s outcome=%s",
+		ref.Key(), page, total.Milliseconds(), timing.session.Milliseconds(),
+		timing.transcript.Milliseconds(), timing.cache.Milliseconds(),
+		timing.pending.Milliseconds(), timing.projection.Milliseconds(),
+		timing.preferences.Milliseconds(), timing.pane.total().Milliseconds(),
+		timing.pane.capture.Milliseconds(), timing.pane.render.Milliseconds(),
+		timing.events, timing.transcriptSource, timing.pane.outcome, timing.outcome,
+	)
 }
 
 type sessionPageKey struct {
@@ -240,17 +271,28 @@ func (h *Handler) renderSessionCardSnapshot(
 		screen, err := h.projector.SessionCard(actor, ref)
 		return sessionCardSnapshot{screen: screen}, err
 	}
+	timing := sessionCardTiming{
+		startedAt: time.Now(), transcriptSource: "none", outcome: "ok",
+		pane: paneAttachTiming{outcome: "skipped"},
+	}
+	defer func() { timing.log(ref, page) }()
+	phaseStarted := time.Now()
 	session, sessionErr := h.service.Session(actor, ref)
+	timing.session = time.Since(phaseStarted)
 	if sessionErr != nil {
+		timing.outcome = "session_error"
 		return sessionCardSnapshot{}, sessionErr
 	}
+	phaseStarted = time.Now()
 	events, err := h.controls.Transcript(ctx, actor, ref)
+	timing.transcript = time.Since(phaseStarted)
 	if err != nil {
 		// A transient node-control failure must not erase a previously rendered
 		// transcript by replacing the live card with its header-only projection.
 		// Reuse the bounded in-memory copy when possible; otherwise leave the
 		// existing Telegram card untouched until the transcript is reachable.
 		if cached, ok := h.cachedCardTranscript(ref); ok {
+			timing.transcriptSource = "cache"
 			events = cached
 		} else if session.ProviderSessionID == "" ||
 			(session.IsLive() && errors.Is(err, transcript.ErrTranscriptNotFound)) {
@@ -258,29 +300,54 @@ func (h *Handler) renderSessionCardSnapshot(
 			// does not create the JSONL transcript until that prompt is accepted.
 			// A freshly provisioned live session therefore has a legitimate empty
 			// transcript and must still receive its usable Telegram card.
+			timing.transcriptSource = "empty"
+			phaseStarted = time.Now()
 			renderedEvents := h.withPendingVoiceRows(actor, ref, session, nil)
+			timing.pending = time.Since(phaseStarted)
+			phaseStarted = time.Now()
 			screen, projectErr := h.projector.SessionCardPageWithContext(
 				actor, ref, cardEvents(renderedEvents), page, h.cardContext(ref),
 			)
+			timing.projection = time.Since(phaseStarted)
+			timing.events = len(renderedEvents)
+			if projectErr != nil {
+				timing.outcome = "projection_error"
+			}
 			return sessionCardSnapshot{screen: screen}, projectErr
 		} else {
+			timing.transcriptSource = "error"
+			timing.outcome = "transcript_error"
 			return sessionCardSnapshot{}, err
 		}
+	} else {
+		timing.transcriptSource = "live"
 	}
+	phaseStarted = time.Now()
 	h.rememberCardTranscript(ref, session.Revision, session.ProviderSessionID, events)
+	timing.cache = time.Since(phaseStarted)
+	phaseStarted = time.Now()
 	renderedEvents := h.withPendingVoiceRows(actor, ref, session, events)
+	timing.pending = time.Since(phaseStarted)
+	phaseStarted = time.Now()
 	screen, err := h.projector.SessionCardPageWithContext(
 		actor, ref, cardEvents(renderedEvents), page, h.cardContext(ref),
 	)
+	timing.projection = time.Since(phaseStarted)
+	timing.events = len(renderedEvents)
+	if err != nil {
+		timing.outcome = "projection_error"
+	}
 	if err == nil {
 		if finalAt, final := finalTranscriptAt(events); final && screen.Checkpoint != nil &&
 			(screenShowsLatestCardPage(screen) || page == application.CardPageLatestResponseStart) {
 			screen.Checkpoint.RenderedFinalAt = finalAt
 		}
+		phaseStarted = time.Now()
 		preferences, preferencesErr := h.service.Preferences(actor)
+		timing.preferences = time.Since(phaseStarted)
 		if preferencesErr == nil &&
 			preferences.EffectiveTerminalSnapshots() == domain.TerminalSnapshotAlways {
-			h.attachImmediatePane(ctx, actor, ref, &screen)
+			timing.pane = h.attachImmediatePane(ctx, actor, ref, &screen)
 		}
 	}
 	return sessionCardSnapshot{screen: screen, events: events}, err
