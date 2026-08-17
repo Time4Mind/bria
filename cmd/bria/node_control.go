@@ -131,7 +131,7 @@ func startNodeRuntimeControl(
 	transcriptReader, err := transcript.NewReader(transcript.Config{
 		ClaudeProjectsRoot: filepath.Join(home, ".claude", "projects"),
 		CodexSessionsRoot:  filepath.Join(home, ".codex", "sessions"),
-		MaxReadBytes:       1 << 20,
+		MaxReadBytes:       6 << 20,
 		MaxBodyBytes:       64 << 10,
 	})
 	if err != nil {

@@ -810,6 +810,70 @@ func TestSessionSwitchRestoresEachSessionsPageAndFollowMode(t *testing.T) {
 	}
 }
 
+func TestSelectingSettledStaleRunningSessionDoesNotRepostFinal(t *testing.T) {
+	fixture := newFixture(t)
+	actor := application.Principal{UserID: 7}
+	finalAt := time.Now().Add(-time.Second).UTC()
+	stale := domain.Session{
+		ID: "stale-final", NodeID: "allowed", OwnerID: 7, Name: "Stale Final",
+		Backend: "codex", State: domain.SessionActive, RuntimePhase: domain.RuntimeRunning,
+		CreatedAt: finalAt.Add(-time.Second), LiveSinceAt: finalAt.Add(-time.Second),
+		LastEventAt: finalAt.Add(-time.Second),
+	}
+	if result := fixture.machine.Apply(commandForTest(
+		t, "add-stale-final", clusterstate.CommandAddSession, stale,
+	)); result.Err() != nil {
+		t.Fatal(result.Err())
+	}
+	controls := &blockingControls{events: []transcript.Event{{
+		Kind: transcript.EventAssistantFinal, Text: "Already delivered",
+		Timestamp: finalAt.Format(time.RFC3339Nano),
+	}}}
+	handler, err := telegramapp.NewHandlerWithControls(
+		fixture.service, fixture.projector, fixture.codec, fixture.messenger, controls,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, err := fixture.codec.Session(7, telegramui.ActionSelectSession, stale.Ref())
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := (telegramui.Callback{
+		Action: telegramui.ActionSelectSession, Token: token,
+	}).Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := handler.HandleTelegramUpdate(context.Background(), telegrambot.IncomingUpdate{
+		UpdateID: 401, Kind: telegrambot.IncomingCallback, ChatID: 7, UserID: 7,
+		CallbackID: "select-stale-final", CallbackData: data,
+		CallbackOrigin: telegrambot.Message{ChatID: 7, MessageID: 150, Rich: true},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		session, sessionErr := fixture.service.Session(actor, stale.Ref())
+		if sessionErr != nil {
+			t.Fatal(sessionErr)
+		}
+		if session.RuntimePhase == domain.RuntimeIdle {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	time.Sleep(50 * time.Millisecond)
+	if len(fixture.messenger.sent) != 0 {
+		t.Fatalf("selecting delivered stale final reposted carrier: %#v", fixture.messenger.sent)
+	}
+	card, ok, cardErr := fixture.service.TelegramResponseCard(actor)
+	if cardErr != nil || !ok || card.MessageID != 150 || card.Session != stale.Ref() ||
+		!card.RenderedFinalAt.Equal(finalAt) {
+		t.Fatalf("stable selected carrier = %#v / %v / %v", card, ok, cardErr)
+	}
+}
+
 func TestTranscriptPageButtonsResolveOpaqueTargetPage(t *testing.T) {
 	fixture := newFixture(t)
 	ref := domain.SessionRef{NodeID: "allowed", SessionID: "live"}

@@ -242,6 +242,15 @@ func (h *Handler) repostFinalResponseCard(
 		if current.Session != ref {
 			return telegramMessage(current), nil
 		}
+		if checkpoint := screen.Checkpoint; checkpoint != nil &&
+			!checkpoint.RenderedFinalAt.IsZero() &&
+			responseCardCoversFinal(current, ref, checkpoint.RenderedFinalAt) {
+			// Selecting a session can settle a stale running runtime after the
+			// callback has already edited the existing carrier with that final.
+			// The restored pane worker must not promote the same delivered final
+			// into another Telegram message.
+			return telegramMessage(current), nil
+		}
 		if current.ChatID != previous.ChatID || current.MessageID != previous.MessageID ||
 			current.Rich != previous.Rich || current.RichMediaFileID != previous.RichMediaFileID {
 			return telegramMessage(current), nil
