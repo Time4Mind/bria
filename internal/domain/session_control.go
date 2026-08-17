@@ -73,6 +73,7 @@ func (s *State) ClearSession(
 		return fmt.Errorf("%w: session counter exhausted", ErrInvalidState)
 	}
 	session.Name = ""
+	session.NameFormatVersion = 0
 	session.ProviderSessionID = ""
 	session.ProviderResume = false
 	session.ProviderBindingSince = at
@@ -111,14 +112,18 @@ func (s *State) RenameSession(
 	if err := requireRevision(session, expectedRevision); err != nil {
 		return err
 	}
-	name = strings.TrimSpace(name)
-	if name == "" || len(name) > 64 || strings.ContainsAny(name, "\r\n\t") {
-		return fmt.Errorf("%w: session name is invalid", ErrInvalidState)
+	name, err = NormalizeSessionName(name)
+	if err != nil {
+		return err
+	}
+	if s.sessionNameTaken(session.OwnerID, ref, name) {
+		return fmt.Errorf("%w: session name already exists", ErrAlreadyExists)
 	}
 	if session.Revision == math.MaxUint64 {
 		return fmt.Errorf("%w: session revision exhausted", ErrInvalidState)
 	}
 	session.Name = name
+	session.NameFormatVersion = SessionNameFormatVersion
 	session.LastEventAt = at
 	session.Revision++
 	s.Sessions[ref.Key()] = session

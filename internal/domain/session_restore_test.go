@@ -76,7 +76,7 @@ func TestGeneratedRenameNeverOverwritesANewerName(t *testing.T) {
 	ref := addSession(t, state, "rename", "alpha", 1, time.Unix(10, 0).UTC())
 	session := state.Sessions[ref.Key()]
 	if err := state.RenameSession(
-		1, ref, session.Revision, "fresh context", time.Unix(20, 0).UTC(),
+		1, ref, session.Revision, "fresh ctx", time.Unix(20, 0).UTC(),
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +85,7 @@ func TestGeneratedRenameNeverOverwritesANewerName(t *testing.T) {
 	); !errors.Is(err, domain.ErrStaleOperation) {
 		t.Fatalf("stale rename error=%v", err)
 	}
-	if got := state.Sessions[ref.Key()].Name; got != "fresh context" {
+	if got := state.Sessions[ref.Key()].Name; got != "fresh ctx" {
 		t.Fatalf("name=%q", got)
 	}
 }

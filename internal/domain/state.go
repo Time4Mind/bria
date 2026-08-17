@@ -141,6 +141,20 @@ func (s *State) AddSession(session Session) error {
 	if _, exists := s.Sessions[key]; exists {
 		return ErrAlreadyExists
 	}
+	// Format version zero is a persisted legacy name. It remains readable and
+	// is migrated from the first prompt by sessioncontrol; every new committed
+	// name must explicitly carry and satisfy the current contract.
+	if session.Name != "" && session.NameFormatVersion >= SessionNameFormatVersion {
+		name, nameErr := NormalizeSessionName(session.Name)
+		if nameErr != nil {
+			return nameErr
+		}
+		if s.sessionNameTaken(session.OwnerID, session.Ref(), name) {
+			return fmt.Errorf("%w: session name already exists", ErrAlreadyExists)
+		}
+		session.Name = name
+		session.NameFormatVersion = SessionNameFormatVersion
+	}
 	s.Sessions[key] = session
 	s.ensureActiveSession(session.OwnerID)
 	return nil

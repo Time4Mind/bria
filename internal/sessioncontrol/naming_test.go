@@ -42,7 +42,7 @@ func TestFirstInputAfterClearAssignsANewGeneratedName(t *testing.T) {
 
 	runtime.mu.Lock()
 	runtime.results["prompt-name"] = runtimehost.Result{
-		Accepted: true, Delivered: true, GeneratedName: "archive repair",
+		Accepted: true, Delivered: true, GeneratedName: "archive fix",
 	}
 	runtime.mu.Unlock()
 	if _, err := controller.SendInput(
@@ -53,12 +53,12 @@ func TestFirstInputAfterClearAssignsANewGeneratedName(t *testing.T) {
 	}
 	deadline := time.Now().Add(time.Second)
 	for time.Now().Before(deadline) {
-		if machine.State().Sessions[ref.Key()].Name == "archive repair" {
+		if machine.State().Sessions[ref.Key()].Name == "archive fix" {
 			break
 		}
 		time.Sleep(time.Millisecond)
 	}
-	if got := machine.State().Sessions[ref.Key()].Name; got != "archive repair" {
+	if got := machine.State().Sessions[ref.Key()].Name; got != "archive fix" {
 		t.Fatalf("generated name=%q", got)
 	}
 	runtime.mu.Lock()
@@ -77,7 +77,7 @@ func TestFailedNamingCallRetriesWithoutAnotherSessionInput(t *testing.T) {
 	runtime.mu.Lock()
 	runtime.results["prompt-name"] = runtimehost.Result{Accepted: true, Delivered: false}
 	runtime.results["prompt-name-retry-1"] = runtimehost.Result{
-		Accepted: true, Delivered: true, GeneratedName: "retry-success",
+		Accepted: true, Delivered: true, GeneratedName: "retry ok",
 	}
 	runtime.mu.Unlock()
 	if _, err := controller.SendInput(
@@ -85,7 +85,7 @@ func TestFailedNamingCallRetriesWithoutAnotherSessionInput(t *testing.T) {
 	); err != nil {
 		t.Fatal(err)
 	}
-	waitForName(t, machine, ref, "retry-success")
+	waitForName(t, machine, ref, "retry ok")
 	runtime.mu.Lock()
 	defer runtime.mu.Unlock()
 	if got := runtime.requests[len(runtime.requests)-1]; got.OperationID != "prompt-name-retry-1" || got.Action != runtimehost.ActionGenerateName {
@@ -123,10 +123,10 @@ func TestEnsureNameRecoversFirstTranscriptPromptWithoutResendingIt(t *testing.T)
 	}
 	runtime.mu.Lock()
 	runtime.results[namingRequest.OperationID] = runtimehost.Result{
-		Accepted: true, Delivered: true, GeneratedName: "persisted-prompt",
+		Accepted: true, Delivered: true, GeneratedName: "persisted",
 	}
 	runtime.mu.Unlock()
-	waitForName(t, machine, ref, "persisted-prompt")
+	waitForName(t, machine, ref, "persisted")
 	// Clear plus naming only: the recovery path did not enqueue send_input.
 	runtime.mu.Lock()
 	defer runtime.mu.Unlock()
@@ -134,6 +134,46 @@ func TestEnsureNameRecoversFirstTranscriptPromptWithoutResendingIt(t *testing.T)
 		if request.Action == runtimehost.ActionSendInput {
 			t.Fatalf("prompt was resent to the interactive session: %#v", request)
 		}
+	}
+}
+
+func TestMigrateNamesRenamesExistingSessionFromFirstPromptOnce(t *testing.T) {
+	controller, runtime, machine := controllerFixture(t)
+	controller.transcripts = &namingTranscriptStub{events: []transcript.Event{
+		{Kind: transcript.EventUserText, Text: "first migration prompt"},
+		{Kind: transcript.EventAssistantFinal, Text: "answer"},
+		{Kind: transcript.EventUserText, Text: "later prompt"},
+	}}
+	if queued := controller.MigrateNames(); queued != 1 {
+		t.Fatalf("queued migrations=%d", queued)
+	}
+	var request runtimehost.Request
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		runtime.mu.Lock()
+		if len(runtime.requests) > 0 {
+			request = runtime.requests[len(runtime.requests)-1]
+		}
+		runtime.mu.Unlock()
+		if request.OperationID != "" {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if request.Text != "first migration prompt" {
+		t.Fatalf("migration request=%#v", request)
+	}
+	runtime.mu.Lock()
+	runtime.results[request.OperationID] = runtimehost.Result{
+		Accepted: true, Delivered: true, GeneratedName: "first task",
+	}
+	runtime.mu.Unlock()
+	waitForName(t, machine, domain.SessionRef{NodeID: "node", SessionID: "session"}, "first task")
+	if got := machine.State().Sessions["node/session"].NameFormatVersion; got != domain.SessionNameFormatVersion {
+		t.Fatalf("name format version=%d", got)
+	}
+	if queued := controller.MigrateNames(); queued != 0 {
+		t.Fatalf("committed name migrated again: %d", queued)
 	}
 }
 

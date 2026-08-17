@@ -70,6 +70,20 @@ func TestGeneratorRejectsRefusals(t *testing.T) {
 	}
 }
 
+func TestGeneratorLimitsNameToTwelveCharacters(t *testing.T) {
+	runner := &runnerStub{stdout: []byte("Very-Long-Session-Name")}
+	generator, err := NewGenerator(runner, map[string]Command{
+		"codex": {Executable: "codex", Model: "gpt-mini"},
+	}, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	name, err := generator.Generate(context.Background(), "codex", "some prompt")
+	if err != nil || len(name) > 12 || len(strings.Fields(name)) > 2 {
+		t.Fatalf("name=%q err=%v", name, err)
+	}
+}
+
 func TestGeneratorTruncatesLongUnicodeSeedOnRuneBoundary(t *testing.T) {
 	runner := &runnerStub{stdout: []byte("windows-node")}
 	generator, err := NewGenerator(runner, map[string]Command{

@@ -14,12 +14,12 @@ import (
 	"unicode/utf8"
 )
 
-const promptTemplate = "Generate a 2 word kebab-case name (lowercase, hyphenated, exactly two words) for a coding session about: %s\nReply with only the name, no quotes."
+const promptTemplate = "Generate a short 1 or 2 word kebab-case name (lowercase, hyphenated, no more than 12 characters total) for a coding session about: %s\nReply with only the name, no quotes."
 
 var (
 	invalidNameCharacters = regexp.MustCompile(`[^a-z0-9-]+`)
 	repeatedHyphens       = regexp.MustCompile(`-+`)
-	validName             = regexp.MustCompile(`^[a-z][a-z0-9-]{1,30}$`)
+	validName             = regexp.MustCompile(`^[a-z][a-z0-9-]{0,11}$`)
 	refusalPrefixes       = []string{
 		"i cannot", "i can't", "i can not", "i won't", "i will not",
 		"i'm unable", "i am unable", "i'm sorry", "i am sorry",
@@ -135,6 +135,9 @@ func sanitize(raw []byte) (string, error) {
 	words := strings.Split(line, "-")
 	if len(words) > 2 {
 		line = strings.Join(words[:2], "-")
+	}
+	if len(line) > 12 {
+		line = strings.TrimRight(line[:12], "-")
 	}
 	if !validName.MatchString(line) {
 		return "", errors.New("naming response is invalid")

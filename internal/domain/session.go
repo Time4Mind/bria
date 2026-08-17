@@ -70,6 +70,7 @@ type Session struct {
 	NodeID               NodeID                  `json:"node_id"`
 	OwnerID              UserID                  `json:"owner_id"`
 	Name                 string                  `json:"name"`
+	NameFormatVersion    int                     `json:"name_format_version,omitempty"`
 	Workdir              string                  `json:"workdir"`
 	Backend              string                  `json:"backend"`
 	ProviderSessionID    string                  `json:"provider_session_id,omitempty"`

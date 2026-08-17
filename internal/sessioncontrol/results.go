@@ -189,7 +189,7 @@ func (c *Controller) namingStillNeeded(
 	session, err := c.service.Session(actor, domain.SessionRef{
 		NodeID: domain.NodeID(request.NodeID), SessionID: domain.SessionID(request.SessionID),
 	})
-	return err == nil && session.IsLive() && session.Name == "" &&
+	return err == nil && session.IsLive() && sessionNeedsGeneratedName(session) &&
 		session.RuntimeGeneration == request.ExpectedGeneration
 }
 
@@ -209,14 +209,27 @@ func (c *Controller) commitGeneratedName(
 	ref := domain.SessionRef{
 		NodeID: domain.NodeID(request.NodeID), SessionID: domain.SessionID(request.SessionID),
 	}
-	session, err := c.service.Session(actor, ref)
-	if err != nil || session.Name != "" || session.RuntimeGeneration != request.ExpectedGeneration {
-		return
+	for attempt := 0; attempt < 3; attempt++ {
+		session, err := c.service.Session(actor, ref)
+		if err != nil || !sessionNeedsGeneratedName(session) ||
+			session.RuntimeGeneration != request.ExpectedGeneration {
+			return
+		}
+		candidate, err := c.service.AvailableSessionName(actor, ref, name)
+		if err != nil {
+			return
+		}
+		ctx, cancel := context.WithTimeout(c.ctx, 3*time.Second)
+		ctx = application.WithOperationScope(
+			ctx, fmt.Sprintf("%s-commit-%d-%s", request.OperationID, attempt, candidate),
+		)
+		err = c.service.RenameSession(ctx, actor, session, candidate)
+		cancel()
+		if err == nil {
+			fmt.Printf("bria session naming: renamed ref=%q name=%q\n", ref.Key(), candidate)
+			return
+		}
 	}
-	ctx, cancel := context.WithTimeout(c.ctx, 3*time.Second)
-	defer cancel()
-	ctx = application.WithOperationScope(ctx, request.OperationID+"-commit")
-	_ = c.service.RenameSession(ctx, actor, session, name)
 }
 
 func (c *Controller) applyResult(

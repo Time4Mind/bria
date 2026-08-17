@@ -143,6 +143,34 @@ func (s *Service) RenameSession(
 	})
 }
 
+func (s *Service) AvailableSessionName(
+	actor Principal,
+	ref domain.SessionRef,
+	requested string,
+) (string, error) {
+	state := s.reader.State()
+	session, ok := state.Sessions[ref.Key()]
+	if !ok {
+		return "", domain.ErrNotFound
+	}
+	if session.OwnerID != actor.UserID || !state.CanPerformSessionAction(actor.UserID, ref, domain.ActionRename) {
+		return "", domain.ErrAccessDenied
+	}
+	return state.AvailableSessionName(session.OwnerID, ref, requested)
+}
+
+func (s *Service) SessionsNeedingGeneratedNames() []domain.Session {
+	state := s.reader.State()
+	result := make([]domain.Session, 0)
+	for _, session := range state.Sessions {
+		if session.IsLive() && session.NameFormatVersion < domain.SessionNameFormatVersion {
+			result = append(result, session)
+		}
+	}
+	domain.SortLive(result)
+	return result
+}
+
 func (s *Service) CloseSession(
 	ctx context.Context,
 	actor Principal,

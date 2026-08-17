@@ -65,7 +65,7 @@ func (c *Controller) startNaming(
 // interactive provider session and never blocks Telegram rendering.
 func (c *Controller) EnsureName(actor application.Principal, ref domain.SessionRef) bool {
 	session, err := c.service.Session(actor, ref)
-	if err != nil || c.transcripts == nil || !session.IsLive() || session.Name != "" ||
+	if err != nil || c.transcripts == nil || !session.IsLive() || !sessionNeedsGeneratedName(session) ||
 		session.OwnerID != actor.UserID {
 		return false
 	}
@@ -95,6 +95,24 @@ func (c *Controller) EnsureName(actor application.Principal, ref domain.SessionR
 		c.startNaming(actor, operationID, session, seed, key)
 	}()
 	return true
+}
+
+// MigrateNames schedules a one-time first-prompt rename for sessions persisted
+// before the current naming contract. A committed format version makes the
+// operation restart-safe and prevents already migrated names from changing.
+func (c *Controller) MigrateNames() int {
+	queued := 0
+	for _, session := range c.service.SessionsNeedingGeneratedNames() {
+		actor := application.Principal{UserID: session.OwnerID}
+		if c.EnsureName(actor, session.Ref()) {
+			queued++
+		}
+	}
+	return queued
+}
+
+func sessionNeedsGeneratedName(session domain.Session) bool {
+	return session.Name == "" || session.NameFormatVersion < domain.SessionNameFormatVersion
 }
 
 func namingKey(session domain.Session) string {

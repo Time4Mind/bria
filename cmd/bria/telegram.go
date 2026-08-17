@@ -84,6 +84,9 @@ func newTelegramAdapter(
 	if err := controls.SetSessionFiles(runtimeControl.sessionFiles); err != nil {
 		return nil, err
 	}
+	if queued := controls.MigrateNames(); queued > 0 {
+		fmt.Printf("bria session naming: queued_migrations=%d\n", queued)
+	}
 	handler, err := telegramapp.NewHandlerWithControlsAndLeadership(
 		service, projector, codec, client, controls, adapterLeader,
 	)
