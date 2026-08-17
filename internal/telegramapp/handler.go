@@ -40,7 +40,6 @@ type Handler struct {
 
 	paneRefreshState
 	voicePendingState
-	inputPendingState
 	cardRuntimeState
 	fileMu             sync.Mutex
 	deliveredFiles     map[string]bool
@@ -85,7 +84,6 @@ func NewHandler(
 		activity:           activity,
 		paneRefreshState:   newPaneRefreshState(),
 		voicePendingState:  newVoicePendingState(),
-		inputPendingState:  newInputPendingState(),
 		cardRuntimeState:   newCardRuntimeState(),
 		deliveredFiles:     make(map[string]bool),
 		promptHashes:       make(map[domain.UserID]map[string]string),
@@ -396,13 +394,19 @@ func (h *Handler) handleCallback(
 		// which action exposed the rich screen (including Sessions and paging).
 	}
 	pageEdit := pageRef.Validate() == nil
+	serializeCardEdit := pageEdit || leavesSessionCard(callback.Action)
 	if pageEdit {
 		// Stop the live worker before serializing the page edit. If it already
 		// owns the edit lock, it finishes first; the user's explicit page always
 		// wins and the replacement worker starts from that pinned page.
 		h.cancelPaneRefresh(actor.UserID)
-		h.cardEditMu.Lock()
 		h.rememberResolvedCardPage(actor.UserID, update.CallbackOrigin, pageRef, screen)
+	}
+	if serializeCardEdit {
+		// An explicit navigation must be the final writer. The live worker uses
+		// the same lock, so a pane edit that was already in flight finishes first
+		// and cannot repaint the session after the requested screen is visible.
+		h.cardEditMu.Lock()
 	}
 	if replaceCarrier {
 		// Telegram cannot safely promote a legacy carrier to Rich in place.
@@ -415,7 +419,13 @@ func (h *Handler) handleCallback(
 	} else {
 		edited, err = h.messenger.EditScreen(ctx, update.CallbackOrigin, screen)
 	}
-	if pageEdit {
+	if err == nil {
+		// Persist every carrier screen, including non-session navigation. An empty
+		// session checkpoint is intentional state: background workers must not
+		// infer that the selected session is still visible.
+		h.rememberResponseCard(ctx, actor, edited, screen)
+	}
+	if serializeCardEdit {
 		h.cardEditMu.Unlock()
 	}
 	if err == nil && (callback.Action == telegramui.ActionStatus ||
@@ -428,7 +438,6 @@ func (h *Handler) handleCallback(
 		h.rememberCardPage(actor.UserID, edited, screen)
 	}
 	if err == nil && callback.Action == telegramui.ActionSelectSession && h.controls != nil {
-		h.rememberResponseCard(ctx, actor, edited, screen)
 		if ref, resolveErr := h.resolveSession(actor, callback.Action, callback.Token); resolveErr == nil {
 			h.rememberResolvedCardPage(actor.UserID, edited, ref, screen)
 			h.schedulePaneRefresh(ctx, actor, ref, edited)

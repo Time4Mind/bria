@@ -426,7 +426,7 @@ func TestSettingsCallbackStopsTelegramSpinnerBeforeRaftApply(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"answer", "apply", "edit"}
+	want := []string{"answer", "apply", "edit", "apply"}
 	if got := *fixture.events; !slices.Equal(got, want) {
 		t.Fatalf("callback event order=%v, want %v", got, want)
 	}

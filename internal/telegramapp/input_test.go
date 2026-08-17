@@ -107,7 +107,7 @@ func TestCurrentCardDisplayPreferencesDoNotBlockTextDelivery(t *testing.T) {
 	}
 }
 
-func TestTextInputImmediatelyPreservesHistoryAndShowsAcceptedPrompt(t *testing.T) {
+func TestTextInputPreservesHistoryWithoutInventingProviderOrder(t *testing.T) {
 	fixture := newFixture(t)
 	ref := domain.SessionRef{NodeID: "allowed", SessionID: "live"}
 	controls := &blockingControls{ref: ref, events: []transcript.Event{
@@ -134,14 +134,15 @@ func TestTextInputImmediatelyPreservesHistoryAndShowsAcceptedPrompt(t *testing.T
 		t.Fatalf("sent screens=%#v", fixture.messenger.sent)
 	}
 	text := fixture.messenger.sent[0].Text
-	previous := strings.Index(text, "previous answer")
-	current := strings.Index(text, "👤 current prompt")
-	if previous < 0 || current < 0 || previous > current {
-		t.Fatalf("initial card lost history or accepted prompt:\n%s", text)
+	if !strings.Contains(text, "previous answer") {
+		t.Fatalf("initial card lost history:\n%s", text)
+	}
+	if strings.Contains(text, "current prompt") {
+		t.Fatalf("initial card invented a provider event:\n%s", text)
 	}
 }
 
-func TestPendingTextSurvivesTranscriptFlushLag(t *testing.T) {
+func TestTextInputUsesProviderTranscriptOrderAfterFlush(t *testing.T) {
 	fixture := newFixture(t)
 	actor := application.Principal{UserID: 7}
 	ref := domain.SessionRef{NodeID: "allowed", SessionID: "live"}
@@ -175,18 +176,36 @@ func TestPendingTextSurvivesTranscriptFlushLag(t *testing.T) {
 	}
 	waitTestNotification(t, fixture.messenger.editNotify, "lagging transcript was not refreshed")
 	edited := fixture.messenger.edited[len(fixture.messenger.edited)-1].Text
-	if !strings.Contains(edited, "previous answer") ||
-		!strings.Contains(edited, "👤 current prompt") {
-		t.Fatalf("pending prompt disappeared during transcript lag:\n%s", edited)
+	if !strings.Contains(edited, "previous answer") || strings.Contains(edited, "current prompt") {
+		t.Fatalf("card did not preserve provider-only history during flush lag:\n%s", edited)
 	}
-	controls.appendTranscriptEvent(transcript.Event{
-		Kind: transcript.EventUserText, Text: "current prompt",
-		Timestamp: time.Now().Format(time.RFC3339Nano),
-	})
+	now := time.Now()
+	controls.mu.Lock()
+	controls.events = append(controls.events,
+		transcript.Event{
+			Kind: transcript.EventUserText, Text: "current prompt",
+			Timestamp: now.Format(time.RFC3339Nano),
+		},
+		transcript.Event{
+			Kind: transcript.EventToolCall, Head: "ORDERED TOOL", Body: "work",
+			Timestamp: now.Add(time.Millisecond).Format(time.RFC3339Nano),
+		},
+		transcript.Event{
+			Kind: transcript.EventAssistantText, Text: "ordered answer",
+			Timestamp: now.Add(2 * time.Millisecond).Format(time.RFC3339Nano),
+		},
+	)
+	controls.mu.Unlock()
 	waitTestNotification(t, fixture.messenger.editNotify, "flushed transcript was not refreshed")
 	edited = fixture.messenger.edited[len(fixture.messenger.edited)-1].Text
 	if count := strings.Count(edited, "👤 current prompt"); count != 1 {
-		t.Fatalf("accepted prompt was duplicated after transcript flush (%d):\n%s", count, edited)
+		t.Fatalf("provider prompt count after transcript flush = %d:\n%s", count, edited)
+	}
+	promptAt := strings.Index(edited, "👤 current prompt")
+	toolAt := strings.Index(edited, "ORDERED TOOL")
+	answerAt := strings.Index(edited, "ordered answer")
+	if promptAt < 0 || toolAt < 0 || answerAt < 0 || promptAt > toolAt || toolAt > answerAt {
+		t.Fatalf("provider order was not preserved:\n%s", edited)
 	}
 }
 

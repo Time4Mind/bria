@@ -84,19 +84,14 @@ func (h *Handler) handleMessage(
 		return err
 	}
 	// The prompt is already durably queued. Reuse the exact transcript snapshot
-	// that backed the previous card and add the accepted input optimistically;
-	// provider transcripts are asynchronous and must not produce a blank card
-	// between Telegram acceptance and their first flush. Voice has its own
-	// CCBot-compatible pending transcription row.
+	// that backed the previous card, but do not invent a chronological user row:
+	// only the provider transcript knows where the CLI processed it relative to
+	// tools and responses. Voice has its own pending transcription status row.
 	screen, err := h.projector.SessionCard(actor, accepted.Session)
 	if err == nil && update.Content.Kind == telegrambot.IncomingVoice && !accepted.Deferred {
 		h.markVoicePending(actor, accepted.Session, operationIDForInput(update.UpdateID), voiceBaseline)
 		screen, err = h.pendingVoiceCard(actor, accepted.Session, voiceBaseline)
 	} else if err == nil && pendingInputText(update) != "" {
-		h.markInputPending(
-			actor, accepted.Session, operationIDForInput(update.UpdateID),
-			pendingInputText(update), inputBaseline,
-		)
 		screen, err = h.pendingInputCard(actor, accepted.Session, inputBaseline)
 	}
 	message, err := h.sendProjectedMessage(ctx, update.ChatID, screen, err)
@@ -179,13 +174,17 @@ func (h *Handler) editResponseCard(
 	// A background reconciliation may have already promoted this carrier while
 	// an older live-card worker was sleeping. Re-read the replicated identity so
 	// concurrent recovery paths cannot create two replacement cards.
-	if current, ok, err := h.service.TelegramResponseCard(actor); err == nil && ok &&
+	current, currentOK, currentErr := h.service.TelegramResponseCard(actor)
+	if currentErr == nil && currentOK &&
 		current.ChatID == message.ChatID && current.MessageID != 0 &&
 		(current.MessageID != message.MessageID || current.Rich != message.Rich ||
 			current.RichMediaFileID != message.RichMediaFileID) {
 		message = telegramMessage(current)
 	}
 	active, activeErr := h.service.ActiveSession(actor)
+	if activeErr == nil && currentOK && current.Session != active.Ref() {
+		return telegramMessage(current), nil
+	}
 	if activeErr == nil && !h.screenMatchesRememberedPage(
 		actor.UserID, message, active.Ref(), screen,
 	) {
@@ -240,6 +239,9 @@ func (h *Handler) repostFinalResponseCard(
 		return previous, nil
 	}
 	if currentErr == nil && currentOK {
+		if current.Session != ref {
+			return telegramMessage(current), nil
+		}
 		if current.ChatID != previous.ChatID || current.MessageID != previous.MessageID ||
 			current.Rich != previous.Rich || current.RichMediaFileID != previous.RichMediaFileID {
 			return telegramMessage(current), nil

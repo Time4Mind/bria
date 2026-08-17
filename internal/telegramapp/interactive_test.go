@@ -218,13 +218,18 @@ func TestActivePromptRepaintsReplicatedLiveCardWithoutNotification(t *testing.T)
 	pane := []byte("☐ Choose\n❯ 1. First\nEnter to select\n")
 	publishInteractivePrompt(t, fixture, pane)
 	actor := application.Principal{UserID: 7}
+	ref := domain.SessionRef{NodeID: "allowed", SessionID: "live"}
+	session := fixture.machine.State().Sessions[ref.Key()]
 	if err := fixture.service.RecordTelegramResponseCard(
-		context.Background(), actor, domain.TelegramResponseCard{ChatID: 7, MessageID: 55},
+		context.Background(), actor, domain.TelegramResponseCard{
+			ChatID: 7, MessageID: 55, Session: ref,
+			SessionRevision: session.Revision, SessionEventAt: session.LastEventAt,
+		},
 	); err != nil {
 		t.Fatal(err)
 	}
 	controls := &blockingControls{
-		ref: domain.SessionRef{NodeID: "allowed", SessionID: "live"}, pane: pane,
+		ref: ref, pane: pane,
 	}
 	handler, err := telegramapp.NewHandlerWithControls(
 		fixture.service, fixture.projector, fixture.codec, fixture.messenger, controls,

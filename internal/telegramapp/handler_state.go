@@ -29,15 +29,6 @@ func newVoicePendingState() voicePendingState {
 	return voicePendingState{pendingVoices: make(map[voicePendingKey][]voicePending)}
 }
 
-type inputPendingState struct {
-	inputMu       sync.Mutex
-	pendingInputs map[inputPendingKey][]inputPending
-}
-
-func newInputPendingState() inputPendingState {
-	return inputPendingState{pendingInputs: make(map[inputPendingKey][]inputPending)}
-}
-
 type cardRuntimeState struct {
 	cardDataMu      sync.RWMutex
 	cardContexts    map[string]cardContextEntry

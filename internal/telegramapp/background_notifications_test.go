@@ -10,6 +10,8 @@ import (
 	"github.com/Time4Mind/bria/internal/clusterstate"
 	"github.com/Time4Mind/bria/internal/domain"
 	"github.com/Time4Mind/bria/internal/telegramapp"
+	"github.com/Time4Mind/bria/internal/telegrambot"
+	"github.com/Time4Mind/bria/internal/telegramui"
 	"github.com/Time4Mind/bria/internal/transcript"
 )
 
@@ -74,9 +76,13 @@ func TestReconciliationRefreshesActiveResponseCardWithRecoveredFinal(t *testing.
 			Session: ref, Generation: session.RuntimeGeneration,
 			Phase: domain.RuntimeRunning,
 		})
+	running := fixture.machine.State().Sessions[ref.Key()]
 	if err := fixture.service.RecordTelegramResponseCard(
 		application.WithOperationScope(context.Background(), "active-card"), actor,
-		domain.TelegramResponseCard{ChatID: 7, MessageID: 51, Rich: true},
+		domain.TelegramResponseCard{
+			ChatID: 7, MessageID: 51, Rich: true, Session: ref,
+			SessionRevision: running.Revision, SessionEventAt: running.LastEventAt,
+		},
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -201,9 +207,13 @@ func TestReconciliationAcceptsFastFinalBeforeLegacyDeliveryAck(t *testing.T) {
 				Status: domain.OperationSucceeded,
 			},
 		})
+	running := fixture.machine.State().Sessions[ref.Key()]
 	if err := fixture.service.RecordTelegramResponseCard(
 		application.WithOperationScope(context.Background(), "legacy-card"), actor,
-		domain.TelegramResponseCard{ChatID: 7, MessageID: 61, Rich: true},
+		domain.TelegramResponseCard{
+			ChatID: 7, MessageID: 61, Rich: true, Session: ref,
+			SessionRevision: running.Revision, SessionEventAt: running.LastEventAt,
+		},
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -239,9 +249,13 @@ func TestBackgroundReconciliationRestoresLiveCardWorkerAfterRestart(t *testing.T
 			Session: ref, Generation: session.RuntimeGeneration,
 			Phase: domain.RuntimeRunning,
 		})
+	running := fixture.machine.State().Sessions[ref.Key()]
 	if err := fixture.service.RecordTelegramResponseCard(
 		application.WithOperationScope(context.Background(), "legacy-live-card"), actor,
-		domain.TelegramResponseCard{ChatID: 7, MessageID: 71, Rich: false},
+		domain.TelegramResponseCard{
+			ChatID: 7, MessageID: 71, Rich: false, Session: ref,
+			SessionRevision: running.Revision, SessionEventAt: running.LastEventAt,
+		},
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -287,6 +301,56 @@ func TestBackgroundReconciliationRestoresLiveCardWorkerAfterRestart(t *testing.T
 	}
 	if len(fixture.messenger.deleted) == 0 || fixture.messenger.deleted[0].MessageID != 71 {
 		t.Fatalf("legacy carrier was not replaced: %#v", fixture.messenger.deleted)
+	}
+}
+
+func TestServersNavigationIsNotReplacedByRunningSessionRefresh(t *testing.T) {
+	fixture := newFixture(t)
+	actor := application.Principal{UserID: 7}
+	ref := domain.SessionRef{NodeID: "allowed", SessionID: "live"}
+	session := fixture.machine.State().Sessions[ref.Key()]
+	runningAt := time.Now().UTC()
+	applyBackgroundCommand(t, fixture, "servers-navigation-running",
+		clusterstate.CommandPublishSessionRuntime, runningAt,
+		clusterstate.PublishSessionRuntime{
+			Session: ref, Generation: session.RuntimeGeneration,
+			Phase: domain.RuntimeRunning,
+		})
+	running := fixture.machine.State().Sessions[ref.Key()]
+	if err := fixture.service.RecordTelegramResponseCard(
+		application.WithOperationScope(context.Background(), "servers-navigation-card"), actor,
+		domain.TelegramResponseCard{
+			ChatID: 7, MessageID: 91, Rich: true, Session: ref,
+			SessionRevision: running.Revision, SessionEventAt: running.LastEventAt,
+		},
+	); err != nil {
+		t.Fatal(err)
+	}
+	controls := &blockingControls{ref: ref, events: []transcript.Event{{
+		Kind: transcript.EventToolCall, Head: "Bash", Body: "still working",
+		Timestamp: runningAt.Format(time.RFC3339Nano),
+	}}}
+	handler, err := telegramapp.NewHandlerWithControls(
+		fixture.service, fixture.projector, fixture.codec, fixture.messenger, controls,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	origin := telegrambot.Message{ChatID: 7, MessageID: 91, Rich: true}
+	invokeCarrierAction(t, handler, 601, origin, telegramui.ActionSessions, "servers")
+	if got := fixture.messenger.edited[len(fixture.messenger.edited)-1].Name; got != telegramui.ScreenStatus {
+		t.Fatalf("navigation screen = %q", got)
+	}
+	card, ok, cardErr := fixture.service.TelegramResponseCard(actor)
+	if cardErr != nil || !ok || card.Session != (domain.SessionRef{}) {
+		t.Fatalf("navigation card checkpoint = %#v / %v / %v", card, ok, cardErr)
+	}
+	edits := len(fixture.messenger.edited)
+	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Millisecond)
+	defer cancel()
+	handler.RunBackgroundNotifications(ctx, 5*time.Millisecond)
+	if len(fixture.messenger.edited) != edits {
+		t.Fatalf("servers screen was replaced: %#v", fixture.messenger.edited[edits:])
 	}
 }
 

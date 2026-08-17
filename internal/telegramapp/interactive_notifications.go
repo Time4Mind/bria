@@ -117,6 +117,11 @@ func (h *Handler) refreshActiveInteractive(
 		h.rememberResponseCard(ctx, actor, message, screen)
 		return true
 	}
+	if card.Session != notice.Session.Ref() {
+		// The session is selected but the user explicitly navigated elsewhere.
+		// Notify in a separate message instead of replacing that screen.
+		return h.sendInteractiveNotification(ctx, notice)
+	}
 	_, err = h.editResponseCard(ctx, actor, telegramMessage(card), screen)
 	return err == nil
 }

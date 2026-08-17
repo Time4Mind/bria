@@ -60,7 +60,7 @@ func (h *Handler) reconcileActiveFinalCards(ctx context.Context) {
 		if err != nil || session.RuntimePhase != domain.RuntimeIdle {
 			continue
 		}
-		if card.Session != (domain.SessionRef{}) && card.Session != session.Ref() {
+		if card.Session != session.Ref() {
 			continue
 		}
 		if card.Session == session.Ref() && card.SessionRevision >= session.Revision &&
@@ -91,7 +91,7 @@ func (h *Handler) restoreActivePaneRefreshes(ctx context.Context) {
 			continue
 		}
 		card, ok, err := h.service.TelegramResponseCard(candidate.Actor)
-		if err != nil || !ok {
+		if err != nil || !ok || card.Session != candidate.Session.Ref() {
 			continue
 		}
 		h.ensurePaneRefresh(ctx, candidate.Actor, candidate.Session.Ref(), telegramMessage(card))
@@ -200,6 +200,9 @@ func (h *Handler) refreshBackgroundPanel(ctx context.Context, userID domain.User
 	if err != nil {
 		return true
 	}
+	if card.Session != session.Ref() {
+		return true
+	}
 	message := telegramMessage(card)
 	page := h.rememberedCardPage(actor.UserID, message, session.Ref())
 	if session.RuntimePhase != domain.RuntimeIdle {
@@ -277,7 +280,7 @@ func (h *Handler) repostActiveFinal(
 	ref domain.SessionRef,
 ) {
 	card, ok, err := h.service.TelegramResponseCard(actor)
-	if err != nil || !ok {
+	if err != nil || !ok || card.Session != ref {
 		return
 	}
 	screen, err := h.renderSessionCard(ctx, actor, ref, 0)
