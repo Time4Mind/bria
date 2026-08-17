@@ -424,6 +424,13 @@ func (h *Handler) handleCallback(
 		// session checkpoint is intentional state: background workers must not
 		// infer that the selected session is still visible.
 		h.rememberResponseCard(ctx, actor, edited, screen)
+		if leavesSessionCard(callback.Action) {
+			// A background reconciliation can start a replacement worker while a
+			// slow navigation screen is being projected. Invalidate that generation
+			// after the non-session checkpoint is durable and before releasing the
+			// shared edit lock.
+			h.cancelPaneRefresh(actor.UserID)
+		}
 	}
 	if serializeCardEdit {
 		h.cardEditMu.Unlock()

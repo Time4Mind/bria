@@ -206,6 +206,10 @@ func (h *Handler) editPaneScreen(
 		!h.screenMatchesRememberedPage(actor.UserID, message, ref, screen) {
 		return message, nil
 	}
+	card, ok, err := h.service.TelegramResponseCard(actor)
+	if err != nil || !ok || card.Session != ref {
+		return message, nil
+	}
 	edited, err := h.messenger.EditScreen(ctx, message, screen)
 	if err == nil {
 		h.rememberResolvedCardPage(actor.UserID, edited, ref, screen)

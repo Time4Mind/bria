@@ -93,6 +93,7 @@ func (h *Handler) handleCreateCallback(
 	edited, err := h.messenger.EditScreen(ctx, update.CallbackOrigin, screen)
 	if err == nil {
 		h.rememberResponseCard(ctx, actor, edited, screen)
+		h.cancelPaneRefresh(actor.UserID)
 	}
 	h.cardEditMu.Unlock()
 	if err == nil && ref.SessionID != "" {
