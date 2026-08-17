@@ -33,7 +33,7 @@ func packCardEventPages(blocks []cardEventBlock, runeLimit, byteLimit int) []str
 	return pages
 }
 
-func splitCardText(text string, runeLimit, byteLimit int) []string {
+func splitCardPlainText(text string, runeLimit, byteLimit int) []string {
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return nil
