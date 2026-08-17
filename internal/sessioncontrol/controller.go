@@ -32,13 +32,14 @@ type Controller struct {
 	ctx         context.Context
 	cancel      context.CancelFunc
 
-	pollInterval  time.Duration
-	retryInterval time.Duration
-	resultWait    time.Duration
-	namingWait    time.Duration
-	workers       sync.WaitGroup
-	namingMu      sync.Mutex
-	naming        map[string]bool
+	pollInterval    time.Duration
+	retryInterval   time.Duration
+	resultWait      time.Duration
+	mediaResultWait time.Duration
+	namingWait      time.Duration
+	workers         sync.WaitGroup
+	namingMu        sync.Mutex
+	naming          map[string]bool
 }
 
 func NewWithTranscripts(
@@ -73,8 +74,9 @@ func New(service *application.Service, runtime Runtime) (*Controller, error) {
 	return &Controller{
 		service: service, runtime: runtime, ctx: ctx, cancel: cancel,
 		pollInterval: 50 * time.Millisecond, retryInterval: 200 * time.Millisecond,
-		resultWait: 15 * time.Second, namingWait: 35 * time.Second,
-		naming: make(map[string]bool),
+		resultWait: 15 * time.Second, mediaResultWait: 12 * time.Minute,
+		namingWait: 35 * time.Second,
+		naming:     make(map[string]bool),
 	}, nil
 }
 

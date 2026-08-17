@@ -98,9 +98,12 @@ func (h *Handler) recordResponseCard(
 		card.RichMediaFileID, card.PaneHash, card.Session.Key(), card.SessionRevision,
 		card.SessionEventAt.UnixNano(), card.RenderedFinalAt.UnixNano(),
 	)))
-	recordCtx := application.WithOperationScope(
-		ctx, fmt.Sprintf("telegram-response-card-%d-%d-%x",
-			card.ChatID, card.MessageID, fingerprint[:8]),
+	// A Telegram update may record more than one response-card state. Keep those
+	// same-kind commands distinct, but retain replay stability under the update's
+	// causal scope. With no external scope (background refresh), this stays
+	// unscoped and therefore cannot deduplicate a later identical transition.
+	recordCtx := application.WithOperationSubscope(
+		ctx, fmt.Sprintf("telegram-response-card-%x", fingerprint[:8]),
 	)
 	if err := h.service.RecordTelegramResponseCard(recordCtx, actor, card); err != nil {
 		return previous, exists, false

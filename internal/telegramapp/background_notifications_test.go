@@ -476,6 +476,23 @@ func TestServersNavigationIsNotReplacedByRunningSessionRefresh(t *testing.T) {
 	if cardErr != nil || !ok || card.Session != (domain.SessionRef{}) {
 		t.Fatalf("navigation card checkpoint = %#v / %v / %v", card, ok, cardErr)
 	}
+	// Return to the live card, then open the byte-for-byte identical Servers
+	// screen again. Each click is a distinct causal mutation even though the
+	// resulting empty checkpoint has the same fingerprint.
+	if err := fixture.service.RecordTelegramResponseCard(
+		application.WithOperationScope(context.Background(), "returned-session-card"), actor,
+		domain.TelegramResponseCard{
+			ChatID: 7, MessageID: 91, Rich: true, Session: ref,
+			SessionRevision: running.Revision, SessionEventAt: running.LastEventAt,
+		},
+	); err != nil {
+		t.Fatal(err)
+	}
+	invokeCarrierAction(t, handler, 602, origin, telegramui.ActionSessions, "servers")
+	card, ok, cardErr = fixture.service.TelegramResponseCard(actor)
+	if cardErr != nil || !ok || card.Session != (domain.SessionRef{}) {
+		t.Fatalf("repeated navigation card checkpoint = %#v / %v / %v", card, ok, cardErr)
+	}
 	edits := len(fixture.messenger.edited)
 	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Millisecond)
 	defer cancel()

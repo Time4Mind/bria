@@ -4,7 +4,6 @@ import (
 	"sync"
 
 	"github.com/Time4Mind/bria/internal/domain"
-	"github.com/Time4Mind/bria/internal/transcript"
 )
 
 type paneRefreshState struct {
@@ -32,13 +31,13 @@ func newVoicePendingState() voicePendingState {
 type cardRuntimeState struct {
 	cardDataMu      sync.RWMutex
 	cardContexts    map[string]cardContextEntry
-	cardTranscripts map[string][]transcript.Event
+	cardTranscripts map[string]cardTranscriptEntry
 	cardMutationMu  sync.Mutex
 }
 
 func newCardRuntimeState() cardRuntimeState {
 	return cardRuntimeState{
 		cardContexts:    make(map[string]cardContextEntry),
-		cardTranscripts: make(map[string][]transcript.Event),
+		cardTranscripts: make(map[string]cardTranscriptEntry),
 	}
 }

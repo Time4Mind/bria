@@ -117,7 +117,7 @@ func (c *Controller) deliverDeferred(ctx context.Context, leadership Leadership,
 	if _, err := c.runtime.Submit(ctx, request); err != nil {
 		return
 	}
-	deadline := time.NewTimer(c.resultWait)
+	deadline := time.NewTimer(c.operationResultWait(request))
 	defer deadline.Stop()
 	ticker := time.NewTicker(c.pollInterval)
 	defer ticker.Stop()

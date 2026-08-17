@@ -25,6 +25,16 @@ type whisperRunner struct {
 	stdoutOnly bool
 }
 
+func TestWhisperDefaultAllowsSlowCPUNodes(t *testing.T) {
+	transcriber, err := NewWhisperTranscriber(WhisperConfig{ModelPath: "/model"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if transcriber.config.TranscribeTimeout != 10*time.Minute {
+		t.Fatalf("default transcription timeout = %s", transcriber.config.TranscribeTimeout)
+	}
+}
+
 func (r *whisperRunner) Run(
 	ctx context.Context,
 	stdout io.Writer,

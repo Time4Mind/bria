@@ -282,6 +282,17 @@ func WithOperationScope(ctx context.Context, scope string) context.Context {
 	return context.WithValue(ctx, operationScopeKey{}, scope)
 }
 
+// WithOperationSubscope separates multiple commands of the same kind emitted
+// while handling one external event, without making unscoped background work
+// deterministic across otherwise unrelated runs.
+func WithOperationSubscope(ctx context.Context, subscope string) context.Context {
+	scope, ok := ctx.Value(operationScopeKey{}).(string)
+	if !ok || scope == "" || subscope == "" {
+		return ctx
+	}
+	return WithOperationScope(ctx, scope+"\x00"+subscope)
+}
+
 func randomID() (string, error) {
 	raw := make([]byte, 16)
 	if _, err := rand.Read(raw); err != nil {

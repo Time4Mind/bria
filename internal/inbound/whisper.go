@@ -30,8 +30,11 @@ type WhisperTranscriber struct {
 }
 
 const (
-	defaultConvertTimeout    = 30 * time.Second
-	defaultTranscribeTimeout = 2 * time.Minute
+	defaultConvertTimeout = 30 * time.Second
+	// CPU-only nodes can need several times the recording duration for the
+	// medium model, especially while another session is busy. Two minutes made
+	// otherwise valid 30-60 second Telegram voice notes fail nondeterministically.
+	defaultTranscribeTimeout = 10 * time.Minute
 	defaultMaxOutputBytes    = 64 << 10
 	maximumMaxOutputBytes    = 1 << 20
 )

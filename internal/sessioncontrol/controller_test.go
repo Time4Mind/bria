@@ -97,6 +97,41 @@ func TestExternalInputPinsDescriptorWithoutMediaBytes(t *testing.T) {
 	}
 }
 
+func TestExternalInputObservationOutlivesOrdinaryOperationDeadline(t *testing.T) {
+	controller, runtime, machine := controllerFixture(t)
+	controller.resultWait = 5 * time.Millisecond
+	controller.mediaResultWait = 250 * time.Millisecond
+	input := runtimehost.InputPayload{
+		Kind: runtimehost.InputVoice,
+		File: runtimehost.InputFile{
+			Provider: "telegram", ID: "voice-id", UniqueID: "voice-unique", Size: 42,
+		},
+	}
+	if _, err := controller.SendExternalInput(
+		context.Background(), application.Principal{UserID: 7}, "slow-voice", input,
+	); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(20 * time.Millisecond)
+	runtime.mu.Lock()
+	runtime.results["slow-voice"] = runtimehost.Result{
+		Accepted: true, Delivered: false, Detail: "runtime operation failed",
+	}
+	runtime.mu.Unlock()
+
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		session := machine.State().Sessions["node/session"]
+		if session.LastOperation != nil &&
+			session.LastOperation.OperationID == "slow-voice" &&
+			session.LastOperation.Status == domain.OperationFailed {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("slow voice result was abandoned: %#v", machine.State().Sessions["node/session"])
+}
+
 func TestSendInputTimeoutEntersBoundedRetryWithoutBlockingAcceptance(t *testing.T) {
 	controller, runtime, machine := controllerFixture(t)
 	runtime.mu.Lock()

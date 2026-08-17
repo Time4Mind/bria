@@ -36,3 +36,23 @@ func TestOperationScopeMakesReplayCommandIDStable(t *testing.T) {
 		t.Fatalf("scoped command IDs=%#v", port.commands)
 	}
 }
+
+func TestOperationSubscopeSeparatesSameKindCommandsWithinUpdate(t *testing.T) {
+	state := domain.NewState()
+	port := &capturePort{state: state}
+	service, err := NewService(port, port)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := WithOperationScope(context.Background(), "telegram-update-42")
+	for _, subscope := range []string{"first-card", "second-card", "first-card"} {
+		if err := service.AdvanceTelegramCursor(WithOperationSubscope(ctx, subscope), 43); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(port.commands) != 3 ||
+		port.commands[0].OperationID == port.commands[1].OperationID ||
+		port.commands[0].OperationID != port.commands[2].OperationID {
+		t.Fatalf("subscoped command IDs=%#v", port.commands)
+	}
+}

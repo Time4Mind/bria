@@ -15,6 +15,13 @@ type cardContextEntry struct {
 	revision uint64
 }
 
+type cardTranscriptEntry struct {
+	providerSessionID string
+	events            []transcript.Event
+}
+
+const maxCachedCardEvents = 200
+
 func latestContextPercent(events []transcript.Event) (int, bool) {
 	for index := len(events) - 1; index >= 0; index-- {
 		if events[index].ContextPercent != nil {
@@ -27,12 +34,21 @@ func latestContextPercent(events []transcript.Event) (int, bool) {
 func (h *Handler) rememberCardTranscript(
 	ref domain.SessionRef,
 	revision uint64,
+	providerSessionID string,
 	events []transcript.Event,
 ) {
-	cloned := append([]transcript.Event(nil), events...)
-	percent, present := latestContextPercent(events)
 	h.cardDataMu.Lock()
-	h.cardTranscripts[ref.Key()] = cloned
+	previous := h.cardTranscripts[ref.Key()]
+	if previous.providerSessionID == providerSessionID {
+		events = mergeCardTranscriptEvents(previous.events, events)
+	} else {
+		events = cloneTranscriptEvents(events)
+	}
+	h.cardTranscripts[ref.Key()] = cardTranscriptEntry{
+		providerSessionID: providerSessionID,
+		events:            events,
+	}
+	percent, present := latestContextPercent(events)
 	h.cardContexts[ref.Key()] = cardContextEntry{
 		percent: percent, present: present, revision: revision,
 	}
@@ -41,9 +57,64 @@ func (h *Handler) rememberCardTranscript(
 
 func (h *Handler) cachedCardTranscript(ref domain.SessionRef) ([]transcript.Event, bool) {
 	h.cardDataMu.RLock()
-	events, ok := h.cardTranscripts[ref.Key()]
+	entry, ok := h.cardTranscripts[ref.Key()]
 	h.cardDataMu.RUnlock()
-	return append([]transcript.Event(nil), events...), ok
+	return cloneTranscriptEvents(entry.events), ok
+}
+
+func mergeCardTranscriptEvents(
+	previous []transcript.Event,
+	current []transcript.Event,
+) []transcript.Event {
+	if len(previous) == 0 {
+		return cloneTranscriptEvents(current)
+	}
+	if len(current) == 0 {
+		return cloneTranscriptEvents(previous)
+	}
+	overlap := 0
+	for count := min(len(previous), len(current)); count > 0; count-- {
+		matched := true
+		for index := 0; index < count; index++ {
+			if !sameTranscriptEvent(
+				previous[len(previous)-count+index], current[index],
+			) {
+				matched = false
+				break
+			}
+		}
+		if matched {
+			overlap = count
+			break
+		}
+	}
+	merged := cloneTranscriptEvents(previous)
+	if overlap > 0 {
+		copy(merged[len(merged)-overlap:], cloneTranscriptEvents(current[:overlap]))
+	}
+	merged = append(merged, cloneTranscriptEvents(current[overlap:])...)
+	if len(merged) > maxCachedCardEvents {
+		merged = cloneTranscriptEvents(merged[len(merged)-maxCachedCardEvents:])
+	}
+	return merged
+}
+
+func sameTranscriptEvent(left, right transcript.Event) bool {
+	return left.Kind == right.Kind && left.Text == right.Text &&
+		left.ToolUseID == right.ToolUseID && left.ToolName == right.ToolName &&
+		left.Head == right.Head && left.Body == right.Body &&
+		left.Error == right.Error && left.Timestamp == right.Timestamp
+}
+
+func cloneTranscriptEvents(events []transcript.Event) []transcript.Event {
+	cloned := append([]transcript.Event(nil), events...)
+	for index := range cloned {
+		if cloned[index].ContextPercent != nil {
+			value := *cloned[index].ContextPercent
+			cloned[index].ContextPercent = &value
+		}
+	}
+	return cloned
 }
 
 func (h *Handler) cardContext(ref domain.SessionRef) application.CardContext {
@@ -120,7 +191,8 @@ func (h *Handler) refreshBackgroundContexts(
 			)
 			if err == nil {
 				h.rememberCardTranscript(
-					delivery.Session.Ref(), delivery.Notice.EventRevision, events,
+					delivery.Session.Ref(), delivery.Notice.EventRevision,
+					delivery.Session.ProviderSessionID, events,
 				)
 			}
 		}()

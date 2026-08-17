@@ -267,7 +267,7 @@ func (h *Handler) renderSessionCardSnapshot(
 			return sessionCardSnapshot{}, err
 		}
 	}
-	h.rememberCardTranscript(ref, session.Revision, events)
+	h.rememberCardTranscript(ref, session.Revision, session.ProviderSessionID, events)
 	renderedEvents := h.withPendingVoiceRows(actor, ref, session, events)
 	screen, err := h.projector.SessionCardPageWithContext(
 		actor, ref, cardEvents(renderedEvents), page, h.cardContext(ref),

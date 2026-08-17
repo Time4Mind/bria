@@ -47,3 +47,20 @@ func TestRichPaneAlsoNormalizesShellFence(t *testing.T) {
 		t.Fatalf("rich pane shell block was not normalized: %q", rich.Markdown)
 	}
 }
+
+func TestRichPaneCoalescesMetadataSpacerAfterScreenshot(t *testing.T) {
+	text := "answer\n\n" + richMediaSpacer + "\n\ncontext: 42%"
+	rich, err := buildRichMessage(
+		text, telegramui.PaneImage{AnchorOffset: len("answer")}, "photo-id",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantTail := richPhotoMarkdown + "\n\n" + richMediaSpacer + "\n\ncontext: 42%"
+	if !strings.Contains(rich.Markdown, wantTail) {
+		t.Fatalf("screenshot metadata spacing = %q, want tail %q", rich.Markdown, wantTail)
+	}
+	if strings.Count(rich.Markdown, richMediaSpacer) != 2 {
+		t.Fatalf("duplicate screenshot spacer remains: %q", rich.Markdown)
+	}
+}

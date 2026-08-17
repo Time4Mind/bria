@@ -81,3 +81,32 @@ func TestPaneAnchorUsesSessionContentBoundary(t *testing.T) {
 		t.Fatalf("pane anchor = %d", got)
 	}
 }
+
+func TestCardTranscriptCacheRetainsHistoryWhenReaderWindowShrinks(t *testing.T) {
+	contextBefore := 41
+	contextAfter := 43
+	previous := []transcript.Event{
+		{Kind: transcript.EventUserText, Text: "first", Timestamp: "2026-08-17T10:00:00Z"},
+		{Kind: transcript.EventAssistantFinal, Text: "first answer", Timestamp: "2026-08-17T10:00:01Z"},
+		{Kind: transcript.EventUserText, Text: "second", Timestamp: "2026-08-17T10:00:02Z"},
+		{Kind: transcript.EventAssistantFinal, Text: "second answer", Timestamp: "2026-08-17T10:00:03Z", ContextPercent: &contextBefore},
+	}
+	shrunk := []transcript.Event{
+		{Kind: transcript.EventUserText, Text: "second", Timestamp: "2026-08-17T10:00:02Z"},
+		{Kind: transcript.EventAssistantFinal, Text: "second answer", Timestamp: "2026-08-17T10:00:03Z"},
+		{Kind: transcript.EventUserText, Text: "third", Timestamp: "2026-08-17T10:00:04Z"},
+		{Kind: transcript.EventAssistantFinal, Text: "third answer", Timestamp: "2026-08-17T10:00:05Z", ContextPercent: &contextAfter},
+	}
+	merged := mergeCardTranscriptEvents(previous, shrunk)
+	if len(merged) != 6 || merged[0].Text != "first" ||
+		merged[len(merged)-1].Text != "third answer" {
+		t.Fatalf("merged transcript = %#v", merged)
+	}
+	if percent, ok := latestContextPercent(merged); !ok || percent != contextAfter {
+		t.Fatalf("merged context = %d / %v", percent, ok)
+	}
+	merged[0].Text = "mutated"
+	if previous[0].Text != "first" || shrunk[0].Text != "second" {
+		t.Fatal("merged transcript aliases an input slice")
+	}
+}

@@ -251,6 +251,11 @@ func insertPaneAnchor(text string, offset int) string {
 	if tail == "" {
 		return head + "\n\n" + richMediaSpacer + "\n\n" + richPhotoMarkdown
 	}
+	// Session cards already place a non-breaking spacer before context and
+	// background metadata. The media shell contributes its own spacer after the
+	// screenshot, so coalesce the existing one instead of rendering two blank
+	// bands between the image and the metadata.
+	tail = strings.TrimPrefix(tail, richMediaSpacer+"\n\n")
 	return head + "\n\n" + richMediaSpacer + "\n\n" + richPhotoMarkdown +
 		"\n\n" + richMediaSpacer + "\n\n" + tail
 }

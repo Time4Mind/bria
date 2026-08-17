@@ -262,7 +262,8 @@ func (h *Handler) settleRunningSessions(ctx context.Context) {
 			)
 			if err == nil {
 				h.rememberCardTranscript(
-					candidate.Session.Ref(), candidate.Session.Revision, events,
+					candidate.Session.Ref(), candidate.Session.Revision,
+					candidate.Session.ProviderSessionID, events,
 				)
 				if h.settleFromTranscript(ctx, candidate.Actor, candidate.Session, events) {
 					active, activeErr := h.service.ActiveSession(candidate.Actor)

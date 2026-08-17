@@ -52,7 +52,7 @@ func (c *Controller) observe(actor application.Principal, request runtimehost.Re
 	c.workers.Add(1)
 	go func() {
 		defer c.workers.Done()
-		deadline := time.NewTimer(c.resultWait)
+		deadline := time.NewTimer(c.operationResultWait(request))
 		defer deadline.Stop()
 		ticker := time.NewTicker(c.pollInterval)
 		defer ticker.Stop()
@@ -72,6 +72,13 @@ func (c *Controller) observe(actor application.Principal, request runtimehost.Re
 			}
 		}
 	}()
+}
+
+func (c *Controller) operationResultWait(request runtimehost.Request) time.Duration {
+	if request.Action == runtimehost.ActionSendInput && request.Input != nil {
+		return c.mediaResultWait
+	}
+	return c.resultWait
 }
 
 func (c *Controller) observeArchive(actor application.Principal, request runtimehost.Request) {
