@@ -206,7 +206,7 @@ func (h *Handler) refreshBackgroundPanel(ctx context.Context, userID domain.User
 		return true
 	}
 	message := telegramMessage(card)
-	page := h.rememberedCardPage(actor.UserID, message, session.Ref())
+	page := h.rememberedCardPage(actor.UserID, session.Ref())
 	if session.RuntimePhase != domain.RuntimeIdle {
 		screen, renderErr := h.renderSessionCard(ctx, actor, session.Ref(), page)
 		if renderErr != nil {

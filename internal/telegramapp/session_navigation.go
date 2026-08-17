@@ -19,7 +19,8 @@ func (h *Handler) openSessions(
 	}
 	if preferences.SessionView == domain.ViewAllHosts {
 		if session, activeErr := h.service.ActiveSession(actor); activeErr == nil {
-			return h.renderSessionCard(ctx, actor, session.Ref(), 0)
+			page := h.rememberedCardPage(actor.UserID, session.Ref())
+			return h.renderSessionCard(ctx, actor, session.Ref(), page)
 		} else if !errors.Is(activeErr, domain.ErrNotFound) {
 			return telegramui.Screen{}, activeErr
 		}
@@ -35,7 +36,8 @@ func (h *Handler) openSessions(
 	if nodeAvailableForCard(selected.Node) {
 		session, activeErr := h.service.ActiveSession(actor)
 		if activeErr == nil && session.NodeID == selected.Node.ID {
-			return h.renderSessionCard(ctx, actor, session.Ref(), 0)
+			page := h.rememberedCardPage(actor.UserID, session.Ref())
+			return h.renderSessionCard(ctx, actor, session.Ref(), page)
 		}
 		if activeErr != nil && !errors.Is(activeErr, domain.ErrNotFound) {
 			return telegramui.Screen{}, activeErr
@@ -73,7 +75,8 @@ func (h *Handler) selectNode(
 	if selectedOK && selected.Node.Enabled() && nodeAvailableForCard(selected.Node) {
 		session, activeErr := h.service.ActiveSession(actor)
 		if activeErr == nil && session.NodeID == nodeID {
-			return h.renderSessionCard(ctx, actor, session.Ref(), 0)
+			page := h.rememberedCardPage(actor.UserID, session.Ref())
+			return h.renderSessionCard(ctx, actor, session.Ref(), page)
 		}
 		if activeErr != nil && !errors.Is(activeErr, domain.ErrNotFound) {
 			return telegramui.Screen{}, activeErr
@@ -99,7 +102,8 @@ func (h *Handler) selectSession(
 	if err := h.service.SelectSession(ctx, actor, ref); err != nil {
 		return telegramui.Screen{}, err
 	}
-	return h.renderSessionCard(ctx, actor, ref, 0)
+	page := h.rememberedCardPage(actor.UserID, ref)
+	return h.renderSessionCard(ctx, actor, ref, page)
 }
 
 func (h *Handler) resolveSession(

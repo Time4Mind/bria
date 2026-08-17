@@ -44,7 +44,7 @@ func (h *Handler) scheduleNameRefresh(
 				if session.Name == "" {
 					continue
 				}
-				page := h.rememberedCardPage(actor.UserID, message, ref)
+				page := h.rememberedCardPage(actor.UserID, ref)
 				screen, err := h.renderSessionCard(ctx, actor, ref, page)
 				if err == nil {
 					_, _ = h.editPaneScreen(ctx, actor, ref, message, generation, screen)

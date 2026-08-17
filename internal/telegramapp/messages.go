@@ -186,7 +186,7 @@ func (h *Handler) editResponseCard(
 		return telegramMessage(current), nil
 	}
 	if activeErr == nil && !h.screenMatchesRememberedPage(
-		actor.UserID, message, active.Ref(), screen,
+		actor.UserID, active.Ref(), screen,
 	) {
 		return message, nil
 	}
@@ -202,7 +202,7 @@ func (h *Handler) editResponseCard(
 		_ = h.messenger.DeleteMessage(ctx, message)
 		h.recordResponseCard(ctx, actor, replacement, screen)
 		if activeErr == nil {
-			h.rememberResolvedCardPage(actor.UserID, replacement, active.Ref(), screen)
+			h.rememberResolvedCardPage(actor.UserID, active.Ref(), screen)
 		}
 		return replacement, nil
 	}
@@ -210,7 +210,7 @@ func (h *Handler) editResponseCard(
 	if err == nil {
 		h.rememberResponseCardLocked(ctx, actor, edited, screen)
 		if activeErr == nil {
-			h.rememberResolvedCardPage(actor.UserID, edited, active.Ref(), screen)
+			h.rememberResolvedCardPage(actor.UserID, active.Ref(), screen)
 		}
 	}
 	return edited, err
@@ -270,7 +270,7 @@ func (h *Handler) repostFinalResponseCard(
 		return telegrambot.Message{}, errors.New("final response card was not committed")
 	}
 	_ = h.messenger.DeleteMessage(ctx, previous)
-	h.rememberResolvedCardPage(actor.UserID, replacement, ref, screen)
+	h.rememberResolvedCardPage(actor.UserID, ref, screen)
 	return replacement, nil
 }
 

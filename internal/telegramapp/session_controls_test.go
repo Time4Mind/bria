@@ -686,6 +686,113 @@ func TestCompletedSessionSwitchKeepsReplicatedRichCarrier(t *testing.T) {
 	}
 }
 
+func TestSessionSwitchRestoresEachSessionsPageAndFollowMode(t *testing.T) {
+	fixture := newFixture(t)
+	firstRef := domain.SessionRef{NodeID: "allowed", SessionID: "live"}
+	second := domain.Session{
+		ID: "page-second", NodeID: "allowed", OwnerID: 7, Name: "Page Second",
+		Backend: "codex", State: domain.SessionActive, RuntimePhase: domain.RuntimeIdle,
+		CreatedAt: time.Unix(320, 0).UTC(), LiveSinceAt: time.Unix(320, 0).UTC(),
+	}
+	if result := fixture.machine.Apply(commandForTest(
+		t, "add-page-second", clusterstate.CommandAddSession, second,
+	)); result.Err() != nil {
+		t.Fatal(result.Err())
+	}
+	controls := &blockingControls{events: []transcript.Event{
+		{Kind: transcript.EventAssistantFinal, Text: "Answer one"},
+		{Kind: transcript.EventAssistantFinal, Text: "Answer two"},
+		{Kind: transcript.EventAssistantFinal, Text: "Answer three"},
+	}}
+	handler, err := telegramapp.NewHandlerWithControls(
+		fixture.service, fixture.projector, fixture.codec, fixture.messenger, controls,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	origin := telegrambot.Message{ChatID: 7, MessageID: 90, Rich: true}
+	updateID := int64(300)
+	selectSession := func(ref domain.SessionRef) telegramui.Screen {
+		t.Helper()
+		token, tokenErr := fixture.codec.Session(7, telegramui.ActionSelectSession, ref)
+		if tokenErr != nil {
+			t.Fatal(tokenErr)
+		}
+		data, encodeErr := (telegramui.Callback{
+			Action: telegramui.ActionSelectSession, Token: token,
+		}).Encode()
+		if encodeErr != nil {
+			t.Fatal(encodeErr)
+		}
+		updateID++
+		if handleErr := handler.HandleTelegramUpdate(context.Background(), telegrambot.IncomingUpdate{
+			UpdateID: updateID, Kind: telegrambot.IncomingCallback,
+			ChatID: 7, UserID: 7, CallbackID: fmt.Sprintf("select-%d", updateID),
+			CallbackData: data, CallbackOrigin: origin,
+		}); handleErr != nil {
+			t.Fatal(handleErr)
+		}
+		return fixture.messenger.edited[len(fixture.messenger.edited)-1]
+	}
+	pagePrevious := func(screen telegramui.Screen) telegramui.Screen {
+		t.Helper()
+		data, encodeErr := screen.Grid[0][0].Callback.Encode()
+		if encodeErr != nil {
+			t.Fatal(encodeErr)
+		}
+		updateID++
+		if handleErr := handler.HandleTelegramUpdate(context.Background(), telegrambot.IncomingUpdate{
+			UpdateID: updateID, Kind: telegrambot.IncomingCallback,
+			ChatID: 7, UserID: 7, CallbackID: fmt.Sprintf("previous-%d", updateID),
+			CallbackData: data, CallbackOrigin: origin,
+		}); handleErr != nil {
+			t.Fatal(handleErr)
+		}
+		return fixture.messenger.edited[len(fixture.messenger.edited)-1]
+	}
+
+	first := selectSession(firstRef)
+	if first.Grid[0][1].Label != "3/3" {
+		t.Fatalf("first initial page = %s", first.Grid[0][1].Label)
+	}
+	first = pagePrevious(first)
+	if first.Grid[0][1].Label != "2/3" {
+		t.Fatalf("first pinned page = %s", first.Grid[0][1].Label)
+	}
+	secondScreen := selectSession(second.Ref())
+	secondScreen = pagePrevious(secondScreen)
+	secondScreen = pagePrevious(secondScreen)
+	if secondScreen.Grid[0][1].Label != "1/3" {
+		t.Fatalf("second pinned page = %s", secondScreen.Grid[0][1].Label)
+	}
+	if restored := selectSession(firstRef); restored.Grid[0][1].Label != "2/3" {
+		t.Fatalf("first restored page = %s", restored.Grid[0][1].Label)
+	}
+	if restored := selectSession(second.Ref()); restored.Grid[0][1].Label != "1/3" {
+		t.Fatalf("second restored page = %s", restored.Grid[0][1].Label)
+	}
+
+	latestData, err := secondScreen.Grid[0][1].Callback.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	updateID++
+	if err := handler.HandleTelegramUpdate(context.Background(), telegrambot.IncomingUpdate{
+		UpdateID: updateID, Kind: telegrambot.IncomingCallback,
+		ChatID: 7, UserID: 7, CallbackID: "latest-second",
+		CallbackData: latestData, CallbackOrigin: origin,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	controls.appendTranscriptEvent(transcript.Event{
+		Kind: transcript.EventAssistantFinal, Text: "Answer four",
+	})
+	selectSession(firstRef)
+	if followed := selectSession(second.Ref()); followed.Grid[0][1].Label != "4/4" {
+		t.Fatalf("second follow page = %s", followed.Grid[0][1].Label)
+	}
+}
+
 func TestTranscriptPageButtonsResolveOpaqueTargetPage(t *testing.T) {
 	fixture := newFixture(t)
 	ref := domain.SessionRef{NodeID: "allowed", SessionID: "live"}

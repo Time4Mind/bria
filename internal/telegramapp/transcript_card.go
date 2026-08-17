@@ -10,7 +10,6 @@ import (
 	"github.com/Time4Mind/bria/internal/application"
 	"github.com/Time4Mind/bria/internal/callbacktoken"
 	"github.com/Time4Mind/bria/internal/domain"
-	"github.com/Time4Mind/bria/internal/telegrambot"
 	"github.com/Time4Mind/bria/internal/telegramui"
 	"github.com/Time4Mind/bria/internal/transcript"
 )
@@ -22,14 +21,13 @@ type sessionCardSnapshot struct {
 	events []transcript.Event
 }
 
-type cardPageKey struct {
+type sessionPageKey struct {
 	userID    domain.UserID
-	chatID    int64
-	messageID int64
+	nodeID    domain.NodeID
+	sessionID domain.SessionID
 }
 
 type cardPageState struct {
-	ref    domain.SessionRef
 	page   int
 	pages  int
 	follow bool
@@ -38,7 +36,6 @@ type cardPageState struct {
 func (h *Handler) openSessionPage(
 	ctx context.Context,
 	actor application.Principal,
-	origin telegrambot.Message,
 	action telegramui.Action,
 	token telegramui.OpaqueToken,
 ) (telegramui.Screen, domain.SessionRef, error) {
@@ -63,11 +60,11 @@ func (h *Handler) openSessionPage(
 		// transcript and explicitly restores follow mode.
 		page = 0
 	} else if action == telegramui.ActionPagePrevious || action == telegramui.ActionPageNext {
-		key := cardPageKey{userID: actor.UserID, chatID: origin.ChatID, messageID: origin.MessageID}
+		key := pageKey(actor.UserID, target.Session)
 		h.pageMu.Lock()
-		state, ok := h.cardPages[key]
+		state, ok := h.sessionPages[key]
 		h.pageMu.Unlock()
-		if ok && state.ref == target.Session && state.page > 0 && state.pages > 0 {
+		if ok && state.page > 0 && state.pages > 0 {
 			page = state.page - 1
 			if action == telegramui.ActionPageNext {
 				page = state.page + 1
@@ -81,51 +78,50 @@ func (h *Handler) openSessionPage(
 
 func (h *Handler) rememberCardPage(
 	userID domain.UserID,
-	message telegrambot.Message,
 	screen telegramui.Screen,
 ) {
-	if screen.Name != telegramui.ScreenSessionCard || message.ChatID == 0 || message.MessageID == 0 ||
-		len(screen.Grid) == 0 || len(screen.Grid[0]) < 2 {
+	if screen.Name != telegramui.ScreenSessionCard || screen.Checkpoint == nil {
+		return
+	}
+	ref := domain.SessionRef{
+		NodeID:    domain.NodeID(screen.Checkpoint.NodeID),
+		SessionID: domain.SessionID(screen.Checkpoint.SessionID),
+	}
+	if ref.Validate() != nil {
+		return
+	}
+	h.rememberResolvedCardPage(userID, ref, screen)
+}
+
+func (h *Handler) rememberResolvedCardPage(
+	userID domain.UserID,
+	ref domain.SessionRef,
+	screen telegramui.Screen,
+) {
+	if len(screen.Grid) == 0 || len(screen.Grid[0]) < 2 {
 		return
 	}
 	page, pages, ok := parseCardPageLabel(screen.Grid[0][1].Label)
 	if !ok {
 		return
 	}
-	key := cardPageKey{userID: userID, chatID: message.ChatID, messageID: message.MessageID}
+	key := pageKey(userID, ref)
 	h.pageMu.Lock()
-	state := h.cardPages[key]
-	state.page, state.pages = page, pages
-	state.follow = page == pages
-	h.cardPages[key] = state
-	h.pageMu.Unlock()
-}
-
-func (h *Handler) rememberResolvedCardPage(
-	userID domain.UserID,
-	message telegrambot.Message,
-	ref domain.SessionRef,
-	screen telegramui.Screen,
-) {
-	h.rememberCardPage(userID, message, screen)
-	key := cardPageKey{userID: userID, chatID: message.ChatID, messageID: message.MessageID}
-	h.pageMu.Lock()
-	state := h.cardPages[key]
-	state.ref = ref
-	h.cardPages[key] = state
+	h.sessionPages[key] = cardPageState{
+		page: page, pages: pages, follow: page == pages,
+	}
 	h.pageMu.Unlock()
 }
 
 func (h *Handler) rememberedCardPage(
 	userID domain.UserID,
-	message telegrambot.Message,
 	ref domain.SessionRef,
 ) int {
-	key := cardPageKey{userID: userID, chatID: message.ChatID, messageID: message.MessageID}
+	key := pageKey(userID, ref)
 	h.pageMu.Lock()
 	defer h.pageMu.Unlock()
-	state, ok := h.cardPages[key]
-	if !ok || state.ref != ref || state.page < 1 {
+	state, ok := h.sessionPages[key]
+	if !ok || state.page < 1 {
 		return 0
 	}
 	if state.follow {
@@ -134,13 +130,16 @@ func (h *Handler) rememberedCardPage(
 	return state.page
 }
 
+func pageKey(userID domain.UserID, ref domain.SessionRef) sessionPageKey {
+	return sessionPageKey{userID: userID, nodeID: ref.NodeID, sessionID: ref.SessionID}
+}
+
 func (h *Handler) screenMatchesRememberedPage(
 	userID domain.UserID,
-	message telegrambot.Message,
 	ref domain.SessionRef,
 	screen telegramui.Screen,
 ) bool {
-	want := h.rememberedCardPage(userID, message, ref)
+	want := h.rememberedCardPage(userID, ref)
 	if want == 0 {
 		return true
 	}

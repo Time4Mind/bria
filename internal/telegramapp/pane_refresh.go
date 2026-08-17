@@ -101,7 +101,7 @@ func (h *Handler) runPaneRefresh(
 			continue
 		}
 		if session.RuntimePhase == domain.RuntimeWaitingInput {
-			page := h.rememberedCardPage(actor.UserID, message, ref)
+			page := h.rememberedCardPage(actor.UserID, ref)
 			screen, renderErr := h.renderSessionCard(ctx, actor, ref, page)
 			if renderErr == nil && h.sessionIsActive(actor, ref) &&
 				h.currentPaneGeneration(actor.UserID, generation) {
@@ -113,7 +113,7 @@ func (h *Handler) runPaneRefresh(
 		// idle before this live-card worker gets its next turn. Render once more
 		// so that race cannot leave the Telegram card on a tool result or pane.
 		if session.RuntimePhase == domain.RuntimeIdle {
-			page := h.rememberedCardPage(actor.UserID, message, ref)
+			page := h.rememberedCardPage(actor.UserID, ref)
 			snapshot, renderErr := h.renderSessionCardSnapshot(ctx, actor, ref, page)
 			if renderErr == nil && h.sessionIsActive(actor, ref) &&
 				h.currentPaneGeneration(actor.UserID, generation) {
@@ -136,7 +136,7 @@ func (h *Handler) runPaneRefresh(
 		}
 		if session.RuntimePhase != domain.RuntimeRunning {
 			if session.RuntimePhase == domain.RuntimeDegraded {
-				page := h.rememberedCardPage(actor.UserID, message, ref)
+				page := h.rememberedCardPage(actor.UserID, ref)
 				screen, renderErr := h.renderSessionCard(ctx, actor, ref, page)
 				if renderErr == nil && h.sessionIsActive(actor, ref) &&
 					h.currentPaneGeneration(actor.UserID, generation) {
@@ -145,7 +145,7 @@ func (h *Handler) runPaneRefresh(
 			}
 			return
 		}
-		page := h.rememberedCardPage(actor.UserID, message, ref)
+		page := h.rememberedCardPage(actor.UserID, ref)
 		snapshot, err := h.renderSessionCardSnapshot(ctx, actor, ref, page)
 		if err != nil {
 			return
@@ -207,7 +207,7 @@ func (h *Handler) editPaneScreen(
 	h.cardEditMu.Lock()
 	defer h.cardEditMu.Unlock()
 	if !h.currentPaneGeneration(actor.UserID, generation) ||
-		!h.screenMatchesRememberedPage(actor.UserID, message, ref, screen) {
+		!h.screenMatchesRememberedPage(actor.UserID, ref, screen) {
 		return message, nil
 	}
 	card, ok, err := h.service.TelegramResponseCard(actor)
@@ -216,7 +216,7 @@ func (h *Handler) editPaneScreen(
 	}
 	edited, err := h.messenger.EditScreen(ctx, message, screen)
 	if err == nil {
-		h.rememberResolvedCardPage(actor.UserID, edited, ref, screen)
+		h.rememberResolvedCardPage(actor.UserID, ref, screen)
 	}
 	return edited, err
 }

@@ -62,7 +62,7 @@ type Handler struct {
 	knownSpeechNodes   map[domain.NodeID]bool
 	speechWatchStarted time.Time
 	pageMu             sync.Mutex
-	cardPages          map[cardPageKey]cardPageState
+	sessionPages       map[sessionPageKey]cardPageState
 	cardEditMu         sync.Mutex
 	activity           *activityMessenger
 	clusterEventMu     sync.Mutex
@@ -98,7 +98,7 @@ func NewHandler(
 		speechTargets:      make(map[domain.UserID]domain.NodeID),
 		knownSpeechNodes:   make(map[domain.NodeID]bool),
 		speechWatchStarted: time.Now(),
-		cardPages:          make(map[cardPageKey]cardPageState),
+		sessionPages:       make(map[sessionPageKey]cardPageState),
 		clusterEventLogs:   make(map[int64]clusterEventLog),
 	}, nil
 }
@@ -356,7 +356,7 @@ func (h *Handler) handleCallback(
 		screen, err = h.selectSession(ctx, actor, callback.Action, callback.Token)
 	case telegramui.ActionPagePrevious, telegramui.ActionPageLatest, telegramui.ActionPageNext:
 		screen, pageRef, err = h.openSessionPage(
-			ctx, actor, update.CallbackOrigin, callback.Action, callback.Token,
+			ctx, actor, callback.Action, callback.Token,
 		)
 	case telegramui.ActionSelectArchive:
 		screen, err = h.openArchive(ctx, actor, callback.Token)
@@ -405,7 +405,7 @@ func (h *Handler) handleCallback(
 		// owns the edit lock, it finishes first; the user's explicit page always
 		// wins and the replacement worker starts from that pinned page.
 		h.cancelPaneRefresh(actor.UserID)
-		h.rememberResolvedCardPage(actor.UserID, update.CallbackOrigin, pageRef, screen)
+		h.rememberResolvedCardPage(actor.UserID, pageRef, screen)
 	}
 	if serializeCardEdit {
 		// An explicit navigation must be the final writer. The live worker uses
@@ -445,13 +445,13 @@ func (h *Handler) handleCallback(
 		h.scheduleStatusRefresh(ctx, actor, edited, statusMode(callback.Token))
 	}
 	if err == nil && pageRef.Validate() == nil {
-		h.rememberResolvedCardPage(actor.UserID, edited, pageRef, screen)
+		h.rememberResolvedCardPage(actor.UserID, pageRef, screen)
 	} else if err == nil {
-		h.rememberCardPage(actor.UserID, edited, screen)
+		h.rememberCardPage(actor.UserID, screen)
 	}
 	if err == nil && callback.Action == telegramui.ActionSelectSession && h.controls != nil {
 		if ref, resolveErr := h.resolveSession(actor, callback.Action, callback.Token); resolveErr == nil {
-			h.rememberResolvedCardPage(actor.UserID, edited, ref, screen)
+			h.rememberResolvedCardPage(actor.UserID, ref, screen)
 			h.schedulePaneRefresh(ctx, actor, ref, edited)
 		}
 	}
