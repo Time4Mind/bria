@@ -100,6 +100,11 @@ func TestAllHostsNewSessionSelectsServerAndAnswersBeforeBrowse(t *testing.T) {
 	if serverScreen.Name != telegramui.ScreenNodes || serverScreen.Grid[0][0].Callback.Action != telegramui.ActionNewNode {
 		t.Fatalf("server selector=%#v", serverScreen)
 	}
+	actor := application.Principal{UserID: 7}
+	card, exists, cardErr := fixture.service.TelegramResponseCard(actor)
+	if cardErr != nil || !exists || card.Session != (domain.SessionRef{}) {
+		t.Fatalf("create navigation card=%#v exists=%v err=%v", card, exists, cardErr)
+	}
 	*fixture.events = (*fixture.events)[:0]
 	nodeData, err := serverScreen.Grid[0][0].Callback.Encode()
 	if err != nil {
@@ -138,8 +143,7 @@ func TestHostFirstNewSessionReusesSelectedNode(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if got := *fixture.events; len(got) != 4 || got[0] != "answer" || got[1] != "apply" ||
-		got[2] != "browse" || got[3] != "edit" {
+	if got, want := *fixture.events, []string{"answer", "apply", "browse", "edit", "apply"}; !slices.Equal(got, want) {
 		t.Fatalf("event order=%v", got)
 	}
 	screen := fixture.messenger.edited[len(fixture.messenger.edited)-1]
@@ -183,8 +187,7 @@ func TestNewSessionFromNodeSessionsUsesThatNode(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if got := *fixture.events; len(got) < 3 || got[0] != "answer" ||
-		got[len(got)-2] != "browse" || got[len(got)-1] != "edit" {
+	if got, want := *fixture.events, []string{"answer", "apply", "browse", "edit", "apply"}; !slices.Equal(got, want) {
 		t.Fatalf("direct node creation events=%v", got)
 	}
 	screen := fixture.messenger.edited[len(fixture.messenger.edited)-1]
