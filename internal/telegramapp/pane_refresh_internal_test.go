@@ -31,6 +31,23 @@ func TestSettlementWaitsForLatestQueuedPrompt(t *testing.T) {
 	}
 }
 
+func TestSettledQueuedPromptRejectsPreviousTurnFinal(t *testing.T) {
+	promptAt := time.Unix(200, 0).UTC()
+	session := domain.Session{
+		ID: "session", NodeID: "node", RuntimePhase: domain.RuntimeIdle,
+		LastEventAt: promptAt.Add(5 * time.Second),
+		LastOperation: &domain.SessionOperationResult{
+			OperationID: "current-prompt", Action: domain.ActionSendInput,
+			Status: domain.OperationQueued, At: promptAt,
+		},
+	}
+	if transcriptFinalBelongsToCurrentTurn(
+		session, promptAt.Add(-time.Second), promptAt.Add(10*time.Second),
+	) {
+		t.Fatal("previous turn final matched the current queued prompt")
+	}
+}
+
 func TestCardEventsHideOnlyTrailingAssistantMemoryMetadata(t *testing.T) {
 	metadata := "<oai-mem-citation>\n<citation_entries>\ninternal\n" +
 		"</citation_entries>\n</oai-mem-citation>"

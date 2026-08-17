@@ -191,6 +191,74 @@ func TestReconciliationRepublishesFinalSettledByHeartbeat(t *testing.T) {
 	}
 }
 
+func TestReconciliationRepublishesFinalAfterInterruptedTelegramSettlement(t *testing.T) {
+	fixture := newFixture(t)
+	actor := application.Principal{UserID: 7}
+	ref := domain.SessionRef{NodeID: "allowed", SessionID: "live"}
+	session := fixture.machine.State().Sessions[ref.Key()]
+	promptAt := time.Now().Add(-5 * time.Second).UTC()
+	applyBackgroundCommand(t, fixture, "queued-prompt",
+		clusterstate.CommandPublishSessionRuntime, promptAt,
+		clusterstate.PublishSessionRuntime{
+			Session: ref, Generation: session.RuntimeGeneration,
+			Phase: domain.RuntimeRunning, Result: &domain.SessionOperationResult{
+				OperationID: "input-before-restart", Action: domain.ActionSendInput,
+				Status: domain.OperationQueued,
+			},
+		})
+	running := fixture.machine.State().Sessions[ref.Key()]
+	finalAt := promptAt.Add(3 * time.Second)
+	settledAt := finalAt.Add(500 * time.Millisecond)
+	applyBackgroundCommand(t, fixture, "transcript-settled-before-repost",
+		clusterstate.CommandPublishSessionRuntime, settledAt,
+		clusterstate.PublishSessionRuntime{
+			Session: ref, Generation: running.RuntimeGeneration,
+			Phase: domain.RuntimeIdle,
+		})
+	settled := fixture.machine.State().Sessions[ref.Key()]
+	if settled.LastOperation == nil ||
+		settled.LastOperation.Status != domain.OperationQueued ||
+		!settled.LastEventAt.Equal(settledAt) {
+		t.Fatalf("settlement precondition = %#v", settled)
+	}
+	if err := fixture.service.RecordTelegramResponseCard(
+		application.WithOperationScope(context.Background(), "interrupted-final-card"), actor,
+		domain.TelegramResponseCard{
+			ChatID: 7, MessageID: 82, Rich: true, Session: ref,
+			SessionRevision: settled.Revision, SessionEventAt: settled.LastEventAt,
+		},
+	); err != nil {
+		t.Fatal(err)
+	}
+	controls := &blockingControls{ref: ref, events: []transcript.Event{
+		{
+			Kind: transcript.EventUserText, Text: "prompt before restart",
+			Timestamp: promptAt.Format(time.RFC3339Nano),
+		},
+		{
+			Kind: transcript.EventAssistantFinal, Text: "FINAL AFTER RESTART",
+			Timestamp: finalAt.Format(time.RFC3339Nano),
+		},
+	}}
+	handler, err := telegramapp.NewHandlerWithControls(
+		fixture.service, fixture.projector, fixture.codec, fixture.messenger, controls,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	handler.RunBackgroundNotifications(ctx, 5*time.Millisecond)
+	if len(fixture.messenger.sent) != 1 ||
+		!strings.Contains(fixture.messenger.sent[0].Text, "FINAL AFTER RESTART") {
+		t.Fatalf("replacement cards = %#v", fixture.messenger.sent)
+	}
+	card, ok, cardErr := fixture.service.TelegramResponseCard(actor)
+	if cardErr != nil || !ok || !card.RenderedFinalAt.Equal(finalAt) {
+		t.Fatalf("response card checkpoint = %#v / %v / %v", card, ok, cardErr)
+	}
+}
+
 func TestHistoricalPageNavigationDoesNotRepublishDeliveredFinal(t *testing.T) {
 	fixture := newFixture(t)
 	actor := application.Principal{UserID: 7}

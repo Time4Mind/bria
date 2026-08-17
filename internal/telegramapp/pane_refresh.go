@@ -387,11 +387,23 @@ func transcriptFinalBelongsToCurrentTurn(
 	if !finalAt.Before(session.LastEventAt) {
 		return true
 	}
+	operation := session.LastOperation
+	if operation != nil && operation.Action == domain.ActionSendInput &&
+		operation.Status == domain.OperationQueued &&
+		session.RuntimePhase == domain.RuntimeIdle {
+		// Transcript settlement and Telegram delivery are separate durable
+		// steps. If the process exits after publishing idle but before reposting
+		// the card, LastEventAt contains the settlement time while LastOperation
+		// still contains the queued prompt. The operation timestamp is the
+		// durable turn boundary: a final after it belongs to that prompt, while
+		// a previous turn's final does not.
+		return !finalAt.Before(operation.At) &&
+			session.LastEventAt.Sub(finalAt) <= deliveredInputTimestampSkew
+	}
 	// Older builds stamped LastEventAt again when the local node acknowledged
 	// an already-delivered prompt. A fast backend can finish before that
 	// acknowledgement is replicated. Accept only that narrow legacy skew; all
 	// other finals older than the current turn remain stale.
-	operation := session.LastOperation
 	return operation != nil && operation.Action == domain.ActionSendInput &&
 		operation.Status == domain.OperationSucceeded &&
 		session.LastEventAt.Sub(finalAt) <= deliveredInputTimestampSkew &&
