@@ -33,4 +33,12 @@ func TestPaneImageCacheIsBoundedAndCloned(t *testing.T) {
 	if !ok || again.PNG[0] != byte(maxCachedPaneImages) {
 		t.Fatalf("cached pane image was aliased: %#v", again.PNG)
 	}
+	state.paneMu.Lock()
+	entry := state.paneImages[latest.Key()]
+	entry.capturedAt = time.Now().Add(-time.Hour)
+	state.paneImages[latest.Key()] = entry
+	state.paneMu.Unlock()
+	if _, ok := state.cachedPaneImage(latest, 0); !ok {
+		t.Fatal("navigation cache unexpectedly expired")
+	}
 }

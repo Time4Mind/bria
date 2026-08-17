@@ -20,7 +20,6 @@ const (
 	paneRefreshDelay   = 1200 * time.Millisecond
 	paneRefreshLimit   = 1500
 	paneCaptureLimit   = time.Second
-	immediatePaneCache = 5 * time.Second
 	typingRefreshDelay = 4 * time.Second
 )
 
@@ -332,7 +331,11 @@ func (h *Handler) attachImmediatePane(
 ) paneAttachTiming {
 	timing := paneAttachTiming{outcome: "capture_error"}
 	startedAt := time.Now()
-	if cached, ok := h.cachedPaneImage(ref, immediatePaneCache); ok {
+	// Navigation reuses the latest known pane immediately. The live worker owns
+	// freshness and replaces it asynchronously; blocking an explicit session or
+	// page switch on another capture only adds latency and can never make the
+	// transcript/card projection more current.
+	if cached, ok := h.cachedPaneImage(ref, 0); ok {
 		timing.cache = time.Since(startedAt)
 		timing.outcome = "cache"
 		cached.AnchorOffset = paneAnchorOffset(*screen)

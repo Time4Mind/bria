@@ -61,7 +61,7 @@ func (s *paneRefreshState) cachedPaneImage(
 	s.paneMu.Lock()
 	defer s.paneMu.Unlock()
 	entry, ok := s.paneImages[ref.Key()]
-	if !ok || time.Since(entry.capturedAt) > maxAge {
+	if !ok || (maxAge > 0 && time.Since(entry.capturedAt) > maxAge) {
 		return telegramui.PaneImage{}, false
 	}
 	entry.image.PNG = append([]byte(nil), entry.image.PNG...)
