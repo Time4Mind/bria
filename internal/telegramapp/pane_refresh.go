@@ -317,12 +317,16 @@ func (h *Handler) settleFromTranscript(
 	if session.RuntimePhase != domain.RuntimeRunning {
 		return false
 	}
-	final, ok := finalTranscriptEvent(events)
+	turn, ok := transcript.LatestCompletedTurn(events)
 	if !ok {
 		return false
 	}
-	finalAt, err := time.Parse(time.RFC3339Nano, final.Timestamp)
-	if err != nil || !transcriptFinalBelongsToCurrentTurn(session, finalAt, time.Now()) {
+	final := turn.Final
+	finalAt := turn.FinalAt
+	if turn.HasUser && turn.UserAt.Before(session.LastEventAt) {
+		return false
+	}
+	if !transcriptFinalBelongsToCurrentTurn(session, finalAt, time.Now()) {
 		return false
 	}
 	settleCtx := application.WithOperationScope(

@@ -68,6 +68,19 @@ func TestCollectTranscriptFinalsRejectsUnsettledOrUnavailableTranscript(t *testi
 	}
 }
 
+func TestCollectTranscriptFinalsRejectsAnswerForEarlierQueuedPrompt(t *testing.T) {
+	state := transcriptReconcileState(t, domain.RuntimeRunning)
+	reader := &transcriptReconcileReader{events: []transcript.Event{
+		{Kind: transcript.EventUserText, Text: "earlier prompt",
+			Timestamp: time.Unix(90, 0).UTC().Format(time.RFC3339Nano)},
+		{Kind: transcript.EventAssistantFinal, Text: "earlier answer",
+			Timestamp: time.Unix(110, 0).UTC().Format(time.RFC3339Nano)},
+	}}
+	if reports := collectTranscriptFinals(context.Background(), "node", state, reader); len(reports) != 0 {
+		t.Fatalf("earlier queued turn reports=%#v", reports)
+	}
+}
+
 func transcriptReconcileState(t *testing.T, phase domain.RuntimePhase) *domain.State {
 	t.Helper()
 	state := domain.NewState()

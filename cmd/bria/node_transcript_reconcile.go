@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"time"
 
 	"github.com/Time4Mind/bria/internal/domain"
 	"github.com/Time4Mind/bria/internal/transcript"
@@ -41,38 +40,20 @@ func collectTranscriptFinals(
 			}
 			continue
 		}
-		event, timestamp, ok := finalTranscriptEvent(events)
-		if !ok || timestamp.Before(session.LastEventAt) {
+		turn, ok := transcript.LatestCompletedTurn(events)
+		if !ok || turn.FinalAt.Before(session.LastEventAt) ||
+			(turn.HasUser && turn.UserAt.Before(session.LastEventAt)) {
 			continue
 		}
 		reports = append(reports, domain.TranscriptFinalReport{
 			SessionID: session.ID, Generation: session.RuntimeGeneration,
-			Timestamp: timestamp, Digest: transcriptEventDigest(event),
+			Timestamp: turn.FinalAt, Digest: transcriptEventDigest(turn.Final),
 		})
 		if len(reports) == 512 {
 			break
 		}
 	}
 	return reports
-}
-
-func finalTranscriptEvent(events []transcript.Event) (transcript.Event, time.Time, bool) {
-	for index := len(events) - 1; index >= 0; index-- {
-		event := events[index]
-		if event.Kind != transcript.EventAssistantFinal {
-			if event.Kind == transcript.EventAssistantText || event.Kind == transcript.EventThinking ||
-				event.Kind == transcript.EventToolCall {
-				return transcript.Event{}, time.Time{}, false
-			}
-			continue
-		}
-		timestamp, err := time.Parse(time.RFC3339Nano, event.Timestamp)
-		if err != nil {
-			return transcript.Event{}, time.Time{}, false
-		}
-		return event, timestamp.UTC(), true
-	}
-	return transcript.Event{}, time.Time{}, false
 }
 
 func transcriptEventDigest(event transcript.Event) string {
