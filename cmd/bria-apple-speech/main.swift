@@ -30,7 +30,7 @@ private final class RecognitionState: @unchecked Sendable {
     private let lock = NSLock()
     private var finished = false
     private var transcript = ""
-    private var failed = false
+    private var failure: String?
 
     func accept(_ result: SFSpeechRecognitionResult?, error: Error?) -> Bool {
         lock.lock()
@@ -39,17 +39,23 @@ private final class RecognitionState: @unchecked Sendable {
         if let result = result {
             transcript = result.bestTranscription.formattedString
             finished = result.isFinal
-        } else if error != nil {
-            failed = true
+        } else if let error = error {
+            failure = error.localizedDescription
             finished = true
         }
         return finished
     }
 
-    func snapshot() -> (String, Bool) {
+    func snapshot() -> (String, String?) {
         lock.lock()
         defer { lock.unlock() }
-        return (transcript, failed)
+        return (transcript, failure)
+    }
+
+    func isFinished() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return finished
     }
 }
 
@@ -138,19 +144,20 @@ private func recognize(options: Options) {
     request.shouldReportPartialResults = false
     if #available(macOS 13.0, *) { request.addsPunctuation = true }
 
-    let semaphore = DispatchSemaphore(value: 0)
     let state = RecognitionState()
     let task = recognizer.recognitionTask(with: request) { result, error in
-        if state.accept(result, error: error) {
-            semaphore.signal()
-        }
+        _ = state.accept(result, error: error)
     }
-    if semaphore.wait(timeout: .now() + 110) != .success {
+    let deadline = Date().addingTimeInterval(110)
+    while !state.isFinished() && Date() < deadline {
+        RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.05))
+    }
+    if !state.isFinished() {
         task.cancel()
         fail("recognition timed out")
     }
-    let (transcript, failed) = state.snapshot()
-    if failed { fail("recognition failed") }
+    let (transcript, failure) = state.snapshot()
+    if let failure = failure { fail("recognition failed: \(failure)") }
     let output = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
     if output.isEmpty { fail("recognition returned no text") }
     print(output)

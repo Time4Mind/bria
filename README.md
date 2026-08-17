@@ -226,9 +226,11 @@ On macOS Apple Silicon, `speech_engine: "apple"` selects Apple's built-in,
 strictly on-device recognizer and does not require a Whisper model. Build the
 narrow helper with `scripts/build-apple-speech.sh`, set its path in
 `apple_speech_command`, and run `bria-apple-speech --authorize` once from that
-macOS user session. `whisper_language` is reused as the locale (`auto` means
-the current macOS locale). `ffmpeg` remains responsible only for converting
-Telegram OGG/Opus audio to a system-readable WAV file.
+macOS user session. Dictation must also be enabled in macOS Keyboard settings;
+the on-device Speech framework reports an error when system Dictation is off.
+`whisper_language` is reused as the locale (`auto` means the current macOS
+locale). `ffmpeg` remains responsible only for converting Telegram OGG/Opus
+audio to a system-readable WAV file.
 
 ## Add a node
 
