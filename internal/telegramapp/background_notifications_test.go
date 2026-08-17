@@ -191,6 +191,69 @@ func TestReconciliationRepublishesFinalSettledByHeartbeat(t *testing.T) {
 	}
 }
 
+func TestHistoricalPageNavigationDoesNotRepublishDeliveredFinal(t *testing.T) {
+	fixture := newFixture(t)
+	actor := application.Principal{UserID: 7}
+	ref := domain.SessionRef{NodeID: "allowed", SessionID: "live"}
+	session, err := fixture.service.Session(actor, ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	finalAt := time.Now().Add(-time.Second).UTC()
+	if err := fixture.service.RecordTelegramResponseCard(
+		application.WithOperationScope(context.Background(), "delivered-final-card"), actor,
+		domain.TelegramResponseCard{
+			ChatID: 7, MessageID: 117, Rich: true, Session: ref,
+			SessionRevision: session.Revision, SessionEventAt: session.LastEventAt,
+			RenderedFinalAt: finalAt,
+		},
+	); err != nil {
+		t.Fatal(err)
+	}
+	controls := &blockingControls{ref: ref, events: []transcript.Event{
+		{Kind: transcript.EventAssistantFinal, Text: "Older answer",
+			Timestamp: finalAt.Add(-time.Second).Format(time.RFC3339Nano)},
+		{Kind: transcript.EventAssistantFinal, Text: "Delivered final",
+			Timestamp: finalAt.Format(time.RFC3339Nano)},
+	}}
+	handler, err := telegramapp.NewHandlerWithControls(
+		fixture.service, fixture.projector, fixture.codec, fixture.messenger, controls,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	initial, err := fixture.projector.SessionCardPage(
+		actor, ref, []application.CardEvent{
+			{Kind: application.CardEventAssistantText, Text: "Older answer", PageBreak: true},
+			{Kind: application.CardEventAssistantText, Text: "Delivered final", PageBreak: true},
+		}, 0,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	previousData, err := initial.Grid[0][0].Callback.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := handler.HandleTelegramUpdate(context.Background(), telegrambot.IncomingUpdate{
+		UpdateID: 172, Kind: telegrambot.IncomingCallback, ChatID: 7, UserID: 7,
+		CallbackID: "historical-page", CallbackData: previousData,
+		CallbackOrigin: telegrambot.Message{ChatID: 7, MessageID: 117, Rich: true},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	card, ok, cardErr := fixture.service.TelegramResponseCard(actor)
+	if cardErr != nil || !ok || card.MessageID != 117 || !card.RenderedFinalAt.Equal(finalAt) {
+		t.Fatalf("historical navigation erased final watermark: %#v / %v / %v", card, ok, cardErr)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	handler.RunBackgroundNotifications(ctx, 5*time.Millisecond)
+	if len(fixture.messenger.sent) != 0 {
+		t.Fatalf("historical page triggered duplicate final carrier: %#v", fixture.messenger.sent)
+	}
+}
+
 func TestReconciliationAcceptsFastFinalBeforeLegacyDeliveryAck(t *testing.T) {
 	fixture := newFixture(t)
 	actor := application.Principal{UserID: 7}

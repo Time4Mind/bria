@@ -82,6 +82,14 @@ func (h *Handler) recordResponseCard(
 		card.SessionEventAt = checkpoint.EventAt
 		card.RenderedFinalAt = checkpoint.RenderedFinalAt
 	}
+	if exists && previous.ChatID == card.ChatID && previous.MessageID == card.MessageID &&
+		previous.Session == card.Session && card.RenderedFinalAt.Before(previous.RenderedFinalAt) {
+		// Page navigation can hide the page containing an already delivered final,
+		// but it must not erase the delivery watermark. Otherwise the reconciliation
+		// loop mistakes an intentional historical page for a lost final and posts a
+		// duplicate carrier back on the latest response.
+		card.RenderedFinalAt = previous.RenderedFinalAt
+	}
 	if exists && previous == card {
 		return previous, true, false
 	}

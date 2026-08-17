@@ -14,8 +14,9 @@ type TelegramResponseCard struct {
 	Session         SessionRef `json:"session,omitempty"`
 	SessionRevision uint64     `json:"session_revision,omitempty"`
 	SessionEventAt  time.Time  `json:"session_event_at,omitempty"`
-	// RenderedFinalAt identifies the provider final already visible in this
-	// Telegram carrier; session timestamps alone cannot prove it was rendered.
+	// RenderedFinalAt is the monotonic watermark of provider finals already
+	// delivered through this Telegram carrier. The user may navigate the carrier
+	// to a historical page without making that delivery undone.
 	RenderedFinalAt time.Time `json:"rendered_final_at,omitempty"`
 }
 
