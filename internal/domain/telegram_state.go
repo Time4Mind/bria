@@ -14,6 +14,9 @@ type TelegramResponseCard struct {
 	Session         SessionRef `json:"session,omitempty"`
 	SessionRevision uint64     `json:"session_revision,omitempty"`
 	SessionEventAt  time.Time  `json:"session_event_at,omitempty"`
+	// RenderedFinalAt identifies the provider final already visible in this
+	// Telegram carrier; session timestamps alone cannot prove it was rendered.
+	RenderedFinalAt time.Time `json:"rendered_final_at,omitempty"`
 }
 
 // BindTelegramBot associates transport state with one Telegram bot. A cursor
@@ -61,7 +64,8 @@ func (s *State) RecordTelegramResponseCard(userID UserID, card TelegramResponseC
 			!s.CanViewSession(userID, card.Session) {
 			return ErrAccessDenied
 		}
-	} else if card.SessionRevision != 0 || !card.SessionEventAt.IsZero() {
+	} else if card.SessionRevision != 0 || !card.SessionEventAt.IsZero() ||
+		!card.RenderedFinalAt.IsZero() {
 		return fmt.Errorf("Telegram response card session checkpoint has no session")
 	}
 	if s.TelegramResponseCards == nil {

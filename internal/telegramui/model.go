@@ -54,6 +54,8 @@ type SessionCheckpoint struct {
 	SessionID string
 	Revision  uint64
 	EventAt   time.Time
+	// RenderedFinalAt is set only when the latest page contains a provider final.
+	RenderedFinalAt time.Time
 }
 
 type Screen struct {

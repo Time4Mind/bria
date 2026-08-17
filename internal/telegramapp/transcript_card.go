@@ -236,6 +236,10 @@ func (h *Handler) renderSessionCardSnapshot(
 		actor, ref, cardEvents(renderedEvents), page, h.cardContext(ref),
 	)
 	if err == nil {
+		if finalAt, final := finalTranscriptAt(events); final &&
+			screenShowsLatestCardPage(screen) && screen.Checkpoint != nil {
+			screen.Checkpoint.RenderedFinalAt = finalAt
+		}
 		preferences, preferencesErr := h.service.Preferences(actor)
 		if preferencesErr == nil &&
 			preferences.EffectiveTerminalSnapshots() == domain.TerminalSnapshotAlways {

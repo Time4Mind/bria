@@ -63,7 +63,8 @@ func (h *Handler) reconcileActiveFinalCards(ctx context.Context) {
 		if card.Session != (domain.SessionRef{}) && card.Session != session.Ref() {
 			continue
 		}
-		if responseCardCoversSession(card, session) {
+		if card.Session == session.Ref() && card.SessionRevision >= session.Revision &&
+			!card.RenderedFinalAt.IsZero() {
 			continue
 		}
 		snapshot, err := h.renderSessionCardSnapshot(ctx, actor, session.Ref(), 0)
@@ -72,6 +73,9 @@ func (h *Handler) reconcileActiveFinalCards(ctx context.Context) {
 		}
 		finalAt, final := finalTranscriptAt(snapshot.events)
 		if !final || !transcriptFinalBelongsToCurrentTurn(session, finalAt, time.Now()) {
+			continue
+		}
+		if responseCardCoversFinal(card, session.Ref(), finalAt) {
 			continue
 		}
 		_, _ = h.repostFinalResponseCard(
@@ -196,28 +200,38 @@ func (h *Handler) refreshBackgroundPanel(ctx context.Context, userID domain.User
 	if err != nil {
 		return true
 	}
-	// Do not let the ordinary background-panel edit consume a completion
-	// revision. Completion must replace the active carrier so Telegram surfaces
-	// it as a new message; reconcileActiveFinalCards owns that transition.
-	if session.RuntimePhase == domain.RuntimeIdle && !responseCardCoversSession(card, session) {
-		return false
-	}
 	message := telegramMessage(card)
 	page := h.rememberedCardPage(actor.UserID, message, session.Ref())
-	screen, err := h.renderSessionCard(ctx, actor, session.Ref(), page)
+	if session.RuntimePhase != domain.RuntimeIdle {
+		screen, renderErr := h.renderSessionCard(ctx, actor, session.Ref(), page)
+		if renderErr != nil {
+			return false
+		}
+		_, renderErr = h.editResponseCard(ctx, actor, message, screen)
+		return renderErr == nil
+	}
+	snapshot, err := h.renderSessionCardSnapshot(ctx, actor, session.Ref(), page)
 	if err != nil {
 		return false
 	}
-	_, err = h.editResponseCard(ctx, actor, message, screen)
+	// Do not let the ordinary background-panel edit consume a completion.
+	// Completion must replace the active carrier so Telegram surfaces it as a
+	// new message; reconcileActiveFinalCards owns that transition.
+	if finalAt, final := finalTranscriptAt(snapshot.events); final &&
+		transcriptFinalBelongsToCurrentTurn(session, finalAt, time.Now()) &&
+		!responseCardCoversFinal(card, session.Ref(), finalAt) {
+		return false
+	}
+	_, err = h.editResponseCard(ctx, actor, message, snapshot.screen)
 	return err == nil
 }
 
-func responseCardCoversSession(
+func responseCardCoversFinal(
 	card domain.TelegramResponseCard,
-	session domain.Session,
+	ref domain.SessionRef,
+	finalAt time.Time,
 ) bool {
-	return card.Session == session.Ref() && card.SessionRevision >= session.Revision &&
-		!card.SessionEventAt.IsZero() && !card.SessionEventAt.Before(session.LastEventAt)
+	return card.Session == ref && !card.RenderedFinalAt.Before(finalAt)
 }
 
 func (h *Handler) settleRunningSessions(ctx context.Context) {
