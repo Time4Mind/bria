@@ -54,6 +54,7 @@ func newNodeSetupRuntime(
 	}
 	localSpeech, err := speechsetup.NewManager(speechsetup.Config{
 		NodeID: nodeConfig.NodeID, OS: runtime.GOOS, Arch: runtime.GOARCH,
+		Engine:  nodeConfig.EffectiveSpeechEngine(),
 		DataDir: nodeConfig.DataDir, FFmpegCommand: nodeConfig.FFmpegCommand,
 		WhisperCommand: nodeConfig.WhisperCommand, WhisperModel: nodeConfig.WhisperModelPath,
 		AppleCommand: nodeConfig.AppleSpeechCommand,

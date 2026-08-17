@@ -85,6 +85,50 @@ func TestAppleSetupRequestsAuthorizationOnlyAfterExplicitStart(t *testing.T) {
 	}
 }
 
+func TestConfiguredWhisperOverridesMacOSAppleDefault(t *testing.T) {
+	manager, err := NewManager(Config{
+		NodeID: "mac", OS: "darwin", Engine: "whisper", DataDir: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := manager.engine(); got != "whisper" {
+		t.Fatalf("speech setup engine=%q", got)
+	}
+}
+
+func TestEngineChangeDropsStalePermissionFailure(t *testing.T) {
+	directory := t.TempDir()
+	ffmpeg := filepath.Join(directory, "ffmpeg")
+	whisper := filepath.Join(directory, "whisper-cli")
+	model := filepath.Join(directory, "model.bin")
+	for _, path := range []string{ffmpeg, whisper, model} {
+		if err := os.WriteFile(path, []byte("ready"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	store := &Manager{config: Config{DataDir: directory}}
+	store.persistStatus(Status{
+		NodeID: "mac", Engine: "apple", Phase: PhasePermissionRequired,
+		Detail: "old Apple permission", UpdatedAt: time.Now(),
+	})
+	manager, err := NewManager(Config{
+		NodeID: "mac", OS: "darwin", Engine: "whisper", DataDir: directory,
+		FFmpegCommand: ffmpeg, WhisperCommand: whisper, WhisperModel: model,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, err := manager.Status(context.Background(), Request{NodeID: "mac"})
+	if err != nil || status.Engine != "whisper" || status.Phase != PhaseReady {
+		t.Fatalf("status after engine change=%#v err=%v", status, err)
+	}
+	persisted, ok := manager.loadStatus()
+	if !ok || persisted.Engine != "whisper" || persisted.Phase != PhaseReady {
+		t.Fatalf("persisted status after engine change=%#v exists=%v", persisted, ok)
+	}
+}
+
 func TestManagerPersistsTerminalFailureAcrossRestart(t *testing.T) {
 	directory := t.TempDir()
 	ffmpeg := filepath.Join(directory, "ffmpeg")

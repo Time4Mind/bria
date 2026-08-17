@@ -128,16 +128,17 @@ func configureInboundResolver(
 		}
 		transcribers[config.SpeechEngineApple] = apple
 	}
-	defaultVoice := nodeConfig.EffectiveSpeechEngine()
-	if runtime.GOOS == "darwin" {
-		defaultVoice = config.SpeechEngineApple
-	}
+	defaultVoice := configuredDefaultVoice(nodeConfig)
 	executor.SetInputResolver(runtimeInputResolver{
 		downloader: telegramInboundDownloader{client: client}, transcribers: transcribers,
 		defaultVoice: defaultVoice, maxDownloadSize: maxInboundTelegramBytes,
 		temporary: temporary,
 	})
 	return nil
+}
+
+func configuredDefaultVoice(nodeConfig config.Config) string {
+	return nodeConfig.EffectiveSpeechEngine()
 }
 
 func configuredWhisperTranscriber(

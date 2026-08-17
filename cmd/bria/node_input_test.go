@@ -40,6 +40,17 @@ func TestConfiguredTranscriberRestrictsAppleSpeechToMacOS(t *testing.T) {
 	}
 }
 
+func TestConfiguredSpeechEngineIsNotOverriddenOnMacOS(t *testing.T) {
+	configured, err := config.Default()
+	if err != nil {
+		t.Fatal(err)
+	}
+	configured.SpeechEngine = config.SpeechEngineWhisper
+	if got := configuredDefaultVoice(configured); got != config.SpeechEngineWhisper {
+		t.Fatalf("configured speech engine=%q", got)
+	}
+}
+
 func TestRuntimeInputResolverSelectsRequestedVoiceBackend(t *testing.T) {
 	resolver := runtimeInputResolver{
 		downloader: inputDownloaderStub{data: "voice"},

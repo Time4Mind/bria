@@ -19,6 +19,7 @@ type Config struct {
 	NodeID         string
 	OS             string
 	Arch           string
+	Engine         string
 	DataDir        string
 	FFmpegCommand  string
 	WhisperCommand string
@@ -231,6 +232,12 @@ func (m *Manager) inspect() Status {
 }
 
 func (m *Manager) engine() string {
+	switch strings.ToLower(strings.TrimSpace(m.config.Engine)) {
+	case "apple":
+		return "apple"
+	case "whisper":
+		return "whisper"
+	}
 	if strings.EqualFold(m.config.OS, "darwin") {
 		return "apple"
 	}

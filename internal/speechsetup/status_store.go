@@ -13,6 +13,10 @@ func (m *Manager) initialStatus() Status {
 	if !ok {
 		return inspected
 	}
+	if persisted.Engine != inspected.Engine {
+		m.persistStatus(inspected)
+		return inspected
+	}
 	if persisted.Phase == PhaseInstalling {
 		if inspected.Phase == PhaseReady {
 			return inspected
