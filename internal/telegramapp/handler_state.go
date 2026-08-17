@@ -68,6 +68,25 @@ func (s *paneRefreshState) cachedPaneImage(
 	return entry.image, true
 }
 
+func (s *paneRefreshState) rememberPaneFileID(
+	ref domain.SessionRef,
+	hash string,
+	fileID string,
+) {
+	if hash == "" || fileID == "" {
+		return
+	}
+	s.paneMu.Lock()
+	defer s.paneMu.Unlock()
+	entry, ok := s.paneImages[ref.Key()]
+	if !ok || entry.image.Hash != hash {
+		return
+	}
+	entry.image.PNG = nil
+	entry.image.FileID = fileID
+	s.paneImages[ref.Key()] = entry
+}
+
 type voicePendingState struct {
 	voiceMu       sync.Mutex
 	pendingVoices map[voicePendingKey][]voicePending

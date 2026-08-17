@@ -227,6 +227,9 @@ func (h *Handler) editPaneScreen(
 	}
 	edited, err := h.messenger.EditScreen(ctx, message, screen)
 	if err == nil {
+		if screen.Pane != nil {
+			h.rememberPaneFileID(ref, screen.Pane.Hash, edited.RichMediaFileID)
+		}
 		h.rememberResolvedCardPage(actor.UserID, ref, screen)
 	}
 	return edited, err

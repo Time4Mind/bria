@@ -42,3 +42,19 @@ func TestPaneImageCacheIsBoundedAndCloned(t *testing.T) {
 		t.Fatal("navigation cache unexpectedly expired")
 	}
 }
+
+func TestPaneImageCachePromotesUploadToTelegramFileID(t *testing.T) {
+	state := newPaneRefreshState()
+	ref := domain.SessionRef{NodeID: "node", SessionID: "session"}
+	state.rememberPaneImage(ref, telegramui.PaneImage{PNG: []byte("png"), Hash: "pane-v1"})
+	state.rememberPaneFileID(ref, "stale-pane", "stale-file")
+	before, ok := state.cachedPaneImage(ref, 0)
+	if !ok || len(before.PNG) == 0 || before.FileID != "" {
+		t.Fatalf("mismatched hash changed pane cache: %#v", before)
+	}
+	state.rememberPaneFileID(ref, "pane-v1", "telegram-photo")
+	after, ok := state.cachedPaneImage(ref, 0)
+	if !ok || len(after.PNG) != 0 || after.FileID != "telegram-photo" || after.Hash != "pane-v1" {
+		t.Fatalf("pane cache was not promoted to file id: %#v", after)
+	}
+}

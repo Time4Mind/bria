@@ -60,7 +60,7 @@ func (m *activityMessenger) SendScreen(
 	logSlowTelegramOperation("send_screen_queue", queuedAt, nil)
 	startedAt := time.Now()
 	message, err := m.inner.SendScreen(ctx, chatID, screen)
-	logSlowTelegramOperation("send_screen", startedAt, err)
+	logSlowTelegramOperation(screenOperation("send_screen", screen), startedAt, err)
 	if err == nil {
 		m.observeLocked(message.ChatID, message.MessageID)
 	}
@@ -76,8 +76,21 @@ func (m *activityMessenger) EditScreen(
 	logSlowTelegramOperation("edit_screen_queue", queuedAt, nil)
 	startedAt := time.Now()
 	edited, err := m.inner.EditScreen(ctx, message, screen)
-	logSlowTelegramOperation("edit_screen", startedAt, err)
+	logSlowTelegramOperation(screenOperation("edit_screen", screen), startedAt, err)
 	return edited, err
+}
+
+func screenOperation(base string, screen telegramui.Screen) string {
+	if screen.Pane == nil {
+		return base + "_text"
+	}
+	if len(screen.Pane.PNG) > 0 {
+		return base + "_upload"
+	}
+	if screen.Pane.FileID != "" {
+		return base + "_file_id"
+	}
+	return base + "_pane"
 }
 
 func logSlowTelegramOperation(operation string, startedAt time.Time, err error) {

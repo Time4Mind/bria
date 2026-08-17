@@ -66,6 +66,11 @@ func (h *Handler) recordResponseCard(
 	message telegrambot.Message,
 	screen telegramui.Screen,
 ) (domain.TelegramResponseCard, bool, bool) {
+	if checkpoint := screen.Checkpoint; checkpoint != nil && screen.Pane != nil {
+		h.rememberPaneFileID(domain.SessionRef{
+			NodeID: domain.NodeID(checkpoint.NodeID), SessionID: domain.SessionID(checkpoint.SessionID),
+		}, screen.Pane.Hash, message.RichMediaFileID)
+	}
 	previous, exists, err := h.service.TelegramResponseCard(actor)
 	if err != nil {
 		return domain.TelegramResponseCard{}, false, false
