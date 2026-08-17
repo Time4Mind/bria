@@ -98,6 +98,33 @@ func TestRecentReadWindowDropsPartialLeadingLine(t *testing.T) {
 	}
 }
 
+func TestFirstUserTextReadsBeforeRecentWindow(t *testing.T) {
+	layout := newTestLayout(t)
+	workdir := "/safe"
+	sessionID := "session"
+	path := filepath.Join(layout.claude, encodeClaudeWorkdir(workdir), sessionID+".jsonl")
+	writeTestFile(t, path, `{"type":"user","message":{"content":"actual first prompt"}}
+{"type":"assistant","message":{"stop_reason":"end_turn","content":"`+strings.Repeat("recent", 100)+`"}}
+`)
+	reader := newTestReader(t, layout, func(config *Config) { config.MaxReadBytes = 100 })
+	request := Request{
+		Backend: BackendClaude, ProviderSessionID: sessionID, Workdir: workdir,
+	}
+	events, err := reader.Read(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range events {
+		if event.Text == "actual first prompt" {
+			t.Fatal("recent window unexpectedly retained the first prompt")
+		}
+	}
+	text, err := reader.ReadFirstUserText(context.Background(), request)
+	if err != nil || text != "actual first prompt" {
+		t.Fatalf("first user text=%q err=%v", text, err)
+	}
+}
+
 func TestBodiesAreBoundedWithoutBrokenUTF8(t *testing.T) {
 	layout := newTestLayout(t)
 	workdir := "/safe"

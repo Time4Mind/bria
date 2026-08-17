@@ -1,8 +1,11 @@
 package transcript
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -78,16 +81,7 @@ func (r *Reader) Read(ctx context.Context, request Request) ([]Event, error) {
 		return nil, err
 	}
 
-	var path string
-	var err error
-	switch request.Backend {
-	case BackendClaude:
-		path, err = r.resolveClaude(request)
-	case BackendCodex:
-		path, err = r.resolveCodex(ctx, request)
-	default:
-		return nil, fmt.Errorf("%w: %q", ErrUnsupportedBackend, request.Backend)
-	}
+	path, err := r.resolveTranscriptPath(ctx, request)
 	if err != nil {
 		return nil, err
 	}
@@ -114,6 +108,66 @@ func (r *Reader) Read(ctx context.Context, request Request) ([]Event, error) {
 		r.rememberRead(path, after, events)
 	}
 	return events, nil
+}
+
+// ReadFirstUserText scans from the start of the JSONL instead of using the
+// recent-event window. This is intentionally separate from Read: session
+// naming must use the actual first prompt even when a transcript exceeds the
+// card reader's bounded suffix.
+func (r *Reader) ReadFirstUserText(ctx context.Context, request Request) (string, error) {
+	if err := validateRequest(request); err != nil {
+		return "", err
+	}
+	path, err := r.resolveTranscriptPath(ctx, request)
+	if err != nil {
+		return "", err
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return "", fmt.Errorf("open transcript: %w", err)
+	}
+	defer file.Close()
+	reader := bufio.NewReaderSize(file, min(r.config.MaxLineBytes, 64<<10))
+	for {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+		line, oversized, readErr := readBoundedLine(reader, r.config.MaxLineBytes)
+		if !oversized {
+			line = bytes.TrimSpace(line)
+			if len(line) > 0 {
+				var events []Event
+				switch request.Backend {
+				case BackendClaude:
+					events = parseClaude([][]byte{line}, r.config.MaxBodyBytes)
+				case BackendCodex:
+					events = parseCodex([][]byte{line}, r.config.MaxBodyBytes)
+				}
+				for _, event := range events {
+					if event.Kind == EventUserText && strings.TrimSpace(event.Text) != "" {
+						return event.Text, nil
+					}
+				}
+			}
+		}
+		if readErr != nil {
+			if readErr == io.EOF {
+				return "", nil
+			}
+			return "", fmt.Errorf("read transcript: %w", readErr)
+		}
+	}
+}
+
+func (r *Reader) resolveTranscriptPath(ctx context.Context, request Request) (string, error) {
+	switch request.Backend {
+	case BackendClaude:
+		return r.resolveClaude(request)
+	case BackendCodex:
+		return r.resolveCodex(ctx, request)
+	default:
+		return "", fmt.Errorf("%w: %q", ErrUnsupportedBackend, request.Backend)
+	}
 }
 
 func parseRecentEvents(

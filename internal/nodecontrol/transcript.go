@@ -13,6 +13,7 @@ type TranscriptQuery struct {
 	NodeID             string `json:"node_id"`
 	SessionID          string `json:"session_id"`
 	ExpectedGeneration uint64 `json:"expected_generation"`
+	FirstUserPrompt    bool   `json:"first_user_prompt,omitempty"`
 }
 
 type TranscriptReader interface {
@@ -21,6 +22,10 @@ type TranscriptReader interface {
 
 type TranscriptSource interface {
 	Read(context.Context, transcript.Request) ([]transcript.Event, error)
+}
+
+type FirstUserPromptSource interface {
+	ReadFirstUserText(context.Context, transcript.Request) (string, error)
 }
 
 type ArchivedTranscriptSource interface {
@@ -85,10 +90,22 @@ func (s *LocalTranscriptService) ReadTranscript(
 	if session.ProviderSessionID == "" {
 		return nil, nil
 	}
-	return s.source.Read(ctx, transcript.Request{
+	request := transcript.Request{
 		Backend: transcript.Backend(session.Backend), ProviderSessionID: session.ProviderSessionID,
 		Workdir: session.Workdir,
-	})
+	}
+	if query.FirstUserPrompt {
+		source, ok := s.source.(FirstUserPromptSource)
+		if !ok {
+			return nil, errors.New("first user prompt source is unavailable")
+		}
+		text, err := source.ReadFirstUserText(ctx, request)
+		if err != nil || text == "" {
+			return nil, err
+		}
+		return []transcript.Event{{Kind: transcript.EventUserText, Text: text}}, nil
+	}
+	return s.source.Read(ctx, request)
 }
 
 type TranscriptRouter struct {

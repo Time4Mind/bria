@@ -18,6 +18,7 @@ import (
 type transcriptSourceRecorder struct {
 	request transcript.Request
 	events  []transcript.Event
+	first   string
 }
 
 type archivedTranscriptRecorder struct {
@@ -41,6 +42,14 @@ func (r *transcriptSourceRecorder) Read(
 	return append([]transcript.Event(nil), r.events...), nil
 }
 
+func (r *transcriptSourceRecorder) ReadFirstUserText(
+	_ context.Context,
+	request transcript.Request,
+) (string, error) {
+	r.request = request
+	return r.first, nil
+}
+
 func TestLocalTranscriptServiceResolvesTrustedSessionMetadata(t *testing.T) {
 	state, session := transcriptState(t)
 	source := &transcriptSourceRecorder{events: []transcript.Event{{
@@ -62,6 +71,23 @@ func TestLocalTranscriptServiceResolvesTrustedSessionMetadata(t *testing.T) {
 	}
 	if source.request != want {
 		t.Fatalf("source request=%#v, want %#v", source.request, want)
+	}
+}
+
+func TestLocalTranscriptServiceReadsActualFirstUserPrompt(t *testing.T) {
+	state, session := transcriptState(t)
+	source := &transcriptSourceRecorder{first: "actual first prompt"}
+	service, err := NewLocalTranscriptService("node", staticState{state}, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	events, err := service.ReadTranscript(context.Background(), TranscriptQuery{
+		ActorID: 1, NodeID: "node", SessionID: "session",
+		ExpectedGeneration: session.RuntimeGeneration, FirstUserPrompt: true,
+	})
+	if err != nil || len(events) != 1 || events[0].Kind != transcript.EventUserText ||
+		events[0].Text != "actual first prompt" {
+		t.Fatalf("events=%#v err=%v", events, err)
 	}
 }
 

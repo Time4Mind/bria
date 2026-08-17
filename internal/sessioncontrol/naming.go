@@ -84,6 +84,7 @@ func (c *Controller) EnsureName(actor application.Principal, ref domain.SessionR
 		events, readErr := c.transcripts.ReadTranscript(ctx, nodecontrol.TranscriptQuery{
 			ActorID: int64(actor.UserID), NodeID: string(session.NodeID),
 			SessionID: string(session.ID), ExpectedGeneration: session.RuntimeGeneration,
+			FirstUserPrompt: true,
 		})
 		cancel()
 		seed := firstUserText(events)
