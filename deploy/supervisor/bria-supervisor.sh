@@ -47,16 +47,18 @@ if [ ! -x "$binary" ] || [ ! -r "$config" ]; then
     log "binary or config unavailable (binary=$binary config=$config)"
     exit 1
 fi
-[ -n "$ssh_target" ] || {
-    log "BRIA_SSH_TARGET is required"
+command -v flock >/dev/null 2>&1 || {
+    log "required command is unavailable: flock"
     exit 1
 }
-for command in ssh flock nc; do
-    command -v "$command" >/dev/null 2>&1 || {
-        log "required command is unavailable: $command"
-        exit 1
-    }
-done
+if [ -n "$ssh_target" ]; then
+    for command in ssh nc; do
+        command -v "$command" >/dev/null 2>&1 || {
+            log "required transport command is unavailable: $command"
+            exit 1
+        }
+    done
+fi
 
 exec 9>"$state_dir/supervisor.lock"
 if ! flock -n 9; then
@@ -66,15 +68,16 @@ fi
 
 tunnel_pid=""
 node_pid=""
+stop_child() {
+    pid="$1"
+    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+        kill "$pid" 2>/dev/null || true
+    fi
+    [ -n "$pid" ] && wait "$pid" 2>/dev/null || true
+}
 cleanup_children() {
-    for pid in "$node_pid" "$tunnel_pid"; do
-        if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
-            kill "$pid" 2>/dev/null || true
-        fi
-    done
-    for pid in "$node_pid" "$tunnel_pid"; do
-        [ -n "$pid" ] && wait "$pid" 2>/dev/null || true
-    done
+    stop_child "$node_pid"
+    stop_child "$tunnel_pid"
 }
 shutdown() {
     trap - INT TERM EXIT
@@ -119,20 +122,19 @@ local_forward_ready() {
     done
 }
 
-backoff="$restart_floor"
-log "starting (node=$binary tunnel=$ssh_target)"
-while true; do
-    until ssh "${probe_options[@]}" "$ssh_target" true >/dev/null 2>&1; do
-        log "SSH transport unavailable; retrying in ${backoff}s"
-        sleep "$backoff"
-        backoff=$((backoff * 2))
-        [ "$backoff" -gt "$backoff_max" ] && backoff="$backoff_max"
-    done
+start_node() {
+    node_started_at="$(date +%s)"
+    "$binary" node run --config "$config" >>"$state_dir/logs/node.log" 2>&1 &
+    node_pid=$!
+    log "node running"
+}
 
+start_tunnel() {
     # The target is intentionally selected locally; no remote expansion is used.
     # shellcheck disable=SC2029
     ssh "${ssh_options[@]}" "$ssh_target" >>"$state_dir/logs/tunnel.log" 2>&1 &
     tunnel_pid=$!
+    tunnel_started_at="$(date +%s)"
     ready=0
     for _ in $(seq 1 20); do
         if ! kill -0 "$tunnel_pid" 2>/dev/null; then
@@ -144,33 +146,69 @@ while true; do
         fi
         sleep 1
     done
-    if [ "$ready" -ne 1 ]; then
-        log "SSH forwards did not become ready"
-        cleanup_children
-        tunnel_pid=""
+    if [ "$ready" -eq 1 ]; then
+        log "SSH transport running"
+        return 0
+    fi
+    log "SSH forwards did not become ready"
+    stop_child "$tunnel_pid"
+    tunnel_pid=""
+    return 1
+}
+
+node_backoff="$restart_floor"
+tunnel_backoff="$restart_floor"
+next_tunnel_attempt=0
+log "starting (node=$binary tunnel=${ssh_target:-disabled})"
+start_node
+while true; do
+    if ! kill -0 "$node_pid" 2>/dev/null; then
+        wait "$node_pid" 2>/dev/null || true
+        ran_for=$(( $(date +%s) - node_started_at ))
+        log "node exited after ${ran_for}s; restarting in ${node_backoff}s"
         node_pid=""
-        sleep "$backoff"
+        if [ "$ran_for" -ge "$healthy_run_sec" ]; then
+            node_backoff="$restart_floor"
+        else
+            node_backoff=$((node_backoff * 2))
+            [ "$node_backoff" -gt "$backoff_max" ] && node_backoff="$backoff_max"
+        fi
+        sleep "$node_backoff"
+        start_node
         continue
     fi
 
-    started_at="$(date +%s)"
-    "$binary" node run --config "$config" >>"$state_dir/logs/node.log" 2>&1 &
-    node_pid=$!
-    log "node and SSH transport running"
-
-    while kill -0 "$tunnel_pid" 2>/dev/null && kill -0 "$node_pid" 2>/dev/null; do
+    if [ -z "$ssh_target" ]; then
         sleep 2
-    done
-    ran_for=$(( $(date +%s) - started_at ))
-    log "node or transport exited after ${ran_for}s; restarting in ${backoff}s"
-    cleanup_children
-    tunnel_pid=""
-    node_pid=""
-    if [ "$ran_for" -ge "$healthy_run_sec" ]; then
-        backoff="$restart_floor"
-    else
-        backoff=$((backoff * 2))
-        [ "$backoff" -gt "$backoff_max" ] && backoff="$backoff_max"
+        continue
     fi
-    sleep "$backoff"
+
+    now="$(date +%s)"
+    if [ -n "$tunnel_pid" ] && ! kill -0 "$tunnel_pid" 2>/dev/null; then
+        wait "$tunnel_pid" 2>/dev/null || true
+        ran_for=$(( now - tunnel_started_at ))
+        log "SSH transport exited after ${ran_for}s; retrying in ${tunnel_backoff}s"
+        tunnel_pid=""
+        if [ "$ran_for" -ge "$healthy_run_sec" ]; then
+            tunnel_backoff="$restart_floor"
+        else
+            tunnel_backoff=$((tunnel_backoff * 2))
+            [ "$tunnel_backoff" -gt "$backoff_max" ] && tunnel_backoff="$backoff_max"
+        fi
+        next_tunnel_attempt=$((now + tunnel_backoff))
+    fi
+
+    if [ -z "$tunnel_pid" ] && [ "$now" -ge "$next_tunnel_attempt" ]; then
+        if ssh "${probe_options[@]}" "$ssh_target" true >/dev/null 2>&1 && start_tunnel; then
+            tunnel_backoff="$restart_floor"
+            next_tunnel_attempt=0
+        else
+            log "SSH transport unavailable; node remains online; retrying in ${tunnel_backoff}s"
+            next_tunnel_attempt=$((now + tunnel_backoff))
+            tunnel_backoff=$((tunnel_backoff * 2))
+            [ "$tunnel_backoff" -gt "$backoff_max" ] && tunnel_backoff="$backoff_max"
+        fi
+    fi
+
+    sleep 2
 done
