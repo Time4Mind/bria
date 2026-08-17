@@ -152,6 +152,11 @@ func (h *Handler) handleCallback(
 	if callback.Action == telegramui.ActionNoop {
 		return h.messenger.AnswerCallbackQuery(ctx, update.CallbackID, "")
 	}
+	// Telegram callback payloads do not consistently echo rich_message. Recover
+	// the durable carrier metadata when the callback belongs to the current
+	// response card, otherwise a rich card is mistaken for a legacy carrier and
+	// every rich session selection becomes send+delete instead of an edit.
+	update.CallbackOrigin = h.resolveCallbackCarrier(actor, update.CallbackOrigin)
 	if leavesSessionCard(callback.Action) {
 		h.cancelPaneRefresh(actor.UserID)
 	}

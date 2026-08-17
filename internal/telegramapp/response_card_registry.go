@@ -22,6 +22,19 @@ func (h *Handler) rememberResponseCard(
 	h.rememberResponseCardLocked(ctx, actor, message, screen)
 }
 
+func (h *Handler) resolveCallbackCarrier(
+	actor application.Principal,
+	origin telegrambot.Message,
+) telegrambot.Message {
+	card, ok, err := h.service.TelegramResponseCard(actor)
+	if err != nil || !ok || card.ChatID != origin.ChatID || card.MessageID != origin.MessageID {
+		return origin
+	}
+	resolved := telegramMessage(card)
+	resolved.Text = origin.Text
+	return resolved
+}
+
 func (h *Handler) rememberResponseCardLocked(
 	ctx context.Context,
 	actor application.Principal,

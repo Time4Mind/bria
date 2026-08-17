@@ -351,7 +351,11 @@ func TestVoicePendingRowMatchesCCBotUntilTranscriptArrives(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	latest := fixture.messenger.sent[len(fixture.messenger.sent)-1].Text
+	if len(fixture.messenger.sent) != 1 || len(fixture.messenger.deleted) != 0 {
+		t.Fatalf("voice refresh recreated carrier: sent=%#v deleted=%#v",
+			fixture.messenger.sent, fixture.messenger.deleted)
+	}
+	latest := fixture.messenger.edited[len(fixture.messenger.edited)-1].Text
 	if strings.Contains(latest, "Голосовое распознаётся") ||
 		!strings.Contains(latest, "👤 распознанный запрос") {
 		t.Fatalf("transcribed voice did not replace pending row: %q", latest)

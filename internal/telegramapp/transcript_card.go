@@ -256,6 +256,10 @@ func cardEvents(events []transcript.Event) []application.CardEvent {
 		}
 		startedAt, _ := time.Parse(time.RFC3339Nano, event.Timestamp)
 		text := event.Text
+		if event.Kind == transcript.EventAssistantText ||
+			event.Kind == transcript.EventAssistantFinal {
+			text = stripTrailingAssistantMetadata(text)
+		}
 		if event.Head != "" {
 			text = event.Head
 		}
@@ -266,6 +270,27 @@ func cardEvents(events []transcript.Event) []application.CardEvent {
 		})
 	}
 	return result
+}
+
+const (
+	assistantMetadataOpen  = "<oai-mem-citation>"
+	assistantMetadataClose = "</oai-mem-citation>"
+)
+
+// stripTrailingAssistantMetadata removes transport-only metadata appended by
+// Codex after the user-facing answer. It intentionally requires a complete
+// trailing block and runs only for assistant events, so user text, code samples,
+// ordinary HTML, and incomplete tag-shaped content remain visible verbatim.
+func stripTrailingAssistantMetadata(text string) string {
+	trimmed := strings.TrimSpace(text)
+	for strings.HasSuffix(trimmed, assistantMetadataClose) {
+		start := strings.LastIndex(trimmed, assistantMetadataOpen)
+		if start < 0 || (start > 0 && trimmed[start-1] != '\n') {
+			break
+		}
+		trimmed = strings.TrimSpace(trimmed[:start])
+	}
+	return trimmed
 }
 
 func cardEventKind(kind transcript.EventKind) (application.CardEventKind, bool) {

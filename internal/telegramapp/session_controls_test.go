@@ -607,6 +607,78 @@ func TestHiddenTechnicalEventsLeaveOnlyAssistantNarrative(t *testing.T) {
 	}
 }
 
+func TestCompletedSessionSwitchKeepsReplicatedRichCarrier(t *testing.T) {
+	fixture := newFixture(t)
+	actor := application.Principal{UserID: 7}
+	firstRef := domain.SessionRef{NodeID: "allowed", SessionID: "live"}
+	second := domain.Session{
+		ID: "completed-second", NodeID: "allowed", OwnerID: 7, Name: "Completed Second",
+		Backend: "codex", State: domain.SessionActive, RuntimePhase: domain.RuntimeIdle,
+		CreatedAt: time.Unix(300, 0).UTC(), LiveSinceAt: time.Unix(300, 0).UTC(),
+	}
+	if result := fixture.machine.Apply(commandForTest(
+		t, "add-completed-second", clusterstate.CommandAddSession, second,
+	)); result.Err() != nil {
+		t.Fatal(result.Err())
+	}
+	first, err := fixture.service.Session(actor, firstRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.service.RecordTelegramResponseCard(
+		application.WithOperationScope(context.Background(), "completed-rich-card"), actor,
+		domain.TelegramResponseCard{
+			ChatID: 7, MessageID: 90, Rich: true, Session: firstRef,
+			SessionRevision: first.Revision, SessionEventAt: first.LastEventAt,
+		},
+	); err != nil {
+		t.Fatal(err)
+	}
+	controls := &blockingControls{events: []transcript.Event{{
+		Kind: transcript.EventAssistantFinal, Text: "completed answer",
+		Timestamp: time.Now().Add(-time.Minute).Format(time.RFC3339Nano),
+	}}}
+	handler, err := telegramapp.NewHandlerWithControls(
+		fixture.service, fixture.projector, fixture.codec, fixture.messenger, controls,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index, ref := range []domain.SessionRef{second.Ref(), firstRef, second.Ref(), firstRef} {
+		token, tokenErr := fixture.codec.Session(7, telegramui.ActionSelectSession, ref)
+		if tokenErr != nil {
+			t.Fatal(tokenErr)
+		}
+		data, encodeErr := (telegramui.Callback{
+			Action: telegramui.ActionSelectSession, Token: token,
+		}).Encode()
+		if encodeErr != nil {
+			t.Fatal(encodeErr)
+		}
+		if handleErr := handler.HandleTelegramUpdate(context.Background(), telegrambot.IncomingUpdate{
+			UpdateID: int64(200 + index), Kind: telegrambot.IncomingCallback,
+			ChatID: 7, UserID: 7, CallbackID: fmt.Sprintf("switch-%d", index),
+			CallbackData: data,
+			// Reproduce production: callback carries the message identity but loses
+			// Telegram's rich_message marker.
+			CallbackOrigin: telegrambot.Message{ChatID: 7, MessageID: 90},
+		}); handleErr != nil {
+			t.Fatal(handleErr)
+		}
+	}
+	if len(fixture.messenger.sent) != 0 || len(fixture.messenger.deleted) != 0 {
+		t.Fatalf("completed switches recreated carrier: sent=%#v deleted=%#v",
+			fixture.messenger.sent, fixture.messenger.deleted)
+	}
+	if len(fixture.messenger.edited) != 4 {
+		t.Fatalf("completed switches edits = %d", len(fixture.messenger.edited))
+	}
+	card, ok, cardErr := fixture.service.TelegramResponseCard(actor)
+	if cardErr != nil || !ok || card.MessageID != 90 || !card.Rich || card.Session != firstRef {
+		t.Fatalf("stable rich carrier = %#v / %v / %v", card, ok, cardErr)
+	}
+}
+
 func TestTranscriptPageButtonsResolveOpaqueTargetPage(t *testing.T) {
 	fixture := newFixture(t)
 	ref := domain.SessionRef{NodeID: "allowed", SessionID: "live"}

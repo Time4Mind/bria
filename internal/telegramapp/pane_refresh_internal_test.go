@@ -29,3 +29,29 @@ func TestSettlementWaitsForLatestQueuedPrompt(t *testing.T) {
 		t.Fatal("earlier answer settled a later queued prompt")
 	}
 }
+
+func TestCardEventsHideOnlyTrailingAssistantMemoryMetadata(t *testing.T) {
+	metadata := "<oai-mem-citation>\n<citation_entries>\ninternal\n" +
+		"</citation_entries>\n</oai-mem-citation>"
+	events := cardEvents([]transcript.Event{
+		{Kind: transcript.EventUserText, Text: "keep user " + metadata},
+		{Kind: transcript.EventAssistantText, Text: "keep incomplete <oai-mem-citation>"},
+		{Kind: transcript.EventAssistantText, Text: "keep inline " + metadata},
+		{Kind: transcript.EventAssistantFinal, Text: "Visible answer\n\n" + metadata},
+	})
+	if len(events) != 4 {
+		t.Fatalf("card events = %#v", events)
+	}
+	if events[0].Text != "keep user "+metadata {
+		t.Fatalf("user metadata-shaped text changed: %q", events[0].Text)
+	}
+	if events[1].Text != "keep incomplete <oai-mem-citation>" {
+		t.Fatalf("incomplete assistant text changed: %q", events[1].Text)
+	}
+	if events[2].Text != "keep inline "+metadata {
+		t.Fatalf("inline assistant text changed: %q", events[2].Text)
+	}
+	if events[3].Text != "Visible answer" {
+		t.Fatalf("trailing assistant metadata remained: %q", events[3].Text)
+	}
+}
