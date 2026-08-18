@@ -124,7 +124,7 @@ func TestServersBackReturnsToSessionsInsteadOfMenu(t *testing.T) {
 	}
 }
 
-func TestServersBackReplacesCardWhenTelegramRateLimitsEdit(t *testing.T) {
+func TestServersBackDoesNotSendReplacementWhenTelegramRateLimitsEdit(t *testing.T) {
 	fixture := newFixture(t)
 	servers := encodeCallback(t, telegramui.ActionSessions, "servers")
 	if err := fixture.handler.HandleTelegramUpdate(context.Background(), telegrambot.IncomingUpdate{
@@ -145,25 +145,20 @@ func TestServersBackReplacesCardWhenTelegramRateLimitsEdit(t *testing.T) {
 		Method: "editMessageText", Code: 429, RetryAfter: 20 * time.Minute,
 	}
 	beforeSent := len(fixture.messenger.sent)
-	if err := fixture.handler.HandleTelegramUpdate(context.Background(), telegrambot.IncomingUpdate{
+	err = fixture.handler.HandleTelegramUpdate(context.Background(), telegrambot.IncomingUpdate{
 		UpdateID: 331, Kind: telegrambot.IncomingCallback, ChatID: 7, UserID: 7,
 		CallbackID: "back-limited", CallbackData: backData, CallbackOrigin: origin,
-	}); err != nil {
-		t.Fatalf("rate-limited back: %v", err)
+	})
+	if _, limited := telegrambot.FloodWait(err); !limited {
+		t.Fatalf("rate-limited back error=%v", err)
 	}
-	if len(fixture.messenger.sent) != beforeSent+1 {
-		t.Fatalf("replacement sends=%d want=%d", len(fixture.messenger.sent), beforeSent+1)
+	if len(fixture.messenger.sent) != beforeSent {
+		t.Fatalf("replacement sends=%d want=%d", len(fixture.messenger.sent), beforeSent)
 	}
-	replacement := fixture.messenger.sent[len(fixture.messenger.sent)-1]
-	if replacement.Name == telegramui.ScreenStatus || replacement.Name == telegramui.ScreenMenu {
-		t.Fatalf("replacement=%#v", replacement)
-	}
-	deletedOrigin := false
 	for _, deleted := range fixture.messenger.deleted {
-		deletedOrigin = deletedOrigin || deleted.MessageID == origin.MessageID
-	}
-	if !deletedOrigin {
-		t.Fatalf("deleted=%#v want origin=%#v", fixture.messenger.deleted, origin)
+		if deleted.MessageID == origin.MessageID {
+			t.Fatalf("rate-limited origin was deleted: %#v", deleted)
+		}
 	}
 }
 

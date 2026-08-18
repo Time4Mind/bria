@@ -14,7 +14,7 @@ import (
 const (
 	paneInitialDelay         = 500 * time.Millisecond
 	paneWorkingRefreshDelay  = 2500 * time.Millisecond
-	paneResponseRefreshDelay = 500 * time.Millisecond
+	paneResponseRefreshDelay = 1200 * time.Millisecond
 	paneRefreshLimit         = 1500
 	paneCaptureLimit         = time.Second
 	typingRefreshDelay       = 4 * time.Second

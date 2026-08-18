@@ -21,6 +21,12 @@ func (c *Client) SendScreen(
 		if richErr == nil {
 			return message, nil
 		}
+		// A flood wait applies to the chat, not just to the rich transport.
+		// Falling back immediately doubles the rejected traffic and can turn a
+		// short cooldown into an hours-long Telegram ban.
+		if _, limited := FloodWait(richErr); limited {
+			return Message{}, richErr
+		}
 		log.Printf("bria telegram: rich send failed; using expandable fallback: %v", richErr)
 		fallbackText := richFallbackMarkdownV2(screen)
 		fallback, fallbackErr := c.SendMessage(ctx, MessageRequest{

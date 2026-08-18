@@ -115,7 +115,7 @@ func TestTextInputUsesProviderTranscriptOrderAfterFlush(t *testing.T) {
 	}
 }
 
-func TestLiveCardReplacesOnceWhenTelegramRateLimitsEdits(t *testing.T) {
+func TestLiveCardStopsAllWritesWhenTelegramRateLimitsEdits(t *testing.T) {
 	fixture := newFixture(t)
 	actor := application.Principal{UserID: 7}
 	ref := domain.SessionRef{NodeID: "allowed", SessionID: "live"}
@@ -149,20 +149,12 @@ func TestLiveCardReplacesOnceWhenTelegramRateLimitsEdits(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		sent, _, _ := fixture.messenger.screensSnapshot()
-		if len(sent) >= 2 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("live card was not replaced after edit flood wait: sent=%d", len(sent))
-		}
-		time.Sleep(10 * time.Millisecond)
+	time.Sleep(1500 * time.Millisecond)
+	sent, edited, _ := fixture.messenger.screensSnapshot()
+	if len(sent) != 1 {
+		t.Fatalf("live card sends=%d want=1 initial send only", len(sent))
 	}
-	time.Sleep(1400 * time.Millisecond)
-	sent, _, _ := fixture.messenger.screensSnapshot()
-	if len(sent) != 2 {
-		t.Fatalf("live card replacements=%d want=2 total sends", len(sent))
+	if len(edited) != 1 {
+		t.Fatalf("live card edit attempts=%d want=1", len(edited))
 	}
 }

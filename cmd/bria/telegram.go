@@ -196,6 +196,12 @@ func newTelegramAdapter(
 					update.UpdateID, telegramErrorSuffix(answerErr, token),
 				)
 			}
+			if _, limited := telegrambot.FloodWait(dropErr); limited {
+				// The screen layer already records Telegram's requested cooldown.
+				// Do not amplify it with a visible-message fallback that is certain
+				// to hit the same per-chat flood control.
+				return
+			}
 			// Most callbacks are acknowledged before their state or screen work.
 			// A second callback answer then cannot show a toast, so send a visible
 			// notice as well instead of silently losing the requested action.

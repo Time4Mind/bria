@@ -17,15 +17,16 @@ const tracedTelegramOperation = 25 * time.Millisecond
 // message contents and exists so a compact service log is edited only while it
 // is still the newest message in the private chat.
 type activityMessenger struct {
-	inner         Messenger
-	mu            sync.Mutex
-	latest        map[int64]int64
-	editBlockedAt map[int64]time.Time
+	inner             Messenger
+	mu                sync.Mutex
+	latest            map[int64]int64
+	outboundBlockedAt map[int64]time.Time
 }
 
 func newActivityMessenger(inner Messenger) *activityMessenger {
 	return &activityMessenger{
-		inner: inner, latest: make(map[int64]int64), editBlockedAt: make(map[int64]time.Time),
+		inner: inner, latest: make(map[int64]int64),
+		outboundBlockedAt: make(map[int64]time.Time),
 	}
 }
 
@@ -39,7 +40,14 @@ func (m *activityMessenger) AnswerCallbackQuery(
 }
 
 func (m *activityMessenger) SendTyping(ctx context.Context, chatID int64) error {
-	return m.inner.SendTyping(ctx, chatID)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if err := m.localFloodWaitLocked("sendChatAction", chatID); err != nil {
+		return err
+	}
+	err := m.inner.SendTyping(ctx, chatID)
+	m.rememberFloodWaitLocked(chatID, err)
+	return err
 }
 
 func (m *activityMessenger) SendDocument(
@@ -47,7 +55,11 @@ func (m *activityMessenger) SendDocument(
 ) (telegrambot.Message, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if err := m.localFloodWaitLocked("sendDocument", request.ChatID); err != nil {
+		return telegrambot.Message{}, err
+	}
 	message, err := m.inner.SendDocument(ctx, request)
+	m.rememberFloodWaitLocked(request.ChatID, err)
 	if err == nil {
 		m.observeLocked(message.ChatID, message.MessageID)
 	}
@@ -61,9 +73,13 @@ func (m *activityMessenger) SendScreen(
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	logSlowTelegramOperation("send_screen_queue", queuedAt, nil)
+	if err := m.localFloodWaitLocked("sendScreen", chatID); err != nil {
+		return telegrambot.Message{}, err
+	}
 	startedAt := time.Now()
 	message, err := m.inner.SendScreen(ctx, chatID, screen)
 	logSlowTelegramOperation(screenOperation("send_screen", screen), startedAt, err)
+	m.rememberFloodWaitLocked(chatID, err)
 	if err == nil {
 		m.observeLocked(message.ChatID, message.MessageID)
 	}
@@ -77,40 +93,52 @@ func (m *activityMessenger) EditScreen(
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	logSlowTelegramOperation("edit_screen_queue", queuedAt, nil)
-	if blockedAt := m.editBlockedAt[message.ChatID]; time.Now().Before(blockedAt) {
-		return telegrambot.Message{}, &telegrambot.APIError{
-			Method: "editScreen", Code: 429,
-			Description: "local flood wait",
-			RetryAfter:  time.Until(blockedAt),
-			Local:       true,
-		}
+	if err := m.localFloodWaitLocked("editScreen", message.ChatID); err != nil {
+		return telegrambot.Message{}, err
 	}
 	startedAt := time.Now()
 	edited, err := m.inner.EditScreen(ctx, message, screen)
 	logSlowTelegramOperation(screenOperation("edit_screen", screen), startedAt, err)
-	if retryAfter, limited := telegrambot.FloodWait(err); limited && retryAfter > 0 {
-		blockedAt := time.Now().Add(retryAfter)
-		if blockedAt.After(m.editBlockedAt[message.ChatID]) {
-			m.editBlockedAt[message.ChatID] = blockedAt
-			processlog.Servicef("bria telegram: edit_flood_wait retry_after_ms=%d error=%v",
-				retryAfter.Milliseconds(), err)
-		}
-	} else if err == nil {
-		delete(m.editBlockedAt, message.ChatID)
-	}
+	m.rememberFloodWaitLocked(message.ChatID, err)
 	return edited, err
 }
 
 func (m *activityMessenger) editFloodWait(chatID int64) (time.Duration, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	blockedAt := m.editBlockedAt[chatID]
+	blockedAt := m.outboundBlockedAt[chatID]
 	remaining := time.Until(blockedAt)
 	if remaining <= 0 {
-		delete(m.editBlockedAt, chatID)
+		delete(m.outboundBlockedAt, chatID)
 		return 0, false
 	}
 	return remaining, true
+}
+
+func (m *activityMessenger) localFloodWaitLocked(method string, chatID int64) error {
+	blockedAt := m.outboundBlockedAt[chatID]
+	if !time.Now().Before(blockedAt) {
+		delete(m.outboundBlockedAt, chatID)
+		return nil
+	}
+	return &telegrambot.APIError{
+		Method: method, Code: 429, Description: "local flood wait",
+		RetryAfter: time.Until(blockedAt), Local: true,
+	}
+}
+
+func (m *activityMessenger) rememberFloodWaitLocked(chatID int64, err error) {
+	retryAfter, limited := telegrambot.RemoteFloodWait(err)
+	if !limited || retryAfter <= 0 {
+		return
+	}
+	blockedAt := time.Now().Add(retryAfter)
+	if !blockedAt.After(m.outboundBlockedAt[chatID]) {
+		return
+	}
+	m.outboundBlockedAt[chatID] = blockedAt
+	processlog.Servicef("bria telegram: outbound_flood_wait retry_after_ms=%d error=%v",
+		retryAfter.Milliseconds(), err)
 }
 
 func screenOperation(base string, screen telegramui.Screen) string {
@@ -149,7 +177,11 @@ func (m *activityMessenger) DeleteMessage(
 ) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if err := m.localFloodWaitLocked("deleteMessage", message.ChatID); err != nil {
+		return err
+	}
 	err := m.inner.DeleteMessage(ctx, message)
+	m.rememberFloodWaitLocked(message.ChatID, err)
 	if err == nil && m.latest[message.ChatID] == message.MessageID {
 		// Telegram does not expose the message now revealed underneath. Force the
 		// next cluster event to start a new log instead of editing an older one.
@@ -161,7 +193,14 @@ func (m *activityMessenger) DeleteMessage(
 func (m *activityMessenger) ClearKeyboard(
 	ctx context.Context, message telegrambot.Message,
 ) error {
-	return m.inner.ClearKeyboard(ctx, message)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if err := m.localFloodWaitLocked("clearKeyboard", message.ChatID); err != nil {
+		return err
+	}
+	err := m.inner.ClearKeyboard(ctx, message)
+	m.rememberFloodWaitLocked(message.ChatID, err)
+	return err
 }
 
 func (m *activityMessenger) observeIncoming(chatID, messageID int64) {
@@ -190,12 +229,17 @@ func (m *activityMessenger) upsertNewest(
 ) (telegrambot.Message, bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if err := m.localFloodWaitLocked("upsertScreen", chatID); err != nil {
+		return telegrambot.Message{}, false, err
+	}
 	if previous.ChatID == chatID && previous.MessageID > 0 &&
 		m.latest[chatID] == previous.MessageID {
 		edited, err := m.inner.EditScreen(ctx, previous, editScreen)
+		m.rememberFloodWaitLocked(chatID, err)
 		return edited, true, err
 	}
 	message, err := m.inner.SendScreen(ctx, chatID, newScreen)
+	m.rememberFloodWaitLocked(chatID, err)
 	if err == nil {
 		m.observeLocked(message.ChatID, message.MessageID)
 	}
