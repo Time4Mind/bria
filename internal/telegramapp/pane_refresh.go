@@ -2,11 +2,11 @@ package telegramapp
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/Time4Mind/bria/internal/application"
 	"github.com/Time4Mind/bria/internal/domain"
+	"github.com/Time4Mind/bria/internal/processlog"
 	"github.com/Time4Mind/bria/internal/telegrambot"
 	"github.com/Time4Mind/bria/internal/transcript"
 )
@@ -211,8 +211,8 @@ func (h *Handler) runPaneRefresh(
 		nextDelay := nextPaneRefreshDelay(session, snapshot.events)
 		responseStarted := nextDelay == paneResponseRefreshDelay
 		if responseStarted && !responseRefresh {
-			fmt.Printf(
-				"bria telegram: pane_refresh_mode ref=%q mode=response interval_ms=%d\n",
+			processlog.Detailf(
+				"bria telegram: pane_refresh_mode ref=%q mode=response interval_ms=%d",
 				ref.Key(), paneResponseRefreshDelay.Milliseconds(),
 			)
 		}

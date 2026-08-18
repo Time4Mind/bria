@@ -3,12 +3,12 @@ package main
 import (
 	"context"
 	"fmt"
-	"os"
 	"time"
 
 	"github.com/Time4Mind/bria/internal/clusterstate"
 	"github.com/Time4Mind/bria/internal/consensus"
 	"github.com/Time4Mind/bria/internal/domain"
+	"github.com/Time4Mind/bria/internal/processlog"
 )
 
 func maintainLeaderPolicy(ctx context.Context, node *consensus.Node) {
@@ -89,7 +89,7 @@ func reconcileTemporaryLeader(ctx context.Context, node *consensus.Node) {
 	}
 	if node.LeaderID() != string(preference.NodeID) {
 		if err := node.TransferLeadershipTo(string(preference.NodeID)); err != nil {
-			fmt.Fprintf(os.Stderr, "bria temporary leader: %v\n", err)
+			processlog.Criticalf("bria temporary leader: %v", err)
 		}
 	}
 }

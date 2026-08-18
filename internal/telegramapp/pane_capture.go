@@ -8,6 +8,7 @@ import (
 
 	"github.com/Time4Mind/bria/internal/application"
 	"github.com/Time4Mind/bria/internal/domain"
+	"github.com/Time4Mind/bria/internal/processlog"
 	"github.com/Time4Mind/bria/internal/telegrambot"
 	"github.com/Time4Mind/bria/internal/telegramui"
 	"github.com/Time4Mind/bria/internal/terminalimage"
@@ -106,9 +107,9 @@ func (h *Handler) attachPane(
 	timing := paneAttachTiming{outcome: "capture_error"}
 	defer func() {
 		if timing.total() >= 25*time.Millisecond {
-			fmt.Printf(
+			processlog.Detailf(
 				"bria telegram: pane_timing mode=refresh ref=%q total_ms=%d "+
-					"capture_ms=%d render_ms=%d outcome=%s\n",
+					"capture_ms=%d render_ms=%d outcome=%s",
 				ref.Key(), timing.total().Milliseconds(), timing.capture.Milliseconds(),
 				timing.render.Milliseconds(), timing.outcome,
 			)

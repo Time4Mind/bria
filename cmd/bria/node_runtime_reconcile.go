@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"os"
 	"time"
 
 	"github.com/Time4Mind/bria/internal/clusterstate"
@@ -11,6 +10,7 @@ import (
 	"github.com/Time4Mind/bria/internal/consensus"
 	"github.com/Time4Mind/bria/internal/domain"
 	"github.com/Time4Mind/bria/internal/nodecontrol"
+	"github.com/Time4Mind/bria/internal/processlog"
 	"github.com/Time4Mind/bria/internal/runtimehost"
 )
 
@@ -154,14 +154,14 @@ func runLocalRuntimeReconciler(
 ) {
 	remote, err := nodecontrol.NewRemoteRecoveryApplier(nodeConfig.NodeID, node, client)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "bria runtime reconcile: %v\n", err)
+		processlog.Criticalf("bria runtime reconcile: %v", err)
 		return
 	}
 	reconciler, err := newRuntimeMissingReconciler(
 		nodeConfig, node.State(), driver, remote, executor,
 	)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "bria runtime reconcile: %v\n", err)
+		processlog.Criticalf("bria runtime reconcile: %v", err)
 		return
 	}
 	ticker := time.NewTicker(runtimeReconcileInterval)
@@ -172,7 +172,7 @@ func runLocalRuntimeReconciler(
 			return
 		case <-ticker.C:
 			if err := reconciler.Reconcile(ctx); err != nil && ctx.Err() == nil {
-				fmt.Fprintf(os.Stderr, "bria runtime reconcile: %v\n", err)
+				processlog.Criticalf("bria runtime reconcile: %v", err)
 			}
 		}
 	}

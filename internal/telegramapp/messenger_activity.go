@@ -2,10 +2,10 @@ package telegramapp
 
 import (
 	"context"
-	"log"
 	"sync"
 	"time"
 
+	"github.com/Time4Mind/bria/internal/processlog"
 	"github.com/Time4Mind/bria/internal/telegrambot"
 	"github.com/Time4Mind/bria/internal/telegramui"
 )
@@ -92,7 +92,7 @@ func (m *activityMessenger) EditScreen(
 		blockedAt := time.Now().Add(retryAfter)
 		if blockedAt.After(m.editBlockedAt[message.ChatID]) {
 			m.editBlockedAt[message.ChatID] = blockedAt
-			log.Printf("bria telegram: edit_flood_wait retry_after_ms=%d error=%v",
+			processlog.Servicef("bria telegram: edit_flood_wait retry_after_ms=%d error=%v",
 				retryAfter.Milliseconds(), err)
 		}
 	} else if err == nil {
@@ -135,12 +135,12 @@ func logSlowTelegramOperation(operation string, startedAt time.Time, err error) 
 	if err != nil {
 		outcome = "failed"
 	}
-	log.Printf("bria telegram: outbound_timing operation=%s duration_ms=%d outcome=%s",
+	processlog.Detailf("bria telegram: outbound_timing operation=%s duration_ms=%d outcome=%s",
 		operation, duration.Milliseconds(), outcome)
 	if duration < slowTelegramOperation {
 		return
 	}
-	log.Printf("bria telegram: slow_outbound operation=%s duration_ms=%d outcome=%s",
+	processlog.Servicef("bria telegram: slow_outbound operation=%s duration_ms=%d outcome=%s",
 		operation, duration.Milliseconds(), outcome)
 }
 

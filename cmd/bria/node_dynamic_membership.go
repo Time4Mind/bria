@@ -2,13 +2,12 @@ package main
 
 import (
 	"context"
-	"fmt"
-	"os"
 	"time"
 
 	"github.com/Time4Mind/bria/internal/config"
 	"github.com/Time4Mind/bria/internal/consensus"
 	"github.com/Time4Mind/bria/internal/domain"
+	"github.com/Time4Mind/bria/internal/processlog"
 )
 
 func maintainDynamicMembership(
@@ -31,13 +30,13 @@ func maintainDynamicMembership(
 		state := node.State().State()
 		configured, err := configuredMemberAddresses(node)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Raft membership read: %v\n", err)
+			processlog.Criticalf("Raft membership read: %v", err)
 		} else {
 			syncMembershipResolverIfReady(resolver, state, knownAddresses, configured)
 		}
 		if err == nil && node.IsLeader() {
 			if err := reconcileDesiredMembership(node, state); err != nil {
-				fmt.Fprintf(os.Stderr, "Raft dynamic membership: %v\n", err)
+				processlog.Criticalf("Raft dynamic membership: %v", err)
 			}
 		}
 		select {

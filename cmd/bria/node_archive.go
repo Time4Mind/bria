@@ -10,6 +10,7 @@ import (
 	"github.com/Time4Mind/bria/internal/config"
 	"github.com/Time4Mind/bria/internal/domain"
 	"github.com/Time4Mind/bria/internal/localarchive"
+	"github.com/Time4Mind/bria/internal/processlog"
 	"github.com/Time4Mind/bria/internal/runtimehost"
 )
 
@@ -96,7 +97,7 @@ func runLocalArchiveReconciler(
 			if err := reconcileLocalArchives(
 				ctx, state.State(), nodeConfig, driver, archives,
 			); err != nil && ctx.Err() == nil {
-				fmt.Fprintf(os.Stderr, "bria archive reconcile: %v\n", err)
+				processlog.Criticalf("bria archive reconcile: %v", err)
 			}
 		}
 	}

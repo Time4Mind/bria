@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -13,7 +11,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strings"
 	"syscall"
 	"time"
 
@@ -22,6 +19,7 @@ import (
 	"github.com/Time4Mind/bria/internal/consensus"
 	"github.com/Time4Mind/bria/internal/domain"
 	"github.com/Time4Mind/bria/internal/platform"
+	"github.com/Time4Mind/bria/internal/processlog"
 	"github.com/Time4Mind/bria/internal/recovery"
 	"github.com/Time4Mind/bria/internal/runtimehost"
 	"github.com/hashicorp/raft"
@@ -67,6 +65,12 @@ func runNode(arguments []string) error {
 	nodeConfig, err := config.Load(absoluteConfigPath)
 	if err != nil {
 		return err
+	}
+	processLogs, logErr := processlog.Start(filepath.Join(nodeConfig.DataDir, "logs"))
+	if logErr != nil {
+		fmt.Fprintf(os.Stderr, "bria process logging: %v\n", logErr)
+	} else {
+		defer processLogs.Close()
 	}
 	bootstrapCtx, cancelBootstrap := context.WithTimeout(context.Background(), 10*time.Minute)
 	bootstrapBinary, err := bootstrapNodeCompatibility(
@@ -115,7 +119,7 @@ func runNode(arguments []string) error {
 		DataDir:      filepath.Join(nodeConfig.DataDir, "raft"),
 		Bootstrap:    nodeConfig.Bootstrap,
 		ApplyTimeout: 10 * time.Second,
-		LogOutput:    os.Stderr,
+		LogOutput:    processlog.Writer(processlog.Service),
 	}, clusterstate.NewFSM(machine), transport)
 	if err != nil {
 		_ = transport.Close()
@@ -175,7 +179,7 @@ func runNode(arguments []string) error {
 				if recoveryErr := executor.Run(ctx, plan.Recover); recoveryErr != nil {
 					// Every failed provider resume has already been committed as an
 					// archive transition. Keep the healthy node online.
-					fmt.Fprintf(os.Stderr, "bria reboot recovery: %v\n", recoveryErr)
+					processlog.Criticalf("bria reboot recovery: %v", recoveryErr)
 				}
 			}
 		}
@@ -194,7 +198,7 @@ func runNode(arguments []string) error {
 	if err != nil {
 		return fmt.Errorf("start cluster update coordinator: %w", err)
 	}
-	fmt.Fprintf(os.Stderr, "bria node %s running at %s\n", nodeConfig.NodeID, nodeConfig.RaftAdvertise)
+	processlog.Servicef("bria node %s running at %s", nodeConfig.NodeID, nodeConfig.RaftAdvertise)
 	adapterErrors, err := startInteractionAdapters(ctx, node, nodeConfig, runtimeControl, updateCoordinator)
 	if err != nil {
 		return fmt.Errorf("start interaction adapters: %w", err)
@@ -288,35 +292,4 @@ func registerLocalNode(
 		return domain.BootRecoveryPlan{}, fmt.Errorf("decode boot recovery plan: %w", err)
 	}
 	return plan, nil
-}
-
-func connectedLocalBackends(
-	state *domain.State, nodeID domain.NodeID, installed []domain.BackendDescriptor,
-) []domain.BackendDescriptor {
-	if state == nil {
-		return nil
-	}
-	node, ok := state.Nodes[nodeID]
-	if !ok || !node.BackendSelectionInitialized {
-		return nil
-	}
-	connected := make(map[string]bool, len(node.Backends))
-	for _, backend := range node.Backends {
-		connected[strings.ToLower(backend.Name)] = true
-	}
-	result := make([]domain.BackendDescriptor, 0, len(installed))
-	for _, backend := range installed {
-		if connected[strings.ToLower(backend.Name)] {
-			result = append(result, backend)
-		}
-	}
-	return result
-}
-
-func newOperationID() (string, error) {
-	bytes := make([]byte, 16)
-	if _, err := rand.Read(bytes); err != nil {
-		return "", fmt.Errorf("generate operation id: %w", err)
-	}
-	return hex.EncodeToString(bytes), nil
 }

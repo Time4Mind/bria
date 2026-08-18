@@ -14,6 +14,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Time4Mind/bria/internal/processlog"
 )
 
 type Phase string
@@ -266,7 +268,7 @@ func (m *Manager) startWatchdog(request Request) error {
 		"--timeout", "90s",
 	)
 	command.Stdin = nil
-	command.Stdout, command.Stderr = os.Stderr, os.Stderr
+	command.Stdout, command.Stderr = processlog.Writer(processlog.Service), processlog.Writer(processlog.Critical)
 	if err := command.Start(); err != nil {
 		return fmt.Errorf("start update rollback watchdog: %w", err)
 	}

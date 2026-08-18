@@ -5,13 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"os"
 	"time"
 
 	"github.com/Time4Mind/bria/internal/clusterstate"
 	"github.com/Time4Mind/bria/internal/config"
 	"github.com/Time4Mind/bria/internal/consensus"
 	"github.com/Time4Mind/bria/internal/domain"
+	"github.com/Time4Mind/bria/internal/processlog"
 	"github.com/hashicorp/raft"
 )
 
@@ -42,11 +42,11 @@ func maintainConfiguredMembership(
 			continue
 		}
 		if err := registerConfiguredNodes(ctx, node, nodeConfig); err != nil {
-			fmt.Fprintf(os.Stderr, "Raft node registration: %v\n", err)
+			processlog.Criticalf("Raft node registration: %v", err)
 			continue
 		}
 		if err := reconcileConfiguredVoters(ctx, node, nodeConfig); err != nil {
-			fmt.Fprintf(os.Stderr, "Raft membership reconciliation: %v\n", err)
+			processlog.Criticalf("Raft membership reconciliation: %v", err)
 			continue
 		}
 		converged = true
@@ -111,7 +111,7 @@ func reconcileConfiguredVoters(
 	}
 	// Additional members are expected after invitation-based enrollment. Static
 	// bootstrap peers are seeds, not an exact assertion over durable Raft state.
-	fmt.Printf("Raft membership ready: %d servers\n", len(configuration.Servers))
+	processlog.Servicef("Raft membership ready: %d servers", len(configuration.Servers))
 	return nil
 }
 

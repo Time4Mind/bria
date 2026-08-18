@@ -8,6 +8,7 @@ import (
 
 	"github.com/Time4Mind/bria/internal/application"
 	"github.com/Time4Mind/bria/internal/domain"
+	"github.com/Time4Mind/bria/internal/processlog"
 	"github.com/Time4Mind/bria/internal/runtimehost"
 )
 
@@ -226,7 +227,7 @@ func (c *Controller) commitGeneratedName(
 		err = c.service.RenameSession(ctx, actor, session, candidate)
 		cancel()
 		if err == nil {
-			fmt.Printf("bria session naming: renamed ref=%q name=%q\n", ref.Key(), candidate)
+			processlog.Servicef("bria session naming: renamed ref=%q name=%q", ref.Key(), candidate)
 			return
 		}
 	}

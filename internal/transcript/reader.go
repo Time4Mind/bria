@@ -6,7 +6,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -14,6 +13,8 @@ import (
 	"sync"
 	"time"
 	"unicode/utf8"
+
+	"github.com/Time4Mind/bria/internal/processlog"
 )
 
 var providerSessionIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$`)
@@ -67,7 +68,7 @@ func (r *Reader) Read(ctx context.Context, request Request) ([]Event, error) {
 	lineCount := 0
 	parsedLineCount := 0
 	defer func() {
-		log.Printf(
+		processlog.Detailf(
 			"bria transcript: read_timing backend=%s total_ms=%d cache=%t "+
 				"lines=%d parsed_lines=%d events=%d",
 			request.Backend, time.Since(startedAt).Milliseconds(), cacheHit,

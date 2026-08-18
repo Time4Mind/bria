@@ -20,6 +20,7 @@ import (
 	"github.com/Time4Mind/bria/internal/domain"
 	"github.com/Time4Mind/bria/internal/i18n"
 	"github.com/Time4Mind/bria/internal/interaction"
+	"github.com/Time4Mind/bria/internal/processlog"
 	"github.com/Time4Mind/bria/internal/sessioncontrol"
 	"github.com/Time4Mind/bria/internal/sessionstart"
 	"github.com/Time4Mind/bria/internal/telegramapp"
@@ -86,7 +87,7 @@ func newTelegramAdapter(
 		return nil, err
 	}
 	if queued := controls.MigrateNames(); queued > 0 {
-		fmt.Printf("bria session naming: queued_migrations=%d\n", queued)
+		processlog.Servicef("bria session naming: queued_migrations=%d", queued)
 	}
 	handler, err := telegramapp.NewHandlerWithControlsAndLeadership(
 		service, projector, codec, client, controls, adapterLeader,
@@ -152,7 +153,11 @@ func newTelegramAdapter(
 		if handleErr != nil {
 			outcome = "failed"
 		}
-		fmt.Fprintf(os.Stderr, "bria telegram: update=%d kind=%s%s %s%s%s\n",
+		writeEvent := processlog.Detailf
+		if handleErr != nil {
+			writeEvent = processlog.Criticalf
+		}
+		writeEvent("bria telegram: update=%d kind=%s%s %s%s%s",
 			update.UpdateID, update.Kind, telegramCallbackLogSuffix(update), outcome,
 			telegramTimingLogSuffix(update, startedAt, finishedAt),
 			telegramErrorSuffix(handleErr, token))
@@ -170,8 +175,8 @@ func newTelegramAdapter(
 			return activateTelegramLeader(activationCtx, client, service)
 		},
 		OnCallbackDropped: func(update telegrambot.IncomingUpdate, dropErr error, attempts int) {
-			fmt.Fprintf(os.Stderr,
-				"bria telegram: update=%d kind=%s%s dropped_after=%d%s\n",
+			processlog.Criticalf(
+				"bria telegram: update=%d kind=%s%s dropped_after=%d%s",
 				update.UpdateID, update.Kind, telegramCallbackLogSuffix(update), attempts,
 				telegramErrorSuffix(dropErr, token),
 			)
@@ -186,8 +191,8 @@ func newTelegramAdapter(
 			if answerErr := client.AnswerCallbackQuery(
 				noticeCtx, update.CallbackID, failureNotice,
 			); answerErr != nil {
-				fmt.Fprintf(os.Stderr,
-					"bria telegram: update=%d callback_drop_notice_failed%s\n",
+				processlog.Criticalf(
+					"bria telegram: update=%d callback_drop_notice_failed%s",
 					update.UpdateID, telegramErrorSuffix(answerErr, token),
 				)
 			}
@@ -197,8 +202,8 @@ func newTelegramAdapter(
 			if _, noticeErr := client.SendMessage(noticeCtx, telegrambot.MessageRequest{
 				ChatID: update.ChatID, Text: failureNotice,
 			}); noticeErr != nil {
-				fmt.Fprintf(os.Stderr,
-					"bria telegram: update=%d callback_drop_message_failed%s\n",
+				processlog.Criticalf(
+					"bria telegram: update=%d callback_drop_message_failed%s",
 					update.UpdateID, telegramErrorSuffix(noticeErr, token),
 				)
 			}

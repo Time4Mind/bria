@@ -16,6 +16,7 @@ import (
 	"github.com/Time4Mind/bria/internal/domain"
 	"github.com/Time4Mind/bria/internal/enrollment"
 	"github.com/Time4Mind/bria/internal/nodecontrol"
+	"github.com/Time4Mind/bria/internal/processlog"
 	"github.com/Time4Mind/bria/internal/security"
 )
 
@@ -103,7 +104,7 @@ func startEnrollmentRuntime(
 	runtime := &enrollmentRuntime{server: server, listener: listener}
 	go func() {
 		if serveErr := server.Serve(listener); serveErr != nil && ctx.Err() == nil {
-			fmt.Fprintf(os.Stderr, "bria enrollment: %v\n", serveErr)
+			processlog.Criticalf("bria enrollment: %v", serveErr)
 		}
 	}()
 	go func() {

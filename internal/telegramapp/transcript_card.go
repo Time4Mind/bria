@@ -2,7 +2,6 @@ package telegramapp
 
 import (
 	"context"
-	"log"
 	"strconv"
 	"strings"
 	"time"
@@ -10,6 +9,7 @@ import (
 	"github.com/Time4Mind/bria/internal/application"
 	"github.com/Time4Mind/bria/internal/callbacktoken"
 	"github.com/Time4Mind/bria/internal/domain"
+	"github.com/Time4Mind/bria/internal/processlog"
 	"github.com/Time4Mind/bria/internal/telegramui"
 	"github.com/Time4Mind/bria/internal/transcript"
 )
@@ -37,7 +37,7 @@ type sessionCardTiming struct {
 
 func (timing sessionCardTiming) log(ref domain.SessionRef, page int) {
 	total := time.Since(timing.startedAt)
-	log.Printf(
+	processlog.Detailf(
 		"bria telegram: card_timing ref=%q page=%d total_ms=%d session_ms=%d "+
 			"transcript_ms=%d cache_ms=%d pending_ms=%d projection_ms=%d "+
 			"preferences_ms=%d pane_ms=%d pane_cache_ms=%d pane_capture_ms=%d pane_render_ms=%d "+

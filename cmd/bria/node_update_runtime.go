@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"time"
 
@@ -12,6 +11,7 @@ import (
 	"github.com/Time4Mind/bria/internal/config"
 	"github.com/Time4Mind/bria/internal/consensus"
 	"github.com/Time4Mind/bria/internal/interaction"
+	"github.com/Time4Mind/bria/internal/processlog"
 )
 
 func confirmRunningUpdate(nodeConfig config.Config) {
@@ -24,7 +24,7 @@ func confirmRunningUpdate(nodeConfig config.Config) {
 		installRoot = filepath.Dir(filepath.Dir(activationPath))
 	}
 	if err := clusterupdate.ConfirmInstalled(installRoot, localBuildVersion()); err != nil {
-		fmt.Fprintf(os.Stderr, "bria update confirmation: %v\n", err)
+		processlog.Criticalf("bria update confirmation: %v", err)
 	}
 }
 

@@ -3,10 +3,10 @@ package main
 import (
 	"context"
 	"fmt"
-	"os"
 	"time"
 
 	"github.com/Time4Mind/bria/internal/domain"
+	"github.com/Time4Mind/bria/internal/processlog"
 	"github.com/Time4Mind/bria/internal/runtimehost"
 	"github.com/Time4Mind/bria/internal/sessionstart"
 )
@@ -95,7 +95,7 @@ func runLocalSessionStartReconciler(
 ) {
 	reconciler, err := newLocalSessionStartReconciler(nodeID, state, provisioner, runtimes)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "bria local session start: %v\n", err)
+		processlog.Criticalf("bria local session start: %v", err)
 		return
 	}
 	ticker := time.NewTicker(localSessionStartInterval)
@@ -112,7 +112,7 @@ func runLocalSessionStartReconciler(
 				detail = err.Error()
 			}
 			if detail != "" && detail != lastError {
-				fmt.Fprintf(os.Stderr, "bria local session start: %s\n", detail)
+				processlog.Criticalf("bria local session start: %s", detail)
 			}
 			lastError = detail
 		}

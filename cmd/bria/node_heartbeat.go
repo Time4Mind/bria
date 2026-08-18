@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"runtime"
 	"sync"
 	"time"
@@ -14,6 +13,7 @@ import (
 	"github.com/Time4Mind/bria/internal/domain"
 	"github.com/Time4Mind/bria/internal/nodecontrol"
 	"github.com/Time4Mind/bria/internal/platform"
+	"github.com/Time4Mind/bria/internal/processlog"
 	"github.com/Time4Mind/bria/internal/quota"
 	"github.com/Time4Mind/bria/internal/recovery"
 	"github.com/Time4Mind/bria/internal/runtimehost"
@@ -248,7 +248,7 @@ func logHeartbeatErrors(ctx context.Context, errorsIn <-chan error) {
 			return
 		case err := <-errorsIn:
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "bria node heartbeat: %v\n", err)
+				processlog.Criticalf("bria node heartbeat: %v", err)
 			}
 		}
 	}
