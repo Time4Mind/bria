@@ -35,6 +35,23 @@ exit 1`)
 	}
 }
 
+func TestBootstrapPreflightNeedsNoLiveControlEndpoint(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture")
+	}
+	binary := writePreflightFixture(t, `
+test "$1" = node
+test "$2" = config-check
+test "$3" = --config
+test -n "$4"
+`)
+	if err := preflightBootstrapCandidate(
+		context.Background(), binary, filepath.Join(t.TempDir(), "config.json"),
+	); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func writePreflightFixture(t *testing.T, body string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "bria")

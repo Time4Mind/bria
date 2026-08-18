@@ -10,17 +10,19 @@ import (
 	"time"
 
 	"github.com/Time4Mind/bria/internal/buildinfo"
+	"github.com/Time4Mind/bria/internal/clusterupdate"
 	"github.com/Time4Mind/bria/internal/platform"
 	"github.com/Time4Mind/bria/internal/runtimehost"
 )
 
 type versionOutput struct {
-	Name    string `json:"name"`
-	Version string `json:"version"`
-	Commit  string `json:"commit"`
-	Go      string `json:"go"`
-	OS      string `json:"os"`
-	Arch    string `json:"arch"`
+	Name         string `json:"name"`
+	Version      string `json:"version"`
+	Commit       string `json:"commit"`
+	NodeProtocol int    `json:"node_protocol"`
+	Go           string `json:"go"`
+	OS           string `json:"os"`
+	Arch         string `json:"arch"`
 }
 
 type probeOutput struct {
@@ -104,7 +106,8 @@ func usage() {
 func buildVersion() versionOutput {
 	return versionOutput{
 		Name: "bria", Version: buildinfo.Version, Commit: buildinfo.Commit,
-		Go: runtime.Version(), OS: runtime.GOOS, Arch: runtime.GOARCH,
+		NodeProtocol: clusterupdate.NodeProtocolVersion,
+		Go:           runtime.Version(), OS: runtime.GOOS, Arch: runtime.GOARCH,
 	}
 }
 

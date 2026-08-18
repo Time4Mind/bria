@@ -99,7 +99,10 @@ func updateOrder(
 			continue
 		}
 		if node.Status != domain.NodeOnline {
-			return nil, fmt.Errorf("node %s is offline", node.Name)
+			// A dormant node must not block releases indefinitely. Releases that
+			// raise the signed protocol floor are installed by that node's stable
+			// pre-Raft updater when it comes back online.
+			continue
 		}
 		if _, ok := manifest.CompatibleArtifact(node.OS, node.Arch); !ok {
 			return nil, fmt.Errorf("release does not support %s (%s/%s)", node.Name, node.OS, node.Arch)

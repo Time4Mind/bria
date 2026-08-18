@@ -75,6 +75,7 @@ jobs:
       - name: Sign release manifest
         env:
           RELEASE_KEY: ${{ secrets.BRIA_RELEASE_SIGNING_KEY }}
+          MINIMUM_NODE_PROTOCOL: ${{ vars.BRIA_MINIMUM_NODE_PROTOCOL || '0' }}
         run: |
           test -n "$RELEASE_KEY"
           umask 077
@@ -84,6 +85,7 @@ jobs:
             --directory dist \
             --base-url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}" \
             --private-key "$RUNNER_TEMP/bria-release.key" \
+            --minimum-node-protocol "$MINIMUM_NODE_PROTOCOL" \
             --output dist/release-manifest.json
       - name: Publish immutable release
         env:

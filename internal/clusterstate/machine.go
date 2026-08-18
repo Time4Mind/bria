@@ -96,7 +96,7 @@ func apply(state *domain.State, command Command) (json.RawMessage, error) {
 	switch command.Kind {
 	case CommandAddNode:
 		var payload domain.Node
-		return nil, decodeAnd(command.Payload, &payload, func() error {
+		return nil, decodeAnd(command.Payload, command.StrictPayload, &payload, func() error {
 			if payload.CreatedAt.IsZero() {
 				payload.CreatedAt = command.IssuedAt
 			}
@@ -104,22 +104,22 @@ func apply(state *domain.State, command Command) (json.RawMessage, error) {
 		})
 	case CommandSetNodeAccess:
 		var payload SetNodeAccess
-		return nil, decodeAnd(command.Payload, &payload, func() error {
+		return nil, decodeAnd(command.Payload, command.StrictPayload, &payload, func() error {
 			return state.SetNodeAccess(payload.UserID, payload.Role, payload.NodeIDs...)
 		})
 	case CommandSetSoleOwner:
 		var payload SetSoleOwner
-		return nil, decodeAnd(command.Payload, &payload, func() error {
+		return nil, decodeAnd(command.Payload, command.StrictPayload, &payload, func() error {
 			return state.SetSoleOwner(payload.UserID)
 		})
 	case CommandAddSession:
 		var payload domain.Session
-		return nil, decodeAnd(command.Payload, &payload, func() error {
+		return nil, decodeAnd(command.Payload, command.StrictPayload, &payload, func() error {
 			return state.AddSession(payload)
 		})
 	case CommandBindProviderSession:
 		var payload BindProviderSession
-		return nil, decodeAnd(command.Payload, &payload, func() error {
+		return nil, decodeAnd(command.Payload, command.StrictPayload, &payload, func() error {
 			return state.BindProviderSession(
 				payload.ActorID, payload.Session, payload.ExpectedRevision,
 				payload.ProviderID, command.IssuedAt,
@@ -127,7 +127,7 @@ func apply(state *domain.State, command Command) (json.RawMessage, error) {
 		})
 	case CommandShareSession:
 		var payload ShareSession
-		return nil, decodeAnd(command.Payload, &payload, func() error {
+		return nil, decodeAnd(command.Payload, command.StrictPayload, &payload, func() error {
 			return state.ShareSession(
 				payload.ActorID,
 				payload.Session,
@@ -137,7 +137,7 @@ func apply(state *domain.State, command Command) (json.RawMessage, error) {
 		})
 	case CommandRevokeShare:
 		var payload RevokeShare
-		return nil, decodeAnd(command.Payload, &payload, func() error {
+		return nil, decodeAnd(command.Payload, command.StrictPayload, &payload, func() error {
 			return state.RevokeSessionShare(payload.ActorID, payload.Session, payload.UserID)
 		})
 	case CommandObserveBoot:
@@ -152,7 +152,7 @@ func apply(state *domain.State, command Command) (json.RawMessage, error) {
 		return json.Marshal(plan)
 	case CommandMarkMissing:
 		var payload MarkMissing
-		return nil, decodeAnd(command.Payload, &payload, func() error {
+		return nil, decodeAnd(command.Payload, command.StrictPayload, &payload, func() error {
 			if payload.ArchiveID == "" {
 				payload.ArchiveID = MissingArchiveID(command.OperationID)
 			}
@@ -163,47 +163,47 @@ func apply(state *domain.State, command Command) (json.RawMessage, error) {
 		})
 	case CommandSetPreferences:
 		var payload SetPreferences
-		return nil, decodeAnd(command.Payload, &payload, func() error {
+		return nil, decodeAnd(command.Payload, command.StrictPayload, &payload, func() error {
 			return state.SetPreferences(payload.UserID, payload.Preferences)
 		})
 	case CommandSetProviderAlias:
 		var payload SetProviderAlias
-		return nil, decodeAnd(command.Payload, &payload, func() error {
+		return nil, decodeAnd(command.Payload, command.StrictPayload, &payload, func() error {
 			return state.SetProviderAccountAlias(payload.NodeID, payload.Backend, payload.Alias)
 		})
 	case CommandSetNodeBackend:
 		var payload SetNodeBackend
-		return nil, decodeAnd(command.Payload, &payload, func() error {
+		return nil, decodeAnd(command.Payload, command.StrictPayload, &payload, func() error {
 			return state.SetNodeBackendConnected(payload.NodeID, payload.Backend, payload.Connected)
 		})
 	case CommandSelectNode:
 		var payload SelectNode
-		return nil, decodeAnd(command.Payload, &payload, func() error {
+		return nil, decodeAnd(command.Payload, command.StrictPayload, &payload, func() error {
 			return state.SelectNode(payload.UserID, payload.NodeID, command.IssuedAt)
 		})
 	case CommandSelectSession:
 		var payload SelectSession
-		return nil, decodeAnd(command.Payload, &payload, func() error {
+		return nil, decodeAnd(command.Payload, command.StrictPayload, &payload, func() error {
 			return state.SelectSession(payload.UserID, payload.Session, command.IssuedAt)
 		})
 	case CommandBindTelegramBot:
 		var payload BindTelegramBot
-		return nil, decodeAnd(command.Payload, &payload, func() error {
+		return nil, decodeAnd(command.Payload, command.StrictPayload, &payload, func() error {
 			return state.BindTelegramBot(payload.BotID)
 		})
 	case CommandAdvanceTelegramCursor:
 		var payload AdvanceTelegramCursor
-		return nil, decodeAnd(command.Payload, &payload, func() error {
+		return nil, decodeAnd(command.Payload, command.StrictPayload, &payload, func() error {
 			return state.AdvanceTelegramCursor(payload.NextUpdateID)
 		})
 	case CommandRecordTelegramCard:
 		var payload RecordTelegramCard
-		return nil, decodeAnd(command.Payload, &payload, func() error {
+		return nil, decodeAnd(command.Payload, command.StrictPayload, &payload, func() error {
 			return state.RecordTelegramResponseCard(payload.UserID, payload.Card)
 		})
 	case CommandMarkBackgroundNotified:
 		var payload MarkBackgroundNotified
-		return nil, decodeAnd(command.Payload, &payload, func() error {
+		return nil, decodeAnd(command.Payload, command.StrictPayload, &payload, func() error {
 			return state.MarkBackgroundNotified(
 				payload.UserID, payload.Session, payload.EventRevision,
 			)
@@ -218,7 +218,7 @@ func apply(state *domain.State, command Command) (json.RawMessage, error) {
 		return applyClusterControl(state, command)
 	case CommandUpdateNodeRuntime:
 		var payload UpdateNodeRuntime
-		return nil, decodeAnd(command.Payload, &payload, func() error {
+		return nil, decodeAnd(command.Payload, command.StrictPayload, &payload, func() error {
 			return state.UpdateNodeRuntime(
 				payload.NodeID, payload.Status, payload.Version, payload.Backends, command.IssuedAt,
 			)
@@ -244,22 +244,22 @@ func apply(state *domain.State, command Command) (json.RawMessage, error) {
 		return json.Marshal(plan)
 	case CommandMarkNodeOffline:
 		var payload MarkNodeOffline
-		return nil, decodeAnd(command.Payload, &payload, func() error {
+		return nil, decodeAnd(command.Payload, command.StrictPayload, &payload, func() error {
 			return state.MarkNodeOffline(payload.NodeID, payload.ObservedLastSeenAt)
 		})
 	case CommandCompleteBootRecovery:
 		var payload BootRecovery
-		return nil, decodeAnd(command.Payload, &payload, func() error {
+		return nil, decodeAnd(command.Payload, command.StrictPayload, &payload, func() error {
 			return state.CompleteBootRecovery(payload.Session, command.IssuedAt)
 		})
 	case CommandFailBootRecovery:
 		var payload BootRecovery
-		return nil, decodeAnd(command.Payload, &payload, func() error {
+		return nil, decodeAnd(command.Payload, command.StrictPayload, &payload, func() error {
 			return state.FailBootRecovery(payload.Session, command.IssuedAt)
 		})
 	case CommandPublishSessionRuntime:
 		var payload PublishSessionRuntime
-		return nil, decodeAnd(command.Payload, &payload, func() error {
+		return nil, decodeAnd(command.Payload, command.StrictPayload, &payload, func() error {
 			return state.PublishSessionRuntime(
 				payload.Session,
 				payload.Generation,
@@ -270,17 +270,17 @@ func apply(state *domain.State, command Command) (json.RawMessage, error) {
 		})
 	case CommandRecordSessionActivity:
 		var payload RecordSessionActivity
-		return nil, decodeAnd(command.Payload, &payload, func() error {
+		return nil, decodeAnd(command.Payload, command.StrictPayload, &payload, func() error {
 			return state.RecordSessionActivity(payload.ActorID, payload.Session, command.IssuedAt)
 		})
 	case CommandQueueDeferredInput:
 		var payload QueueDeferredInput
-		return nil, decodeAnd(command.Payload, &payload, func() error {
+		return nil, decodeAnd(command.Payload, command.StrictPayload, &payload, func() error {
 			return state.QueueDeferredSessionInput(payload.Input, command.IssuedAt)
 		})
 	case CommandResolveDeferredInput:
 		var payload ResolveDeferredInput
-		return nil, decodeAnd(command.Payload, &payload, func() error {
+		return nil, decodeAnd(command.Payload, command.StrictPayload, &payload, func() error {
 			return state.ResolveDeferredSessionInput(
 				payload.Session, payload.OperationID, payload.Failed, payload.Detail, command.IssuedAt,
 			)

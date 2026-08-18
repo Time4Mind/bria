@@ -106,17 +106,21 @@ func extractRelease(archivePath, destination string) error {
 	return nil
 }
 
-func verifyReleaseBinary(destination, version string) error {
+func verifyReleaseBinary(destination, version string, minimumNodeProtocol int) error {
 	binary := releaseBinary(destination)
 	output, err := exec.Command(binary, "version").Output()
 	if err != nil {
 		return fmt.Errorf("verify staged Bria binary: %w", err)
 	}
 	var value struct {
-		Version string `json:"version"`
+		Version      string `json:"version"`
+		NodeProtocol int    `json:"node_protocol"`
 	}
 	if json.Unmarshal(output, &value) != nil || value.Version != version {
 		return errors.New("staged Bria version does not match manifest")
+	}
+	if minimumNodeProtocol > 0 && value.NodeProtocol < minimumNodeProtocol {
+		return errors.New("staged Bria binary does not satisfy manifest node protocol")
 	}
 	return nil
 }

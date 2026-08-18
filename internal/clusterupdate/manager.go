@@ -42,6 +42,14 @@ type Status struct {
 	Error    string `json:"error,omitempty"`
 }
 
+type CompatibilityResult struct {
+	Required        bool
+	ManifestVersion string
+	ActivationPath  string
+}
+
+const bootstrapManifestTimeout = 5 * time.Second
+
 type Service interface {
 	Inspect(context.Context) (VerifiedManifest, error)
 	Start(context.Context, Request) (Status, error)
@@ -116,6 +124,59 @@ func (m *Manager) Status(_ context.Context, request Request) (Status, error) {
 	return m.status, nil
 }
 
+// EnsureCompatible runs before Raft and uses only the pinned release manifest.
+// A compatible node is never forced to update. Once the signed manifest raises
+// the floor, activation must succeed before the caller joins the cluster.
+func (m *Manager) EnsureCompatible(
+	ctx context.Context,
+	localProtocol int,
+) (CompatibilityResult, error) {
+	checkCtx, cancel := context.WithTimeout(ctx, bootstrapManifestTimeout)
+	manifest, err := m.Inspect(checkCtx)
+	cancel()
+	if err != nil {
+		return CompatibilityResult{}, err
+	}
+	result := CompatibilityResult{ManifestVersion: manifest.Version}
+	if manifest.MinimumNodeProtocol == 0 || localProtocol >= manifest.MinimumNodeProtocol {
+		return result, nil
+	}
+	result.Required = true
+	request := Request{
+		NodeID: m.config.NodeID, UpdateID: "bootstrap-" + manifest.SHA256[:16],
+		Version: manifest.Version, ManifestSHA256: manifest.SHA256,
+	}
+	_ = os.Remove(filepath.Join(m.config.InstallRoot, "update-status.json"))
+	if err := m.installVerified(ctx, request, manifest); err != nil {
+		m.persistBootstrapFailure(request, err)
+		return result, err
+	}
+	if m.config.Watchdog != nil {
+		err = m.config.Watchdog(request)
+	} else {
+		err = m.startWatchdog(request)
+	}
+	if err != nil {
+		_, _ = restorePending(filepath.Join(m.config.InstallRoot, "update-pending.json"), request.UpdateID)
+		m.persistBootstrapFailure(request, err)
+		return result, err
+	}
+	result.ActivationPath = m.config.ActivationPath
+	return result, nil
+}
+
+func (m *Manager) persistBootstrapFailure(request Request, err error) {
+	status := Status{
+		NodeID: m.config.NodeID, UpdateID: request.UpdateID, Version: request.Version,
+		Phase: PhaseFailed, Error: shortError(err),
+	}
+	data, marshalErr := json.Marshal(status)
+	if marshalErr != nil || os.MkdirAll(m.config.InstallRoot, 0o700) != nil {
+		return
+	}
+	_ = os.WriteFile(filepath.Join(m.config.InstallRoot, "update-status.json"), data, 0o600)
+}
+
 func (m *Manager) validateRequest(request Request) error {
 	if request.NodeID != m.config.NodeID || strings.TrimSpace(request.UpdateID) == "" ||
 		strings.TrimSpace(request.Version) == "" || len(request.ManifestSHA256) != 64 {
@@ -137,16 +198,8 @@ func (m *Manager) install(request Request) {
 	if err == nil && manifest.Version != request.Version {
 		err = errors.New("manifest version does not match cluster update")
 	}
-	var artifact Artifact
 	if err == nil {
-		var ok bool
-		artifact, ok = manifest.Artifact(runtime.GOOS, runtime.GOARCH)
-		if !ok {
-			err = fmt.Errorf("release has no artifact for %s/%s", runtime.GOOS, runtime.GOARCH)
-		}
-	}
-	if err == nil {
-		err = m.downloadAndActivate(ctx, request, artifact)
+		err = m.installVerified(ctx, request, manifest)
 	}
 	if err == nil {
 		if m.config.Watchdog != nil {
@@ -167,6 +220,20 @@ func (m *Manager) install(request Request) {
 	m.status.Phase = PhaseStaged
 	m.mu.Unlock()
 	m.config.Restart(m.config.ActivationPath)
+}
+
+func (m *Manager) installVerified(
+	ctx context.Context,
+	request Request,
+	manifest VerifiedManifest,
+) error {
+	artifact, ok := manifest.Artifact(runtime.GOOS, runtime.GOARCH)
+	if !ok {
+		return fmt.Errorf("release has no artifact for %s/%s", runtime.GOOS, runtime.GOARCH)
+	}
+	return m.downloadAndActivate(
+		ctx, request, artifact, manifest.MinimumNodeProtocol,
+	)
 }
 
 func (m *Manager) startWatchdog(request Request) error {
@@ -197,7 +264,12 @@ type pendingUpdate struct {
 	CurrentLink string `json:"current_link"`
 }
 
-func (m *Manager) downloadAndActivate(ctx context.Context, request Request, artifact Artifact) error {
+func (m *Manager) downloadAndActivate(
+	ctx context.Context,
+	request Request,
+	artifact Artifact,
+	minimumNodeProtocol int,
+) error {
 	if err := os.MkdirAll(filepath.Join(m.config.InstallRoot, "releases"), 0o700); err != nil {
 		return fmt.Errorf("create update release root: %w", err)
 	}
@@ -225,7 +297,7 @@ func (m *Manager) downloadAndActivate(ctx context.Context, request Request, arti
 	} else if err != nil {
 		return err
 	}
-	if err := verifyReleaseBinary(destination, request.Version); err != nil {
+	if err := verifyReleaseBinary(destination, request.Version, minimumNodeProtocol); err != nil {
 		return err
 	}
 	if err := m.config.Preflight(ctx, releaseBinary(destination)); err != nil {

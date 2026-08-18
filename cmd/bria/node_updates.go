@@ -22,43 +22,14 @@ func newNodeUpdateServices(
 	client *nodecontrol.Client,
 	restarts chan<- string,
 ) (*clusterupdate.Manager, *nodecontrol.UpdateRouter, error) {
-	if nodeConfig.UpdateManifestURL == "" {
-		return nil, nil, nil
-	}
-	publicKey, err := clusterupdate.DecodePublicKey(nodeConfig.UpdatePublicKey)
-	if err != nil {
-		return nil, nil, err
-	}
-	httpClient, err := updateHTTPClient(nodeConfig.TelegramProxyURL())
-	if err != nil {
-		return nil, nil, err
-	}
-	activationPath, err := resolveActivationPath()
-	if err != nil {
-		return nil, nil, err
-	}
-	installRoot := nodeConfig.EffectiveUpdateInstallRoot()
-	if filepath.Base(filepath.Dir(activationPath)) == "current" && nodeConfig.UpdateInstallRoot == "" {
-		installRoot = filepath.Dir(filepath.Dir(activationPath))
-	}
-	local, err := clusterupdate.NewManager(clusterupdate.ManagerConfig{
-		NodeID: nodeConfig.NodeID, InstallRoot: installRoot, ActivationPath: activationPath,
-		Fetcher: clusterupdate.Fetcher{
-			URL: nodeConfig.UpdateManifestURL, PublicKey: publicKey, Client: httpClient,
-		},
-		Client: httpClient,
-		Preflight: func(ctx context.Context, binary string) error {
-			return preflightUpdateCandidate(ctx, binary, configPath)
-		},
-		Restart: func(binary string) {
-			select {
-			case restarts <- binary:
-			default:
-			}
-		},
-	})
-	if err != nil {
-		return nil, nil, err
+	local, err := newLocalUpdateManager(nodeConfig, configPath, func(binary string) {
+		select {
+		case restarts <- binary:
+		default:
+		}
+	}, preflightUpdateCandidate)
+	if err != nil || local == nil {
+		return local, nil, err
 	}
 	remote, err := nodecontrol.NewUpdateClient(client)
 	if err != nil {
@@ -69,6 +40,86 @@ func newNodeUpdateServices(
 		return nil, nil, err
 	}
 	return local, router, nil
+}
+
+func newLocalUpdateManager(
+	nodeConfig config.Config,
+	configPath string,
+	restart func(string),
+	preflight func(context.Context, string, string) error,
+) (*clusterupdate.Manager, error) {
+	if nodeConfig.UpdateManifestURL == "" {
+		return nil, nil
+	}
+	publicKey, err := clusterupdate.DecodePublicKey(nodeConfig.UpdatePublicKey)
+	if err != nil {
+		return nil, err
+	}
+	httpClient, err := updateHTTPClient(nodeConfig.TelegramProxyURL())
+	if err != nil {
+		return nil, err
+	}
+	activationPath, err := resolveActivationPath()
+	if err != nil {
+		return nil, err
+	}
+	installRoot := nodeConfig.EffectiveUpdateInstallRoot()
+	if filepath.Base(filepath.Dir(activationPath)) == "current" && nodeConfig.UpdateInstallRoot == "" {
+		installRoot = filepath.Dir(filepath.Dir(activationPath))
+	}
+	return clusterupdate.NewManager(clusterupdate.ManagerConfig{
+		NodeID: nodeConfig.NodeID, InstallRoot: installRoot, ActivationPath: activationPath,
+		Fetcher: clusterupdate.Fetcher{
+			URL: nodeConfig.UpdateManifestURL, PublicKey: publicKey, Client: httpClient,
+		},
+		Client: httpClient,
+		Preflight: func(ctx context.Context, binary string) error {
+			return preflight(ctx, binary, configPath)
+		},
+		Restart: restart,
+	})
+}
+
+func bootstrapNodeCompatibility(
+	ctx context.Context,
+	nodeConfig config.Config,
+	configPath string,
+) (string, error) {
+	manager, err := newLocalUpdateManager(
+		nodeConfig, configPath, func(string) {}, preflightBootstrapCandidate,
+	)
+	if err != nil || manager == nil {
+		return "", err
+	}
+	result, err := manager.EnsureCompatible(ctx, clusterupdate.NodeProtocolVersion)
+	if err != nil {
+		if !result.Required {
+			return "", fmt.Errorf("verify signed compatibility manifest: %w", err)
+		}
+		return "", fmt.Errorf(
+			"install required compatibility update %s: %w", result.ManifestVersion, err,
+		)
+	}
+	return result.ActivationPath, nil
+}
+
+func preflightBootstrapCandidate(ctx context.Context, binary, configPath string) error {
+	probeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	output, err := exec.CommandContext(
+		probeCtx, binary, "node", "config-check", "--config", configPath,
+	).CombinedOutput()
+	if err == nil {
+		return nil
+	}
+	detail := strings.Join(strings.Fields(string(output)), " ")
+	if detail == "" {
+		detail = err.Error()
+	}
+	if len(detail) > 240 {
+		detail = detail[:240]
+	}
+	return fmt.Errorf("candidate cannot load the current node config: %s", detail)
 }
 
 func preflightUpdateCandidate(ctx context.Context, binary, configPath string) error {

@@ -68,11 +68,12 @@ const (
 )
 
 type Command struct {
-	Version     int             `json:"version"`
-	OperationID string          `json:"operation_id"`
-	Kind        CommandKind     `json:"kind"`
-	IssuedAt    time.Time       `json:"issued_at"`
-	Payload     json.RawMessage `json:"payload"`
+	Version       int             `json:"version"`
+	OperationID   string          `json:"operation_id"`
+	Kind          CommandKind     `json:"kind"`
+	IssuedAt      time.Time       `json:"issued_at"`
+	StrictPayload bool            `json:"strict_payload,omitempty"`
+	Payload       json.RawMessage `json:"payload"`
 }
 
 func NewCommand(operationID string, kind CommandKind, at time.Time, payload any) (Command, error) {
@@ -81,11 +82,12 @@ func NewCommand(operationID string, kind CommandKind, at time.Time, payload any)
 		return Command{}, fmt.Errorf("encode command payload: %w", err)
 	}
 	return Command{
-		Version:     CommandVersion,
-		OperationID: operationID,
-		Kind:        kind,
-		IssuedAt:    at.UTC(),
-		Payload:     encoded,
+		Version:       CommandVersion,
+		OperationID:   operationID,
+		Kind:          kind,
+		IssuedAt:      at.UTC(),
+		StrictPayload: true,
+		Payload:       encoded,
 	}, nil
 }
 

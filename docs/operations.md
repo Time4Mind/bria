@@ -199,11 +199,19 @@ target and terminates the failed process so its supervisor restarts the
 rollback. The update job and per-node phases are replicated, so a newly elected
 leader resumes the same rollout rather than starting another one.
 
-Nodes installed before the updater endpoint existed require one normal manual
-rolling installation of an updater-capable bridge release. That bootstrap is
-unavoidable: an old process cannot accept the new authenticated update command.
-After every enabled node runs the bridge release, subsequent compatible tagged
-releases use the Telegram rolling-update flow above.
+Offline nodes do not block a rollout. A node that returns later checks the
+signed manifest before opening TLS or Raft. If the manifest's
+`minimum_node_protocol` exceeds the local `node_protocol`, it downloads,
+preflights and activates the current release through outbound HTTPS, then
+restarts and joins the cluster. Compatible older nodes start normally and are
+not forced to update. This recovery path does not require a current cluster
+certificate, node-control API, inbound address, or Raft membership.
+
+Nodes installed before the pre-Raft updater existed require one normal manual
+installation of this compatibility-floor release. After that one-time bridge,
+version age alone must never require shell or physical access. Network loss,
+an unsupported OS/architecture, a stopped supervisor, local disk/config damage,
+or a compromised release root key remain manual-recovery boundaries.
 
 Official tagged releases are produced by `.github/workflows/release.yml`.
 `BRIA_RELEASE_SIGNING_KEY` is a repository secret; only its public key is in
@@ -215,10 +223,11 @@ is unavailable:
 
 1. Confirm every intended voter is reachable and ready with authenticated
    `bria node probe`; record the current leader and build versions.
-2. Read the release compatibility note. A state-machine change must ship as a
-   bridge release that reads both formats but writes only the old format until
-   all voters run it. Bria rejects unknown command and snapshot versions rather
-   than guessing.
+2. Read the release compatibility note. New commands mark their payload strict;
+   legacy persisted commands remain replayable. A semantic command or transport
+   break must increment both its protocol version and the signed manifest floor.
+   The compatibility-floor release must publish floor `0` (field omitted); later
+   breaking releases pass `--minimum-node-protocol` to the manifest generator.
 3. Update and restart one follower. Wait for its probe to report a current
    leader and for the cluster status to show it online at the expected version.
 4. Repeat for the remaining followers, never taking down a quorum. In a

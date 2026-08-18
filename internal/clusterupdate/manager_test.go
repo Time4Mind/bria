@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -179,11 +180,18 @@ func TestManagerRejectsIncompatibleCandidateBeforeActivation(t *testing.T) {
 }
 
 func releaseFixture(t *testing.T, version string) []byte {
+	return releaseFixtureWithProtocol(t, version, 0)
+}
+
+func releaseFixtureWithProtocol(t *testing.T, version string, protocol int) []byte {
 	t.Helper()
 	var buffer bytes.Buffer
 	gzipWriter := gzip.NewWriter(&buffer)
 	tarWriter := tar.NewWriter(gzipWriter)
-	content := []byte("#!/bin/sh\nprintf '{\"version\":\"" + version + "\"}\\n'\n")
+	content := []byte(fmt.Sprintf(
+		"#!/bin/sh\nprintf '{\"version\":\"%s\",\"node_protocol\":%d}\\n'\n",
+		version, protocol,
+	))
 	if err := tarWriter.WriteHeader(&tar.Header{Name: "bria", Mode: 0o755, Size: int64(len(content))}); err != nil {
 		t.Fatal(err)
 	}

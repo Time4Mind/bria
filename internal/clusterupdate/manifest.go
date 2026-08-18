@@ -18,7 +18,13 @@ import (
 	"time"
 )
 
-const maxManifestBytes = 1 << 20
+const (
+	maxManifestBytes = 1 << 20
+	// NodeProtocolVersion is the compatibility floor understood before a node
+	// opens Raft or needs a current cluster certificate/control API. Increment it
+	// only for a release that also publishes MinimumNodeProtocol in its manifest.
+	NodeProtocolVersion = 1
+)
 
 type Artifact struct {
 	OS     string `json:"os"`
@@ -29,10 +35,11 @@ type Artifact struct {
 }
 
 type Manifest struct {
-	Version     string     `json:"version"`
-	PublishedAt time.Time  `json:"published_at"`
-	Artifacts   []Artifact `json:"artifacts"`
-	Signature   string     `json:"signature"`
+	Version             string     `json:"version"`
+	PublishedAt         time.Time  `json:"published_at"`
+	MinimumNodeProtocol int        `json:"minimum_node_protocol,omitempty"`
+	Artifacts           []Artifact `json:"artifacts"`
+	Signature           string     `json:"signature"`
 }
 
 type VerifiedManifest struct {
@@ -127,7 +134,8 @@ func SignManifest(manifest Manifest, key ed25519.PrivateKey) (Manifest, error) {
 
 func manifestSigningPayload(manifest Manifest) ([]byte, error) {
 	manifest.Version = strings.TrimSpace(manifest.Version)
-	if manifest.Version == "" || manifest.PublishedAt.IsZero() || len(manifest.Artifacts) == 0 {
+	if manifest.Version == "" || manifest.PublishedAt.IsZero() || len(manifest.Artifacts) == 0 ||
+		manifest.MinimumNodeProtocol < 0 {
 		return nil, errors.New("update manifest metadata is incomplete")
 	}
 	manifest.Signature = ""
@@ -153,10 +161,14 @@ func manifestSigningPayload(manifest Manifest) ([]byte, error) {
 		seen[key] = true
 	}
 	unsigned := struct {
-		Version     string     `json:"version"`
-		PublishedAt time.Time  `json:"published_at"`
-		Artifacts   []Artifact `json:"artifacts"`
-	}{manifest.Version, manifest.PublishedAt.UTC(), manifest.Artifacts}
+		Version             string     `json:"version"`
+		PublishedAt         time.Time  `json:"published_at"`
+		MinimumNodeProtocol int        `json:"minimum_node_protocol,omitempty"`
+		Artifacts           []Artifact `json:"artifacts"`
+	}{
+		Version: manifest.Version, PublishedAt: manifest.PublishedAt.UTC(),
+		MinimumNodeProtocol: manifest.MinimumNodeProtocol, Artifacts: manifest.Artifacts,
+	}
 	return json.Marshal(unsigned)
 }
 

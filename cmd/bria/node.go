@@ -47,10 +47,12 @@ func runNode(arguments []string) error {
 			return runUpdateWatchdog(arguments[1:])
 		case "isolation-check":
 			return checkNodeIsolation(arguments[1:])
+		case "config-check":
+			return checkNodeConfig(arguments[1:])
 		}
 	}
 	if len(arguments) == 0 || arguments[0] != "run" {
-		return errors.New("usage: bria node <run|probe|metrics|cert-request|cert-install|cert-rollback|update-watchdog|isolation-check>")
+		return errors.New("usage: bria node <run|probe|metrics|cert-request|cert-install|cert-rollback|update-watchdog|isolation-check|config-check>")
 	}
 	flags := flag.NewFlagSet("node run", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
@@ -68,6 +70,17 @@ func runNode(arguments []string) error {
 	nodeConfig, err := config.Load(absoluteConfigPath)
 	if err != nil {
 		return err
+	}
+	bootstrapCtx, cancelBootstrap := context.WithTimeout(context.Background(), 10*time.Minute)
+	bootstrapBinary, err := bootstrapNodeCompatibility(
+		bootstrapCtx, nodeConfig, absoluteConfigPath,
+	)
+	cancelBootstrap()
+	if err != nil {
+		return err
+	}
+	if bootstrapBinary != "" {
+		return &processReplacement{binary: bootstrapBinary}
 	}
 	backendRuntime, err := openBackendRuntime(context.Background(), nodeConfig)
 	if err != nil {

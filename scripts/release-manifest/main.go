@@ -25,9 +25,13 @@ func main() {
 	baseURL := flag.String("base-url", "", "HTTPS release asset base URL")
 	privateKeyPath := flag.String("private-key", "", "0600 base64 Ed25519 private key")
 	output := flag.String("output", "", "manifest output path")
+	minimumNodeProtocol := flag.Int(
+		"minimum-node-protocol", 0,
+		"minimum pre-Raft node protocol; keep zero for the compatibility-floor release",
+	)
 	flag.Parse()
 	if flag.NArg() != 0 || *version == "" || *directory == "" || *baseURL == "" ||
-		*privateKeyPath == "" || *output == "" {
+		*privateKeyPath == "" || *output == "" || *minimumNodeProtocol < 0 {
 		fatal(errors.New("all release manifest flags are required"))
 	}
 	key, err := readPrivateKey(*privateKeyPath)
@@ -47,7 +51,8 @@ func main() {
 		publishedAt = time.Unix(seconds, 0).UTC()
 	}
 	manifest, err := clusterupdate.SignManifest(clusterupdate.Manifest{
-		Version: *version, PublishedAt: publishedAt, Artifacts: artifacts,
+		Version: *version, PublishedAt: publishedAt,
+		MinimumNodeProtocol: *minimumNodeProtocol, Artifacts: artifacts,
 	}, key)
 	if err != nil {
 		fatal(err)
