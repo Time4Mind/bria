@@ -18,6 +18,7 @@ type providerAuthFlow struct {
 	NodeID    domain.NodeID
 	Backend   string
 	FlowID    string
+	Epoch     uint64
 	ExpiresAt time.Time
 	Carrier   telegrambot.Message
 	Code      bool
@@ -58,27 +59,29 @@ func (h *Handler) handleProviderAuthCallback(
 	pending := providerAuthFlow{
 		NodeID: nodeID, Backend: backend, ExpiresAt: time.Now().Add(10 * time.Minute), Carrier: carrier,
 	}
-	h.membershipMu.Lock()
-	h.providerAuthFlows[actor.UserID] = pending
-	h.membershipMu.Unlock()
+	pending = h.beginProviderAuthFlow(actor.UserID, pending)
 	status, err := h.providerAuth.Start(ctx, providerauth.StartRequest{
 		ActorID: int64(actor.UserID), NodeID: string(nodeID), Backend: backend,
 	})
 	if err != nil {
-		return h.editProviderAuthResult(ctx, actor, carrier, i18n.ProviderAuthFailed, "unavailable")
+		return h.finishProviderAuthFlow(
+			ctx, actor, pending, i18n.ProviderAuthFailed, "unavailable",
+		)
 	}
 	flow := providerAuthFlow{
-		NodeID: nodeID, Backend: backend, FlowID: status.FlowID,
+		NodeID: nodeID, Backend: backend, FlowID: status.FlowID, Epoch: pending.Epoch,
 		ExpiresAt: status.ExpiresAt, Carrier: carrier,
 		Code: status.State == providerauth.StateWaitingInput,
 	}
-	h.membershipMu.Lock()
-	h.providerAuthFlows[actor.UserID] = flow
-	h.membershipMu.Unlock()
+	if !h.replaceProviderAuthFlow(actor.UserID, flow) {
+		_ = h.providerAuth.Cancel(ctx, flow.request(actor))
+		return nil
+	}
 	cancelToken, err := h.tokens.Choice(
 		actor.UserID, telegramui.ActionProviderAuthCancel, "provider_auth_cancel", status.FlowID,
 	)
 	if err != nil {
+		_, _ = h.takeProviderAuthFlow(actor.UserID, flow.Epoch)
 		_ = h.providerAuth.Cancel(ctx, flow.request(actor))
 		return err
 	}
@@ -87,13 +90,15 @@ func (h *Handler) handleProviderAuthCallback(
 	)
 	carrier, err = h.messenger.EditScreen(ctx, carrier, screen)
 	if err != nil {
+		_, _ = h.takeProviderAuthFlow(actor.UserID, flow.Epoch)
 		_ = h.providerAuth.Cancel(ctx, flow.request(actor))
 		return err
 	}
-	h.membershipMu.Lock()
 	flow.Carrier = carrier
-	h.providerAuthFlows[actor.UserID] = flow
-	h.membershipMu.Unlock()
+	if !h.replaceProviderAuthFlow(actor.UserID, flow) {
+		_ = h.providerAuth.Cancel(ctx, flow.request(actor))
+		return nil
+	}
 	if !flow.Code {
 		go h.watchProviderAuth(context.WithoutCancel(ctx), actor, flow)
 	}
@@ -160,12 +165,15 @@ func (h *Handler) acceptProviderAuthCode(
 		ActorID: int64(actor.UserID), NodeID: string(flow.NodeID), FlowID: flow.FlowID, Code: code,
 	})
 	if err != nil {
-		return h.editProviderAuthResult(ctx, actor, flow.Carrier, i18n.ProviderAuthFailed, "rejected")
+		return h.finishProviderAuthFlow(
+			ctx, actor, flow, i18n.ProviderAuthFailed, "rejected",
+		)
 	}
 	flow.Code = false
-	h.membershipMu.Lock()
-	h.providerAuthFlows[actor.UserID] = flow
-	h.membershipMu.Unlock()
+	if !h.replaceProviderAuthFlow(actor.UserID, flow) {
+		_ = h.providerAuth.Cancel(ctx, flow.request(actor))
+		return nil
+	}
 	go h.watchProviderAuth(context.WithoutCancel(ctx), actor, flow)
 	return nil
 }
@@ -195,11 +203,11 @@ func (h *Handler) watchProviderAuth(
 			if status.State != providerauth.StateSucceeded {
 				key, detail = i18n.ProviderAuthFailed, status.Detail
 			}
-			_ = h.editProviderAuthResult(ctx, actor, flow.Carrier, key, detail)
+			_ = h.finishProviderAuthFlow(ctx, actor, flow, key, detail)
 			return
 		}
 	}
-	_ = h.editProviderAuthResult(ctx, actor, flow.Carrier, i18n.ProviderAuthFailed, "expired")
+	_ = h.finishProviderAuthFlow(ctx, actor, flow, i18n.ProviderAuthFailed, "expired")
 }
 
 func (h *Handler) cancelProviderAuth(
@@ -221,12 +229,17 @@ func (h *Handler) cancelProviderAuth(
 		h.membershipMu.Unlock()
 		return nil
 	}
+	if ok {
+		delete(h.providerAuthFlows, actor.UserID)
+	}
 	h.membershipMu.Unlock()
-	if ok && h.providerAuth != nil {
+	if h.providerAuth != nil {
 		_ = h.providerAuth.Cancel(ctx, flow.request(actor))
 		carrier = flow.Carrier
 	}
-	return h.editProviderAuthResult(ctx, actor, carrier, i18n.ProviderAuthCancelled, "")
+	return h.renderProviderAuthResult(
+		ctx, actor, carrier, flow, i18n.ProviderAuthCancelled, "",
+	)
 }
 
 func (h *Handler) cancelProviderAuthFlow(
@@ -242,17 +255,14 @@ func (h *Handler) cancelProviderAuthFlow(
 	}
 }
 
-func (h *Handler) editProviderAuthResult(
+func (h *Handler) renderProviderAuthResult(
 	ctx context.Context,
 	actor application.Principal,
 	carrier telegrambot.Message,
+	flow providerAuthFlow,
 	key i18n.Key,
 	detail string,
 ) error {
-	h.membershipMu.Lock()
-	flow := h.providerAuthFlows[actor.UserID]
-	delete(h.providerAuthFlows, actor.UserID)
-	h.membershipMu.Unlock()
 	text := h.copy(actor).Text(key)
 	if detail != "" {
 		text = h.copy(actor).Format(key, html.EscapeString(detail))

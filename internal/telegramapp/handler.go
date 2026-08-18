@@ -54,6 +54,7 @@ type Handler struct {
 	speechSetup        speechsetup.Service
 	clusterUpdater     clusterUpdater
 	providerAuthFlows  map[domain.UserID]providerAuthFlow
+	providerAuthEpochs map[domain.UserID]uint64
 	nodeSettingsBack   map[domain.UserID]settingsReturn
 	statusBack         map[domain.UserID]settingsReturn
 	speechMu           sync.Mutex
@@ -92,6 +93,7 @@ func NewHandler(
 		renameFlows:        make(map[domain.UserID]nodeRenameFlow),
 		providerAliasFlows: make(map[domain.UserID]providerAliasFlow),
 		providerAuthFlows:  make(map[domain.UserID]providerAuthFlow),
+		providerAuthEpochs: make(map[domain.UserID]uint64),
 		nodeSettingsBack:   make(map[domain.UserID]settingsReturn),
 		statusBack:         make(map[domain.UserID]settingsReturn),
 		speechTargets:      make(map[domain.UserID]domain.NodeID),
