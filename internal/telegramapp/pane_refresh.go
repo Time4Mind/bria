@@ -16,11 +16,12 @@ import (
 )
 
 const (
-	paneInitialDelay   = 500 * time.Millisecond
-	paneRefreshDelay   = 1200 * time.Millisecond
-	paneRefreshLimit   = 1500
-	paneCaptureLimit   = time.Second
-	typingRefreshDelay = 4 * time.Second
+	paneInitialDelay         = 500 * time.Millisecond
+	paneWorkingRefreshDelay  = 2500 * time.Millisecond
+	paneResponseRefreshDelay = 500 * time.Millisecond
+	paneRefreshLimit         = 1500
+	paneCaptureLimit         = time.Second
+	typingRefreshDelay       = 4 * time.Second
 )
 
 type paneAttachTiming struct {
@@ -87,6 +88,7 @@ func (h *Handler) runPaneRefresh(
 ) {
 	defer h.finishPaneRefresh(actor.UserID, generation)
 	delay := paneInitialDelay
+	responseRefresh := false
 	for attempt := 0; attempt < paneRefreshLimit; attempt++ {
 		if !waitPaneRefresh(ctx, delay) || !h.canRefresh() ||
 			!h.currentPaneGeneration(actor.UserID, generation) {
@@ -115,7 +117,7 @@ func (h *Handler) runPaneRefresh(
 			lastTyping = time.Now()
 		}
 		if session.RuntimePhase == domain.RuntimeStarting {
-			delay = paneRefreshDelay
+			delay = paneWorkingRefreshDelay
 			continue
 		}
 		if session.RuntimePhase == domain.RuntimeWaitingInput {
@@ -210,8 +212,65 @@ func (h *Handler) runPaneRefresh(
 		if settled {
 			return
 		}
-		delay = paneRefreshDelay
+		nextDelay := nextPaneRefreshDelay(session, snapshot.events)
+		responseStarted := nextDelay == paneResponseRefreshDelay
+		if responseStarted && !responseRefresh {
+			fmt.Printf(
+				"bria telegram: pane_refresh_mode ref=%q mode=response interval_ms=%d\n",
+				ref.Key(), paneResponseRefreshDelay.Milliseconds(),
+			)
+		}
+		responseRefresh = responseStarted
+		delay = nextDelay
 	}
+}
+
+const currentTurnUserTimestampSkew = 5 * time.Second
+
+func nextPaneRefreshDelay(session domain.Session, events []transcript.Event) time.Duration {
+	if currentTurnEndsWithAssistantResponse(session, events) {
+		return paneResponseRefreshDelay
+	}
+	return paneWorkingRefreshDelay
+}
+
+// currentTurnEndsWithAssistantResponse enables the fast cadence only while the
+// provider transcript tail is model output for the current input. A later tool
+// or thinking event returns the worker to the conservative cadence, preventing
+// long tool-heavy turns from flooding Telegram after an early commentary row.
+func currentTurnEndsWithAssistantResponse(
+	session domain.Session,
+	events []transcript.Event,
+) bool {
+	operation := session.LastOperation
+	if operation == nil || operation.Action != domain.ActionSendInput {
+		return false
+	}
+	userIndex := -1
+	for index := len(events) - 1; index >= 0; index-- {
+		if events[index].Kind != transcript.EventUserText {
+			continue
+		}
+		userAt, err := time.Parse(time.RFC3339Nano, events[index].Timestamp)
+		if err != nil || userAt.Before(operation.At.Add(-currentTurnUserTimestampSkew)) {
+			return false
+		}
+		userIndex = index
+		break
+	}
+	if userIndex < 0 {
+		return false
+	}
+	responseTail := false
+	for index := userIndex + 1; index < len(events); index++ {
+		switch events[index].Kind {
+		case transcript.EventAssistantText, transcript.EventAssistantFinal:
+			responseTail = true
+		case transcript.EventThinking, transcript.EventToolCall, transcript.EventToolResult:
+			responseTail = false
+		}
+	}
+	return responseTail
 }
 
 func (h *Handler) editPaneScreen(

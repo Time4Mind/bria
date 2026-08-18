@@ -36,7 +36,7 @@ func waitTestNotification(t *testing.T, target chan struct{}, failure string) {
 	t.Helper()
 	select {
 	case <-target:
-	case <-time.After(2 * time.Second):
+	case <-time.After(4 * time.Second):
 		t.Fatal(failure)
 	}
 }

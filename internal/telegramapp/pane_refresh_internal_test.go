@@ -48,6 +48,66 @@ func TestSettledQueuedPromptRejectsPreviousTurnFinal(t *testing.T) {
 	}
 }
 
+func TestCurrentTurnAssistantResponseRefreshMode(t *testing.T) {
+	promptAt := time.Unix(300, 0).UTC()
+	session := domain.Session{LastOperation: &domain.SessionOperationResult{
+		Action: domain.ActionSendInput, Status: domain.OperationQueued, At: promptAt,
+	}}
+	event := func(kind transcript.EventKind, offset time.Duration) transcript.Event {
+		return transcript.Event{
+			Kind: kind, Timestamp: promptAt.Add(offset).Format(time.RFC3339Nano),
+		}
+	}
+	tests := []struct {
+		name      string
+		events    []transcript.Event
+		wantDelay time.Duration
+	}{
+		{
+			name: "previous answer while current prompt is not flushed",
+			events: []transcript.Event{
+				event(transcript.EventUserText, -time.Minute),
+				event(transcript.EventAssistantFinal, -time.Minute+time.Second),
+			},
+			wantDelay: paneWorkingRefreshDelay,
+		},
+		{
+			name: "current prompt still working",
+			events: []transcript.Event{
+				event(transcript.EventUserText, time.Second),
+				event(transcript.EventThinking, 2*time.Second),
+				event(transcript.EventToolCall, 3*time.Second),
+			},
+			wantDelay: paneWorkingRefreshDelay,
+		},
+		{
+			name: "assistant response tail",
+			events: []transcript.Event{
+				event(transcript.EventUserText, time.Second),
+				event(transcript.EventToolResult, 2*time.Second),
+				event(transcript.EventAssistantText, 3*time.Second),
+			},
+			wantDelay: paneResponseRefreshDelay,
+		},
+		{
+			name: "tool resumed after commentary",
+			events: []transcript.Event{
+				event(transcript.EventUserText, time.Second),
+				event(transcript.EventAssistantText, 2*time.Second),
+				event(transcript.EventToolCall, 3*time.Second),
+			},
+			wantDelay: paneWorkingRefreshDelay,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := nextPaneRefreshDelay(session, test.events); got != test.wantDelay {
+				t.Fatalf("refresh delay=%v want=%v", got, test.wantDelay)
+			}
+		})
+	}
+}
+
 func TestCardEventsHideOnlyTrailingAssistantMemoryMetadata(t *testing.T) {
 	metadata := "<oai-mem-citation>\n<citation_entries>\ninternal\n" +
 		"</citation_entries>\n</oai-mem-citation>"
