@@ -63,11 +63,10 @@ func installHook(binary, configPath, hooksPath, backend string, events []string)
 		if !ok && hooks[event] != nil {
 			return fmt.Errorf("Codex %s hooks are invalid", event)
 		}
-		if !containsCommand(entries, command) {
-			entries = append(entries, map[string]any{"hooks": []any{map[string]any{
-				"type": "command", "command": command, "timeout": float64(5),
-			}}})
-		}
+		entries = removeBriaProviderCommands(entries, configPath, backend)
+		entries = append(entries, map[string]any{"hooks": []any{map[string]any{
+			"type": "command", "command": command, "timeout": float64(5),
+		}}})
 		hooks[event] = entries
 	}
 	encoded, err := json.MarshalIndent(document, "", "  ")
@@ -102,18 +101,58 @@ func installHook(binary, configPath, hooksPath, backend string, events []string)
 	return os.Rename(temporaryPath, hooksPath)
 }
 
-func containsCommand(entries []any, command string) bool {
+// removeBriaProviderCommands makes a single installer invocation the owner of
+// the selected Bria environment. It removes current and stale Bria binaries
+// for the same config/backend while preserving other environments and tools.
+func removeBriaProviderCommands(entries []any, configPath, backend string) []any {
+	result := make([]any, 0, len(entries))
 	for _, rawEntry := range entries {
-		entry, _ := rawEntry.(map[string]any)
-		inner, _ := entry["hooks"].([]any)
+		entry, ok := rawEntry.(map[string]any)
+		if !ok {
+			result = append(result, rawEntry)
+			continue
+		}
+		inner, ok := entry["hooks"].([]any)
+		if !ok {
+			result = append(result, rawEntry)
+			continue
+		}
+		filtered := make([]any, 0, len(inner))
 		for _, rawHook := range inner {
 			hook, _ := rawHook.(map[string]any)
-			if hook["command"] == command {
-				return true
+			command, _ := hook["command"].(string)
+			if !isBriaProviderCommand(command, configPath, backend) {
+				filtered = append(filtered, rawHook)
 			}
 		}
+		if len(filtered) == 0 {
+			continue
+		}
+		copyEntry := make(map[string]any, len(entry))
+		for key, value := range entry {
+			copyEntry[key] = value
+		}
+		copyEntry["hooks"] = filtered
+		result = append(result, copyEntry)
 	}
-	return false
+	return result
+}
+
+func isBriaProviderCommand(command, configPath, backend string) bool {
+	marker := " provider-hook --config " + shellQuote(configPath)
+	position := strings.Index(command, marker)
+	if position <= 0 {
+		return false
+	}
+	binary := strings.Trim(strings.TrimSpace(command[:position]), "'\"")
+	if filepath.Base(binary) != "bria" {
+		return false
+	}
+	remainder := strings.TrimSpace(command[position+len(marker):])
+	if backend == "codex" {
+		return remainder == ""
+	}
+	return remainder == "--backend "+shellQuote(backend)
 }
 
 func shellQuote(value string) string {

@@ -6,6 +6,7 @@ import (
 
 	"github.com/Time4Mind/bria/internal/application"
 	"github.com/Time4Mind/bria/internal/domain"
+	"github.com/Time4Mind/bria/internal/processlog"
 	"github.com/Time4Mind/bria/internal/providerstop"
 )
 
@@ -35,7 +36,9 @@ func (h *Handler) RunProviderStopNotifications(
 }
 
 func (h *Handler) handleProviderStopWithRetry(ctx context.Context, signal providerstop.Signal) {
-	for _, delay := range providerStopRetryDelays {
+	startedAt := time.Now()
+	lastOutcome := "not_attempted"
+	for attempt, delay := range providerStopRetryDelays {
 		if delay > 0 {
 			timer := time.NewTimer(delay)
 			select {
@@ -48,43 +51,58 @@ func (h *Handler) handleProviderStopWithRetry(ctx context.Context, signal provid
 		if !h.canRefresh() {
 			return
 		}
-		if h.handleProviderStop(ctx, signal) {
+		done, outcome := h.handleProviderStop(ctx, signal)
+		lastOutcome = outcome
+		if done {
+			processlog.Detailf(
+				"bria telegram: provider_stop ref=%q outcome=%s attempts=%d duration_ms=%d",
+				signal.NodeID+"/"+signal.SessionID, outcome, attempt+1,
+				time.Since(startedAt).Milliseconds(),
+			)
 			return
 		}
 	}
+	processlog.Servicef(
+		"bria telegram: provider_stop ref=%q outcome=retry_exhausted last=%s attempts=%d duration_ms=%d",
+		signal.NodeID+"/"+signal.SessionID, lastOutcome, len(providerStopRetryDelays),
+		time.Since(startedAt).Milliseconds(),
+	)
 }
 
-func (h *Handler) handleProviderStop(ctx context.Context, signal providerstop.Signal) bool {
+func (h *Handler) handleProviderStop(
+	ctx context.Context,
+	signal providerstop.Signal,
+) (bool, string) {
 	actor, session, ok := h.providerStopSession(signal)
 	if !ok {
-		return true // stale, foreign, or already replaced session
+		return true, "ignored" // stale, foreign, or already replaced session
 	}
 	events, err := h.readBackgroundTranscript(ctx, actor, session.Ref())
 	if err != nil {
-		return false
+		return false, "transcript_unavailable"
 	}
 	h.rememberCardTranscript(
 		session.Ref(), session.Revision, session.ProviderSessionID, events,
 	)
 	finalAt, final := finalTranscriptAt(events)
 	if !final || !transcriptFinalBelongsToCurrentTurn(session, finalAt, time.Now()) {
-		return false
+		return false, "final_pending"
 	}
 	if session.RuntimePhase == domain.RuntimeRunning &&
 		!h.settleFromTranscript(ctx, actor, session, events) {
-		return false
+		return false, "settlement_pending"
 	}
 	latest, err := h.service.Session(actor, session.Ref())
 	if err != nil || (latest.RuntimePhase != domain.RuntimeIdle &&
 		latest.RuntimePhase != domain.RuntimeDegraded) {
-		return false
+		return false, "runtime_pending"
 	}
 	card, present, err := h.service.TelegramResponseCard(actor)
 	if err != nil || !present || card.Session != session.Ref() {
-		return true
+		return true, "no_active_card"
 	}
 	if responseCardCoversFinal(card, session.Ref(), finalAt) {
-		return true
+		return true, "already_delivered"
 	}
 	// Invalidate the sleeping periodic worker before promoting the completion.
 	// Its eventual wake-up then observes a newer generation and exits without an
@@ -92,7 +110,10 @@ func (h *Handler) handleProviderStop(ctx context.Context, signal providerstop.Si
 	h.cancelPaneRefresh(actor.UserID)
 	h.repostActiveFinal(ctx, actor, session.Ref())
 	card, present, err = h.service.TelegramResponseCard(actor)
-	return err == nil && present && responseCardCoversFinal(card, session.Ref(), finalAt)
+	if err == nil && present && responseCardCoversFinal(card, session.Ref(), finalAt) {
+		return true, "delivered"
+	}
+	return false, "delivery_pending"
 }
 
 func (h *Handler) providerStopSession(

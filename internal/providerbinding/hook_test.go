@@ -97,6 +97,41 @@ func TestInstallHookPreservesExistingHooksAndIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestInstallHookReplacesOnlyStaleBriaForSameEnvironment(t *testing.T) {
+	directory := t.TempDir()
+	path := filepath.Join(directory, "hooks.json")
+	current := "/opt/bria/current/bria"
+	config := "/var/bria/config.json"
+	existing := fmt.Sprintf(`{"hooks":{"SessionStart":[{"hooks":[
+		{"type":"command","command":"ccbot hook","timeout":5},
+		{"type":"command","command":%q,"timeout":5},
+		{"type":"command","command":%q,"timeout":5}
+	]}]}}`,
+		shellQuote("/opt/bria/dev/bria")+" provider-hook --config "+shellQuote(config),
+		shellQuote("/opt/bria/other/bria")+" provider-hook --config "+shellQuote("/var/bria/other.json"),
+	)
+	if err := os.WriteFile(path, []byte(existing), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := InstallHook(current, config, path); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded := string(data)
+	if strings.Contains(encoded, "/opt/bria/dev/bria") {
+		t.Fatalf("stale Bria hook survived: %s", encoded)
+	}
+	if strings.Count(encoded, current) != len(codexHookEvents) {
+		t.Fatalf("current Bria hook count is not canonical: %s", encoded)
+	}
+	if !strings.Contains(encoded, "ccbot hook") || !strings.Contains(encoded, "/var/bria/other.json") {
+		t.Fatalf("unrelated hook was removed: %s", encoded)
+	}
+}
+
 func TestCaptureStopReturnsOneFinalWakeSignal(t *testing.T) {
 	directory := t.TempDir()
 	store, err := NewStore(filepath.Join(directory, "bindings.json"))

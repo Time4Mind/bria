@@ -33,13 +33,6 @@ func (h *Handler) editPaneScreen(
 		return message, nil
 	}
 	edited, err := h.messenger.EditScreen(ctx, message, screen)
-	if _, limited := telegrambot.RemoteFloodWait(err); limited {
-		h.cardMutationMu.Lock()
-		edited, err = h.replaceFloodLimitedResponseCardLocked(
-			ctx, actor, message, ref, screen, err,
-		)
-		h.cardMutationMu.Unlock()
-	}
 	if err == nil {
 		if screen.Pane != nil {
 			h.rememberPaneFileID(ref, screen.Pane.Hash, edited.RichMediaFileID)
