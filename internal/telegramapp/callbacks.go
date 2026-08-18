@@ -23,6 +23,9 @@ func (h *Handler) handleCallback(
 	if callback.Action == telegramui.ActionNoop {
 		return h.messenger.AnswerCallbackQuery(ctx, update.CallbackID, "")
 	}
+	if !isClusterUpdateAction(callback.Action) {
+		h.cancelClusterUpdateRefresh(actor.UserID)
+	}
 	// Telegram callback payloads do not consistently echo rich_message. Recover
 	// the durable carrier metadata when the callback belongs to the current
 	// response card, otherwise a rich card is mistaken for a legacy carrier and
@@ -124,6 +127,7 @@ func (h *Handler) handleCallback(
 		isStatusAction(callback.Action) ||
 		isArchiveContentAction(callback.Action) ||
 		isEnrollmentAction(callback.Action) || isClusterUpdateAction(callback.Action) ||
+		isClusterHealthAction(callback.Action) ||
 		callback.Action == telegramui.ActionPagePrevious ||
 		callback.Action == telegramui.ActionPageLatest ||
 		callback.Action == telegramui.ActionPageNext || isListPageAction(callback.Action)

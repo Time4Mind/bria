@@ -15,6 +15,8 @@ import (
 
 const backgroundSettleWorkers = 8
 
+var backgroundTranscriptBudget = 3 * time.Second
+
 func (h *Handler) RunBackgroundNotifications(ctx context.Context, interval time.Duration) {
 	if interval <= 0 {
 		interval = 1200 * time.Millisecond
@@ -31,6 +33,7 @@ func (h *Handler) RunBackgroundNotifications(ctx context.Context, interval time.
 			h.settleRunningSessions(ctx)
 			h.reconcileActiveFinalCards(ctx)
 			h.restoreActivePaneRefreshes(ctx)
+			h.restoreClusterUpdateRefreshes(ctx)
 			h.scanBackgroundNotifications(ctx, panelFingerprints)
 		}
 		select {
@@ -257,9 +260,7 @@ func (h *Handler) settleRunningSessions(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			}
-			events, err := h.controls.Transcript(
-				ctx, candidate.Actor, candidate.Session.Ref(),
-			)
+			events, err := h.readBackgroundTranscript(ctx, candidate.Actor, candidate.Session.Ref())
 			if err == nil {
 				h.rememberCardTranscript(
 					candidate.Session.Ref(), candidate.Session.Revision,

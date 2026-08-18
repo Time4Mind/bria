@@ -127,6 +127,7 @@ func TestClusterSettingsExposeGlobalSortAndPollingGolden(t *testing.T) {
 [Лидер: Не назначен -> setting@leader_node]
 [Сортировка серверов: По времени -> setting@node_sort]
 [Опрос лимитов: 10 мин -> setting@quota_poll]
+[🩺 Проверка здоровья -> cluster_health]
 [⬆ Обновить кластер -> cluster_update]
 [＋ Подключить ноду -> cluster_add]
 [← Назад -> settings]`)

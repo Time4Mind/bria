@@ -109,6 +109,14 @@ type cardRuntimeState struct {
 	cardDataMu      sync.RWMutex
 	cardContexts    map[string]cardContextEntry
 	cardTranscripts map[string]cardTranscriptEntry
+	cardCacheOrder  []string
+	cardCacheHits   uint64
+	cardCacheMisses uint64
+	cardEvictions   uint64
+	transcriptReads uint64
+	transcriptSlow  uint64
+	transcriptTotal time.Duration
+	transcriptMax   time.Duration
 	cardMutationMu  sync.Mutex
 }
 

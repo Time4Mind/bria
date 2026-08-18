@@ -3,6 +3,7 @@ package domain_test
 import (
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/Time4Mind/bria/internal/domain"
 )
@@ -204,5 +205,46 @@ func TestResponseCardRegistryIsBoundToThePrivateActorChat(t *testing.T) {
 		ChatID: 8, MessageID: 1,
 	}); err == nil {
 		t.Fatal("response card from another chat was accepted")
+	}
+}
+
+func TestResponseCardRegistryPreservesFinalDeliveryWatermark(t *testing.T) {
+	state := domain.NewState()
+	if err := state.AddNode(domain.Node{ID: "node", Name: "Node"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.SetNodeAccess(7, domain.RoleOwner, "node"); err != nil {
+		t.Fatal(err)
+	}
+	created := time.Unix(10, 0).UTC()
+	if err := state.AddSession(domain.Session{
+		ID: "session", NodeID: "node", OwnerID: 7, Name: "Session", Backend: "codex",
+		State: domain.SessionLive, RuntimePhase: domain.RuntimeIdle,
+		CreatedAt: created, LiveSinceAt: created,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	ref := domain.SessionRef{NodeID: "node", SessionID: "session"}
+	finalAt := created.Add(time.Minute)
+	card := domain.TelegramResponseCard{
+		ChatID: 7, MessageID: 11, Session: ref, SessionRevision: 1,
+		RenderedFinalAt: finalAt,
+	}
+	if err := state.RecordTelegramResponseCard(7, card); err != nil {
+		t.Fatal(err)
+	}
+	card.RenderedFinalAt = finalAt.Add(-time.Second)
+	if err := state.RecordTelegramResponseCard(7, card); err != nil {
+		t.Fatal(err)
+	}
+	if got := state.TelegramResponseCards[7].RenderedFinalAt; got != finalAt {
+		t.Fatalf("watermark=%s, want %s", got, finalAt)
+	}
+	card.RenderedFinalAt = finalAt.Add(time.Second)
+	if err := state.RecordTelegramResponseCard(7, card); err != nil {
+		t.Fatal(err)
+	}
+	if got := state.TelegramResponseCards[7].RenderedFinalAt; got != card.RenderedFinalAt {
+		t.Fatalf("advanced watermark=%s, want %s", got, card.RenderedFinalAt)
 	}
 }

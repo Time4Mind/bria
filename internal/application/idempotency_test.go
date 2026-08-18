@@ -37,6 +37,26 @@ func TestOperationScopeMakesReplayCommandIDStable(t *testing.T) {
 	}
 }
 
+func TestOperationScopeSeparatesDifferentSameKindPayloads(t *testing.T) {
+	state := domain.NewState()
+	port := &capturePort{state: state}
+	service, err := NewService(port, port)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := WithOperationScope(context.Background(), "telegram-update-42")
+	for _, cursor := range []int64{43, 44, 43} {
+		if err := service.AdvanceTelegramCursor(ctx, cursor); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(port.commands) != 3 ||
+		port.commands[0].OperationID == port.commands[1].OperationID ||
+		port.commands[0].OperationID != port.commands[2].OperationID {
+		t.Fatalf("payload-scoped command IDs=%#v", port.commands)
+	}
+}
+
 func TestOperationSubscopeSeparatesSameKindCommandsWithinUpdate(t *testing.T) {
 	state := domain.NewState()
 	port := &capturePort{state: state}

@@ -24,6 +24,34 @@ func (s *State) PublishNodeHeartbeat(
 	at time.Time,
 	isolationReports ...BackendIsolationReport,
 ) (BootRecoveryPlan, error) {
+	candidate := s.Clone()
+	plan, err := candidate.publishNodeHeartbeat(
+		nodeID, bootID, version, osName, arch,
+		certificateFingerprint, previousCertificateFingerprint,
+		backends, archiveIDs, interactive, finals, at, isolationReports...,
+	)
+	if err != nil {
+		return BootRecoveryPlan{}, err
+	}
+	*s = *candidate
+	return plan, nil
+}
+
+func (s *State) publishNodeHeartbeat(
+	nodeID NodeID,
+	bootID string,
+	version string,
+	osName string,
+	arch string,
+	certificateFingerprint string,
+	previousCertificateFingerprint string,
+	backends []BackendDescriptor,
+	archiveIDs []string,
+	interactive []InteractivePromptReport,
+	finals []TranscriptFinalReport,
+	at time.Time,
+	isolationReports ...BackendIsolationReport,
+) (BootRecoveryPlan, error) {
 	if strings.TrimSpace(bootID) == "" {
 		return BootRecoveryPlan{}, fmt.Errorf("boot id is required")
 	}

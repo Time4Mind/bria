@@ -11,6 +11,8 @@ import (
 	"github.com/Time4Mind/bria/internal/telegramui"
 )
 
+const clusterUpdateCardMarker = "view:cluster-update"
+
 func (h *Handler) rememberResponseCard(
 	ctx context.Context,
 	actor application.Principal,
@@ -77,7 +79,7 @@ func (h *Handler) recordResponseCard(
 	}
 	card := domain.TelegramResponseCard{
 		ChatID: message.ChatID, MessageID: message.MessageID, Rich: message.Rich,
-		RichMediaFileID: message.RichMediaFileID, PaneHash: message.PaneHash,
+		RichMediaFileID: message.RichMediaFileID, PaneHash: responseCardPaneHash(message, screen),
 	}
 	if checkpoint := screen.Checkpoint; checkpoint != nil {
 		card.Session = domain.SessionRef{
@@ -114,6 +116,20 @@ func (h *Handler) recordResponseCard(
 		return previous, exists, false
 	}
 	return previous, exists, true
+}
+
+func responseCardPaneHash(message telegrambot.Message, screen telegramui.Screen) string {
+	for _, row := range screen.Grid {
+		for _, item := range row {
+			if item.Callback.Action == telegramui.ActionClusterUpdateRefresh {
+				// PaneHash is transport-only replicated metadata. Plain cluster-update
+				// cards have no terminal pane, so this bounded marker lets a new leader
+				// resume their progress worker without changing the Raft command schema.
+				return clusterUpdateCardMarker
+			}
+		}
+	}
+	return message.PaneHash
 }
 
 func screenShowsLatestCardPage(screen telegramui.Screen) bool {

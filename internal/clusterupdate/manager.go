@@ -2,12 +2,10 @@ package clusterupdate
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -22,8 +20,16 @@ type Phase string
 
 const (
 	PhaseIdle        Phase = "idle"
+	PhaseWaiting     Phase = "waiting"
+	PhaseInspecting  Phase = "inspecting"
 	PhaseDownloading Phase = "downloading"
+	PhaseVerifying   Phase = "verifying"
+	PhaseExtracting  Phase = "extracting"
+	PhasePreflight   Phase = "preflight"
+	PhaseActivating  Phase = "activating"
+	PhaseRestarting  Phase = "restarting"
 	PhaseStaged      Phase = "staged"
+	PhaseHealthy     Phase = "healthy"
 	PhaseFailed      Phase = "failed"
 )
 
@@ -35,11 +41,16 @@ type Request struct {
 }
 
 type Status struct {
-	NodeID   string `json:"node_id"`
-	UpdateID string `json:"update_id,omitempty"`
-	Version  string `json:"version,omitempty"`
-	Phase    Phase  `json:"phase"`
-	Error    string `json:"error,omitempty"`
+	NodeID     string    `json:"node_id"`
+	UpdateID   string    `json:"update_id,omitempty"`
+	Version    string    `json:"version,omitempty"`
+	Phase      Phase     `json:"phase"`
+	Progress   int       `json:"progress,omitempty"`
+	BytesDone  int64     `json:"bytes_done,omitempty"`
+	BytesTotal int64     `json:"bytes_total,omitempty"`
+	StartedAt  time.Time `json:"started_at,omitempty"`
+	UpdatedAt  time.Time `json:"updated_at,omitempty"`
+	Error      string    `json:"error,omitempty"`
 }
 
 type CompatibilityResult struct {
@@ -86,7 +97,7 @@ func NewManager(config ManagerConfig) (*Manager, error) {
 		config.Fetcher.Client = config.Client
 	}
 	manager := &Manager{config: config, status: Status{NodeID: config.NodeID, Phase: PhaseIdle}}
-	manager.loadFailure()
+	manager.loadStatus()
 	return manager, nil
 }
 
@@ -100,15 +111,17 @@ func (m *Manager) Start(ctx context.Context, request Request) (Status, error) {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.status.Phase == PhaseDownloading || m.status.Phase == PhaseStaged {
+	if activeManagerPhase(m.status.Phase) {
 		if m.status.UpdateID == request.UpdateID {
 			return m.status, nil
 		}
 		return Status{}, errors.New("another node update is already active")
 	}
+	now := time.Now().UTC()
 	m.status = Status{
 		NodeID: m.config.NodeID, UpdateID: request.UpdateID,
-		Version: request.Version, Phase: PhaseDownloading,
+		Version: request.Version, Phase: PhaseInspecting, Progress: 2,
+		StartedAt: now, UpdatedAt: now,
 	}
 	_ = os.Remove(filepath.Join(m.config.InstallRoot, "update-status.json"))
 	go m.install(request)
@@ -192,6 +205,9 @@ func (m *Manager) install(request Request) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 	manifest, err := m.Inspect(ctx)
+	if err == nil {
+		m.setStatus(request, PhaseDownloading, 8, 0, 0)
+	}
 	if err == nil && !strings.EqualFold(manifest.SHA256, request.ManifestSHA256) {
 		err = errors.New("manifest changed after cluster update began")
 	}
@@ -213,11 +229,12 @@ func (m *Manager) install(request Request) {
 	}
 	m.mu.Lock()
 	if err != nil {
-		m.status.Phase, m.status.Error = PhaseFailed, shortError(err)
+		m.status.Phase, m.status.Progress, m.status.Error = PhaseFailed, max(m.status.Progress, 1), shortError(err)
+		m.status.UpdatedAt = time.Now().UTC()
 		m.mu.Unlock()
 		return
 	}
-	m.status.Phase = PhaseStaged
+	m.status.Phase, m.status.Progress, m.status.UpdatedAt = PhaseRestarting, 95, time.Now().UTC()
 	m.mu.Unlock()
 	m.config.Restart(m.config.ActivationPath)
 }
@@ -262,88 +279,6 @@ type pendingUpdate struct {
 	Version     string `json:"version"`
 	Previous    string `json:"previous"`
 	CurrentLink string `json:"current_link"`
-}
-
-func (m *Manager) downloadAndActivate(
-	ctx context.Context,
-	request Request,
-	artifact Artifact,
-	minimumNodeProtocol int,
-) error {
-	if err := os.MkdirAll(filepath.Join(m.config.InstallRoot, "releases"), 0o700); err != nil {
-		return fmt.Errorf("create update release root: %w", err)
-	}
-	temporary, err := os.CreateTemp(m.config.InstallRoot, ".download-*.tar.gz")
-	if err != nil {
-		return fmt.Errorf("create update download: %w", err)
-	}
-	temporaryPath := temporary.Name()
-	defer os.Remove(temporaryPath)
-	if err := m.download(ctx, temporary, artifact); err != nil {
-		_ = temporary.Close()
-		return err
-	}
-	if err := temporary.Close(); err != nil {
-		return err
-	}
-	releaseName := safeReleaseName(
-		request.Version + "-" + request.UpdateID + "-" + runtime.GOOS + "-" + runtime.GOARCH,
-	)
-	destination := filepath.Join(m.config.InstallRoot, "releases", releaseName)
-	if _, err := os.Stat(destination); errors.Is(err, os.ErrNotExist) {
-		if err := extractRelease(temporaryPath, destination); err != nil {
-			return err
-		}
-	} else if err != nil {
-		return err
-	}
-	if err := verifyReleaseBinary(destination, request.Version, minimumNodeProtocol); err != nil {
-		return err
-	}
-	if err := m.config.Preflight(ctx, releaseBinary(destination)); err != nil {
-		return fmt.Errorf("preflight staged Bria: %w", err)
-	}
-	return m.switchCurrent(request, destination)
-}
-
-func (m *Manager) download(ctx context.Context, destination *os.File, artifact Artifact) error {
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, artifact.URL, nil)
-	if err != nil {
-		return err
-	}
-	client := m.config.Client
-	if client == nil {
-		client = &http.Client{Timeout: 5 * time.Minute}
-	}
-	response, err := client.Do(request)
-	if err != nil {
-		return fmt.Errorf("download update artifact: %w", err)
-	}
-	defer response.Body.Close()
-	if response.Request.URL.Scheme != "https" {
-		return errors.New("update artifact redirected outside HTTPS")
-	}
-	if response.StatusCode != http.StatusOK || response.ContentLength > artifact.Size {
-		return fmt.Errorf("download update artifact: HTTP %d", response.StatusCode)
-	}
-	hash := sha256.New()
-	written, err := io.Copy(io.MultiWriter(destination, hash), io.LimitReader(response.Body, artifact.Size+1))
-	if err != nil || written != artifact.Size || hex.EncodeToString(hash.Sum(nil)) != artifact.SHA256 {
-		return errors.New("update artifact size or digest mismatch")
-	}
-	return destination.Sync()
-}
-
-func (m *Manager) loadFailure() {
-	data, err := os.ReadFile(filepath.Join(m.config.InstallRoot, "update-status.json"))
-	if err != nil {
-		return
-	}
-	var status Status
-	if json.Unmarshal(data, &status) == nil && status.Phase == PhaseFailed {
-		status.NodeID = m.config.NodeID
-		m.status = status
-	}
 }
 
 func shortError(err error) string {

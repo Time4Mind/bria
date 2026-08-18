@@ -83,8 +83,12 @@ func (h *Handler) handleNavigationCallback(
 	case telegramui.ActionClusterContract:
 		screen = h.beginNodeContract(actor)
 	case telegramui.ActionClusterUpdate, telegramui.ActionClusterUpdateYes,
-		telegramui.ActionClusterUpdateRefresh:
+		telegramui.ActionClusterUpdateRetry, telegramui.ActionClusterUpdateRefresh:
 		screen, err = h.handleClusterUpdate(ctx, actor, callback.Action)
+	case telegramui.ActionClusterHealth, telegramui.ActionClusterHealthRefresh:
+		screen, _, err = h.openClusterHealth(actor)
+	case telegramui.ActionClusterHealthAgent:
+		screen, pageRef, err = h.startClusterHealthAgent(ctx, actor)
 	case telegramui.ActionEnrollmentOpen:
 		screen, err = h.openEnrollment(actor, telegramui.ActionEnrollmentOpen, callback.Token)
 	case telegramui.ActionEnrollmentApprove, telegramui.ActionEnrollmentReject:
@@ -201,6 +205,9 @@ func (h *Handler) handleNavigationCallback(
 	if err == nil && (callback.Action == telegramui.ActionStatus ||
 		callback.Action == telegramui.ActionStatusRefresh) {
 		h.scheduleStatusRefresh(ctx, actor, edited, statusMode(callback.Token))
+	}
+	if err == nil && isClusterUpdateAction(callback.Action) {
+		h.scheduleClusterUpdateRefresh(ctx, actor, edited, screen)
 	}
 	if err == nil && pageRef.Validate() == nil {
 		h.rememberResolvedCardPage(actor.UserID, pageRef, screen)

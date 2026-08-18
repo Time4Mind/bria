@@ -45,7 +45,7 @@ func (input DeferredSessionInput) Validate() error {
 	if strings.TrimSpace(input.OperationID) == "" || len(input.OperationID) > 128 {
 		return fmt.Errorf("%w: deferred operation id is invalid", ErrInvalidState)
 	}
-	if input.ActorID <= 0 || input.Session.Validate() != nil || input.ExpectedGeneration == 0 || input.QueuedAt.IsZero() {
+	if input.ActorID <= 0 || input.Session.Validate() != nil || input.ExpectedGeneration == 0 {
 		return fmt.Errorf("%w: deferred input identity is invalid", ErrInvalidState)
 	}
 	switch input.Kind {
@@ -81,6 +81,7 @@ func (input DeferredSessionInput) Validate() error {
 }
 
 func (s *State) QueueDeferredSessionInput(input DeferredSessionInput, at time.Time) error {
+	input.QueuedAt = at
 	if err := input.Validate(); err != nil {
 		return err
 	}
@@ -109,7 +110,6 @@ func (s *State) QueueDeferredSessionInput(input DeferredSessionInput, at time.Ti
 	if session.Revision == math.MaxUint64 {
 		return fmt.Errorf("%w: session revision exhausted", ErrInvalidState)
 	}
-	input.QueuedAt = at
 	s.DeferredInputs[input.Session.Key()] = append(queue, input)
 	session.LastEventAt = at
 	session.LastOperation = &SessionOperationResult{

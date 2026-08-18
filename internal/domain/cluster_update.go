@@ -21,9 +21,12 @@ const (
 )
 
 type NodeUpdate struct {
-	Phase     NodeUpdatePhase `json:"phase"`
-	UpdatedAt time.Time       `json:"updated_at"`
-	Error     string          `json:"error,omitempty"`
+	Phase           NodeUpdatePhase `json:"phase"`
+	PreviousVersion string          `json:"previous_version,omitempty"`
+	StartedAt       time.Time       `json:"started_at,omitempty"`
+	CompletedAt     time.Time       `json:"completed_at,omitempty"`
+	UpdatedAt       time.Time       `json:"updated_at"`
+	Error           string          `json:"error,omitempty"`
 }
 
 type ClusterUpdate struct {
@@ -58,7 +61,9 @@ func (s *State) BeginClusterUpdate(update ClusterUpdate, at time.Time) error {
 			return fmt.Errorf("%w: invalid update node %q", ErrInvalidState, nodeID)
 		}
 		seen[nodeID] = true
-		update.Nodes[nodeID] = NodeUpdate{Phase: NodeUpdatePending, UpdatedAt: at}
+		update.Nodes[nodeID] = NodeUpdate{
+			Phase: NodeUpdatePending, PreviousVersion: node.Version, UpdatedAt: at,
+		}
 	}
 	update.Phase = ClusterUpdateRunning
 	update.StartedAt, update.UpdatedAt = at, at
@@ -79,6 +84,12 @@ func (s *State) SetClusterUpdateNode(
 	}
 	if len(detail) > 240 {
 		detail = detail[:240]
+	}
+	if current.Phase == NodeUpdatePending && phase == NodeUpdateInstalling && current.StartedAt.IsZero() {
+		current.StartedAt = at
+	}
+	if phase == NodeUpdateHealthy || phase == NodeUpdateFailed {
+		current.CompletedAt = at
 	}
 	current.Phase, current.Error, current.UpdatedAt = phase, strings.TrimSpace(detail), at
 	s.ClusterUpdate.Nodes[nodeID] = current

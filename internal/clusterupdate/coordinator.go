@@ -70,19 +70,68 @@ func (c *Coordinator) Start(ctx context.Context) (domain.ClusterUpdate, error) {
 	if current {
 		return domain.ClusterUpdate{}, fmt.Errorf("cluster already runs %s", manifest.Version)
 	}
-	for _, nodeID := range order {
-		if _, err := c.nodes.Status(ctx, Request{NodeID: string(nodeID)}); err != nil {
-			return domain.ClusterUpdate{}, fmt.Errorf(
-				"node %s cannot update: %w", state.Nodes[nodeID].Name, err,
-			)
+	if err := c.preflight(ctx, state, order); err != nil {
+		return domain.ClusterUpdate{}, err
+	}
+	return c.begin(ctx, manifest.Version, manifest.SHA256, order)
+}
+
+// Retry resumes a failed rollout from its first failed node. Nodes that were
+// durably healthy before the failure are deliberately excluded from the new
+// operation, while the signed release identity must remain exactly the same.
+func (c *Coordinator) Retry(ctx context.Context) (domain.ClusterUpdate, error) {
+	if !c.consensus.IsLeader() {
+		return domain.ClusterUpdate{}, errors.New("cluster update retry must start on the leader")
+	}
+	state := c.reader.State()
+	previous := state.ClusterUpdate
+	if previous == nil || previous.Phase != domain.ClusterUpdateFailed {
+		return domain.ClusterUpdate{}, errors.New("cluster update has no failed operation to retry")
+	}
+	manifest, err := c.nodes.Inspect(ctx)
+	if err != nil {
+		return domain.ClusterUpdate{}, err
+	}
+	if manifest.Version != previous.Version || manifest.SHA256 != previous.ManifestSHA256 {
+		return domain.ClusterUpdate{}, errors.New("release changed since the failed update; start a new update")
+	}
+	start := -1
+	for index, nodeID := range previous.Order {
+		if previous.Nodes[nodeID].Phase == domain.NodeUpdateFailed {
+			start = index
+			break
 		}
 	}
+	if start < 0 {
+		return domain.ClusterUpdate{}, errors.New("failed update has no failed node")
+	}
+	order := append([]domain.NodeID(nil), previous.Order[start:]...)
+	if err := c.preflight(ctx, state, order); err != nil {
+		return domain.ClusterUpdate{}, err
+	}
+	return c.begin(ctx, previous.Version, previous.ManifestSHA256, order)
+}
+
+func (c *Coordinator) preflight(
+	ctx context.Context, state *domain.State, order []domain.NodeID,
+) error {
+	for _, nodeID := range order {
+		if _, err := c.nodes.Status(ctx, Request{NodeID: string(nodeID)}); err != nil {
+			return fmt.Errorf("node %s cannot update: %w", state.Nodes[nodeID].Name, err)
+		}
+	}
+	return nil
+}
+
+func (c *Coordinator) begin(
+	ctx context.Context, version, manifestSHA256 string, order []domain.NodeID,
+) (domain.ClusterUpdate, error) {
 	id, err := updateOperationID()
 	if err != nil {
 		return domain.ClusterUpdate{}, err
 	}
 	update := domain.ClusterUpdate{
-		ID: id, Version: manifest.Version, ManifestSHA256: manifest.SHA256, Order: order,
+		ID: id, Version: version, ManifestSHA256: manifestSHA256, Order: order,
 	}
 	if err := c.apply(ctx, clusterstate.CommandBeginClusterUpdate, update); err != nil {
 		return domain.ClusterUpdate{}, err

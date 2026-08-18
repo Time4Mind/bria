@@ -18,8 +18,12 @@ func TestDeferredInputQueueIsBoundedDeduplicatedAndFIFO(t *testing.T) {
 
 	for index := 1; index <= 5; index++ {
 		input := deferredText(ref, fmt.Sprintf("input-%d", index), fmt.Sprintf("text-%d", index))
-		if err := state.QueueDeferredSessionInput(input, time.Unix(int64(20+index), 0).UTC()); err != nil {
+		queuedAt := time.Unix(int64(20+index), 0).UTC()
+		if err := state.QueueDeferredSessionInput(input, queuedAt); err != nil {
 			t.Fatal(err)
+		}
+		if got := state.DeferredInputs[ref.Key()][index-1].QueuedAt; got != queuedAt {
+			t.Fatalf("queued_at=%s, want %s", got, queuedAt)
 		}
 	}
 	duplicate := deferredText(ref, "input-1", "ignored duplicate")
@@ -102,6 +106,6 @@ func deferredText(ref domain.SessionRef, operationID, text string) domain.Deferr
 	return domain.DeferredSessionInput{
 		OperationID: operationID, ActorID: 1, Session: ref,
 		ExpectedGeneration: 1, Kind: domain.DeferredInputText,
-		Text: text, QueuedAt: time.Unix(20, 0).UTC(),
+		Text: text,
 	}
 }

@@ -29,6 +29,25 @@ func (s *Service) ActiveSession(actor Principal) (domain.Session, error) {
 	return session, nil
 }
 
+// ActiveSessionKeys returns the live navigation targets that must remain hot in
+// adapter caches. It exposes no transcript or user content.
+func (s *Service) ActiveSessionKeys() map[string]bool {
+	state := s.reader.State()
+	result := make(map[string]bool)
+	if state == nil {
+		return result
+	}
+	for userID, nodeID := range state.Navigation.ActiveNodeByUser {
+		sessionID := state.Navigation.ActiveSessionByUserNode[userID][nodeID]
+		ref := domain.SessionRef{NodeID: nodeID, SessionID: sessionID}
+		if session, ok := state.Sessions[ref.Key()]; ok && session.IsLive() &&
+			state.CanViewSession(userID, ref) {
+			result[ref.Key()] = true
+		}
+	}
+	return result
+}
+
 func (s *Service) Session(actor Principal, ref domain.SessionRef) (domain.Session, error) {
 	if actor.UserID <= 0 {
 		return domain.Session{}, domain.ErrAccessDenied

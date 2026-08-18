@@ -195,6 +195,60 @@ func TestCoordinatorRestartsManualSoleVoterWithoutTransfer(t *testing.T) {
 	}
 }
 
+func TestCoordinatorRetryStartsAtFailedNodeAndKeepsReleaseIdentity(t *testing.T) {
+	state := domain.NewState()
+	for index, id := range []domain.NodeID{"leader", "follower-a", "follower-b"} {
+		if err := state.AddNode(domain.Node{
+			ID: id, Name: string(id), Status: domain.NodeOnline, Lifecycle: domain.NodeActive,
+			Version: "v1", OS: "linux", Arch: "amd64", CreatedAt: time.Unix(int64(index+1), 0),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	machine := clusterstate.NewMachine(state)
+	consensus := &coordinatorConsensus{machine: machine, leader: "leader", local: "leader"}
+	nodes := &coordinatorNodes{manifest: VerifiedManifest{
+		Manifest: Manifest{Version: "v2", Artifacts: []Artifact{{OS: "linux", Arch: "amd64"}}},
+		SHA256:   "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+	}}
+	coordinator, err := NewCoordinator("leader", machine, consensus, nodes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	update, err := coordinator.Start(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if err := coordinator.setNode(ctx, update.ID, "follower-a", domain.NodeUpdateInstalling, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := coordinator.setNode(ctx, update.ID, "follower-a", domain.NodeUpdateHealthy, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := coordinator.setNode(ctx, update.ID, "follower-b", domain.NodeUpdateInstalling, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := coordinator.setNode(ctx, update.ID, "follower-b", domain.NodeUpdateFailed, "boom"); err != nil {
+		t.Fatal(err)
+	}
+	if err := coordinator.finish(ctx, update.ID, true, "boom"); err != nil {
+		t.Fatal(err)
+	}
+
+	retry, err := coordinator.Retry(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []domain.NodeID{"follower-b", "leader"}
+	if len(retry.Order) != len(want) || retry.Order[0] != want[0] || retry.Order[1] != want[1] {
+		t.Fatalf("retry order = %v, want %v", retry.Order, want)
+	}
+	if retry.Version != update.Version || retry.ManifestSHA256 != update.ManifestSHA256 {
+		t.Fatalf("retry changed release identity: %#v", retry)
+	}
+}
+
 func publishVersion(t *testing.T, machine *clusterstate.Machine, nodeID domain.NodeID, version string) {
 	t.Helper()
 	command, err := clusterstate.NewCommand(

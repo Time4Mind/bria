@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -100,6 +101,9 @@ func newTelegramAdapter(
 		return nil, err
 	}
 	if err := handler.SetSessionStarter(starter); err != nil {
+		return nil, err
+	}
+	if err := handler.SetClusterAgentWorkdir(clusterAgentWorkdir(nodeConfig)); err != nil {
 		return nil, err
 	}
 	if err := handler.SetProviderAuth(runtimeControl.providerAuth); err != nil {
@@ -204,6 +208,15 @@ func newTelegramAdapter(
 		return nil, err
 	}
 	return interaction.Func{AdapterName: "telegram", RunFunc: poller.Run}, nil
+}
+
+func clusterAgentWorkdir(nodeConfig config.Config) string {
+	if current, err := os.Getwd(); err == nil {
+		if _, statErr := os.Stat(filepath.Join(current, "go.mod")); statErr == nil {
+			return current
+		}
+	}
+	return nodeConfig.EffectiveUpdateInstallRoot()
 }
 
 func telegramTimingLogSuffix(

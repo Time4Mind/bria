@@ -20,7 +20,10 @@ type cardTranscriptEntry struct {
 	events            []transcript.Event
 }
 
-const maxCachedCardEvents = 200
+const (
+	maxCachedCardEvents   = 200
+	maxCachedCardSessions = 64
+)
 
 func latestContextPercent(events []transcript.Event) (int, bool) {
 	for index := len(events) - 1; index >= 0; index-- {
@@ -37,29 +40,73 @@ func (h *Handler) rememberCardTranscript(
 	providerSessionID string,
 	events []transcript.Event,
 ) {
+	pinned := map[string]bool(nil)
+	if h.service != nil {
+		pinned = h.service.ActiveSessionKeys()
+	}
 	h.cardDataMu.Lock()
-	previous := h.cardTranscripts[ref.Key()]
+	key := ref.Key()
+	previous := h.cardTranscripts[key]
 	if previous.providerSessionID == providerSessionID {
 		events = mergeCardTranscriptEvents(previous.events, events)
 	} else {
 		events = cloneTranscriptEvents(events)
 	}
-	h.cardTranscripts[ref.Key()] = cardTranscriptEntry{
+	h.cardTranscripts[key] = cardTranscriptEntry{
 		providerSessionID: providerSessionID,
 		events:            events,
 	}
 	percent, present := latestContextPercent(events)
-	h.cardContexts[ref.Key()] = cardContextEntry{
+	h.cardContexts[key] = cardContextEntry{
 		percent: percent, present: present, revision: revision,
 	}
+	h.touchCardCacheLocked(key)
+	h.evictCardCacheLocked(pinned)
 	h.cardDataMu.Unlock()
 }
 
 func (h *Handler) cachedCardTranscript(ref domain.SessionRef) ([]transcript.Event, bool) {
-	h.cardDataMu.RLock()
-	entry, ok := h.cardTranscripts[ref.Key()]
-	h.cardDataMu.RUnlock()
+	h.cardDataMu.Lock()
+	key := ref.Key()
+	entry, ok := h.cardTranscripts[key]
+	if ok {
+		h.cardCacheHits++
+		h.touchCardCacheLocked(key)
+	} else {
+		h.cardCacheMisses++
+	}
+	h.cardDataMu.Unlock()
 	return cloneTranscriptEvents(entry.events), ok
+}
+
+func (h *Handler) touchCardCacheLocked(key string) {
+	for index, existing := range h.cardCacheOrder {
+		if existing == key {
+			h.cardCacheOrder = append(h.cardCacheOrder[:index], h.cardCacheOrder[index+1:]...)
+			break
+		}
+	}
+	h.cardCacheOrder = append(h.cardCacheOrder, key)
+}
+
+func (h *Handler) evictCardCacheLocked(pinned map[string]bool) {
+	for len(h.cardCacheOrder) > maxCachedCardSessions {
+		victim := -1
+		for index, key := range h.cardCacheOrder {
+			if !pinned[key] {
+				victim = index
+				break
+			}
+		}
+		if victim < 0 {
+			return
+		}
+		key := h.cardCacheOrder[victim]
+		h.cardCacheOrder = append(h.cardCacheOrder[:victim], h.cardCacheOrder[victim+1:]...)
+		delete(h.cardTranscripts, key)
+		delete(h.cardContexts, key)
+		h.cardEvictions++
+	}
 }
 
 func mergeCardTranscriptEvents(
@@ -186,7 +233,7 @@ func (h *Handler) refreshBackgroundContexts(
 			case <-ctx.Done():
 				return
 			}
-			events, err := h.controls.Transcript(
+			events, err := h.readBackgroundTranscript(
 				ctx, application.Principal{UserID: delivery.UserID}, delivery.Session.Ref(),
 			)
 			if err == nil {

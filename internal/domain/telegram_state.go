@@ -72,6 +72,14 @@ func (s *State) RecordTelegramResponseCard(userID UserID, card TelegramResponseC
 	if s.TelegramResponseCards == nil {
 		s.TelegramResponseCards = make(map[UserID]TelegramResponseCard)
 	}
+	if previous, ok := s.TelegramResponseCards[userID]; ok &&
+		previous.ChatID == card.ChatID && previous.MessageID == card.MessageID &&
+		previous.Session == card.Session && card.RenderedFinalAt.Before(previous.RenderedFinalAt) {
+		// Delivery is monotonic for one Telegram carrier. Keep this invariant in
+		// the replicated aggregate so stale retries and future adapters cannot
+		// make an already delivered final look missing again.
+		card.RenderedFinalAt = previous.RenderedFinalAt
+	}
 	s.TelegramResponseCards[userID] = card
 	return nil
 }

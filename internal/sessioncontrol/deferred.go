@@ -47,7 +47,7 @@ func deferredInput(
 	result := domain.DeferredSessionInput{
 		OperationID: operationID, ActorID: actor.UserID, Session: session.Ref(),
 		ExpectedGeneration: session.RuntimeGeneration, Kind: domain.DeferredInputText,
-		Text: text, QueuedAt: time.Now().UTC(),
+		Text: text,
 	}
 	if input == nil {
 		return result, result.Validate()

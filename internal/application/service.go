@@ -247,11 +247,9 @@ func (s *Service) apply(
 	kind clusterstate.CommandKind,
 	payload any,
 ) error {
-	operationID := ""
-	if scope, ok := ctx.Value(operationScopeKey{}).(string); ok && scope != "" {
-		digest := sha256.Sum256([]byte(scope + "\x00" + string(kind)))
-		operationID = "scoped-" + hex.EncodeToString(digest[:16])
-	} else {
+	scope, scoped := ctx.Value(operationScopeKey{}).(string)
+	operationID := "scoped-pending"
+	if !scoped || scope == "" {
 		var err error
 		operationID, err = s.newID()
 		if err != nil {
@@ -261,6 +259,19 @@ func (s *Service) apply(
 	command, err := clusterstate.NewCommand(operationID, kind, s.now(), payload)
 	if err != nil {
 		return err
+	}
+	if scoped && scope != "" {
+		identity, identityErr := stableCommandIdentity(payload, command.Payload)
+		if identityErr != nil {
+			return identityErr
+		}
+		hash := sha256.New()
+		_, _ = hash.Write([]byte(scope))
+		_, _ = hash.Write([]byte{'\x00'})
+		_, _ = hash.Write([]byte(kind))
+		_, _ = hash.Write([]byte{'\x00'})
+		_, _ = hash.Write(identity)
+		command.OperationID = "scoped-" + hex.EncodeToString(hash.Sum(nil)[:16])
 	}
 	result, err := s.applier.Apply(ctx, command)
 	if err != nil {

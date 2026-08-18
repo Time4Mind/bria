@@ -14,6 +14,9 @@ func (h *Handler) HandleTelegramUpdate(
 	ctx context.Context,
 	update telegrambot.IncomingUpdate,
 ) error {
+	if update.Kind == telegrambot.IncomingMessage {
+		h.cancelClusterUpdateRefresh(domain.UserID(update.UserID))
+	}
 	if update.Kind == telegrambot.IncomingMessage && h.activity != nil {
 		h.activity.observeIncoming(update.ChatID, update.MessageID)
 	}

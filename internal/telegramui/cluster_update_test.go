@@ -26,3 +26,21 @@ func TestClusterUpdateCardUsesOneCompactProgressScreen(t *testing.T) {
 	assertGoldenGrid(t, screen, `[🔄 Обновить -> update_refresh]
 [← Назад -> settings_cat@cluster]`)
 }
+
+func TestFailedClusterUpdateOffersRetryFromFailedNode(t *testing.T) {
+	update := domain.ClusterUpdate{
+		Version: "v2", Phase: domain.ClusterUpdateFailed, Error: "boom",
+		Order: []domain.NodeID{"a"},
+		Nodes: map[domain.NodeID]domain.NodeUpdate{
+			"a": {Phase: domain.NodeUpdateFailed, Error: "boom"},
+		},
+	}
+	screen := RenderClusterUpdate(i18n.For("ru"), update, map[domain.NodeID]domain.Node{
+		"a": {ID: "a", Name: "Первая", Version: "v1"},
+	})
+	if !strings.Contains(screen.Text, "ошибка") || strings.Contains(screen.Text, "%!s") {
+		t.Fatalf("failed phase is malformed: %q", screen.Text)
+	}
+	assertGoldenGrid(t, screen, `[↻ Повторить с упавшей ноды -> update_retry]
+[← Назад -> settings_cat@cluster]`)
+}

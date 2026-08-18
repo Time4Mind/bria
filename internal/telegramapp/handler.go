@@ -40,33 +40,37 @@ type Handler struct {
 	paneRefreshState
 	voicePendingState
 	cardRuntimeState
-	fileMu             sync.Mutex
-	deliveredFiles     map[string]bool
-	promptHashes       map[domain.UserID]map[string]string
-	createFlows        map[domain.UserID]*createFlow
-	flowTTL            time.Duration
-	membershipMu       sync.Mutex
-	contractFlows      map[domain.UserID]time.Time
-	renameFlows        map[domain.UserID]nodeRenameFlow
-	providerAliasFlows map[domain.UserID]providerAliasFlow
-	providerAuth       providerauth.Service
-	backendSetup       backendsetup.Service
-	speechSetup        speechsetup.Service
-	clusterUpdater     clusterUpdater
-	providerAuthFlows  map[domain.UserID]providerAuthFlow
-	providerAuthEpochs map[domain.UserID]uint64
-	nodeSettingsBack   map[domain.UserID]settingsReturn
-	statusBack         map[domain.UserID]settingsReturn
-	speechMu           sync.Mutex
-	speechTargets      map[domain.UserID]domain.NodeID
-	knownSpeechNodes   map[domain.NodeID]bool
-	speechWatchStarted time.Time
-	pageMu             sync.Mutex
-	sessionPages       map[sessionPageKey]cardPageState
-	cardEditMu         sync.Mutex
-	activity           *activityMessenger
-	clusterEventMu     sync.Mutex
-	clusterEventLogs   map[int64]clusterEventLog
+	fileMu              sync.Mutex
+	deliveredFiles      map[string]bool
+	promptHashes        map[domain.UserID]map[string]string
+	createFlows         map[domain.UserID]*createFlow
+	flowTTL             time.Duration
+	membershipMu        sync.Mutex
+	contractFlows       map[domain.UserID]time.Time
+	renameFlows         map[domain.UserID]nodeRenameFlow
+	providerAliasFlows  map[domain.UserID]providerAliasFlow
+	providerAuth        providerauth.Service
+	backendSetup        backendsetup.Service
+	speechSetup         speechsetup.Service
+	clusterUpdater      clusterUpdater
+	providerAuthFlows   map[domain.UserID]providerAuthFlow
+	providerAuthEpochs  map[domain.UserID]uint64
+	nodeSettingsBack    map[domain.UserID]settingsReturn
+	statusBack          map[domain.UserID]settingsReturn
+	speechMu            sync.Mutex
+	speechTargets       map[domain.UserID]domain.NodeID
+	knownSpeechNodes    map[domain.NodeID]bool
+	speechWatchStarted  time.Time
+	pageMu              sync.Mutex
+	sessionPages        map[sessionPageKey]cardPageState
+	cardEditMu          sync.Mutex
+	activity            *activityMessenger
+	clusterEventMu      sync.Mutex
+	clusterEventLogs    map[int64]clusterEventLog
+	clusterUpdateMu     sync.Mutex
+	clusterUpdateWatch  map[domain.UserID]uint64
+	clusterUpdateJobs   map[domain.UserID]string
+	clusterAgentWorkdir string
 }
 
 func NewHandler(
@@ -101,6 +105,8 @@ func NewHandler(
 		speechWatchStarted: time.Now(),
 		sessionPages:       make(map[sessionPageKey]cardPageState),
 		clusterEventLogs:   make(map[int64]clusterEventLog),
+		clusterUpdateWatch: make(map[domain.UserID]uint64),
+		clusterUpdateJobs:  make(map[domain.UserID]string),
 	}, nil
 }
 
