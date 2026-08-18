@@ -19,6 +19,7 @@ import (
 	"github.com/Time4Mind/bria/internal/clusterupdate"
 	"github.com/Time4Mind/bria/internal/domain"
 	"github.com/Time4Mind/bria/internal/providerauth"
+	"github.com/Time4Mind/bria/internal/providerstop"
 	"github.com/Time4Mind/bria/internal/runtimehost"
 	"github.com/Time4Mind/bria/internal/security"
 	"github.com/Time4Mind/bria/internal/sessionstart"
@@ -26,26 +27,27 @@ import (
 )
 
 type ServerConfig struct {
-	NodeID       string
-	ClusterID    string
-	Certificate  tls.Certificate
-	Roots        *x509.CertPool
-	Leadership   Leadership
-	Health       HealthObserver
-	Backups      ClusterSnapshotter
-	Admin        MembershipAdmin
-	Membership   Membership
-	Service      RuntimeClient
-	Heartbeats   HeartbeatCommitter
-	Recovery     RecoveryCommitter
-	Transcripts  TranscriptReader
-	SessionFiles SessionFileReader
-	Starts       sessionstart.Service
-	ProviderAuth providerauth.Service
-	BackendSetup backendsetup.Service
-	SpeechSetup  speechsetup.Service
-	Updates      clusterupdate.Service
-	Enrollments  EnrollmentCommitter
+	NodeID        string
+	ClusterID     string
+	Certificate   tls.Certificate
+	Roots         *x509.CertPool
+	Leadership    Leadership
+	Health        HealthObserver
+	Backups       ClusterSnapshotter
+	Admin         MembershipAdmin
+	Membership    Membership
+	Service       RuntimeClient
+	Heartbeats    HeartbeatCommitter
+	Recovery      RecoveryCommitter
+	Transcripts   TranscriptReader
+	SessionFiles  SessionFileReader
+	Starts        sessionstart.Service
+	ProviderAuth  providerauth.Service
+	ProviderStops providerstop.Service
+	BackendSetup  backendsetup.Service
+	SpeechSetup   speechsetup.Service
+	Updates       clusterupdate.Service
+	Enrollments   EnrollmentCommitter
 	// EnrollmentIssuerID is the only member allowed to forward a contract
 	// validated by the public enrollment endpoint.
 	EnrollmentIssuerID string
@@ -67,6 +69,7 @@ type Server struct {
 	sessionFiles       SessionFileReader
 	starts             sessionstart.Service
 	providerAuth       providerauth.Service
+	providerStops      providerstop.Service
 	backendSetup       backendsetup.Service
 	speechSetup        speechsetup.Service
 	updates            clusterupdate.Service
@@ -95,7 +98,8 @@ func NewServer(config ServerConfig) (*Server, error) {
 		backupCertificate: config.Certificate,
 		heartbeats:        config.Heartbeats, recovery: config.Recovery,
 		transcripts: config.Transcripts, sessionFiles: config.SessionFiles, starts: config.Starts,
-		providerAuth: config.ProviderAuth, backendSetup: config.BackendSetup, tlsConfig: tlsConfig,
+		providerAuth: config.ProviderAuth, providerStops: config.ProviderStops,
+		backendSetup: config.BackendSetup, tlsConfig: tlsConfig,
 		speechSetup: config.SpeechSetup,
 		updates:     config.Updates,
 		enrollments: config.Enrollments, enrollmentIssuerID: config.EnrollmentIssuerID,

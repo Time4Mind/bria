@@ -13,6 +13,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/Time4Mind/bria/internal/domain"
 )
 
 var providerIDPattern = regexp.MustCompile(`^[0-9a-fA-F-]{16,128}$`)
@@ -22,6 +24,13 @@ type hookPayload struct {
 	CWD            string `json:"cwd"`
 	Event          string `json:"hook_event_name"`
 	TranscriptPath string `json:"transcript_path"`
+}
+
+type HookResult struct {
+	WakeFinal         bool
+	NodeID            string
+	SessionID         string
+	ProviderSessionID string
 }
 
 type codexMeta struct {
@@ -42,20 +51,36 @@ func Capture(
 	display DisplayFunc,
 	now func() time.Time,
 ) error {
+	_, err := CaptureEvent(ctx, store, input, getenv, display, now, "codex")
+	return err
+}
+
+func CaptureEvent(
+	ctx context.Context,
+	store *Store,
+	input io.Reader,
+	getenv func(string) string,
+	display DisplayFunc,
+	now func() time.Time,
+	backend string,
+) (HookResult, error) {
 	if store == nil || input == nil || getenv == nil || display == nil || now == nil {
-		return errors.New("provider hook dependencies are required")
+		return HookResult{}, errors.New("provider hook dependencies are required")
+	}
+	if backend != "codex" && backend != "claude" {
+		return HookResult{}, errors.New("provider hook backend is invalid")
 	}
 	decoder := json.NewDecoder(io.LimitReader(input, 1<<20))
 	var payload hookPayload
 	if err := decoder.Decode(&payload); err != nil {
-		return fmt.Errorf("decode provider hook: %w", err)
+		return HookResult{}, fmt.Errorf("decode provider hook: %w", err)
 	}
-	if payload.Event != "SessionStart" && payload.Event != "UserPromptSubmit" {
-		return nil
+	if !supportedHookEvent(backend, payload.Event) {
+		return HookResult{}, nil
 	}
 	if !providerIDPattern.MatchString(payload.SessionID) || !filepath.IsAbs(payload.CWD) ||
 		!filepath.IsAbs(payload.TranscriptPath) {
-		return errors.New("provider hook payload is invalid")
+		return HookResult{}, errors.New("provider hook payload is invalid")
 	}
 	nodeID := getenv(EnvNodeID)
 	sessionID := getenv(EnvSessionID)
@@ -63,31 +88,72 @@ func Capture(
 	tmuxWindow := getenv(EnvTmuxWindow)
 	pane := getenv("TMUX_PANE")
 	if nodeID == "" || sessionID == "" || tmuxSession == "" || tmuxWindow == "" || pane == "" {
-		return nil // The hook belongs to a provider process not launched by Bria.
+		return HookResult{}, nil // The hook belongs to a provider process not launched by Bria.
 	}
 	displayed, err := display(ctx, pane)
 	if err != nil {
-		return fmt.Errorf("inspect provider tmux pane: %w", err)
+		return HookResult{}, fmt.Errorf("inspect provider tmux pane: %w", err)
 	}
 	parts := strings.Split(strings.TrimSpace(displayed), "\t")
 	if len(parts) != 3 {
-		return errors.New("invalid provider tmux identity")
+		return HookResult{}, errors.New("invalid provider tmux identity")
 	}
 	actualSession := parts[1]
 	if actualSession == "" {
 		actualSession = parts[0]
 	}
 	if actualSession != tmuxSession || parts[2] != tmuxWindow {
-		return errors.New("provider tmux identity does not match Bria launch")
+		return HookResult{}, errors.New("provider tmux identity does not match Bria launch")
 	}
-	if err := validateCodexTranscript(payload.TranscriptPath, payload.SessionID, payload.CWD); err != nil {
-		return err
+	workdir := filepath.Clean(payload.CWD)
+	ref := domain.SessionRef{NodeID: domain.NodeID(nodeID), SessionID: domain.SessionID(sessionID)}
+	if wakeFinalEvent(payload.Event) {
+		if existing, found, lookupErr := store.LookupRef(ref); lookupErr != nil {
+			return HookResult{}, lookupErr
+		} else if found {
+			if existing.ProviderSessionID != payload.SessionID ||
+				existing.TmuxSession != tmuxSession || existing.TmuxWindow != tmuxWindow {
+				return HookResult{}, errors.New("provider stop does not match stored binding")
+			}
+			workdir = existing.Workdir
+		}
 	}
-	return store.Put(Record{
+	if err := validateProviderTranscript(
+		backend, payload.TranscriptPath, payload.SessionID, workdir,
+	); err != nil {
+		return HookResult{}, err
+	}
+	if err := store.Put(Record{
 		NodeID: nodeID, SessionID: sessionID, ProviderSessionID: payload.SessionID,
-		Workdir: filepath.Clean(payload.CWD), TmuxSession: tmuxSession,
+		Workdir: workdir, TmuxSession: tmuxSession,
 		TmuxWindow: tmuxWindow, UpdatedAt: now().UTC(),
-	})
+	}); err != nil {
+		return HookResult{}, err
+	}
+	return HookResult{
+		WakeFinal: wakeFinalEvent(payload.Event), NodeID: nodeID,
+		SessionID: sessionID, ProviderSessionID: payload.SessionID,
+	}, nil
+}
+
+func supportedHookEvent(backend, event string) bool {
+	switch event {
+	case "SessionStart", "UserPromptSubmit", "Stop":
+		return true
+	case "StopFailure":
+		return backend == "claude"
+	default:
+		return false
+	}
+}
+
+func wakeFinalEvent(event string) bool { return event == "Stop" || event == "StopFailure" }
+
+func validateProviderTranscript(backend, path, providerID, workdir string) error {
+	if backend == "claude" {
+		return validateClaudeTranscript(path, providerID, workdir)
+	}
+	return validateCodexTranscript(path, providerID, workdir)
 }
 
 func DisplayTmux(ctx context.Context, pane string) (string, error) {
@@ -123,4 +189,47 @@ func validateCodexTranscript(path, providerID, workdir string) error {
 		return fmt.Errorf("read provider transcript: %w", err)
 	}
 	return errors.New("provider transcript metadata is missing")
+}
+
+type claudeMeta struct {
+	SessionID string `json:"sessionId"`
+	CWD       string `json:"cwd"`
+}
+
+func validateClaudeTranscript(path, providerID, workdir string) error {
+	file, err := filepath.Abs(path)
+	if err != nil {
+		return err
+	}
+	if filepath.Base(file) != providerID+".jsonl" {
+		return errors.New("Claude transcript filename does not match hook payload")
+	}
+	handle, err := os.Open(file)
+	if err != nil {
+		return fmt.Errorf("open provider transcript: %w", err)
+	}
+	defer handle.Close()
+	info, err := handle.Stat()
+	if err != nil || !info.Mode().IsRegular() {
+		return errors.New("Claude transcript must be a regular file")
+	}
+	scanner := bufio.NewScanner(io.LimitReader(handle, 1<<20))
+	scanner.Buffer(make([]byte, 4096), 1<<20)
+	for count := 0; count < 64 && scanner.Scan(); count++ {
+		var meta claudeMeta
+		if json.Unmarshal(scanner.Bytes(), &meta) != nil {
+			continue
+		}
+		if meta.SessionID != "" && meta.SessionID != providerID {
+			return errors.New("Claude transcript session does not match hook payload")
+		}
+		if meta.CWD != "" && filepath.IsAbs(meta.CWD) &&
+			filepath.Clean(meta.CWD) != filepath.Clean(workdir) {
+			return errors.New("Claude transcript workdir does not match Bria binding")
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("read provider transcript: %w", err)
+	}
+	return nil
 }

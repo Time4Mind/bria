@@ -18,6 +18,7 @@ import (
 	"github.com/Time4Mind/bria/internal/localarchive"
 	"github.com/Time4Mind/bria/internal/nodecontrol"
 	"github.com/Time4Mind/bria/internal/platform"
+	"github.com/Time4Mind/bria/internal/providerstop"
 	"github.com/Time4Mind/bria/internal/runtimehost"
 	"github.com/Time4Mind/bria/internal/sessionname"
 	"github.com/Time4Mind/bria/internal/transcript"
@@ -203,17 +204,25 @@ func startNodeRuntimeControl(
 	if err != nil {
 		return closeFailedRuntime(executor, store, err)
 	}
+	providerStops := providerstop.NewBus(256)
+	providerStopRouter, err := providerstop.NewRouter(
+		nodeConfig.NodeID, node, providerStops, client,
+	)
+	if err != nil {
+		return closeFailedRuntime(executor, store, err)
+	}
 	server, err := nodecontrol.NewServer(nodecontrol.ServerConfig{
 		NodeID: nodeConfig.NodeID, ClusterID: nodeConfig.ClusterID,
 		Certificate: certificate, Roots: roots, Leadership: node,
 		Health: node, Backups: node.State(), Admin: node,
 		Membership: guard, Service: local, Heartbeats: heartbeats, Recovery: heartbeats,
 		Transcripts: localTranscripts, SessionFiles: localSessionFiles, Starts: localStarts,
-		ProviderAuth: localProviderAuth,
-		BackendSetup: setups.localBackends,
-		SpeechSetup:  setups.localSpeech,
-		Updates:      updates.local,
-		Enrollments:  enrollments, EnrollmentIssuerID: nodeConfig.EffectiveEnrollmentIssuerID(),
+		ProviderAuth:  localProviderAuth,
+		ProviderStops: providerStopRouter,
+		BackendSetup:  setups.localBackends,
+		SpeechSetup:   setups.localSpeech,
+		Updates:       updates.local,
+		Enrollments:   enrollments, EnrollmentIssuerID: nodeConfig.EffectiveEnrollmentIssuerID(),
 	})
 	if err != nil {
 		return closeFailedRuntime(executor, store, err)
@@ -230,10 +239,11 @@ func startNodeRuntimeControl(
 		router: router, transcripts: transcriptRouter, sessionFiles: sessionFileRouter,
 		starts:       startRouter,
 		providerAuth: providerAuthRouter, localProviderAuth: localProviderAuth,
-		backendSetup: setups.backends,
-		speechSetup:  setups.speech,
-		updates:      updates,
-		executor:     executor, store: store, client: client,
+		providerStops: providerStops,
+		backendSetup:  setups.backends,
+		speechSetup:   setups.speech,
+		updates:       updates,
+		executor:      executor, store: store, client: client,
 		server: server, listener: listener, errors: make(chan error, 1),
 	}
 	control.enrollment, err = startEnrollmentRuntime(

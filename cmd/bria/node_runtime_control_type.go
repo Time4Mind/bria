@@ -5,6 +5,7 @@ import (
 
 	"github.com/Time4Mind/bria/internal/nodecontrol"
 	"github.com/Time4Mind/bria/internal/providerauth"
+	"github.com/Time4Mind/bria/internal/providerstop"
 	"github.com/Time4Mind/bria/internal/runtimehost"
 )
 
@@ -18,6 +19,7 @@ type nodeRuntimeControl struct {
 	speechSetup       *nodecontrol.SpeechSetupRouter
 	updates           *nodeUpdateControl
 	localProviderAuth *providerauth.Manager
+	providerStops     *providerstop.Bus
 	executor          *runtimehost.LocalExecutor
 	store             *runtimehost.BoltOperationStore
 	client            *nodecontrol.Client

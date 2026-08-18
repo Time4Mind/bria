@@ -122,6 +122,7 @@ func newTelegramAdapter(
 		}
 	}
 	go handler.RunInteractiveNotifications(ctx, 500*time.Millisecond)
+	go handler.RunProviderStopNotifications(ctx, runtimeControl.providerStops.Events())
 	go handler.RunBackgroundNotifications(ctx, 1200*time.Millisecond)
 	go handler.RunQuotaNotifications(ctx, 2*time.Second)
 	go handler.RunEnrollmentNotifications(ctx, time.Second)

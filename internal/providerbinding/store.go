@@ -41,12 +41,23 @@ func NewStore(path string) (*Store, error) {
 }
 
 func (s *Store) Lookup(ref domain.SessionRef, workdir string) (Record, bool, error) {
+	record, ok, err := s.LookupRef(ref)
+	if err != nil || !ok || filepath.Clean(record.Workdir) != filepath.Clean(workdir) {
+		return Record{}, false, err
+	}
+	return record, true, nil
+}
+
+// LookupRef is used by Stop hooks after a provider-side cwd change. The exact
+// Bria tmux identity and provider session id are checked by the caller before
+// the original bound workdir is reused for transcript verification.
+func (s *Store) LookupRef(ref domain.SessionRef) (Record, bool, error) {
 	records, err := s.read()
 	if err != nil {
 		return Record{}, false, err
 	}
 	record, ok := records[bindingKey(string(ref.NodeID), string(ref.SessionID))]
-	if !ok || filepath.Clean(record.Workdir) != filepath.Clean(workdir) {
+	if !ok {
 		return Record{}, false, nil
 	}
 	return record, true, nil

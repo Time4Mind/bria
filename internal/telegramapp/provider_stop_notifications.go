@@ -1,0 +1,125 @@
+package telegramapp
+
+import (
+	"context"
+	"time"
+
+	"github.com/Time4Mind/bria/internal/application"
+	"github.com/Time4Mind/bria/internal/domain"
+	"github.com/Time4Mind/bria/internal/providerstop"
+)
+
+var providerStopRetryDelays = []time.Duration{0, 40 * time.Millisecond, 120 * time.Millisecond}
+
+// RunProviderStopNotifications preempts the periodic live-card cadence. The
+// provider hook is only a wake-up hint: every attempt rereads the canonical
+// transcript and requires an assistant final for the current Bria turn.
+func (h *Handler) RunProviderStopNotifications(
+	ctx context.Context,
+	signals <-chan providerstop.Signal,
+) {
+	if signals == nil {
+		return
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case signal, ok := <-signals:
+			if !ok {
+				return
+			}
+			go h.handleProviderStopWithRetry(ctx, signal)
+		}
+	}
+}
+
+func (h *Handler) handleProviderStopWithRetry(ctx context.Context, signal providerstop.Signal) {
+	for _, delay := range providerStopRetryDelays {
+		if delay > 0 {
+			timer := time.NewTimer(delay)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return
+			case <-timer.C:
+			}
+		}
+		if !h.canRefresh() {
+			return
+		}
+		if h.handleProviderStop(ctx, signal) {
+			return
+		}
+	}
+}
+
+func (h *Handler) handleProviderStop(ctx context.Context, signal providerstop.Signal) bool {
+	actor, session, ok := h.providerStopSession(signal)
+	if !ok {
+		return true // stale, foreign, or already replaced session
+	}
+	events, err := h.readBackgroundTranscript(ctx, actor, session.Ref())
+	if err != nil {
+		return false
+	}
+	h.rememberCardTranscript(
+		session.Ref(), session.Revision, session.ProviderSessionID, events,
+	)
+	finalAt, final := finalTranscriptAt(events)
+	if !final || !transcriptFinalBelongsToCurrentTurn(session, finalAt, time.Now()) {
+		return false
+	}
+	if session.RuntimePhase == domain.RuntimeRunning &&
+		!h.settleFromTranscript(ctx, actor, session, events) {
+		return false
+	}
+	latest, err := h.service.Session(actor, session.Ref())
+	if err != nil || (latest.RuntimePhase != domain.RuntimeIdle &&
+		latest.RuntimePhase != domain.RuntimeDegraded) {
+		return false
+	}
+	card, present, err := h.service.TelegramResponseCard(actor)
+	if err != nil || !present || card.Session != session.Ref() {
+		return true
+	}
+	if responseCardCoversFinal(card, session.Ref(), finalAt) {
+		return true
+	}
+	// Invalidate the sleeping periodic worker before promoting the completion.
+	// Its eventual wake-up then observes a newer generation and exits without an
+	// extra edit; the durable final watermark also protects restart races.
+	h.cancelPaneRefresh(actor.UserID)
+	h.repostActiveFinal(ctx, actor, session.Ref())
+	card, present, err = h.service.TelegramResponseCard(actor)
+	return err == nil && present && responseCardCoversFinal(card, session.Ref(), finalAt)
+}
+
+func (h *Handler) providerStopSession(
+	signal providerstop.Signal,
+) (application.Principal, domain.Session, bool) {
+	if signal.Validate() != nil {
+		return application.Principal{}, domain.Session{}, false
+	}
+	ref := domain.SessionRef{
+		NodeID: domain.NodeID(signal.NodeID), SessionID: domain.SessionID(signal.SessionID),
+	}
+	for _, candidate := range h.service.RunningSessions() {
+		if candidate.Session.Ref() == ref &&
+			candidate.Session.ProviderSessionID == signal.ProviderSessionID {
+			return candidate.Actor, candidate.Session, true
+		}
+	}
+	// The node heartbeat can publish idle just before the Stop hint reaches the
+	// leader. Find only an actively displayed card so an old hook cannot surface
+	// an unrelated background session.
+	for _, userID := range h.service.BackgroundPanelUsers() {
+		actor := application.Principal{UserID: userID}
+		session, err := h.service.ActiveSession(actor)
+		if err == nil && session.Ref() == ref &&
+			session.ProviderSessionID == signal.ProviderSessionID {
+			return actor, session, true
+		}
+	}
+	return application.Principal{}, domain.Session{}, false
+}

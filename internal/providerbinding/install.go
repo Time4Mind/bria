@@ -9,9 +9,21 @@ import (
 	"strings"
 )
 
-var hookEvents = []string{"SessionStart", "UserPromptSubmit"}
+var codexHookEvents = []string{"SessionStart", "UserPromptSubmit", "Stop"}
+var claudeHookEvents = []string{"SessionStart", "UserPromptSubmit", "Stop", "StopFailure"}
 
 func InstallHook(binary, configPath, hooksPath string) error {
+	return installHook(binary, configPath, hooksPath, "codex", codexHookEvents)
+}
+
+func InstallHooks(binary, configPath, codexPath, claudePath string) error {
+	if err := installHook(binary, configPath, codexPath, "codex", codexHookEvents); err != nil {
+		return err
+	}
+	return installHook(binary, configPath, claudePath, "claude", claudeHookEvents)
+}
+
+func installHook(binary, configPath, hooksPath, backend string, events []string) error {
 	for label, path := range map[string]string{
 		"Bria binary": binary, "Bria config": configPath, "Codex hooks": hooksPath,
 	} {
@@ -43,7 +55,10 @@ func InstallHook(binary, configPath, hooksPath string) error {
 		document["hooks"] = hooks
 	}
 	command := shellQuote(binary) + " provider-hook --config " + shellQuote(configPath)
-	for _, event := range hookEvents {
+	if backend != "codex" {
+		command += " --backend " + shellQuote(backend)
+	}
+	for _, event := range events {
 		entries, ok := hooks[event].([]any)
 		if !ok && hooks[event] != nil {
 			return fmt.Errorf("Codex %s hooks are invalid", event)

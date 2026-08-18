@@ -2,6 +2,7 @@ package providerbinding
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -91,7 +92,85 @@ func TestInstallHookPreservesExistingHooksAndIsIdempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 	encoded := string(data)
-	if strings.Count(encoded, "provider-hook") != 2 || strings.Count(encoded, "ccbot hook") != 1 {
+	if strings.Count(encoded, "provider-hook") != 3 || strings.Count(encoded, "ccbot hook") != 1 {
 		t.Fatalf("installed hooks are not preserved/idempotent: %s", encoded)
+	}
+}
+
+func TestCaptureStopReturnsOneFinalWakeSignal(t *testing.T) {
+	directory := t.TempDir()
+	store, err := NewStore(filepath.Join(directory, "bindings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	workdir := filepath.Join(directory, "workspace")
+	if err := os.Mkdir(workdir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	providerID := "019fffe8-02ee-7aa1-b6cf-eed13a005482"
+	transcriptPath := filepath.Join(directory, "rollout.jsonl")
+	meta := fmt.Sprintf(`{"type":"session_meta","payload":{"id":%q,"cwd":%q}}`+"\n", providerID, workdir)
+	if err := os.WriteFile(transcriptPath, []byte(meta), 0600); err != nil {
+		t.Fatal(err)
+	}
+	payload := fmt.Sprintf(`{
+		"session_id":%q,"cwd":%q,"hook_event_name":"Stop",
+		"transcript_path":%q
+	}`, providerID, workdir, transcriptPath)
+	environment := map[string]string{
+		EnvNodeID: "mac", EnvSessionID: "bria-session",
+		EnvTmuxSession: "bria", EnvTmuxWindow: "window", "TMUX_PANE": "%1",
+	}
+	result, err := CaptureEvent(
+		context.Background(), store, strings.NewReader(payload),
+		func(key string) string { return environment[key] },
+		func(context.Context, string) (string, error) { return "bria\t\twindow", nil },
+		time.Now, "codex",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.WakeFinal || result.NodeID != "mac" || result.SessionID != "bria-session" ||
+		result.ProviderSessionID != providerID {
+		t.Fatalf("hook result=%#v", result)
+	}
+}
+
+func TestInstallHooksAddsProviderSpecificCompletionEvents(t *testing.T) {
+	directory := t.TempDir()
+	codexPath := filepath.Join(directory, ".codex", "hooks.json")
+	claudePath := filepath.Join(directory, ".claude", "settings.json")
+	if err := os.MkdirAll(filepath.Dir(claudePath), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(claudePath, []byte(`{"theme":"dark"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := InstallHooks("/opt/bria", "/var/bria.json", codexPath, claudePath); err != nil {
+		t.Fatal(err)
+	}
+	for path, events := range map[string][]string{
+		codexPath:  {"SessionStart", "UserPromptSubmit", "Stop"},
+		claudePath: {"SessionStart", "UserPromptSubmit", "Stop", "StopFailure"},
+	} {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var document struct {
+			Hooks map[string][]any `json:"hooks"`
+		}
+		if err := json.Unmarshal(data, &document); err != nil {
+			t.Fatal(err)
+		}
+		for _, event := range events {
+			if len(document.Hooks[event]) != 1 {
+				t.Fatalf("%s event %s=%#v", path, event, document.Hooks[event])
+			}
+		}
+		if path == claudePath && (!strings.Contains(string(data), "--backend") ||
+			!strings.Contains(string(data), "claude")) {
+			t.Fatalf("Claude backend missing from hook command: %s", data)
+		}
 	}
 }
