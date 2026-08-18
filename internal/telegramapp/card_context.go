@@ -39,7 +39,7 @@ func (h *Handler) rememberCardTranscript(
 	revision uint64,
 	providerSessionID string,
 	events []transcript.Event,
-) {
+) []transcript.Event {
 	pinned := map[string]bool(nil)
 	if h.service != nil {
 		pinned = h.service.ActiveSessionKeys()
@@ -63,6 +63,7 @@ func (h *Handler) rememberCardTranscript(
 	h.touchCardCacheLocked(key)
 	h.evictCardCacheLocked(pinned)
 	h.cardDataMu.Unlock()
+	return cloneTranscriptEvents(events)
 }
 
 func (h *Handler) cachedCardTranscript(ref domain.SessionRef) ([]transcript.Event, bool) {

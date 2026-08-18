@@ -183,7 +183,9 @@ func (h *Handler) renderSessionCardSnapshotWithPane(
 		timing.transcriptSource = "live"
 	}
 	phaseStarted = time.Now()
-	h.rememberCardTranscript(ref, session.Revision, session.ProviderSessionID, events)
+	events = h.rememberCardTranscript(
+		ref, session.Revision, session.ProviderSessionID, events,
+	)
 	timing.cache = time.Since(phaseStarted)
 	phaseStarted = time.Now()
 	renderedEvents := h.withPendingVoiceRows(actor, ref, session, events)

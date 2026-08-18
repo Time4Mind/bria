@@ -16,6 +16,21 @@ type packedCardEventPage struct {
 	anchors []string
 }
 
+func retainLatestCardPages(packed packedCardEventPages, limit int) packedCardEventPages {
+	if limit < 1 || len(packed.pages) <= limit {
+		return packed
+	}
+	dropped := len(packed.pages) - limit
+	packed.pages = packed.pages[dropped:]
+	if packed.latestResponseStart > 0 {
+		packed.latestResponseStart -= dropped
+		if packed.latestResponseStart < 1 {
+			packed.latestResponseStart = 1
+		}
+	}
+	return packed
+}
+
 func packCardEventPages(
 	blocks []cardEventBlock,
 	runeLimit int,

@@ -38,6 +38,34 @@ func readRecentJSONLLines(path string, maxBytes int64, maxLineBytes int) ([][]by
 	return boundedLines(parts, maxLineBytes), nil
 }
 
+func readAppendedJSONLLines(
+	path string,
+	start int64,
+	length int64,
+	maxLineBytes int,
+) ([][]byte, bool, error) {
+	if start < 1 || length < 1 {
+		return nil, false, nil
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, false, err
+	}
+	defer file.Close()
+	previous := []byte{0}
+	if _, err := file.ReadAt(previous, start-1); err != nil || previous[0] != '\n' {
+		return nil, false, err
+	}
+	raw, err := io.ReadAll(io.NewSectionReader(file, start, length))
+	if err != nil {
+		return nil, false, err
+	}
+	if int64(len(raw)) != length || len(raw) == 0 || raw[len(raw)-1] != '\n' {
+		return nil, false, nil
+	}
+	return boundedLines(bytes.Split(raw, []byte{'\n'}), maxLineBytes), true, nil
+}
+
 func readLeadingJSONLLines(path string, count, maxLineBytes int) ([][]byte, error) {
 	file, err := os.Open(path)
 	if err != nil {

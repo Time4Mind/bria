@@ -67,6 +67,29 @@ func TestCardCacheIsBoundedAndPinsActiveSession(t *testing.T) {
 	}
 }
 
+func TestRememberCardTranscriptReturnsStableMergedWindow(t *testing.T) {
+	handler := &Handler{cardRuntimeState: newCardRuntimeState()}
+	ref := domain.SessionRef{NodeID: "node", SessionID: "session"}
+	previous := []transcript.Event{
+		{Kind: transcript.EventUserText, Text: "first", Timestamp: "t1"},
+		{Kind: transcript.EventAssistantFinal, Text: "first answer", Timestamp: "t2"},
+		{Kind: transcript.EventUserText, Text: "second", Timestamp: "t3"},
+	}
+	handler.rememberCardTranscript(ref, 1, "provider", previous)
+	merged := handler.rememberCardTranscript(ref, 2, "provider", []transcript.Event{
+		{Kind: transcript.EventUserText, Text: "second", Timestamp: "t3"},
+		{Kind: transcript.EventAssistantFinal, Text: "second answer", Timestamp: "t4"},
+	})
+	if len(merged) != 4 || merged[0].Text != "first" || merged[3].Text != "second answer" {
+		t.Fatalf("returned transcript window = %#v", merged)
+	}
+	merged[0].Text = "mutated"
+	cached, ok := handler.cachedCardTranscript(ref)
+	if !ok || cached[0].Text != "first" {
+		t.Fatalf("returned window aliases cache: %#v", cached)
+	}
+}
+
 func TestBackgroundTranscriptReadHasIndependentDeadline(t *testing.T) {
 	previous := backgroundTranscriptBudget
 	backgroundTranscriptBudget = 10 * time.Millisecond

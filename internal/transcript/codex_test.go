@@ -99,6 +99,40 @@ func TestReaderCachesOnlyUnchangedTranscriptVersion(t *testing.T) {
 	}
 }
 
+func TestReaderAppendCacheKeepsFixedEventWindow(t *testing.T) {
+	layout := newTestLayout(t)
+	path := filepath.Join(layout.codex, "2026", "08", "17", "rollout-window.jsonl")
+	writeTestFile(t, path, `{"type":"session_meta","payload":{"id":"codex-window","cwd":"/srv/project"}}
+{"timestamp":"t1","type":"event_msg","payload":{"type":"user_message","message":"one"}}
+{"timestamp":"t2","type":"event_msg","payload":{"type":"user_message","message":"two"}}
+{"timestamp":"t3","type":"event_msg","payload":{"type":"user_message","message":"three"}}
+`)
+	reader := newTestReader(t, layout, func(config *Config) {
+		config.MaxEvents = 3
+		config.MaxReadBytes = 512
+	})
+	request := Request{Backend: BackendCodex, ProviderSessionID: "codex-window", Workdir: "/srv/project"}
+	first, err := reader.Read(context.Background(), request)
+	if err != nil || len(first) != 3 {
+		t.Fatalf("initial window = %#v, %v", first, err)
+	}
+	handle, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, writeErr := handle.WriteString(
+		`{"timestamp":"t4","type":"event_msg","payload":{"type":"user_message","message":"four"}}` + "\n",
+	)
+	closeErr := handle.Close()
+	if writeErr != nil || closeErr != nil {
+		t.Fatalf("append: write=%v close=%v", writeErr, closeErr)
+	}
+	second, err := reader.Read(context.Background(), request)
+	if err != nil || len(second) != 3 || second[0].Text != "two" || second[2].Text != "four" {
+		t.Fatalf("appended window = %#v, %v", second, err)
+	}
+}
+
 func TestParseRecentEventsExpandsOnlyToLatestBoundedContext(t *testing.T) {
 	lines := make([][]byte, 0, 900)
 	for index := 0; index < 900; index++ {

@@ -12,6 +12,7 @@ import (
 
 const (
 	DefaultCardPageRunes = 3500
+	DefaultCardMaxPages  = 64
 	// Telegram's legacy text carrier is limited by encoded payload size. Keep
 	// enough room for the session header, background panel, and keyboard even
 	// when a Rich Markdown card has to fall back to editMessageText.
@@ -26,6 +27,7 @@ type CardRenderOptions struct {
 	Location          *time.Location
 	MaxPageRunes      int
 	MaxPageBytes      int
+	MaxPages          int
 	MaxTechnicalLines int
 }
 
@@ -58,6 +60,7 @@ func RenderCardEventPages(
 	prepared := prepareCardEvents(preferences, events)
 	blocks := renderCardEventBlocks(prepared, options)
 	packed := packCardEventPages(blocks, options.MaxPageRunes, options.MaxPageBytes)
+	packed = retainLatestCardPages(packed, options.MaxPages)
 	pages := make([]CardEventPage, len(packed.pages))
 	for index, packedPage := range packed.pages {
 		pages[index] = CardEventPage{
@@ -86,6 +89,9 @@ func normalizedCardRenderOptions(options CardRenderOptions) CardRenderOptions {
 		options.MaxPageBytes = DefaultCardPageBytes
 	} else if options.MaxPageBytes < utf8.UTFMax {
 		options.MaxPageBytes = utf8.UTFMax
+	}
+	if options.MaxPages <= 0 {
+		options.MaxPages = DefaultCardMaxPages
 	}
 	if options.MaxTechnicalLines <= 0 {
 		options.MaxTechnicalLines = defaultTechnicalLines
