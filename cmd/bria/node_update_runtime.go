@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"time"
 
 	"github.com/Time4Mind/bria/internal/clusterupdate"
@@ -14,16 +13,11 @@ import (
 	"github.com/Time4Mind/bria/internal/processlog"
 )
 
-func confirmRunningUpdate(nodeConfig config.Config) {
-	if nodeConfig.UpdateManifestURL == "" {
+func confirmRunningUpdate(nodeConfig config.Config, manager *clusterupdate.Manager) {
+	if nodeConfig.UpdateManifestURL == "" || manager == nil {
 		return
 	}
-	installRoot := nodeConfig.EffectiveUpdateInstallRoot()
-	if activationPath, err := resolveActivationPath(); err == nil &&
-		filepath.Base(filepath.Dir(activationPath)) == "current" && nodeConfig.UpdateInstallRoot == "" {
-		installRoot = filepath.Dir(filepath.Dir(activationPath))
-	}
-	if err := clusterupdate.ConfirmInstalled(installRoot, localBuildVersion()); err != nil {
+	if err := manager.ConfirmInstalled(localBuildVersion()); err != nil {
 		processlog.Criticalf("bria update confirmation: %v", err)
 	}
 }

@@ -30,6 +30,23 @@ func (m *Manager) loadStatus() {
 	}
 }
 
+// ConfirmInstalled disarms rollback and publishes the post-restart state to
+// local progress readers. The replicated coordinator remains the authority for
+// completing the cluster-wide rollout.
+func (m *Manager) ConfirmInstalled(version string) error {
+	if err := ConfirmInstalled(m.config.InstallRoot, version); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.status.Version == version &&
+		(m.status.Phase == PhaseRestarting || m.status.Phase == PhaseStaged) {
+		m.status.Phase, m.status.Progress = PhaseHealthy, 100
+		m.status.UpdatedAt = time.Now().UTC()
+	}
+	return nil
+}
+
 func activeManagerPhase(phase Phase) bool {
 	switch phase {
 	case PhaseInspecting, PhaseDownloading, PhaseVerifying, PhaseExtracting,

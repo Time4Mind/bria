@@ -6,6 +6,7 @@ import (
 
 	"github.com/Time4Mind/bria/internal/application"
 	"github.com/Time4Mind/bria/internal/domain"
+	"github.com/Time4Mind/bria/internal/processlog"
 	"github.com/Time4Mind/bria/internal/telegrambot"
 	"github.com/Time4Mind/bria/internal/telegramui"
 )
@@ -26,11 +27,32 @@ func (h *Handler) scheduleClusterUpdateRefresh(
 	message telegrambot.Message,
 	initial telegramui.Screen,
 ) {
+	h.scheduleClusterUpdateRefreshFrom(ctx, actor, message, initial.Text, false)
+}
+
+func (h *Handler) scheduleRestoredClusterUpdateRefresh(
+	ctx context.Context,
+	actor application.Principal,
+	message telegrambot.Message,
+) {
+	// The replicated card stores a fingerprint, not its rendered text. Force one
+	// comparison/edit after restart so a rollout that completed before adapter
+	// recovery still publishes its terminal state on the existing carrier.
+	h.scheduleClusterUpdateRefreshFrom(ctx, actor, message, "", true)
+}
+
+func (h *Handler) scheduleClusterUpdateRefreshFrom(
+	ctx context.Context,
+	actor application.Principal,
+	message telegrambot.Message,
+	lastText string,
+	restored bool,
+) {
 	if h.clusterUpdater == nil || message.ChatID <= 0 || message.MessageID <= 0 {
 		return
 	}
 	update, _, err := h.service.ClusterUpdate(actor)
-	if err != nil || update == nil || !update.Active() {
+	if err != nil || update == nil || (!restored && !update.Active()) {
 		return
 	}
 	h.clusterUpdateMu.Lock()
@@ -49,7 +71,9 @@ func (h *Handler) scheduleClusterUpdateRefresh(
 	h.clusterUpdateJobs[actor.UserID] = update.ID
 	h.clusterUpdateMu.Unlock()
 	workerCtx := context.WithoutCancel(ctx)
-	go h.refreshClusterUpdateCard(workerCtx, actor, message, initial.Text, update.ID, generation)
+	go h.refreshClusterUpdateCard(
+		workerCtx, actor, message, lastText, update.ID, generation, restored,
+	)
 }
 
 func (h *Handler) refreshClusterUpdateCard(
@@ -59,17 +83,18 @@ func (h *Handler) refreshClusterUpdateCard(
 	lastText string,
 	updateID string,
 	generation uint64,
+	restored bool,
 ) {
 	defer h.finishClusterUpdateRefresh(actor.UserID, updateID, generation)
-	ticker := time.NewTicker(750 * time.Millisecond)
-	defer ticker.Stop()
+	next := time.NewTimer(0)
+	defer next.Stop()
 	timeout := time.NewTimer(45 * time.Minute)
 	defer timeout.Stop()
 	for {
 		select {
 		case <-timeout.C:
 			return
-		case <-ticker.C:
+		case <-next.C:
 		}
 		if !h.clusterUpdateRefreshCurrent(actor.UserID, generation) || !h.canRefresh() {
 			return
@@ -85,6 +110,7 @@ func (h *Handler) refreshClusterUpdateCard(
 			if !update.Active() {
 				return
 			}
+			next.Reset(750 * time.Millisecond)
 			continue
 		}
 		h.cardEditMu.Lock()
@@ -100,8 +126,15 @@ func (h *Handler) refreshClusterUpdateCard(
 		}
 		h.cardEditMu.Unlock()
 		if !update.Active() && editErr == nil {
+			if restored {
+				processlog.Detailf(
+					"bria telegram: cluster_update_card update=%q outcome=restored phase=%s",
+					update.ID, update.Phase,
+				)
+			}
 			return
 		}
+		next.Reset(750 * time.Millisecond)
 	}
 }
 
@@ -115,12 +148,11 @@ func (h *Handler) restoreClusterUpdateRefreshes(ctx context.Context) {
 		if cardErr != nil || !ok || card.PaneHash != clusterUpdateCardMarker {
 			continue
 		}
-		update, nodes, updateErr := h.service.ClusterUpdate(actor)
-		if updateErr != nil || update == nil || !update.Active() {
+		update, _, updateErr := h.service.ClusterUpdate(actor)
+		if updateErr != nil || update == nil {
 			continue
 		}
-		screen := h.renderClusterUpdate(ctx, actor, *update, nodes)
-		h.scheduleClusterUpdateRefresh(ctx, actor, telegramMessage(card), screen)
+		h.scheduleRestoredClusterUpdateRefresh(ctx, actor, telegramMessage(card))
 	}
 }
 

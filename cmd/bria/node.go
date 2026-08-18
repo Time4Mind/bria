@@ -203,7 +203,7 @@ func runNode(arguments []string) error {
 	if err != nil {
 		return fmt.Errorf("start interaction adapters: %w", err)
 	}
-	confirmRunningUpdate(nodeConfig)
+	confirmRunningUpdate(nodeConfig, runtimeControl.updates.local)
 	return waitForNodeRuntime(ctx, runtimeControl, adapterErrors)
 }
 
