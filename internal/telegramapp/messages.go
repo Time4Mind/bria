@@ -183,5 +183,9 @@ func (h *Handler) sendProjectedMessage(
 	if err != nil {
 		return telegrambot.Message{}, err
 	}
-	return h.messenger.SendScreen(ctx, chatID, screen)
+	message, err := h.messenger.SendScreen(ctx, chatID, screen)
+	if err == nil {
+		h.beginVisibleScreen(domain.UserID(chatID), screen)
+	}
+	return message, err
 }

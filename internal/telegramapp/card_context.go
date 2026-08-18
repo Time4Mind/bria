@@ -21,7 +21,7 @@ type cardTranscriptEntry struct {
 }
 
 const (
-	maxCachedCardEvents   = 200
+	maxCachedCardEvents   = 400
 	maxCachedCardSessions = 64
 )
 

@@ -36,6 +36,14 @@ func (s *State) SetSoleOwner(userID UserID) error {
 	s.Preferences = map[UserID]UserPreferences{userID: preferences}
 	s.Grants = make(map[string]SessionGrant)
 	s.TelegramResponseCards = make(map[UserID]TelegramResponseCard)
+	views := s.TelegramSessionViews[previous]
+	if views == nil {
+		views = s.TelegramSessionViews[userID]
+	}
+	s.TelegramSessionViews = make(map[UserID]map[string]TelegramSessionView)
+	if views != nil {
+		s.TelegramSessionViews[userID] = views
+	}
 	s.moveOwnerNavigation(previous, userID)
 	s.ensureActiveSession(userID)
 	return nil

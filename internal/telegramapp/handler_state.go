@@ -1,6 +1,7 @@
 package telegramapp
 
 import (
+	"context"
 	"sync"
 	"time"
 
@@ -19,6 +20,7 @@ type paneRefreshState struct {
 	paneMu         sync.Mutex
 	paneGeneration map[domain.UserID]uint64
 	paneWorkers    map[domain.UserID]uint64
+	paneCancels    map[domain.UserID]context.CancelFunc
 	paneImages     map[string]paneCacheEntry
 	paneImageOrder []string
 }
@@ -27,6 +29,7 @@ func newPaneRefreshState() paneRefreshState {
 	return paneRefreshState{
 		paneGeneration: make(map[domain.UserID]uint64),
 		paneWorkers:    make(map[domain.UserID]uint64),
+		paneCancels:    make(map[domain.UserID]context.CancelFunc),
 		paneImages:     make(map[string]paneCacheEntry),
 	}
 }

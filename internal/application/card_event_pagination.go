@@ -6,8 +6,14 @@ import (
 )
 
 type packedCardEventPages struct {
-	pages               []string
+	pages               []packedCardEventPage
 	latestResponseStart int
+}
+
+type packedCardEventPage struct {
+	text    string
+	anchor  string
+	anchors []string
 }
 
 func packCardEventPages(
@@ -16,32 +22,48 @@ func packCardEventPages(
 	byteLimit int,
 ) packedCardEventPages {
 	if len(blocks) == 0 {
-		return packedCardEventPages{pages: []string{""}}
+		return packedCardEventPages{pages: []packedCardEventPage{{}}}
 	}
-	pages := make([]string, 0, 1)
+	pages := make([]packedCardEventPage, 0, 1)
 	current := ""
+	currentAnchor := ""
+	currentAnchors := make([]string, 0, 1)
 	latestResponseStart := 0
+	flush := func() {
+		pages = append(pages, packedCardEventPage{
+			text: current, anchor: currentAnchor,
+			anchors: append([]string(nil), currentAnchors...),
+		})
+		current = ""
+		currentAnchor = ""
+		currentAnchors = currentAnchors[:0]
+	}
 	for _, block := range blocks {
 		if block.pageBreak && current != "" {
-			pages = append(pages, current)
-			current = ""
+			flush()
 		}
 		candidate := block.text
 		if current != "" {
 			candidate = current + cardEventJoiner + block.text
 		}
 		if current != "" && cardTextTooLong(candidate, runeLimit, byteLimit) {
-			pages = append(pages, current)
-			current = ""
+			flush()
 			candidate = block.text
 		}
 		if block.responseStart {
 			latestResponseStart = len(pages) + 1
 		}
+		if currentAnchor == "" {
+			currentAnchor = block.anchor
+		}
+		if block.anchor != "" &&
+			(len(currentAnchors) == 0 || currentAnchors[len(currentAnchors)-1] != block.anchor) {
+			currentAnchors = append(currentAnchors, block.anchor)
+		}
 		current = candidate
 	}
 	if current != "" {
-		pages = append(pages, current)
+		flush()
 	}
 	return packedCardEventPages{
 		pages: pages, latestResponseStart: latestResponseStart,

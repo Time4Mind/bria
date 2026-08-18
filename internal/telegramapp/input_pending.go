@@ -70,7 +70,9 @@ func (h *Handler) pendingInputCard(
 	} else if cached, ok := h.cachedCardTranscript(ref); ok {
 		events = cached
 	}
-	return h.projector.SessionCardPageWithContext(
-		actor, ref, cardEvents(events), 0, h.cardContext(ref),
+	page := h.rememberedCardPage(actor.UserID, ref)
+	return h.projector.SessionCardViewWithContext(
+		actor, ref, cardEvents(events), page,
+		h.rememberedCardAnchor(actor.UserID, ref, page), h.cardContext(ref),
 	)
 }

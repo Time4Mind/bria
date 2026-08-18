@@ -125,6 +125,14 @@ func TestParseRecentEventsExpandsOnlyToLatestBoundedContext(t *testing.T) {
 	}
 }
 
+func TestReaderDefaultsToFourHundredEvents(t *testing.T) {
+	layout := newTestLayout(t)
+	reader := newTestReader(t, layout, nil)
+	if reader.config.MaxEvents != 400 {
+		t.Fatalf("default max events=%d, want 400", reader.config.MaxEvents)
+	}
+}
+
 func TestReaderFormatsCodexExecWrapperAsBash(t *testing.T) {
 	layout := newTestLayout(t)
 	path := filepath.Join(layout.codex, "2026", "08", "15", "rollout-exec.jsonl")

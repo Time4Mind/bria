@@ -44,7 +44,7 @@ var chineseCatalog = map[Key]string{
 	StatusSettingsBody:  "选择一个服务器查看其设置。",
 	StatusConfirmLeader: "将 %s 指定为集群领导节点？",
 	StatusNodeSettings:  "服务器设置 · %s\n\n后端：%s\n状态：%s",
-	StatusQuotaHeader:   "| 服务器 | 后端 | 已用 | 年龄，分 | 今日剩余 | 重置 |",
+	StatusQuotaHeader:   "| 服务器 | 后端 | 已用 | 年龄，分 | 今日已用 | 重置 |",
 	QuotaAlert:          "%s %s · %s · %s：已使用 %d%%",
 	QuotaWindowFiveHour: "5 小时", QuotaWindowWeek: "本周",
 	ValueMinuteShort: "%d 分钟",

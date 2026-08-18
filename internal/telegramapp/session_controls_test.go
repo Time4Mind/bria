@@ -13,17 +13,18 @@ import (
 )
 
 type blockingControls struct {
-	mu        sync.RWMutex
-	started   chan struct{}
-	release   chan struct{}
-	ref       domain.SessionRef
-	events    []transcript.Event
-	afterSend []transcript.Event
-	external  *runtimehost.InputPayload
-	pane      []byte
-	key       runtimehost.InteractiveKey
-	keyHash   string
-	text      string
+	mu              sync.RWMutex
+	started         chan struct{}
+	release         chan struct{}
+	ref             domain.SessionRef
+	events          []transcript.Event
+	afterSend       []transcript.Event
+	external        *runtimehost.InputPayload
+	pane            []byte
+	key             runtimehost.InteractiveKey
+	keyHash         string
+	text            string
+	transcriptCalls int
 }
 
 type closingControls struct {
@@ -102,8 +103,9 @@ func (c *blockingControls) CapturePane(context.Context, application.Principal, s
 }
 
 func (c *blockingControls) Transcript(context.Context, application.Principal, domain.SessionRef) ([]transcript.Event, error) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.transcriptCalls++
 	return append([]transcript.Event(nil), c.events...), nil
 }
 

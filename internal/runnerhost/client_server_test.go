@@ -12,14 +12,22 @@ import (
 )
 
 func TestClientRunsOnlyInServerEnvironment(t *testing.T) {
-	socket := filepath.Join(t.TempDir(), "runner.sock")
+	// Darwin limits Unix-domain socket paths to roughly 104 bytes. Go's test
+	// temp path includes the full test name and can exceed that before Serve is
+	// reached, so keep the socket root deliberately short.
+	root, err := os.MkdirTemp("", "bria-runner-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(root) })
+	socket := filepath.Join(root, "r.sock")
 	server, err := NewServer(runtimehost.ExecCommandRunner{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	errorsOut := make(chan error, 1)
 	go func() { errorsOut <- server.Serve(socket) }()
-	waitForSocket(t, socket)
+	waitForSocket(t, socket, errorsOut)
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
@@ -64,10 +72,15 @@ func TestServerRefusesToReplaceRegularFile(t *testing.T) {
 	}
 }
 
-func waitForSocket(t *testing.T, socket string) {
+func waitForSocket(t *testing.T, socket string, serveErrors <-chan error) {
 	t.Helper()
 	deadline := time.Now().Add(3 * time.Second)
 	for {
+		select {
+		case err := <-serveErrors:
+			t.Fatalf("start runner server: %v", err)
+		default:
+		}
 		info, err := os.Stat(socket)
 		if err == nil && info.Mode()&os.ModeSocket != 0 {
 			return

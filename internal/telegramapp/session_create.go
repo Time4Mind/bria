@@ -89,6 +89,7 @@ func (h *Handler) handleCreateCallback(
 	// Create flow bypasses the general callback renderer, but it must obey the
 	// same navigation ordering: an in-flight pane edit finishes first and the
 	// non-session screen becomes durable before workers can resume.
+	viewChange := h.beginVisibleScreen(actor.UserID, screen)
 	h.cardEditMu.Lock()
 	edited, err := h.messenger.EditScreen(ctx, update.CallbackOrigin, screen)
 	if err == nil {
@@ -96,6 +97,9 @@ func (h *Handler) handleCreateCallback(
 		h.cancelPaneRefresh(actor.UserID)
 	}
 	h.cardEditMu.Unlock()
+	if err != nil {
+		h.rollbackVisibleScreen(viewChange)
+	}
 	if err == nil && ref.SessionID != "" {
 		h.schedulePaneRefresh(ctx, actor, ref, edited)
 	}

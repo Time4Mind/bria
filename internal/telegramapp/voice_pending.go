@@ -150,15 +150,21 @@ func (h *Handler) pendingVoiceCard(
 	if err != nil {
 		return telegramui.Screen{}, err
 	}
+	page := h.rememberedCardPage(actor.UserID, ref)
+	anchor := h.rememberedCardAnchor(actor.UserID, ref, page)
 	if baseline.known && baseline.ref == ref {
 		events := h.withPendingVoiceRows(actor, ref, session, baseline.events)
-		return h.projector.SessionCardPage(actor, ref, cardEvents(events), 0)
+		return h.projector.SessionCardViewWithContext(
+			actor, ref, cardEvents(events), page, anchor, h.cardContext(ref),
+		)
 	}
 	// A brand-new provider may not have created its transcript yet. Still feed
 	// the pending voice row through the normal card event renderer so it stays
 	// with the active session content and before the background-session panel.
 	events := h.withPendingVoiceRows(actor, ref, session, nil)
-	return h.projector.SessionCardPage(actor, ref, cardEvents(events), 0)
+	return h.projector.SessionCardViewWithContext(
+		actor, ref, cardEvents(events), page, anchor, h.cardContext(ref),
+	)
 }
 
 func lastTranscriptUserEvent(events []transcript.Event) string {

@@ -11,7 +11,9 @@ import (
 	"github.com/Time4Mind/bria/internal/telegramui"
 )
 
-const clusterUpdateCardMarker = "view:cluster-update"
+const (
+	clusterUpdateCardMarker = "view:cluster-update"
+)
 
 func (h *Handler) rememberResponseCard(
 	ctx context.Context,
@@ -79,8 +81,9 @@ func (h *Handler) recordResponseCard(
 	}
 	card := domain.TelegramResponseCard{
 		ChatID: message.ChatID, MessageID: message.MessageID, Rich: message.Rich,
-		RichMediaFileID: message.RichMediaFileID, PaneHash: responseCardPaneHash(message, screen),
-		ScreenHash: message.ScreenHash,
+		RichMediaFileID: message.RichMediaFileID,
+		PaneHash:        h.responseCardPaneHash(actor.UserID, message, screen),
+		ScreenHash:      message.ScreenHash,
 	}
 	if checkpoint := screen.Checkpoint; checkpoint != nil {
 		card.Session = domain.SessionRef{
@@ -119,7 +122,11 @@ func (h *Handler) recordResponseCard(
 	return previous, exists, true
 }
 
-func responseCardPaneHash(message telegrambot.Message, screen telegramui.Screen) string {
+func (h *Handler) responseCardPaneHash(
+	userID domain.UserID,
+	message telegrambot.Message,
+	screen telegramui.Screen,
+) string {
 	for _, row := range screen.Grid {
 		for _, item := range row {
 			if item.Callback.Action == telegramui.ActionClusterUpdateRefresh {
@@ -130,7 +137,35 @@ func responseCardPaneHash(message telegrambot.Message, screen telegramui.Screen)
 			}
 		}
 	}
+	if checkpoint := screen.Checkpoint; checkpoint != nil &&
+		len(screen.Grid) > 0 && len(screen.Grid[0]) > 1 {
+		ref := domain.SessionRef{
+			NodeID: domain.NodeID(checkpoint.NodeID), SessionID: domain.SessionID(checkpoint.SessionID),
+		}
+		if page, pages, ok := parseCardPageLabel(screen.Grid[0][1].Label); ok && ref.Validate() == nil {
+			state, known := h.cardPageState(userID, ref)
+			if !known {
+				state.follow = true
+			}
+			state.page = page
+			state.pages = pages
+			return encodeSessionPagePaneHash(state, message.PaneHash)
+		}
+	}
 	return message.PaneHash
+}
+
+func encodeSessionPagePaneHash(state cardPageState, paneHash string) string {
+	return domain.EncodeTelegramSessionViewPaneHash(domain.TelegramSessionView{
+		Page: state.page, Pages: state.pages, Anchor: state.anchor, Follow: state.follow,
+	}, paneHash)
+}
+
+func decodeSessionPagePaneHash(value string) (cardPageState, string, bool) {
+	view, paneHash, ok := domain.DecodeTelegramSessionViewPaneHash(value)
+	return cardPageState{
+		page: view.Page, pages: view.Pages, anchor: view.Anchor, follow: view.Follow,
+	}, paneHash, ok
 }
 
 func screenShowsLatestCardPage(screen telegramui.Screen) bool {

@@ -161,7 +161,18 @@ func (h *Handler) handleNavigationCallback(
 		// which action exposed the rich screen (including Sessions and paging).
 	}
 	pageEdit := pageRef.Validate() == nil
+	if pageEdit && screen.Pane == nil && update.CallbackOrigin.Rich &&
+		update.CallbackOrigin.RichMediaFileID != "" {
+		// Keep the already displayed terminal image in the fast page edit. The
+		// replacement worker captures a changed terminal asynchronously; reusing
+		// Telegram's file ID avoids a synchronous PNG upload on every tap.
+		screen.Pane = &telegramui.PaneImage{
+			FileID: update.CallbackOrigin.RichMediaFileID,
+			Hash:   update.CallbackOrigin.PaneHash, AnchorOffset: paneAnchorOffset(screen),
+		}
+	}
 	serializeCardEdit := pageEdit || leavesSessionCard(callback.Action)
+	viewChange := h.beginVisibleScreen(actor.UserID, screen)
 	if pageEdit {
 		// Stop the live worker before serializing the page edit. If it already
 		// owns the edit lock, it finishes first; the user's explicit page always
@@ -199,12 +210,15 @@ func (h *Handler) handleNavigationCallback(
 			h.cancelPaneRefresh(actor.UserID)
 		}
 	}
+	if err != nil {
+		h.rollbackVisibleScreen(viewChange)
+	}
 	if serializeCardEdit {
 		h.cardEditMu.Unlock()
 	}
 	if err == nil && (callback.Action == telegramui.ActionStatus ||
 		callback.Action == telegramui.ActionStatusRefresh) {
-		h.scheduleStatusRefresh(ctx, actor, edited, statusMode(callback.Token))
+		h.scheduleStatusRefresh(ctx, actor, edited, statusMode(callback.Token), viewChange.epoch)
 	}
 	if err == nil && isClusterUpdateAction(callback.Action) {
 		h.scheduleClusterUpdateRefresh(ctx, actor, edited, screen)

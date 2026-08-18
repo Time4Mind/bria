@@ -35,6 +35,12 @@ func (h *Handler) editResponseCard(
 	if activeErr == nil && currentOK && current.Session != active.Ref() {
 		return telegramMessage(current), nil
 	}
+	if activeErr == nil && !h.visibleSessionMatches(actor, active.Ref()) {
+		if currentOK {
+			return telegramMessage(current), nil
+		}
+		return message, nil
+	}
 	if activeErr == nil && !h.screenMatchesRememberedPage(
 		actor.UserID, active.Ref(), screen,
 	) {
@@ -118,6 +124,10 @@ func (h *Handler) repostFinalResponseCard(
 		}
 		return previous, nil
 	}
+	// The new carrier intentionally opens at the beginning of the completed
+	// response. Treat that content position as pinned; only an explicit Latest
+	// action may restore follow mode.
+	h.rememberResolvedCardPageWithFollow(actor.UserID, ref, screen, false)
 	h.recordResponseCard(ctx, actor, replacement, screen)
 	current, ok, recordErr := h.service.TelegramResponseCard(actor)
 	if recordErr != nil || !ok || current.ChatID != replacement.ChatID ||
@@ -128,7 +138,10 @@ func (h *Handler) repostFinalResponseCard(
 		}
 		return telegrambot.Message{}, errors.New("final response card was not committed")
 	}
-	_ = h.messenger.DeleteMessage(ctx, previous)
+	// Keep the exact page the user was reading as a frozen history item. Only
+	// the newly posted final carrier remains interactive, so stale callbacks
+	// cannot compete with it and the previous message is never destroyed.
+	_ = h.messenger.ClearKeyboard(ctx, previous)
 	h.rememberResolvedCardPage(actor.UserID, ref, screen)
 	return replacement, nil
 }

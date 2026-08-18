@@ -31,6 +31,8 @@ type CardRenderOptions struct {
 
 type CardEventPage struct {
 	RichMarkdown string
+	Anchor       string
+	AnchorIndex  string
 	Number       int
 	Count        int
 }
@@ -57,9 +59,11 @@ func RenderCardEventPages(
 	blocks := renderCardEventBlocks(prepared, options)
 	packed := packCardEventPages(blocks, options.MaxPageRunes, options.MaxPageBytes)
 	pages := make([]CardEventPage, len(packed.pages))
-	for index, text := range packed.pages {
+	for index, packedPage := range packed.pages {
 		pages[index] = CardEventPage{
-			RichMarkdown: text,
+			RichMarkdown: packedPage.text,
+			Anchor:       packedPage.anchor,
+			AnchorIndex:  strings.Join(packedPage.anchors, "\x00"),
 			Number:       index + 1,
 			Count:        len(packed.pages),
 		}
@@ -97,6 +101,7 @@ func normalizedCardRenderOptions(options CardRenderOptions) CardRenderOptions {
 
 type cardEventBlock struct {
 	text          string
+	anchor        string
 	pageBreak     bool
 	responseStart bool
 }
@@ -116,14 +121,24 @@ func renderCardEventBlocks(events []CardEvent, options CardRenderOptions) []card
 				blocks = append(blocks, cardEventBlock{
 					text: chunk, pageBreak: event.PageBreak || chunkIndex > 0,
 					responseStart: event.PageBreak && chunkIndex == 0,
+					anchor:        cardChunkAnchor(event.ID, chunkIndex),
 				})
 			}
 			continue
 		}
 		text = boundCardBlock(text, options.MaxPageRunes, options.MaxPageBytes)
-		blocks = append(blocks, cardEventBlock{text: text, pageBreak: event.PageBreak})
+		blocks = append(blocks, cardEventBlock{
+			text: text, pageBreak: event.PageBreak, anchor: cardChunkAnchor(event.ID, 0),
+		})
 	}
 	return blocks
+}
+
+func cardChunkAnchor(eventID string, chunk int) string {
+	if eventID == "" {
+		return ""
+	}
+	return fmt.Sprintf("%s.%d", eventID, chunk)
 }
 
 func renderCardEvent(event CardEvent, inFlight bool, options CardRenderOptions) string {

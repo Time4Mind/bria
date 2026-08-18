@@ -153,6 +153,18 @@ func TestSessionSwitchRestoresEachSessionsPageAndFollowMode(t *testing.T) {
 	if first.Grid[0][1].Label != "2/3" {
 		t.Fatalf("first pinned page = %s", first.Grid[0][1].Label)
 	}
+	// A process restart clears Handler's in-memory page map. The replicated
+	// response-card metadata must restore the historical page before rendering,
+	// otherwise a background refresh silently jumps back to the latest page.
+	handler, err = telegramapp.NewHandlerWithControls(
+		fixture.service, fixture.projector, fixture.codec, fixture.messenger, controls,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if restored := selectSession(firstRef); restored.Grid[0][1].Label != "2/3" {
+		t.Fatalf("first page after handler restart = %s", restored.Grid[0][1].Label)
+	}
 	secondScreen := selectSession(second.Ref())
 	secondScreen = pagePrevious(secondScreen)
 	secondScreen = pagePrevious(secondScreen)

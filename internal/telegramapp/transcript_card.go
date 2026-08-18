@@ -61,6 +61,7 @@ type sessionPageKey struct {
 type cardPageState struct {
 	page   int
 	pages  int
+	anchor string
 	follow bool
 }
 
@@ -103,7 +104,19 @@ func (h *Handler) openSessionPage(
 			page = wrappedCardPage(page, state.pages)
 		}
 	}
-	screen, err := h.renderSessionCard(ctx, actor, target.Session, page)
+	var screen telegramui.Screen
+	cached := false
+	if action == telegramui.ActionPagePrevious || action == telegramui.ActionPageNext {
+		screen, cached, err = h.renderCachedSessionCard(actor, target.Session, page)
+	}
+	if err == nil && !cached {
+		screen, err = h.renderSessionCard(ctx, actor, target.Session, page)
+	}
+	if err == nil {
+		h.rememberResolvedCardPageWithFollow(
+			actor.UserID, target.Session, screen, action == telegramui.ActionPageLatest,
+		)
+	}
 	return screen, target.Session, err
 }
 
@@ -129,6 +142,19 @@ func (h *Handler) rememberResolvedCardPage(
 	ref domain.SessionRef,
 	screen telegramui.Screen,
 ) {
+	state, ok := h.cardPageState(userID, ref)
+	if !ok {
+		state.follow = true
+	}
+	h.rememberResolvedCardPageWithFollow(userID, ref, screen, state.follow)
+}
+
+func (h *Handler) rememberResolvedCardPageWithFollow(
+	userID domain.UserID,
+	ref domain.SessionRef,
+	screen telegramui.Screen,
+	follow bool,
+) {
 	if len(screen.Grid) == 0 || len(screen.Grid[0]) < 2 {
 		return
 	}
@@ -136,22 +162,62 @@ func (h *Handler) rememberResolvedCardPage(
 	if !ok {
 		return
 	}
+	anchor := ""
+	if screen.Checkpoint != nil {
+		anchor = screen.Checkpoint.PageAnchor
+	}
 	key := pageKey(userID, ref)
 	h.pageMu.Lock()
 	h.sessionPages[key] = cardPageState{
-		page: page, pages: pages, follow: page == pages,
+		page: page, pages: pages, anchor: anchor, follow: follow,
 	}
 	h.pageMu.Unlock()
+}
+
+func (h *Handler) cardPageState(
+	userID domain.UserID,
+	ref domain.SessionRef,
+) (cardPageState, bool) {
+	key := pageKey(userID, ref)
+	h.pageMu.Lock()
+	state, ok := h.sessionPages[key]
+	h.pageMu.Unlock()
+	if ok {
+		return state, true
+	}
+	if h.service != nil {
+		view, exists, err := h.service.TelegramSessionView(
+			application.Principal{UserID: userID}, ref,
+		)
+		if err == nil && exists {
+			state = cardPageState{
+				page: view.Page, pages: view.Pages, anchor: view.Anchor, follow: view.Follow,
+			}
+			ok = true
+		}
+	}
+	if !ok && h.service != nil {
+		card, exists, err := h.service.TelegramResponseCard(application.Principal{UserID: userID})
+		if err == nil && exists && card.Session == ref {
+			if decoded, _, marked := decodeSessionPagePaneHash(card.PaneHash); marked {
+				state = decoded
+				ok = true
+			}
+		}
+	}
+	if ok {
+		h.pageMu.Lock()
+		h.sessionPages[key] = state
+		h.pageMu.Unlock()
+	}
+	return state, ok
 }
 
 func (h *Handler) rememberedCardPage(
 	userID domain.UserID,
 	ref domain.SessionRef,
 ) int {
-	key := pageKey(userID, ref)
-	h.pageMu.Lock()
-	defer h.pageMu.Unlock()
-	state, ok := h.sessionPages[key]
+	state, ok := h.cardPageState(userID, ref)
 	if !ok || state.page < 1 {
 		return 0
 	}
@@ -159,6 +225,21 @@ func (h *Handler) rememberedCardPage(
 		return 0
 	}
 	return state.page
+}
+
+func (h *Handler) rememberedCardAnchor(
+	userID domain.UserID,
+	ref domain.SessionRef,
+	requestedPage int,
+) string {
+	if requestedPage < 1 {
+		return ""
+	}
+	state, ok := h.cardPageState(userID, ref)
+	if !ok || state.follow || state.page != requestedPage {
+		return ""
+	}
+	return state.anchor
 }
 
 func pageKey(userID domain.UserID, ref domain.SessionRef) sessionPageKey {

@@ -43,9 +43,17 @@ func (h *Handler) schedulePaneRefresh(
 		return
 	}
 	h.paneMu.Lock()
+	if h.paneCancels == nil {
+		h.paneCancels = make(map[domain.UserID]context.CancelFunc)
+	}
+	if cancel := h.paneCancels[actor.UserID]; cancel != nil {
+		cancel()
+	}
 	h.paneGeneration[actor.UserID]++
 	generation := h.paneGeneration[actor.UserID]
+	workerCtx, cancel := context.WithCancel(ctx)
 	h.paneWorkers[actor.UserID] = generation
+	h.paneCancels[actor.UserID] = cancel
 	h.paneMu.Unlock()
 	lastTyping := time.Time{}
 	if session, err := h.service.Session(actor, ref); err == nil &&
@@ -53,7 +61,7 @@ func (h *Handler) schedulePaneRefresh(
 		_ = h.messenger.SendTyping(ctx, message.ChatID)
 		lastTyping = time.Now()
 	}
-	go h.runPaneRefresh(ctx, actor, ref, message, generation, lastTyping)
+	go h.runPaneRefresh(workerCtx, actor, ref, message, generation, lastTyping)
 }
 
 // ensurePaneRefresh restores the live-card poller after a leader or Bria

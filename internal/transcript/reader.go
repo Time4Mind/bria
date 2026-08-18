@@ -26,6 +26,7 @@ type Reader struct {
 	readMu       sync.Mutex
 	readCache    map[string]readCacheEntry
 	readOrder    []string
+	readFlights  map[string]chan struct{}
 }
 
 type resolveCacheKey struct {
@@ -58,6 +59,7 @@ func NewReader(config Config) (*Reader, error) {
 		config:       normalized,
 		resolveCache: make(map[resolveCacheKey]resolveCacheEntry),
 		readCache:    make(map[string]readCacheEntry),
+		readFlights:  make(map[string]chan struct{}),
 	}, nil
 }
 
@@ -86,15 +88,28 @@ func (r *Reader) Read(ctx context.Context, request Request) ([]Event, error) {
 	if err != nil {
 		return nil, err
 	}
-	before, err := os.Stat(path)
-	if err != nil {
-		return nil, fmt.Errorf("stat transcript: %w", err)
+	var before os.FileInfo
+	for {
+		before, err = os.Stat(path)
+		if err != nil {
+			return nil, fmt.Errorf("stat transcript: %w", err)
+		}
+		if events, ok := r.cachedRead(path, before); ok {
+			cacheHit = true
+			eventCount = len(events)
+			return events, nil
+		}
+		wait, owner := r.claimRead(path)
+		if owner {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-wait:
+		}
 	}
-	if events, ok := r.cachedRead(path, before); ok {
-		cacheHit = true
-		eventCount = len(events)
-		return events, nil
-	}
+	defer r.finishRead(path)
 
 	lines, err := readRecentJSONLLines(path, r.config.MaxReadBytes, r.config.MaxLineBytes)
 	if err != nil {
@@ -219,6 +234,27 @@ func (r *Reader) cachedRead(path string, info os.FileInfo) ([]Event, bool) {
 		return nil, false
 	}
 	return cloneEvents(entry.events), true
+}
+
+func (r *Reader) claimRead(path string) (<-chan struct{}, bool) {
+	r.readMu.Lock()
+	defer r.readMu.Unlock()
+	if wait, ok := r.readFlights[path]; ok {
+		return wait, false
+	}
+	wait := make(chan struct{})
+	r.readFlights[path] = wait
+	return wait, true
+}
+
+func (r *Reader) finishRead(path string) {
+	r.readMu.Lock()
+	wait := r.readFlights[path]
+	delete(r.readFlights, path)
+	if wait != nil {
+		close(wait)
+	}
+	r.readMu.Unlock()
 }
 
 func (r *Reader) rememberRead(path string, info os.FileInfo, events []Event) {

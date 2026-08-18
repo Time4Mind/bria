@@ -127,9 +127,13 @@ func (h *Handler) refreshActiveInteractive(
 }
 
 func telegramMessage(card domain.TelegramResponseCard) telegrambot.Message {
+	paneHash := card.PaneHash
+	if _, decodedPaneHash, ok := decodeSessionPagePaneHash(card.PaneHash); ok {
+		paneHash = decodedPaneHash
+	}
 	return telegrambot.Message{
 		ChatID: card.ChatID, MessageID: card.MessageID, Rich: card.Rich,
-		RichMediaFileID: card.RichMediaFileID, PaneHash: card.PaneHash,
+		RichMediaFileID: card.RichMediaFileID, PaneHash: paneHash,
 		ScreenHash: card.ScreenHash,
 	}
 }

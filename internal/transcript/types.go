@@ -59,7 +59,7 @@ type Config struct {
 }
 
 const (
-	defaultMaxEvents     = 200
+	defaultMaxEvents     = 400
 	defaultMaxReadBytes  = 4 << 20
 	defaultMaxLineBytes  = 1 << 20
 	defaultMaxBodyBytes  = 256 << 10

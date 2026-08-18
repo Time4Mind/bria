@@ -1,6 +1,8 @@
 package telegramapp
 
 import (
+	"crypto/sha256"
+	"fmt"
 	"strings"
 	"time"
 
@@ -10,6 +12,7 @@ import (
 
 func cardEvents(events []transcript.Event) []application.CardEvent {
 	result := make([]application.CardEvent, 0, len(events))
+	occurrences := make(map[string]int)
 	for _, event := range events {
 		kind, pageBreak := cardEventKind(event.Kind)
 		if kind == "" {
@@ -24,8 +27,15 @@ func cardEvents(events []transcript.Event) []application.CardEvent {
 		if event.Head != "" {
 			text = event.Head
 		}
+		identity := string(event.Kind) + "\x00" + event.Timestamp + "\x00" + event.ToolUseID
+		if event.Timestamp == "" && event.ToolUseID == "" {
+			identity += "\x00" + event.Text + "\x00" + event.Body
+		}
+		ordinal := occurrences[identity]
+		occurrences[identity] = ordinal + 1
+		digest := sha256.Sum256([]byte(fmt.Sprintf("%s\x00%d", identity, ordinal)))
 		result = append(result, application.CardEvent{
-			Kind: kind, Text: text, Body: event.Body,
+			ID: fmt.Sprintf("%x", digest[:8]), Kind: kind, Text: text, Body: event.Body,
 			ToolUseID: event.ToolUseID, ToolName: event.ToolName,
 			StartedAt: startedAt, IsError: event.Error, PageBreak: pageBreak,
 		})

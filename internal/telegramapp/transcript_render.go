@@ -68,6 +68,36 @@ func (h *Handler) renderRegularSessionCard(
 	return snapshot.screen, err
 }
 
+// renderCachedSessionCard keeps explicit pagination out of the node I/O path.
+// The cache is exactly the transcript snapshot that produced a recent card;
+// a live worker refreshes it asynchronously after the user's page edit.
+func (h *Handler) renderCachedSessionCard(
+	actor application.Principal,
+	ref domain.SessionRef,
+	page int,
+) (telegramui.Screen, bool, error) {
+	session, err := h.service.Session(actor, ref)
+	if err != nil {
+		return telegramui.Screen{}, false, err
+	}
+	events, ok := h.cachedCardTranscript(ref)
+	if !ok {
+		return telegramui.Screen{}, false, nil
+	}
+	renderedEvents := h.withPendingVoiceRows(actor, ref, session, events)
+	screen, err := h.projector.SessionCardViewWithContext(
+		actor, ref, cardEvents(renderedEvents), page,
+		h.rememberedCardAnchor(actor.UserID, ref, page), h.cardContext(ref),
+	)
+	if err == nil {
+		if finalAt, final := finalTranscriptAt(events); final && screen.Checkpoint != nil &&
+			screenShowsLatestCardPage(screen) {
+			screen.Checkpoint.RenderedFinalAt = finalAt
+		}
+	}
+	return screen, true, err
+}
+
 func (h *Handler) renderSessionCardSnapshot(
 	ctx context.Context,
 	actor application.Principal,
@@ -134,8 +164,9 @@ func (h *Handler) renderSessionCardSnapshotWithPane(
 			renderedEvents := h.withPendingVoiceRows(actor, ref, session, nil)
 			timing.pending = time.Since(phaseStarted)
 			phaseStarted = time.Now()
-			screen, projectErr := h.projector.SessionCardPageWithContext(
-				actor, ref, cardEvents(renderedEvents), page, h.cardContext(ref),
+			screen, projectErr := h.projector.SessionCardViewWithContext(
+				actor, ref, cardEvents(renderedEvents), page,
+				h.rememberedCardAnchor(actor.UserID, ref, page), h.cardContext(ref),
 			)
 			timing.projection = time.Since(phaseStarted)
 			timing.events = len(renderedEvents)
@@ -158,8 +189,9 @@ func (h *Handler) renderSessionCardSnapshotWithPane(
 	renderedEvents := h.withPendingVoiceRows(actor, ref, session, events)
 	timing.pending = time.Since(phaseStarted)
 	phaseStarted = time.Now()
-	screen, err := h.projector.SessionCardPageWithContext(
-		actor, ref, cardEvents(renderedEvents), page, h.cardContext(ref),
+	screen, err := h.projector.SessionCardViewWithContext(
+		actor, ref, cardEvents(renderedEvents), page,
+		h.rememberedCardAnchor(actor.UserID, ref, page), h.cardContext(ref),
 	)
 	timing.projection = time.Since(phaseStarted)
 	timing.events = len(renderedEvents)

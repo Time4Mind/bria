@@ -141,6 +141,18 @@ func TestServersNavigationIsNotReplacedByRunningSessionRefresh(t *testing.T) {
 	if cardErr != nil || !ok || card.Session != (domain.SessionRef{}) {
 		t.Fatalf("repeated navigation card checkpoint = %#v / %v / %v", card, ok, cardErr)
 	}
+	// Model a stale cross-worker checkpoint that lands after navigation. The
+	// handler-local visible view is the final authority for outbound rendering:
+	// a session worker must not flash over the Servers screen even temporarily.
+	if err := fixture.service.RecordTelegramResponseCard(
+		application.WithOperationScope(context.Background(), "late-session-checkpoint"), actor,
+		domain.TelegramResponseCard{
+			ChatID: 7, MessageID: 91, Rich: true, Session: ref,
+			SessionRevision: running.Revision, SessionEventAt: running.LastEventAt,
+		},
+	); err != nil {
+		t.Fatal(err)
+	}
 	edits := len(fixture.messenger.edited)
 	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Millisecond)
 	defer cancel()

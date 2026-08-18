@@ -17,6 +17,7 @@ const (
 )
 
 type CardEvent struct {
+	ID          string
 	Kind        CardEventKind
 	Text        string
 	Body        string

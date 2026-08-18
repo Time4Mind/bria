@@ -58,7 +58,7 @@ func TestReplaceResponseCardsDeletesThePreviousReplicatedCard(t *testing.T) {
 func TestPaneRefreshRendersFinalAnswerWhenRuntimeAlreadySettledIdle(t *testing.T) {
 	fixture := newFixture(t)
 	fixture.messenger.sendNotify = make(chan struct{}, 2)
-	fixture.messenger.deleteNotify = make(chan struct{}, 1)
+	fixture.messenger.clearNotify = make(chan struct{}, 1)
 	ref := domain.SessionRef{NodeID: "allowed", SessionID: "live"}
 	actor := application.Principal{UserID: 7}
 	session, err := fixture.service.Session(actor, ref)
@@ -96,7 +96,7 @@ func TestPaneRefreshRendersFinalAnswerWhenRuntimeAlreadySettledIdle(t *testing.T
 	case <-time.After(2 * time.Second):
 		t.Fatal("settled idle card was not promoted to a rich final card")
 	}
-	waitTestNotification(t, fixture.messenger.deleteNotify, "old active carrier was not deleted")
+	waitTestNotification(t, fixture.messenger.clearNotify, "old active carrier was not frozen")
 	if len(fixture.messenger.sent) < 2 {
 		t.Fatal("settled idle card was not promoted to a rich final card")
 	}
@@ -110,15 +110,17 @@ func TestPaneRefreshRendersFinalAnswerWhenRuntimeAlreadySettledIdle(t *testing.T
 	if len(parts) != 2 || parts[0] == parts[1] {
 		t.Fatalf("final response start page = %s", label)
 	}
-	if len(fixture.messenger.deleted) == 0 || fixture.messenger.deleted[0].MessageID != 1 {
-		t.Fatalf("old active carrier was not deleted: %#v", fixture.messenger.deleted)
+	if containsMessageID(fixture.messenger.deleted, 1) ||
+		!containsMessageID(fixture.messenger.cleared, 1) {
+		t.Fatalf("old active carrier deleted=%#v cleared=%#v",
+			fixture.messenger.deleted, fixture.messenger.cleared)
 	}
 }
 
 func TestPaneRefreshSettlesClaudeProviderErrorAsDegraded(t *testing.T) {
 	fixture := newFixture(t)
 	fixture.messenger.sendNotify = make(chan struct{}, 2)
-	fixture.messenger.deleteNotify = make(chan struct{}, 1)
+	fixture.messenger.clearNotify = make(chan struct{}, 1)
 	ref := domain.SessionRef{NodeID: "allowed", SessionID: "live"}
 	session, err := fixture.service.Session(application.Principal{UserID: 7}, ref)
 	if err != nil {
@@ -149,7 +151,7 @@ func TestPaneRefreshSettlesClaudeProviderErrorAsDegraded(t *testing.T) {
 	}
 	waitTestNotification(t, fixture.messenger.sendNotify, "initial Claude card was not sent")
 	waitTestNotification(t, fixture.messenger.sendNotify, "Claude error card was not reposted")
-	waitTestNotification(t, fixture.messenger.deleteNotify, "initial Claude carrier was not retired")
+	waitTestNotification(t, fixture.messenger.clearNotify, "initial Claude carrier was not frozen")
 	session, err = fixture.service.Session(application.Principal{UserID: 7}, ref)
 	if err != nil {
 		t.Fatal(err)

@@ -106,9 +106,14 @@ func (h *Handler) currentPaneGeneration(userID domain.UserID, generation uint64)
 
 func (h *Handler) cancelPaneRefresh(userID domain.UserID) {
 	h.paneMu.Lock()
+	cancel := h.paneCancels[userID]
 	h.paneGeneration[userID]++
 	delete(h.paneWorkers, userID)
+	delete(h.paneCancels, userID)
 	h.paneMu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
 }
 
 func waitPaneRefresh(ctx context.Context, delay time.Duration) bool {

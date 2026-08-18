@@ -45,6 +45,17 @@ func (p *TelegramProjector) SessionCardPageWithContext(
 	requestedPage int,
 	context CardContext,
 ) (telegramui.Screen, error) {
+	return p.SessionCardViewWithContext(actor, ref, events, requestedPage, "", context)
+}
+
+func (p *TelegramProjector) SessionCardViewWithContext(
+	actor Principal,
+	ref domain.SessionRef,
+	events []CardEvent,
+	requestedPage int,
+	requestedAnchor string,
+	context CardContext,
+) (telegramui.Screen, error) {
 	state, err := p.actorState(actor)
 	if err != nil {
 		return telegramui.Screen{}, err
@@ -69,6 +80,27 @@ func (p *TelegramProjector) SessionCardPageWithContext(
 	queueLimit := preferences.EffectiveOfflineInputQueueLimit()
 	pages := RenderCardEventPages(preferences, events, CardRenderOptions{})
 	page := requestedPage
+	anchorResolved := false
+	if requestedAnchor != "" {
+		for _, candidate := range pages.Pages {
+			for _, anchor := range strings.Split(candidate.AnchorIndex, "\x00") {
+				if anchor == requestedAnchor {
+					page = candidate.Number
+					anchorResolved = true
+					break
+				}
+			}
+			if anchorResolved {
+				break
+			}
+		}
+		if !anchorResolved {
+			// The pinned chunk aged out of the bounded transcript. The nearest
+			// surviving content is the new oldest page; retaining the old numeric
+			// index would silently jump the user forward to unrelated text.
+			page = 1
+		}
+	}
 	if page == CardPageLatestResponseStart && pages.LatestResponseStart.Number > 0 {
 		page = pages.LatestResponseStart.Number
 	}
@@ -197,9 +229,14 @@ func (p *TelegramProjector) SessionCardPageWithContext(
 		Sessions: switcher, AllHosts: allHosts,
 	})
 	screen.PaneAnchorOffset = paneAnchorOffset
+	pageAnchor := pages.Pages[page-1].Anchor
+	if anchorResolved {
+		pageAnchor = requestedAnchor
+	}
 	screen.Checkpoint = &telegramui.SessionCheckpoint{
 		NodeID: string(session.NodeID), SessionID: string(session.ID),
 		Revision: session.Revision, EventAt: session.LastEventAt,
+		PageAnchor: pageAnchor,
 	}
 	return screen, nil
 }

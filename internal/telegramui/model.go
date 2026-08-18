@@ -54,6 +54,9 @@ type SessionCheckpoint struct {
 	SessionID string
 	Revision  uint64
 	EventAt   time.Time
+	// PageAnchor identifies the first stable transcript chunk on the rendered
+	// page. It is handler-only navigation metadata and is not sent to Telegram.
+	PageAnchor string
 	// RenderedFinalAt is set only when the latest page contains a provider final.
 	RenderedFinalAt time.Time
 }

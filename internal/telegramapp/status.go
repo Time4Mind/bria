@@ -238,6 +238,7 @@ func (h *Handler) scheduleStatusRefresh(
 	actor application.Principal,
 	message telegrambot.Message,
 	mode telegramui.StatusMode,
+	viewEpoch uint64,
 ) {
 	if message.ChatID == 0 || message.MessageID == 0 {
 		return
@@ -258,7 +259,7 @@ func (h *Handler) scheduleStatusRefresh(
 			case <-timeout.C:
 				return
 			case <-ticker.C:
-				if !h.canRefresh() {
+				if !h.canRefresh() || !h.visibleEpochCurrent(actor.UserID, viewEpoch) {
 					return
 				}
 				current := h.service.StatusFingerprint(actor)
@@ -269,7 +270,7 @@ func (h *Handler) scheduleStatusRefresh(
 					continue
 				}
 				screen, err := h.projectStatus(actor, mode)
-				if err == nil {
+				if err == nil && h.visibleEpochCurrent(actor.UserID, viewEpoch) {
 					_, _ = h.messenger.EditScreen(ctx, message, screen)
 				}
 				last = current

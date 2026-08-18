@@ -62,6 +62,37 @@ func TestSessionCardSeparatesContextAndBackgroundLikeCCBot(t *testing.T) {
 	}
 }
 
+func TestSessionCardAnchorSurvivesLeadingPageEviction(t *testing.T) {
+	projector, _, _ := projectorFixture(t)
+	actor := application.Principal{UserID: 2}
+	ref := domain.SessionRef{NodeID: "alpha", SessionID: "a-new"}
+	events := make([]application.CardEvent, 0, 6)
+	for index := 1; index <= 6; index++ {
+		events = append(events, application.CardEvent{
+			ID: fmt.Sprintf("event-%d", index), Kind: application.CardEventAssistantText,
+			Text:      fmt.Sprintf("answer-%d %s", index, strings.Repeat("content ", 180)),
+			PageBreak: true,
+		})
+	}
+	initial := application.RenderCardEventPages(
+		domain.DefaultUserPreferences(), events, application.CardRenderOptions{},
+	)
+	target := initial.Pages[3]
+	if target.Anchor == "" || target.Number != 4 {
+		t.Fatalf("initial target=%#v", target)
+	}
+	screen, err := projector.SessionCardViewWithContext(
+		actor, ref, events[2:], target.Number, target.Anchor, application.CardContext{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if screen.Grid[0][1].Label != "2/4" || !strings.Contains(screen.Text, "answer-4") ||
+		screen.Checkpoint == nil || screen.Checkpoint.PageAnchor != target.Anchor {
+		t.Fatalf("anchored page did not follow content after eviction: %#v", screen)
+	}
+}
+
 func TestSessionCardUsesAgentTimestampAsRecordedByBackend(t *testing.T) {
 	projector, _, _ := projectorFixture(t)
 	screen, err := projector.SessionCardPage(

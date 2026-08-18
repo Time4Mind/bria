@@ -44,15 +44,17 @@ func (p machinePort) Apply(_ context.Context, command clusterstate.Command) (clu
 }
 
 type messengerStub struct {
-	mu                                   sync.Mutex
-	answers                              []string
-	sent                                 []telegramui.Screen
-	edited                               []telegramui.Screen
-	deleted                              []telegrambot.Message
-	editErr                              error
-	sendErr                              error
-	events                               *[]string
-	editNotify, sendNotify, deleteNotify chan struct{}
+	mu                                                sync.Mutex
+	answers                                           []string
+	sent                                              []telegramui.Screen
+	edited                                            []telegramui.Screen
+	editedMessages                                    []telegrambot.Message
+	deleted                                           []telegrambot.Message
+	cleared                                           []telegrambot.Message
+	editErr                                           error
+	sendErr                                           error
+	events                                            *[]string
+	editNotify, sendNotify, deleteNotify, clearNotify chan struct{}
 }
 
 func (m *messengerStub) AnswerCallbackQuery(_ context.Context, id, text string) error {
@@ -91,6 +93,7 @@ func (m *messengerStub) EditScreen(_ context.Context, message telegrambot.Messag
 		*m.events = append(*m.events, "edit")
 	}
 	m.edited = append(m.edited, screen)
+	m.editedMessages = append(m.editedMessages, message)
 	if m.editNotify != nil {
 		select {
 		case m.editNotify <- struct{}{}:
@@ -112,7 +115,8 @@ func (m *messengerStub) DeleteMessage(_ context.Context, message telegrambot.Mes
 func (m *messengerStub) ClearKeyboard(_ context.Context, message telegrambot.Message) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.deleted = append(m.deleted, message)
+	m.cleared = append(m.cleared, message)
+	notifyTest(m.clearNotify)
 	return nil
 }
 

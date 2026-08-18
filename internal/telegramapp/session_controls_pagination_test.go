@@ -99,11 +99,21 @@ func TestTranscriptPageButtonsResolveOpaqueTargetPage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	controls.mu.RLock()
+	readsBeforePage := controls.transcriptCalls
+	controls.mu.RUnlock()
 	if err := handler.HandleTelegramUpdate(context.Background(), telegrambot.IncomingUpdate{
 		UpdateID: 91, Kind: telegrambot.IncomingCallback, ChatID: 7, UserID: 7,
 		CallbackID: "previous", CallbackData: previousData, CallbackOrigin: telegrambot.Message{ChatID: 7, MessageID: 10, Rich: true},
 	}); err != nil {
 		t.Fatal(err)
+	}
+	controls.mu.RLock()
+	readsAfterPage := controls.transcriptCalls
+	controls.mu.RUnlock()
+	if readsAfterPage != readsBeforePage {
+		t.Fatalf("historical page navigation performed node transcript I/O: before=%d after=%d",
+			readsBeforePage, readsAfterPage)
 	}
 	first := fixture.messenger.edited[len(fixture.messenger.edited)-1]
 	if !strings.Contains(first.Text, "First answer") || strings.Contains(first.Text, "Second answer") || !strings.Contains(telegramui.CanonicalGrid(first.Grid), "1/2") {
@@ -122,6 +132,63 @@ func TestTranscriptPageButtonsResolveOpaqueTargetPage(t *testing.T) {
 	last := fixture.messenger.edited[len(fixture.messenger.edited)-1]
 	if !strings.Contains(last.Text, "Second answer") || !strings.Contains(telegramui.CanonicalGrid(last.Grid), "2/2") {
 		t.Fatalf("wrapped last page=%#v", last)
+	}
+}
+
+func TestSendingPromptPreservesPinnedTranscriptChunk(t *testing.T) {
+	fixture := newFixture(t)
+	ref := domain.SessionRef{NodeID: "allowed", SessionID: "live"}
+	controls := &blockingControls{ref: ref, events: []transcript.Event{
+		{Kind: transcript.EventAssistantFinal, Text: "Pinned older answer"},
+		{Kind: transcript.EventAssistantFinal, Text: "Newest answer"},
+	}}
+	handler, err := telegramapp.NewHandlerWithControls(
+		fixture.service, fixture.projector, fixture.codec, fixture.messenger, controls,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	selectToken, err := fixture.codec.Session(7, telegramui.ActionSelectSession, ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	selectData, err := (telegramui.Callback{
+		Action: telegramui.ActionSelectSession, Token: selectToken,
+	}).Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := handler.HandleTelegramUpdate(context.Background(), telegrambot.IncomingUpdate{
+		UpdateID: 96, Kind: telegrambot.IncomingCallback, ChatID: 7, UserID: 7,
+		CallbackID: "select-for-prompt", CallbackData: selectData,
+		CallbackOrigin: telegrambot.Message{ChatID: 7, MessageID: 10},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	latest := fixture.messenger.sent[len(fixture.messenger.sent)-1]
+	previousData, err := latest.Grid[0][0].Callback.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := handler.HandleTelegramUpdate(context.Background(), telegrambot.IncomingUpdate{
+		UpdateID: 97, Kind: telegrambot.IncomingCallback, ChatID: 7, UserID: 7,
+		CallbackID: "pin-for-prompt", CallbackData: previousData,
+		CallbackOrigin: telegrambot.Message{ChatID: 7, MessageID: 10, Rich: true},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := handler.HandleTelegramUpdate(context.Background(), telegrambot.IncomingUpdate{
+		UpdateID: 98, Kind: telegrambot.IncomingMessage, ChatID: 7, UserID: 7,
+		Content: telegrambot.ContentDescriptor{Kind: telegrambot.IncomingText},
+		Text:    "new prompt while reading history",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	pending := fixture.messenger.sent[len(fixture.messenger.sent)-1]
+	if !strings.Contains(pending.Text, "Pinned older answer") ||
+		strings.Contains(pending.Text, "Newest answer") ||
+		!strings.Contains(telegramui.CanonicalGrid(pending.Grid), "1/2") {
+		t.Fatalf("pending prompt moved pinned transcript chunk: %#v", pending)
 	}
 }
 

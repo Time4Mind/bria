@@ -25,7 +25,8 @@ func (h *Handler) editPaneScreen(
 	h.cardEditMu.Lock()
 	defer h.cardEditMu.Unlock()
 	if !h.currentPaneGeneration(actor.UserID, generation) ||
-		!h.screenMatchesRememberedPage(actor.UserID, ref, screen) {
+		!h.screenMatchesRememberedPage(actor.UserID, ref, screen) ||
+		!h.visibleSessionMatches(actor, ref) {
 		return message, nil
 	}
 	card, ok, err := h.service.TelegramResponseCard(actor)
@@ -72,6 +73,7 @@ func (h *Handler) finishPaneRefresh(userID domain.UserID, generation uint64) {
 	defer h.paneMu.Unlock()
 	if h.paneWorkers[userID] == generation {
 		delete(h.paneWorkers, userID)
+		delete(h.paneCancels, userID)
 	}
 }
 

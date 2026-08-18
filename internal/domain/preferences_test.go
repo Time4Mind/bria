@@ -248,3 +248,50 @@ func TestResponseCardRegistryPreservesFinalDeliveryWatermark(t *testing.T) {
 		t.Fatalf("advanced watermark=%s, want %s", got, card.RenderedFinalAt)
 	}
 }
+
+func TestResponseCardRegistryGroupsExplicitViewStateByUserAndSession(t *testing.T) {
+	state := domain.NewState()
+	if err := state.AddNode(domain.Node{ID: "node", Name: "Node"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.SetNodeAccess(7, domain.RoleOwner, "node"); err != nil {
+		t.Fatal(err)
+	}
+	created := time.Unix(10, 0).UTC()
+	for _, id := range []domain.SessionID{"first", "second"} {
+		if err := state.AddSession(domain.Session{
+			ID: id, NodeID: "node", OwnerID: 7, Backend: "codex",
+			State: domain.SessionLive, RuntimePhase: domain.RuntimeIdle,
+			CreatedAt: created, LiveSinceAt: created,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	views := []domain.TelegramSessionView{
+		{Page: 7, Pages: 9, Anchor: "first.0", Follow: false},
+		{Page: 4, Pages: 4, Anchor: "second.0", Follow: true},
+	}
+	for index, id := range []domain.SessionID{"first", "second"} {
+		ref := domain.SessionRef{NodeID: "node", SessionID: id}
+		card := domain.TelegramResponseCard{
+			ChatID: 7, MessageID: int64(20 + index), Session: ref, SessionRevision: 1,
+			SessionEventAt: created,
+			PaneHash:       domain.EncodeTelegramSessionViewPaneHash(views[index], "pane"),
+		}
+		if err := state.RecordTelegramResponseCard(7, card); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for index, id := range []domain.SessionID{"first", "second"} {
+		got, ok := state.TelegramSessionView(7, domain.SessionRef{NodeID: "node", SessionID: id})
+		if !ok || got != views[index] {
+			t.Fatalf("view %s=%#v ok=%v", id, got, ok)
+		}
+	}
+	clone := state.Clone()
+	clone.TelegramSessionViews[7]["node/first"] = domain.TelegramSessionView{Page: 1, Pages: 1}
+	got, _ := state.TelegramSessionView(7, domain.SessionRef{NodeID: "node", SessionID: "first"})
+	if got != views[0] {
+		t.Fatalf("clone mutated source view: %#v", got)
+	}
+}

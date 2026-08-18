@@ -15,26 +15,27 @@ type Navigation struct {
 	BackgroundByUser        map[UserID]map[string]BackgroundNotice `json:"background_by_user,omitempty"`
 }
 type State struct {
-	SchemaVersion           int                               `json:"schema_version"`
-	Nodes                   map[NodeID]Node                   `json:"nodes"`
-	Sessions                map[string]Session                `json:"sessions"`
-	Users                   map[UserID]UserAccess             `json:"users"`
-	Grants                  map[string]SessionGrant           `json:"grants"`
-	Preferences             map[UserID]UserPreferences        `json:"preferences"`
-	Navigation              Navigation                        `json:"navigation"`
-	TelegramResponseCards   map[UserID]TelegramResponseCard   `json:"telegram_response_cards,omitempty"`
-	Quotas                  map[string]QuotaSnapshot          `json:"quotas,omitempty"`
-	ProviderAccountAliases  map[string]string                 `json:"provider_account_aliases,omitempty"`
-	QuotaRefreshRequestedAt time.Time                         `json:"quota_refresh_requested_at,omitempty"`
-	LeaderPolicy            LeaderPolicy                      `json:"leader_policy,omitempty"`
-	TemporaryLeader         TemporaryLeader                   `json:"temporary_leader,omitempty"`
-	TelegramBotID           int64                             `json:"telegram_bot_id,omitempty"`
-	TelegramNextUpdateID    int64                             `json:"telegram_next_update_id,omitempty"`
-	EnrollmentInvites       map[string]EnrollmentInvite       `json:"enrollment_invites,omitempty"`
-	EnrollmentRequests      map[string]EnrollmentRequest      `json:"enrollment_requests,omitempty"`
-	NodeTombstones          map[NodeID]NodeTombstone          `json:"node_tombstones,omitempty"`
-	DeferredInputs          map[string][]DeferredSessionInput `json:"deferred_inputs,omitempty"`
-	ClusterUpdate           *ClusterUpdate                    `json:"cluster_update,omitempty"`
+	SchemaVersion           int                                       `json:"schema_version"`
+	Nodes                   map[NodeID]Node                           `json:"nodes"`
+	Sessions                map[string]Session                        `json:"sessions"`
+	Users                   map[UserID]UserAccess                     `json:"users"`
+	Grants                  map[string]SessionGrant                   `json:"grants"`
+	Preferences             map[UserID]UserPreferences                `json:"preferences"`
+	Navigation              Navigation                                `json:"navigation"`
+	TelegramResponseCards   map[UserID]TelegramResponseCard           `json:"telegram_response_cards,omitempty"`
+	TelegramSessionViews    map[UserID]map[string]TelegramSessionView `json:"telegram_session_views,omitempty"`
+	Quotas                  map[string]QuotaSnapshot                  `json:"quotas,omitempty"`
+	ProviderAccountAliases  map[string]string                         `json:"provider_account_aliases,omitempty"`
+	QuotaRefreshRequestedAt time.Time                                 `json:"quota_refresh_requested_at,omitempty"`
+	LeaderPolicy            LeaderPolicy                              `json:"leader_policy,omitempty"`
+	TemporaryLeader         TemporaryLeader                           `json:"temporary_leader,omitempty"`
+	TelegramBotID           int64                                     `json:"telegram_bot_id,omitempty"`
+	TelegramNextUpdateID    int64                                     `json:"telegram_next_update_id,omitempty"`
+	EnrollmentInvites       map[string]EnrollmentInvite               `json:"enrollment_invites,omitempty"`
+	EnrollmentRequests      map[string]EnrollmentRequest              `json:"enrollment_requests,omitempty"`
+	NodeTombstones          map[NodeID]NodeTombstone                  `json:"node_tombstones,omitempty"`
+	DeferredInputs          map[string][]DeferredSessionInput         `json:"deferred_inputs,omitempty"`
+	ClusterUpdate           *ClusterUpdate                            `json:"cluster_update,omitempty"`
 }
 
 func NewState() *State {
@@ -46,6 +47,7 @@ func NewState() *State {
 		Grants:                 make(map[string]SessionGrant),
 		Preferences:            make(map[UserID]UserPreferences),
 		TelegramResponseCards:  make(map[UserID]TelegramResponseCard),
+		TelegramSessionViews:   make(map[UserID]map[string]TelegramSessionView),
 		Quotas:                 make(map[string]QuotaSnapshot),
 		ProviderAccountAliases: make(map[string]string),
 		EnrollmentInvites:      make(map[string]EnrollmentInvite),
@@ -221,6 +223,13 @@ func (s *State) Clone() *State {
 	clone.TelegramNextUpdateID = s.TelegramNextUpdateID
 	for userID, card := range s.TelegramResponseCards {
 		clone.TelegramResponseCards[userID] = card
+	}
+	for userID, views := range s.TelegramSessionViews {
+		copyViews := make(map[string]TelegramSessionView, len(views))
+		for key, view := range views {
+			copyViews[key] = view
+		}
+		clone.TelegramSessionViews[userID] = copyViews
 	}
 	for key, snapshot := range s.Quotas {
 		clone.Quotas[key] = cloneQuota(snapshot)

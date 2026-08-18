@@ -190,6 +190,21 @@ func (s *Service) TelegramResponseCard(
 	return card, ok, nil
 }
 
+func (s *Service) TelegramSessionView(
+	actor Principal,
+	ref domain.SessionRef,
+) (domain.TelegramSessionView, bool, error) {
+	if actor.UserID <= 0 || ref.Validate() != nil {
+		return domain.TelegramSessionView{}, false, domain.ErrAccessDenied
+	}
+	state := s.reader.State()
+	if _, ok := state.Users[actor.UserID]; !ok {
+		return domain.TelegramSessionView{}, false, domain.ErrAccessDenied
+	}
+	view, ok := state.TelegramSessionView(actor.UserID, ref)
+	return view, ok, nil
+}
+
 func (s *Service) RecordTelegramResponseCard(
 	ctx context.Context,
 	actor Principal,
