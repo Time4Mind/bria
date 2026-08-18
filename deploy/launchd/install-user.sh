@@ -1,8 +1,11 @@
 #!/bin/sh
 set -eu
 
-data_dir="${BRIA_DATA_DIR:-$HOME/.bria}"
-config="${BRIA_CONFIG:-$data_dir/config.json}"
+project_root=$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)
+. "$project_root/scripts/macos-install-target.sh"
+resolve_macos_install_target
+data_dir="$resolved_data_dir"
+config="$resolved_config"
 binary="${BRIA_BINARY:-$HOME/.local/opt/bria/current/bria}"
 template="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)/com.time4mind.bria.plist"
 destination="$HOME/Library/LaunchAgents/com.time4mind.bria.plist"

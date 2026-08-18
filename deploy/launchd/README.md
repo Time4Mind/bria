@@ -3,9 +3,12 @@
 Bria runs as the logged-in user so Claude/Codex credentials, project folders,
 Apple Speech permission, and tmux belong to the same account. From a source
 checkout, `scripts/install-macos.sh` builds and installs the Apple Silicon
-binary under `~/.local/opt/bria/current`. If `~/.bria/config.json` already
-exists it also loads the LaunchAgent; otherwise it prints the remaining
-cluster init/join step and exits successfully.
+binary under `~/.local/opt/bria/current`. On a fresh install, an existing
+`~/.bria/config.json` loads the LaunchAgent; otherwise the installer prints the
+remaining cluster init/join step and exits successfully. A later bare reinstall
+preserves the config and working directory from the existing generated
+LaunchAgent. Changing node profiles requires explicit `BRIA_DATA_DIR` and
+`BRIA_CONFIG`.
 
 The generated service PATH includes the user-local bin directory, Homebrew on
 Apple Silicon and Intel, and the standard macOS system paths. Commands such as

@@ -12,8 +12,10 @@ fi
 
 project_root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 install_root="${BRIA_INSTALL_ROOT:-$HOME/.local/opt/bria/current}"
-data_dir="${BRIA_DATA_DIR:-$HOME/.bria}"
-config="${BRIA_CONFIG:-$data_dir/config.json}"
+. "$project_root/scripts/macos-install-target.sh"
+resolve_macos_install_target
+data_dir="$resolved_data_dir"
+config="$resolved_config"
 go_binary="${GO_BINARY:-$(command -v go || true)}"
 
 [ -n "$go_binary" ] && [ -x "$go_binary" ] || {
