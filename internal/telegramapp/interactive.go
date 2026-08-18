@@ -119,7 +119,11 @@ func (h *Handler) handleInteractiveCallback(
 		if renderErr != nil {
 			return renderErr
 		}
-		_, err = h.messenger.EditScreen(ctx, update.CallbackOrigin, screen)
+		var edited telegrambot.Message
+		edited, err = h.editExplicitSessionScreen(ctx, actor, update.CallbackOrigin, screen)
+		if err == nil {
+			h.schedulePaneRefresh(ctx, actor, target.Session, edited)
+		}
 		return err
 	}
 	key, ok := interactiveKey(callback.Action)
@@ -140,7 +144,11 @@ func (h *Handler) handleInteractiveCallback(
 			errors.Is(err, context.DeadlineExceeded) {
 			screen, renderErr := h.renderSessionCard(ctx, actor, target.Session, 0)
 			if renderErr == nil {
-				_, _ = h.messenger.EditScreen(ctx, update.CallbackOrigin, screen)
+				if edited, editErr := h.editExplicitSessionScreen(
+					ctx, actor, update.CallbackOrigin, screen,
+				); editErr == nil {
+					h.schedulePaneRefresh(ctx, actor, target.Session, edited)
+				}
 			}
 			return nil
 		}
@@ -156,7 +164,7 @@ func (h *Handler) handleInteractiveCallback(
 	if err != nil {
 		return err
 	}
-	message, err := h.messenger.EditScreen(ctx, update.CallbackOrigin, screen)
+	message, err := h.editExplicitSessionScreen(ctx, actor, update.CallbackOrigin, screen)
 	if err == nil && !waiting {
 		h.schedulePaneRefresh(ctx, actor, target.Session, message)
 	}

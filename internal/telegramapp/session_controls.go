@@ -70,7 +70,7 @@ func (h *Handler) handleSessionControlCallback(
 		if err := h.messenger.AnswerCallbackQuery(ctx, update.CallbackID, ""); err != nil {
 			return err
 		}
-		_, err = h.messenger.EditScreen(ctx, update.CallbackOrigin, screen)
+		_, err = h.editExplicitSessionScreen(ctx, actor, update.CallbackOrigin, screen)
 		return err
 	}
 	if callback.Action == telegramui.ActionCancelControl {
@@ -82,7 +82,7 @@ func (h *Handler) handleSessionControlCallback(
 			return err
 		}
 		var edited telegrambot.Message
-		edited, err = h.messenger.EditScreen(ctx, update.CallbackOrigin, screen)
+		edited, err = h.editExplicitSessionScreen(ctx, actor, update.CallbackOrigin, screen)
 		if err == nil {
 			h.schedulePaneRefresh(ctx, actor, ref, edited)
 		}
@@ -147,8 +147,12 @@ func (h *Handler) handleSessionControlCallback(
 	if err != nil {
 		return err
 	}
-	if _, err = h.messenger.EditScreen(ctx, update.CallbackOrigin, screen); err != nil {
+	var edited telegrambot.Message
+	if edited, err = h.editExplicitSessionScreen(ctx, actor, update.CallbackOrigin, screen); err != nil {
 		return err
+	}
+	if callback.Action == telegramui.ActionTerminal {
+		h.schedulePaneRefresh(ctx, actor, ref, edited)
 	}
 	if callback.Action == telegramui.ActionStop || callback.Action == telegramui.ActionConfirmClear {
 		go h.refreshSettledCard(ctx, actor, ref, operationID, update.CallbackOrigin)
@@ -185,7 +189,11 @@ func (h *Handler) refreshRestoredCard(
 			}
 			screen, err := h.renderSessionCard(ctx, actor, ref, 0)
 			if err == nil {
-				_, _ = h.messenger.EditScreen(ctx, origin, screen)
+				if edited, editErr := h.editExplicitSessionScreen(
+					ctx, actor, origin, screen,
+				); editErr == nil {
+					h.schedulePaneRefresh(ctx, actor, ref, edited)
+				}
 			}
 			return
 		}
@@ -203,7 +211,11 @@ func (h *Handler) editUnavailableSession(
 		return nil
 	}
 	screen.Text += "\n\n" + h.copy(actor).Text(i18n.ToastUnavailable)
-	_, err = h.messenger.EditScreen(ctx, origin, screen)
+	var edited telegrambot.Message
+	edited, err = h.editExplicitSessionScreen(ctx, actor, origin, screen)
+	if err == nil {
+		h.schedulePaneRefresh(ctx, actor, ref, edited)
+	}
 	return err
 }
 
@@ -274,7 +286,11 @@ func (h *Handler) refreshSettledCard(
 			}
 			screen, err := h.renderSessionCard(ctx, actor, ref, 0)
 			if err == nil {
-				_, _ = h.messenger.EditScreen(ctx, origin, screen)
+				if edited, editErr := h.editExplicitSessionScreen(
+					ctx, actor, origin, screen,
+				); editErr == nil {
+					h.schedulePaneRefresh(ctx, actor, ref, edited)
+				}
 			}
 			return
 		}
