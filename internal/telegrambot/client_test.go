@@ -205,6 +205,45 @@ func TestClientRedactsTokenFromAPIErrors(t *testing.T) {
 	}
 }
 
+func TestClientExposesTelegramFloodWait(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.WriteHeader(http.StatusTooManyRequests)
+		writeJSON(t, writer, map[string]any{
+			"ok": false, "error_code": 429,
+			"description": "Too Many Requests: retry after 1167",
+			"parameters":  map[string]any{"retry_after": 1167},
+		})
+	}))
+	defer server.Close()
+	client := newFakeServerClient(t, server, time.Second)
+	_, err := client.EditMessage(context.Background(), EditMessageRequest{
+		ChatID: 42, MessageID: 9, Text: "limited",
+	})
+	retryAfter, limited := FloodWait(err)
+	if !limited || retryAfter != 1167*time.Second {
+		t.Fatalf("FloodWait(%v)=(%v,%t)", err, retryAfter, limited)
+	}
+}
+
+func TestFloodWaitFallsBackToDescription(t *testing.T) {
+	retryAfter, limited := FloodWait(&APIError{
+		Method: "editMessageText", Code: 429,
+		Description: "Too Many Requests: retry after 42",
+	})
+	if !limited || retryAfter != 42*time.Second {
+		t.Fatalf("FloodWait=(%v,%t)", retryAfter, limited)
+	}
+}
+
+func TestRemoteFloodWaitRejectsLocalCooldown(t *testing.T) {
+	err := &APIError{
+		Method: "editScreen", Code: 429, RetryAfter: time.Minute, Local: true,
+	}
+	if _, limited := RemoteFloodWait(err); limited {
+		t.Fatal("local cooldown was classified as a remote Telegram rejection")
+	}
+}
+
 func TestClientTreatsUnchangedEditAsSuccess(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if !strings.HasSuffix(request.URL.Path, "/editMessageText") {

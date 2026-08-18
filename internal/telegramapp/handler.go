@@ -422,7 +422,7 @@ func (h *Handler) handleCallback(
 			_ = h.messenger.DeleteMessage(ctx, update.CallbackOrigin)
 		}
 	} else {
-		edited, err = h.messenger.EditScreen(ctx, update.CallbackOrigin, screen)
+		edited, err = h.editNavigationScreen(ctx, update.CallbackOrigin, screen)
 	}
 	if err == nil {
 		// Persist every carrier screen, including non-session navigation. An empty

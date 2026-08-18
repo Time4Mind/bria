@@ -96,6 +96,7 @@ func (c *Client) callRichMultipart(
 		return nil, &APIError{
 			Method: method, Code: envelope.ErrorCode,
 			Description: boundedDescription(strings.ReplaceAll(envelope.Description, c.token, "[redacted]")),
+			RetryAfter:  time.Duration(envelope.Parameters.RetryAfter) * time.Second,
 		}
 	}
 	if len(envelope.Result) == 0 || string(envelope.Result) == "null" {

@@ -332,6 +332,27 @@ func TestPoisonCallbackIsDroppedAfterBoundedRetriesAndQueueContinues(t *testing.
 	}
 }
 
+func TestRateLimitedCallbackIsDroppedWithoutImmediateRetries(t *testing.T) {
+	poller := &Poller{
+		maxCallbackAttempts: 5, callbackAttempts: make(map[int64]int),
+	}
+	dropped := 0
+	poller.onCallbackDropped = func(_ IncomingUpdate, _ error, attempts int) {
+		dropped = attempts
+	}
+	update := IncomingUpdate{UpdateID: 91, Kind: IncomingCallback}
+	err := &APIError{Method: "editMessageText", Code: 429, RetryAfter: time.Minute}
+	if !poller.dropFailedCallback(update, err) {
+		t.Fatal("rate-limited callback was scheduled for immediate retry")
+	}
+	if dropped != 1 {
+		t.Fatalf("drop attempts=%d want=1", dropped)
+	}
+	if len(poller.callbackAttempts) != 0 {
+		t.Fatalf("rate-limited callback attempts=%#v", poller.callbackAttempts)
+	}
+}
+
 type poisonCallbackAPI struct{}
 
 func (*poisonCallbackAPI) GetUpdates(ctx context.Context, request GetUpdatesRequest) ([]Update, error) {

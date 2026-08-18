@@ -3,10 +3,15 @@ package telegrambot
 import "encoding/json"
 
 type apiEnvelope[T any] struct {
-	OK          bool   `json:"ok"`
-	Result      T      `json:"result"`
-	ErrorCode   int    `json:"error_code,omitempty"`
-	Description string `json:"description,omitempty"`
+	OK          bool                  `json:"ok"`
+	Result      T                     `json:"result"`
+	ErrorCode   int                   `json:"error_code,omitempty"`
+	Description string                `json:"description,omitempty"`
+	Parameters  apiResponseParameters `json:"parameters,omitempty"`
+}
+
+type apiResponseParameters struct {
+	RetryAfter int `json:"retry_after,omitempty"`
 }
 
 type apiUpdate struct {

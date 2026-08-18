@@ -11,6 +11,7 @@ import (
 	"net/textproto"
 	"path/filepath"
 	"strconv"
+	"time"
 )
 
 type DocumentRequest struct {
@@ -81,6 +82,7 @@ func (c *Client) SendDocument(ctx context.Context, request DocumentRequest) (Mes
 		return Message{}, &APIError{
 			Method: "sendDocument", Code: envelope.ErrorCode,
 			Description: boundedDescription(envelope.Description),
+			RetryAfter:  time.Duration(envelope.Parameters.RetryAfter) * time.Second,
 		}
 	}
 	return validateMessageResult(envelope.Result, request.ChatID)

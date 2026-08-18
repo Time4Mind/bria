@@ -124,6 +124,49 @@ func TestServersBackReturnsToSessionsInsteadOfMenu(t *testing.T) {
 	}
 }
 
+func TestServersBackReplacesCardWhenTelegramRateLimitsEdit(t *testing.T) {
+	fixture := newFixture(t)
+	servers := encodeCallback(t, telegramui.ActionSessions, "servers")
+	if err := fixture.handler.HandleTelegramUpdate(context.Background(), telegrambot.IncomingUpdate{
+		UpdateID: 330, Kind: telegrambot.IncomingCallback, ChatID: 7, UserID: 7,
+		CallbackID: "servers-limited", CallbackData: servers,
+		CallbackOrigin: telegrambot.Message{ChatID: 7, MessageID: 12},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	selector := fixture.messenger.sent[len(fixture.messenger.sent)-1]
+	back := selector.Grid[len(selector.Grid)-1][0].Callback
+	backData, err := back.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	origin := stubMessageForScreen(90, selector)
+	fixture.messenger.editErr = &telegrambot.APIError{
+		Method: "editMessageText", Code: 429, RetryAfter: 20 * time.Minute,
+	}
+	beforeSent := len(fixture.messenger.sent)
+	if err := fixture.handler.HandleTelegramUpdate(context.Background(), telegrambot.IncomingUpdate{
+		UpdateID: 331, Kind: telegrambot.IncomingCallback, ChatID: 7, UserID: 7,
+		CallbackID: "back-limited", CallbackData: backData, CallbackOrigin: origin,
+	}); err != nil {
+		t.Fatalf("rate-limited back: %v", err)
+	}
+	if len(fixture.messenger.sent) != beforeSent+1 {
+		t.Fatalf("replacement sends=%d want=%d", len(fixture.messenger.sent), beforeSent+1)
+	}
+	replacement := fixture.messenger.sent[len(fixture.messenger.sent)-1]
+	if replacement.Name == telegramui.ScreenStatus || replacement.Name == telegramui.ScreenMenu {
+		t.Fatalf("replacement=%#v", replacement)
+	}
+	deletedOrigin := false
+	for _, deleted := range fixture.messenger.deleted {
+		deletedOrigin = deletedOrigin || deleted.MessageID == origin.MessageID
+	}
+	if !deletedOrigin {
+		t.Fatalf("deleted=%#v want origin=%#v", fixture.messenger.deleted, origin)
+	}
+}
+
 func TestServersStatusModesKeepSessionsAsBackDestination(t *testing.T) {
 	fixture := newFixture(t)
 	servers := encodeCallback(t, telegramui.ActionSessions, "servers")

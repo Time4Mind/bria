@@ -207,6 +207,11 @@ func (h *Handler) editResponseCard(
 		return replacement, nil
 	}
 	edited, err := h.messenger.EditScreen(ctx, message, screen)
+	if _, limited := telegrambot.RemoteFloodWait(err); limited && activeErr == nil {
+		return h.replaceFloodLimitedResponseCardLocked(
+			ctx, actor, message, active.Ref(), screen, err,
+		)
+	}
 	if err == nil {
 		h.rememberResponseCardLocked(ctx, actor, edited, screen)
 		if activeErr == nil {
@@ -214,6 +219,55 @@ func (h *Handler) editResponseCard(
 		}
 	}
 	return edited, err
+}
+
+// replaceFloodLimitedResponseCardLocked performs one send-based recovery from
+// an actual Bot API edit rejection. The activity messenger marks later edits
+// as local cooldown errors, so this cannot recreate the card on every refresh.
+// The caller holds cardEditMu and cardMutationMu.
+func (h *Handler) replaceFloodLimitedResponseCardLocked(
+	ctx context.Context,
+	actor application.Principal,
+	previous telegrambot.Message,
+	ref domain.SessionRef,
+	screen telegramui.Screen,
+	editErr error,
+) (telegrambot.Message, error) {
+	current, ok, err := h.service.TelegramResponseCard(actor)
+	if err != nil {
+		return telegrambot.Message{}, err
+	}
+	if !ok || current.Session != ref {
+		return previous, nil
+	}
+	if current.ChatID != previous.ChatID || current.MessageID != previous.MessageID ||
+		current.Rich != previous.Rich || current.RichMediaFileID != previous.RichMediaFileID {
+		return telegramMessage(current), nil
+	}
+	replacement, sendErr := h.messenger.SendScreen(ctx, previous.ChatID, screen)
+	if sendErr != nil {
+		return telegrambot.Message{}, fmt.Errorf(
+			"replace rate-limited response card: %w", errors.Join(editErr, sendErr),
+		)
+	}
+	active, activeErr := h.service.ActiveSession(actor)
+	if activeErr != nil || active.Ref() != ref {
+		_ = h.messenger.DeleteMessage(ctx, replacement)
+		return previous, nil
+	}
+	h.recordResponseCard(ctx, actor, replacement, screen)
+	committed, committedOK, recordErr := h.service.TelegramResponseCard(actor)
+	if recordErr != nil || !committedOK || committed.ChatID != replacement.ChatID ||
+		committed.MessageID != replacement.MessageID {
+		_ = h.messenger.DeleteMessage(ctx, replacement)
+		if recordErr != nil {
+			return telegrambot.Message{}, recordErr
+		}
+		return telegrambot.Message{}, errors.New("rate-limited response card was not committed")
+	}
+	_ = h.messenger.DeleteMessage(ctx, previous)
+	h.rememberResolvedCardPage(actor.UserID, ref, screen)
+	return replacement, nil
 }
 
 func (h *Handler) repostFinalResponseCard(

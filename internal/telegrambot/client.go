@@ -45,6 +45,8 @@ type APIError struct {
 	Method      string
 	Code        int
 	Description string
+	RetryAfter  time.Duration
+	Local       bool
 }
 
 func (e *APIError) Error() string {
@@ -52,6 +54,46 @@ func (e *APIError) Error() string {
 		return fmt.Sprintf("telegram %s failed with code %d", e.Method, e.Code)
 	}
 	return fmt.Sprintf("telegram %s failed with code %d: %s", e.Method, e.Code, e.Description)
+}
+
+// FloodWait returns Telegram's requested cooldown for a rate-limited call.
+// Older Bot API gateways sometimes omit response parameters, so retain a
+// bounded description fallback for the canonical "retry after N" response.
+func FloodWait(err error) (time.Duration, bool) {
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) || apiErr.Code != http.StatusTooManyRequests {
+		return 0, false
+	}
+	if apiErr.RetryAfter > 0 {
+		return apiErr.RetryAfter, true
+	}
+	const marker = "retry after "
+	description := strings.ToLower(apiErr.Description)
+	index := strings.Index(description, marker)
+	if index < 0 {
+		return 0, true
+	}
+	var seconds int
+	for _, char := range description[index+len(marker):] {
+		if char < '0' || char > '9' {
+			break
+		}
+		seconds = seconds*10 + int(char-'0')
+	}
+	if seconds <= 0 {
+		return 0, true
+	}
+	return time.Duration(seconds) * time.Second, true
+}
+
+// RemoteFloodWait distinguishes a Bot API rejection from the local cooldown
+// used to suppress repeated edits after that rejection.
+func RemoteFloodWait(err error) (time.Duration, bool) {
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) || apiErr.Local {
+		return 0, false
+	}
+	return FloodWait(err)
 }
 
 type TransportError struct {
@@ -330,10 +372,11 @@ func (c *Client) call(
 		return errors.New("telegram response exceeds configured limit")
 	}
 	outer := struct {
-		OK          bool            `json:"ok"`
-		Result      json.RawMessage `json:"result"`
-		ErrorCode   int             `json:"error_code,omitempty"`
-		Description string          `json:"description,omitempty"`
+		OK          bool                  `json:"ok"`
+		Result      json.RawMessage       `json:"result"`
+		ErrorCode   int                   `json:"error_code,omitempty"`
+		Description string                `json:"description,omitempty"`
+		Parameters  apiResponseParameters `json:"parameters,omitempty"`
 	}{}
 	if err := json.Unmarshal(responseBody, &outer); err != nil {
 		return errors.New("telegram returned malformed JSON")
@@ -344,6 +387,7 @@ func (c *Client) call(
 			Description: boundedDescription(strings.ReplaceAll(
 				outer.Description, c.token, "[redacted]",
 			)),
+			RetryAfter: time.Duration(outer.Parameters.RetryAfter) * time.Second,
 		}
 	}
 	if result == nil {

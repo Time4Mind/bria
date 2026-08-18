@@ -53,6 +53,8 @@ type messengerStub struct {
 	sent                                 []telegramui.Screen
 	edited                               []telegramui.Screen
 	deleted                              []telegrambot.Message
+	editErr                              error
+	sendErr                              error
 	events                               *[]string
 	editNotify, sendNotify, deleteNotify chan struct{}
 }
@@ -81,6 +83,9 @@ func (m *messengerStub) SendScreen(_ context.Context, _ int64, screen telegramui
 		default:
 		}
 	}
+	if m.sendErr != nil {
+		return telegrambot.Message{}, m.sendErr
+	}
 	return stubMessageForScreen(len(m.sent), screen), nil
 }
 func (m *messengerStub) EditScreen(_ context.Context, message telegrambot.Message, screen telegramui.Screen) (telegrambot.Message, error) {
@@ -95,6 +100,9 @@ func (m *messengerStub) EditScreen(_ context.Context, message telegrambot.Messag
 		case m.editNotify <- struct{}{}:
 		default:
 		}
+	}
+	if m.editErr != nil {
+		return telegrambot.Message{}, m.editErr
 	}
 	return message, nil
 }

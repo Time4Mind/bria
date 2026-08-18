@@ -17,13 +17,16 @@ const tracedTelegramOperation = 25 * time.Millisecond
 // message contents and exists so a compact service log is edited only while it
 // is still the newest message in the private chat.
 type activityMessenger struct {
-	inner  Messenger
-	mu     sync.Mutex
-	latest map[int64]int64
+	inner         Messenger
+	mu            sync.Mutex
+	latest        map[int64]int64
+	editBlockedAt map[int64]time.Time
 }
 
 func newActivityMessenger(inner Messenger) *activityMessenger {
-	return &activityMessenger{inner: inner, latest: make(map[int64]int64)}
+	return &activityMessenger{
+		inner: inner, latest: make(map[int64]int64), editBlockedAt: make(map[int64]time.Time),
+	}
 }
 
 func (m *activityMessenger) AnswerCallbackQuery(
@@ -74,10 +77,40 @@ func (m *activityMessenger) EditScreen(
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	logSlowTelegramOperation("edit_screen_queue", queuedAt, nil)
+	if blockedAt := m.editBlockedAt[message.ChatID]; time.Now().Before(blockedAt) {
+		return telegrambot.Message{}, &telegrambot.APIError{
+			Method: "editScreen", Code: 429,
+			Description: "local flood wait",
+			RetryAfter:  time.Until(blockedAt),
+			Local:       true,
+		}
+	}
 	startedAt := time.Now()
 	edited, err := m.inner.EditScreen(ctx, message, screen)
 	logSlowTelegramOperation(screenOperation("edit_screen", screen), startedAt, err)
+	if retryAfter, limited := telegrambot.FloodWait(err); limited && retryAfter > 0 {
+		blockedAt := time.Now().Add(retryAfter)
+		if blockedAt.After(m.editBlockedAt[message.ChatID]) {
+			m.editBlockedAt[message.ChatID] = blockedAt
+			log.Printf("bria telegram: edit_flood_wait retry_after_ms=%d error=%v",
+				retryAfter.Milliseconds(), err)
+		}
+	} else if err == nil {
+		delete(m.editBlockedAt, message.ChatID)
+	}
 	return edited, err
+}
+
+func (m *activityMessenger) editFloodWait(chatID int64) (time.Duration, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	blockedAt := m.editBlockedAt[chatID]
+	remaining := time.Until(blockedAt)
+	if remaining <= 0 {
+		delete(m.editBlockedAt, chatID)
+		return 0, false
+	}
+	return remaining, true
 }
 
 func screenOperation(base string, screen telegramui.Screen) string {

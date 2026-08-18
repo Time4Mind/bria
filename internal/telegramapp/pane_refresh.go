@@ -92,6 +92,13 @@ func (h *Handler) runPaneRefresh(
 			!h.currentPaneGeneration(actor.UserID, generation) {
 			return
 		}
+		if retryAfter, blocked := h.activity.editFloodWait(message.ChatID); blocked {
+			// Keep this generation registered so the recovery watchdog does not
+			// start a fresh worker every 1.2s. Final-answer reconciliation uses a
+			// send and remains independent of the edit cooldown.
+			delay = retryAfter
+			continue
+		}
 		session, err := h.service.Session(actor, ref)
 		if err != nil {
 			return
@@ -226,6 +233,13 @@ func (h *Handler) editPaneScreen(
 		return message, nil
 	}
 	edited, err := h.messenger.EditScreen(ctx, message, screen)
+	if _, limited := telegrambot.RemoteFloodWait(err); limited {
+		h.cardMutationMu.Lock()
+		edited, err = h.replaceFloodLimitedResponseCardLocked(
+			ctx, actor, message, ref, screen, err,
+		)
+		h.cardMutationMu.Unlock()
+	}
 	if err == nil {
 		if screen.Pane != nil {
 			h.rememberPaneFileID(ref, screen.Pane.Hash, edited.RichMediaFileID)

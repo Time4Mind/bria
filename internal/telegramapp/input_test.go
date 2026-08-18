@@ -209,6 +209,58 @@ func TestTextInputUsesProviderTranscriptOrderAfterFlush(t *testing.T) {
 	}
 }
 
+func TestLiveCardReplacesOnceWhenTelegramRateLimitsEdits(t *testing.T) {
+	fixture := newFixture(t)
+	actor := application.Principal{UserID: 7}
+	ref := domain.SessionRef{NodeID: "allowed", SessionID: "live"}
+	session, err := fixture.service.Session(actor, ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.service.PublishSessionRuntime(
+		context.Background(), session, domain.RuntimeRunning, nil,
+	); err != nil {
+		t.Fatal(err)
+	}
+	controls := &blockingControls{ref: ref, events: []transcript.Event{{
+		Kind: transcript.EventAssistantText, Text: "working",
+		Timestamp: time.Now().Format(time.RFC3339Nano),
+	}}}
+	handler, err := telegramapp.NewHandlerWithControls(
+		fixture.service, fixture.projector, fixture.codec, fixture.messenger, controls,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture.messenger.editErr = &telegrambot.APIError{
+		Method: "editMessageText", Code: 429, RetryAfter: time.Minute,
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := handler.HandleTelegramUpdate(ctx, telegrambot.IncomingUpdate{
+		UpdateID: 453, Kind: telegrambot.IncomingMessage, ChatID: 7, UserID: 7,
+		Text: "trigger flood recovery",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		sent, _, _ := fixture.messenger.screensSnapshot()
+		if len(sent) >= 2 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("live card was not replaced after edit flood wait: sent=%d", len(sent))
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	time.Sleep(1400 * time.Millisecond)
+	sent, _, _ := fixture.messenger.screensSnapshot()
+	if len(sent) != 2 {
+		t.Fatalf("live card replacements=%d want=2 total sends", len(sent))
+	}
+}
+
 func TestVoiceInputIsRejectedBeforeNodeTransferWhenRecognitionIsOff(t *testing.T) {
 	fixture := newFixture(t)
 	ref := domain.SessionRef{NodeID: "allowed", SessionID: "live"}

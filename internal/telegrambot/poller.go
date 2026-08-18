@@ -166,6 +166,16 @@ func (p *Poller) dropFailedCallback(update IncomingUpdate, err error) bool {
 	if update.Kind != IncomingCallback {
 		return false
 	}
+	// Replaying a callback immediately cannot clear Telegram flood control and
+	// used to turn one rejected edit into five more requests. The handler has
+	// already attempted the send-based navigation fallback; consume the update
+	// now so newer user actions are not held behind it.
+	if _, limited := FloodWait(err); limited {
+		if p.onCallbackDropped != nil {
+			p.onCallbackDropped(update, err, 1)
+		}
+		return true
+	}
 	attempts := p.callbackAttempts[update.UpdateID] + 1
 	p.callbackAttempts[update.UpdateID] = attempts
 	if attempts < p.maxCallbackAttempts {
