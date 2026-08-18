@@ -179,7 +179,10 @@ func TestTelegramResponseCardIsReplicatedAndSnapshotted(t *testing.T) {
 		t.Fatal(err)
 	}
 	machine := clusterstate.NewMachine(state)
-	card := domain.TelegramResponseCard{ChatID: 7, MessageID: 91}
+	card := domain.TelegramResponseCard{
+		ChatID: 7, MessageID: 91,
+		ScreenHash: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+	}
 	result := machine.Apply(command(t, "tg-card-91", clusterstate.CommandRecordTelegramCard,
 		clusterstate.RecordTelegramCard{UserID: 7, Card: card}))
 	if result.Err() != nil {

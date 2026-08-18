@@ -80,6 +80,7 @@ func (h *Handler) recordResponseCard(
 	card := domain.TelegramResponseCard{
 		ChatID: message.ChatID, MessageID: message.MessageID, Rich: message.Rich,
 		RichMediaFileID: message.RichMediaFileID, PaneHash: responseCardPaneHash(message, screen),
+		ScreenHash: message.ScreenHash,
 	}
 	if checkpoint := screen.Checkpoint; checkpoint != nil {
 		card.Session = domain.SessionRef{
@@ -101,8 +102,8 @@ func (h *Handler) recordResponseCard(
 		return previous, true, false
 	}
 	fingerprint := sha256.Sum256([]byte(fmt.Sprintf(
-		"%d:%d:%t:%s:%s:%s:%d:%d:%d", card.ChatID, card.MessageID, card.Rich,
-		card.RichMediaFileID, card.PaneHash, card.Session.Key(), card.SessionRevision,
+		"%d:%d:%t:%s:%s:%s:%s:%d:%d:%d", card.ChatID, card.MessageID, card.Rich,
+		card.RichMediaFileID, card.PaneHash, card.ScreenHash, card.Session.Key(), card.SessionRevision,
 		card.SessionEventAt.UnixNano(), card.RenderedFinalAt.UnixNano(),
 	)))
 	// A Telegram update may record more than one response-card state. Keep those

@@ -123,7 +123,9 @@ func TestClientConvertsScreenForSendAndEdit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SendScreen: %v", err)
 	}
-	if _, err := client.EditScreen(context.Background(), message, screen); err != nil {
+	editedScreen := screen
+	editedScreen.Text += "\nchanged"
+	if _, err := client.EditScreen(context.Background(), message, editedScreen); err != nil {
 		t.Fatalf("EditScreen: %v", err)
 	}
 	if err := client.AnswerCallbackQuery(context.Background(), "callback-1", "Done"); err != nil {
@@ -138,6 +140,53 @@ func TestClientConvertsScreenForSendAndEdit(t *testing.T) {
 	mu.Lock()
 	defer mu.Unlock()
 	if got := strings.Join(methods, ","); got != "sendMessage,editMessageText,answerCallbackQuery,sendChatAction,deleteMessage" {
+		t.Fatalf("methods = %q", got)
+	}
+}
+
+func TestClientSkipsUnchangedScreenEdit(t *testing.T) {
+	var mu sync.Mutex
+	methods := make([]string, 0, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		method := request.URL.Path[strings.LastIndex(request.URL.Path, "/")+1:]
+		mu.Lock()
+		methods = append(methods, method)
+		mu.Unlock()
+		writeJSON(t, writer, map[string]any{
+			"ok": true, "result": map[string]any{"message_id": 9, "chat": map[string]any{"id": 42}},
+		})
+	}))
+	defer server.Close()
+
+	client := newFakeServerClient(t, server, time.Second)
+	screen := telegramui.RenderMainMenu(i18n.For("en"), "backend")
+	message, err := client.SendScreen(context.Background(), 42, screen)
+	if err != nil {
+		t.Fatalf("SendScreen: %v", err)
+	}
+	if message.ScreenHash == "" {
+		t.Fatal("sent screen has no fingerprint")
+	}
+	unchanged, err := client.EditScreen(context.Background(), message, screen)
+	if err != nil {
+		t.Fatalf("unchanged EditScreen: %v", err)
+	}
+	if unchanged != message {
+		t.Fatalf("unchanged message = %#v want %#v", unchanged, message)
+	}
+
+	changed := screen
+	changed.Text += "\nchanged"
+	updated, err := client.EditScreen(context.Background(), unchanged, changed)
+	if err != nil {
+		t.Fatalf("changed EditScreen: %v", err)
+	}
+	if updated.ScreenHash == "" || updated.ScreenHash == message.ScreenHash {
+		t.Fatalf("changed screen fingerprint = %q, previous %q", updated.ScreenHash, message.ScreenHash)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if got := strings.Join(methods, ","); got != "sendMessage,editMessageText" {
 		t.Fatalf("methods = %q", got)
 	}
 }

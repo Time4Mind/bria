@@ -58,6 +58,7 @@ type Message struct {
 	Rich            bool
 	RichMediaFileID string
 	PaneHash        string
+	ScreenHash      string
 }
 
 type BotIdentity struct {

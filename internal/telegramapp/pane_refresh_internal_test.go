@@ -108,6 +108,18 @@ func TestCurrentTurnAssistantResponseRefreshMode(t *testing.T) {
 	}
 }
 
+func TestPaneRefreshCadenceContract(t *testing.T) {
+	if paneInitialDelay != 1500*time.Millisecond {
+		t.Fatalf("initial delay=%v want=1.5s", paneInitialDelay)
+	}
+	if paneResponseRefreshDelay != 1500*time.Millisecond {
+		t.Fatalf("response delay=%v want=1.5s", paneResponseRefreshDelay)
+	}
+	if paneWorkingRefreshDelay != 2500*time.Millisecond {
+		t.Fatalf("working delay=%v want=2.5s", paneWorkingRefreshDelay)
+	}
+}
+
 func TestCardEventsHideOnlyTrailingAssistantMemoryMetadata(t *testing.T) {
 	metadata := "<oai-mem-citation>\n<citation_entries>\ninternal\n" +
 		"</citation_entries>\n</oai-mem-citation>"

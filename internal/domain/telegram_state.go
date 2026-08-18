@@ -11,6 +11,7 @@ type TelegramResponseCard struct {
 	Rich            bool       `json:"rich,omitempty"`
 	RichMediaFileID string     `json:"rich_media_file_id,omitempty"`
 	PaneHash        string     `json:"pane_hash,omitempty"`
+	ScreenHash      string     `json:"screen_hash,omitempty"`
 	Session         SessionRef `json:"session,omitempty"`
 	SessionRevision uint64     `json:"session_revision,omitempty"`
 	SessionEventAt  time.Time  `json:"session_event_at,omitempty"`
@@ -57,7 +58,7 @@ func (s *State) RecordTelegramResponseCard(userID UserID, card TelegramResponseC
 	if card.ChatID != int64(userID) {
 		return ErrAccessDenied
 	}
-	if len(card.RichMediaFileID) > 1024 || len(card.PaneHash) > 128 {
+	if len(card.RichMediaFileID) > 1024 || len(card.PaneHash) > 128 || len(card.ScreenHash) > 64 {
 		return fmt.Errorf("Telegram response card transport metadata is invalid")
 	}
 	if card.Session != (SessionRef{}) {

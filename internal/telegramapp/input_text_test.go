@@ -141,6 +141,7 @@ func TestLiveCardStopsAllWritesWhenTelegramRateLimitsEdits(t *testing.T) {
 	fixture.messenger.editErr = &telegrambot.APIError{
 		Method: "editMessageText", Code: 429, RetryAfter: time.Minute,
 	}
+	fixture.messenger.editNotify = make(chan struct{}, 1)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	if err := handler.HandleTelegramUpdate(ctx, telegrambot.IncomingUpdate{
@@ -149,7 +150,7 @@ func TestLiveCardStopsAllWritesWhenTelegramRateLimitsEdits(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(1500 * time.Millisecond)
+	waitTestNotification(t, fixture.messenger.editNotify, "live card edit was not attempted")
 	sent, edited, _ := fixture.messenger.screensSnapshot()
 	if len(sent) != 1 {
 		t.Fatalf("live card sends=%d want=1 initial send only", len(sent))

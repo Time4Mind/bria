@@ -68,12 +68,48 @@ func TestRichScreenUploadsAtAnchorAndReusesLargestPhoto(t *testing.T) {
 	if !message.Rich || message.RichMediaFileID != "large-photo" || message.PaneHash != "pane-v1" {
 		t.Fatalf("rich message = %#v", message)
 	}
+	screen.Text += "\nchanged"
 	if _, err := client.EditScreen(context.Background(), message, screen); err != nil {
 		t.Fatalf("EditScreen: %v", err)
 	}
 	mu.Lock()
 	defer mu.Unlock()
 	if got := strings.Join(methods, ","); got != "sendRichMessage,editMessageText" {
+		t.Fatalf("methods = %q", got)
+	}
+}
+
+func TestRichScreenSkipsUnchangedEdit(t *testing.T) {
+	var mu sync.Mutex
+	methods := make([]string, 0, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		method := request.URL.Path[strings.LastIndex(request.URL.Path, "/")+1:]
+		mu.Lock()
+		methods = append(methods, method)
+		mu.Unlock()
+		if method != "sendRichMessage" {
+			t.Errorf("unexpected unchanged rich request %q", method)
+		}
+		writeJSON(t, writer, richMessageResponse())
+	}))
+	defer server.Close()
+
+	client := newFakeServerClient(t, server, time.Second)
+	screen := richTestScreen(testPanePNG(t))
+	message, err := client.SendScreen(context.Background(), 42, screen)
+	if err != nil {
+		t.Fatalf("SendScreen: %v", err)
+	}
+	unchanged, err := client.EditScreen(context.Background(), message, screen)
+	if err != nil {
+		t.Fatalf("unchanged EditScreen: %v", err)
+	}
+	if unchanged != message {
+		t.Fatalf("unchanged rich message = %#v want %#v", unchanged, message)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if got := strings.Join(methods, ","); got != "sendRichMessage" {
 		t.Fatalf("methods = %q", got)
 	}
 }
@@ -268,8 +304,55 @@ func TestRichEditTreatsUnchangedMessageAsSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if updated != previous {
-		t.Fatalf("unchanged rich carrier=%#v want=%#v", updated, previous)
+	if updated.ChatID != previous.ChatID || updated.MessageID != previous.MessageID ||
+		updated.Rich != previous.Rich || updated.PaneHash != previous.PaneHash ||
+		updated.ScreenHash == "" {
+		t.Fatalf("unchanged rich carrier=%#v want preserved carrier with fingerprint", updated)
+	}
+}
+
+func TestScreenFingerprintCoversVisibleContentOnly(t *testing.T) {
+	base := richTestScreen(testPanePNG(t))
+	baseline := screenFingerprint(base)
+	variants := map[string]telegramui.Screen{}
+
+	changedText := base
+	changedText.Text += " changed"
+	variants["text"] = changedText
+
+	changedGrid := base
+	changedGrid.Grid = telegramui.Grid{telegramui.Row{{
+		Label: "Sessions", Callback: telegramui.Callback{Action: telegramui.ActionSessions},
+	}}}
+	variants["grid"] = changedGrid
+
+	changedPane := base
+	changedPane.Pane = &telegramui.PaneImage{
+		PNG: base.Pane.PNG, Hash: "pane-v2", AnchorOffset: base.Pane.AnchorOffset,
+	}
+	variants["pane"] = changedPane
+
+	changedAnchor := base
+	changedAnchor.Pane = &telegramui.PaneImage{
+		PNG: base.Pane.PNG, Hash: base.Pane.Hash, AnchorOffset: base.Pane.AnchorOffset + 1,
+	}
+	variants["pane anchor"] = changedAnchor
+
+	for name, variant := range variants {
+		t.Run(name, func(t *testing.T) {
+			if got := screenFingerprint(variant); got == baseline {
+				t.Fatalf("visible %s change kept fingerprint %q", name, got)
+			}
+		})
+	}
+
+	metadataOnly := base
+	metadataOnly.Name = telegramui.ScreenStatus
+	metadataOnly.Checkpoint = &telegramui.SessionCheckpoint{
+		NodeID: "node", SessionID: "session", Revision: 1, EventAt: time.Unix(1, 0),
+	}
+	if got := screenFingerprint(metadataOnly); got != baseline {
+		t.Fatalf("handler-only metadata changed fingerprint: %q want %q", got, baseline)
 	}
 }
 

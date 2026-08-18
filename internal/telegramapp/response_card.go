@@ -28,7 +28,8 @@ func (h *Handler) editResponseCard(
 	if currentErr == nil && currentOK &&
 		current.ChatID == message.ChatID && current.MessageID != 0 &&
 		(current.MessageID != message.MessageID || current.Rich != message.Rich ||
-			current.RichMediaFileID != message.RichMediaFileID) {
+			current.RichMediaFileID != message.RichMediaFileID ||
+			current.ScreenHash != message.ScreenHash) {
 		message = telegramMessage(current)
 	}
 	active, activeErr := h.service.ActiveSession(actor)
@@ -91,7 +92,8 @@ func (h *Handler) replaceFloodLimitedResponseCardLocked(
 		return previous, nil
 	}
 	if current.ChatID != previous.ChatID || current.MessageID != previous.MessageID ||
-		current.Rich != previous.Rich || current.RichMediaFileID != previous.RichMediaFileID {
+		current.Rich != previous.Rich || current.RichMediaFileID != previous.RichMediaFileID ||
+		current.ScreenHash != previous.ScreenHash {
 		return telegramMessage(current), nil
 	}
 	replacement, sendErr := h.messenger.SendScreen(ctx, previous.ChatID, screen)

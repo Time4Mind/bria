@@ -19,7 +19,7 @@ func (c *Client) SendScreen(
 	if screen.Pane != nil || screen.RichMarkdown {
 		message, richErr := c.sendRichScreen(ctx, chatID, screen)
 		if richErr == nil {
-			return message, nil
+			return stampScreen(message, screen), nil
 		}
 		// A flood wait applies to the chat, not just to the rich transport.
 		// Falling back immediately doubles the rejected traffic and can turn a
@@ -36,11 +36,12 @@ func (c *Client) SendScreen(
 		if fallbackErr != nil {
 			return Message{}, fmt.Errorf("rich screen failed: %v; text fallback: %w", richErr, fallbackErr)
 		}
-		return fallback, nil
+		return stampScreen(fallback, screen), nil
 	}
-	return c.SendMessage(ctx, MessageRequest{
+	message, err := c.SendMessage(ctx, MessageRequest{
 		ChatID: chatID, Text: screen.Text, ParseMode: screen.ParseMode, Grid: screen.Grid,
 	})
+	return stampScreen(message, screen), err
 }
 
 func (c *Client) EditScreen(
@@ -51,6 +52,10 @@ func (c *Client) EditScreen(
 	if err := screen.Validate(); err != nil {
 		return Message{}, err
 	}
+	fingerprint := screenFingerprint(screen)
+	if message.ScreenHash != "" && message.ScreenHash == fingerprint {
+		return message, nil
+	}
 	// Bot API rich messages are a distinct carrier. Editing one through the
 	// legacy text endpoint can leave clients with an unsupported empty message,
 	// while editing a legacy message through the rich endpoint silently changes
@@ -58,20 +63,25 @@ func (c *Client) EditScreen(
 	if message.Rich {
 		updated, richErr := c.editRichScreen(ctx, message, screen)
 		if richErr == nil {
+			updated.ScreenHash = fingerprint
 			return updated, nil
 		}
 		return Message{}, richErr
 	}
 	if screen.Pane != nil || screen.RichMarkdown {
 		fallbackText := richFallbackMarkdownV2(screen)
-		return c.EditMessage(ctx, EditMessageRequest{
+		updated, err := c.EditMessage(ctx, EditMessageRequest{
 			ChatID: message.ChatID, MessageID: message.MessageID,
 			Text: fallbackText, ParseMode: telegramui.ParseModeMarkdownV2,
 			Grid: screen.Grid,
 		})
+		updated.ScreenHash = fingerprint
+		return updated, err
 	}
-	return c.EditMessage(ctx, EditMessageRequest{
+	updated, err := c.EditMessage(ctx, EditMessageRequest{
 		ChatID: message.ChatID, MessageID: message.MessageID,
 		Text: screen.Text, ParseMode: screen.ParseMode, Grid: screen.Grid,
 	})
+	updated.ScreenHash = fingerprint
+	return updated, err
 }

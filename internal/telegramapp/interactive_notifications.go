@@ -130,5 +130,6 @@ func telegramMessage(card domain.TelegramResponseCard) telegrambot.Message {
 	return telegrambot.Message{
 		ChatID: card.ChatID, MessageID: card.MessageID, Rich: card.Rich,
 		RichMediaFileID: card.RichMediaFileID, PaneHash: card.PaneHash,
+		ScreenHash: card.ScreenHash,
 	}
 }
