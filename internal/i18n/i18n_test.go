@@ -1,6 +1,7 @@
 package i18n
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -13,8 +14,8 @@ func TestCatalogsMatchEnglishKeysAndPlaceholders(t *testing.T) {
 				t.Errorf("%s is missing %s", language, key)
 				continue
 			}
-			if strings.Count(translated, "%s") != strings.Count(englishValue, "%s") {
-				t.Errorf("%s/%s placeholder count differs", language, key)
+			if got, want := formatPlaceholders(translated), formatPlaceholders(englishValue); !equalStrings(got, want) {
+				t.Errorf("%s/%s placeholders = %v, want %v", language, key, got, want)
 			}
 		}
 		for key := range catalog {
@@ -23,6 +24,24 @@ func TestCatalogsMatchEnglishKeysAndPlaceholders(t *testing.T) {
 			}
 		}
 	}
+}
+
+var formatPlaceholder = regexp.MustCompile(`%(?:%|s|d)`)
+
+func formatPlaceholders(value string) []string {
+	return formatPlaceholder.FindAllString(value, -1)
+}
+
+func equalStrings(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
 }
 
 func TestCountCatalogsAreComplete(t *testing.T) {

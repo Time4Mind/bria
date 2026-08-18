@@ -184,12 +184,18 @@ func TestEveryCatalogSettingHasScreenAndParent(t *testing.T) {
 	for _, language := range []string{"en", "ru", "zh"} {
 		input := settingsFixture(language)
 		for _, descriptor := range settingsCatalog {
+			if value := settingValue(input, descriptor.id); strings.TrimSpace(value) == "" {
+				t.Fatalf("%s/%s has empty summary value", language, descriptor.id)
+			}
 			screen, err := RenderSetting(input, descriptor.id)
 			if err != nil {
 				t.Fatalf("%s/%s: %v", language, descriptor.id, err)
 			}
 			if err := screen.Validate(); err != nil {
 				t.Fatalf("%s/%s invalid: %v", language, descriptor.id, err)
+			}
+			if len(screen.Grid) < 2 {
+				t.Fatalf("%s/%s has no choices", language, descriptor.id)
 			}
 			last := screen.Grid[len(screen.Grid)-1][0]
 			if last.Callback.Action != ActionSettingsCategory ||
@@ -223,6 +229,7 @@ func settingsFixture(language string) SettingsInput {
 		NotifyFinished: true, NotifyError: true, NotifyAction: true,
 		BackgroundDismiss: 1,
 		NodeSort:          "created", QuotaPollMinutes: 10,
+		LeaderNodes:  []LeaderSettingNode{{Name: "node", Selected: true, Token: "node"}},
 		VoiceBackend: "auto", OfflineQueueLimit: 5,
 	}
 }

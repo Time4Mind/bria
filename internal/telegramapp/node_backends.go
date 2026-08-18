@@ -35,7 +35,7 @@ func (h *Handler) handleNodeBackendInstallCallback(
 	if err != nil {
 		return err
 	}
-	status, err := h.backendSetup.Start(ctx, request)
+	_, err = h.backendSetup.Start(ctx, request)
 	if err != nil {
 		text := h.copy(actor).Format(
 			i18n.BackendInstallFailed, backend, nodeName, shortSetupError(err),
@@ -54,10 +54,6 @@ func (h *Handler) handleNodeBackendInstallCallback(
 	)
 	if err != nil {
 		return err
-	}
-	if status.Phase != backendsetup.PhaseReady {
-		go h.watchBackendSetup(actor, request, nodeName, callback.Token, back, message)
-		return nil
 	}
 	go h.watchBackendSetup(actor, request, nodeName, callback.Token, back, message)
 	return nil

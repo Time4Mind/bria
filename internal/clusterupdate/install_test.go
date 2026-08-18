@@ -90,7 +90,8 @@ func TestWatchdogRestoresPreviousTarget(t *testing.T) {
 		t.Fatal(err)
 	}
 	target, err := filepath.EvalSymlinks(current)
-	if err != nil || target != previous {
+	wantTarget, wantErr := filepath.EvalSymlinks(previous)
+	if err != nil || wantErr != nil || target != wantTarget {
 		t.Fatalf("rollback target = %q, err=%v", target, err)
 	}
 	statusData, err := os.ReadFile(filepath.Join(root, "update-status.json"))

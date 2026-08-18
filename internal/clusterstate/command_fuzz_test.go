@@ -2,6 +2,7 @@ package clusterstate
 
 import (
 	"encoding/json"
+	"reflect"
 	"testing"
 	"time"
 )
@@ -20,7 +21,7 @@ func FuzzMachineRejectsMalformedCommandsWithoutMutatingState(f *testing.F) {
 			Kind: CommandKind(kind), IssuedAt: time.Unix(1, 0).UTC(),
 			Payload: json.RawMessage(payload),
 		})
-		if result.Err() != nil && len(machine.State().Nodes) != len(before.Nodes) {
+		if result.Err() != nil && !reflect.DeepEqual(machine.State(), before) {
 			t.Fatal("failed command mutated state")
 		}
 	})

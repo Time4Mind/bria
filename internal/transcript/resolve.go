@@ -170,7 +170,7 @@ func (r *Reader) codexCandidates(ctx context.Context) ([]codexCandidate, error) 
 			return nil
 		}
 		if len(entries) >= r.config.MaxCodexFiles {
-			return nil
+			return filepath.SkipAll
 		}
 		info, err := entry.Info()
 		if err != nil || !info.Mode().IsRegular() {

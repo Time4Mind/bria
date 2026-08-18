@@ -308,14 +308,3 @@ type FinishClusterUpdate struct {
 	Failed   bool   `json:"failed,omitempty"`
 	Error    string `json:"error,omitempty"`
 }
-
-type QueueDeferredInput struct {
-	Input domain.DeferredSessionInput `json:"input"`
-}
-
-type ResolveDeferredInput struct {
-	Session     domain.SessionRef `json:"session"`
-	OperationID string            `json:"operation_id"`
-	Failed      bool              `json:"failed,omitempty"`
-	Detail      string            `json:"detail,omitempty"`
-}

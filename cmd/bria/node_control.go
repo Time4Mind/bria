@@ -143,9 +143,6 @@ func startNodeRuntimeControl(
 	if err != nil {
 		return closeFailedRuntime(executor, store, err)
 	}
-	go runLocalSessionStartReconciler(
-		ctx, nodeConfig.NodeID, node.State(), localStarts, executor,
-	)
 	archiveStore, err := archive.NewFileStore(filepath.Join(nodeConfig.DataDir, "archives"))
 	if err != nil {
 		return closeFailedRuntime(executor, store, err)
@@ -264,6 +261,9 @@ func startNodeRuntimeControl(
 	}
 	go runLocalArchiveReconciler(ctx, node.State(), nodeConfig, driver, archiveWriter)
 	go runLocalRuntimeReconciler(ctx, node, nodeConfig, client, executor, driver)
+	go runLocalSessionStartReconciler(
+		ctx, nodeConfig.NodeID, node.State(), localStarts, executor,
+	)
 	go func() {
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
