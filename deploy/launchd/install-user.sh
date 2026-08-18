@@ -35,6 +35,26 @@ chmod 0600 "$temporary"
 mv "$temporary" "$destination"
 trap - EXIT HUP INT TERM
 "$binary" provider-hook --config "$config" --install
-launchctl bootout "gui/$(id -u)/com.time4mind.bria" 2>/dev/null || true
-launchctl bootstrap "gui/$(id -u)" "$destination"
+service="gui/$(id -u)/com.time4mind.bria"
+domain="gui/$(id -u)"
+launchctl bootout "$service" 2>/dev/null || true
+
+# bootout is asynchronous on macOS. Re-registering the same label before it
+# disappears intermittently returns Bootstrap failed: 5 (EIO).
+attempt=0
+while launchctl print "$service" >/dev/null 2>&1; do
+  attempt=$((attempt + 1))
+  [ "$attempt" -lt 10 ] || {
+    echo "timed out waiting for $service to stop" >&2
+    exit 1
+  }
+  sleep 1
+done
+
+attempt=0
+until launchctl bootstrap "$domain" "$destination"; do
+  attempt=$((attempt + 1))
+  [ "$attempt" -lt 5 ] || exit 1
+  sleep 1
+done
 echo "installed $destination"
