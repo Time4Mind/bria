@@ -39,10 +39,21 @@ func (h *Handler) handleMessage(
 	if h.awaitingNodeContract(actor) {
 		return h.acceptNodeContract(ctx, actor, update.ChatID, text)
 	}
-	if h.controls == nil || (update.Content.Kind == telegrambot.IncomingText &&
+	textInput := update.Content.Kind == "" || update.Content.Kind == telegrambot.IncomingText
+	if h.controls == nil || (textInput &&
 		(text == "" || text == "/start" || text == "/menu")) {
+		if text == "/start" || text == "/menu" {
+			h.clearCreateFlow(actor.UserID)
+		}
 		screen, err := h.projector.MainMenu(actor)
 		return h.sendProjected(ctx, update.ChatID, screen, err)
+	}
+	createActive, createReady, err := h.prepareCreateFlowInput(ctx, actor)
+	if err != nil {
+		return err
+	}
+	if createActive && !createReady {
+		return nil
 	}
 	voiceBaseline := voicePendingBaseline{}
 	inputBaseline := inputPendingBaseline{}
