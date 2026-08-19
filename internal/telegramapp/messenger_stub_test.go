@@ -13,5 +13,6 @@ func stubMessageForScreen(index int, screen telegramui.Screen) telegrambot.Messa
 	if screen.Pane != nil {
 		message.PaneHash = screen.Pane.Hash
 	}
+	message.ScreenHash = telegrambot.ScreenFingerprint(screen)
 	return message
 }

@@ -31,7 +31,7 @@ func (c *blockingControls) SendKey(
 func TestSelectingWaitingSessionAutomaticallyOpensKeyboard(t *testing.T) {
 	fixture := newFixture(t)
 	pane := []byte("Would you like to run this command?\n› 1. Yes\nPress enter to confirm or esc to cancel\n")
-	prompt := publishInteractivePrompt(t, fixture, pane)
+	publishInteractivePrompt(t, fixture, pane)
 	controls := &blockingControls{
 		ref: domain.SessionRef{NodeID: "allowed", SessionID: "live"}, pane: pane,
 	}
@@ -58,7 +58,8 @@ func TestSelectingWaitingSessionAutomaticallyOpensKeyboard(t *testing.T) {
 	}
 	grid := telegramui.CanonicalGrid(fixture.messenger.edited[0].Grid)
 	if !strings.Contains(grid, "key_enter") || !strings.Contains(grid, "key_ctrlc") ||
-		!strings.Contains(fixture.messenger.edited[0].Text, prompt.Content) {
+		!strings.Contains(fixture.messenger.edited[0].Text,
+			"run this command?\n\n─────\n\n› 1. Yes\n\n─────\n\nPress enter") {
 		t.Fatalf("screen=%#v grid=%s", fixture.messenger.edited[0], grid)
 	}
 }
@@ -210,73 +211,6 @@ func TestBackgroundPromptSendsOneShortNotification(t *testing.T) {
 	notice := fixture.machine.State().Navigation.BackgroundByUser[7]["allowed/background"]
 	if !notice.Notified {
 		t.Fatalf("notification delivery was not replicated: %#v", notice)
-	}
-}
-
-func TestActivePromptRepaintsReplicatedLiveCardWithoutNotification(t *testing.T) {
-	fixture := newFixture(t)
-	pane := []byte("☐ Choose\n❯ 1. First\nEnter to select\n")
-	publishInteractivePrompt(t, fixture, pane)
-	actor := application.Principal{UserID: 7}
-	ref := domain.SessionRef{NodeID: "allowed", SessionID: "live"}
-	session := fixture.machine.State().Sessions[ref.Key()]
-	if err := fixture.service.RecordTelegramResponseCard(
-		context.Background(), actor, domain.TelegramResponseCard{
-			ChatID: 7, MessageID: 55, Session: ref,
-			SessionRevision: session.Revision, SessionEventAt: session.LastEventAt,
-		},
-	); err != nil {
-		t.Fatal(err)
-	}
-	controls := &blockingControls{
-		ref: ref, pane: pane,
-	}
-	handler, err := telegramapp.NewHandlerWithControls(
-		fixture.service, fixture.projector, fixture.codec, fixture.messenger, controls,
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
-	defer cancel()
-	handler.RunInteractiveNotifications(ctx, 5*time.Millisecond)
-	if len(fixture.messenger.sent) != 0 || len(fixture.messenger.edited) != 1 {
-		t.Fatalf("sent=%d edited=%d", len(fixture.messenger.sent), len(fixture.messenger.edited))
-	}
-	if grid := telegramui.CanonicalGrid(fixture.messenger.edited[0].Grid); !strings.Contains(grid, "key_enter") {
-		t.Fatalf("grid=%s", grid)
-	}
-}
-
-func TestActivePromptWithoutRecordedCardSendsKeyboardImmediately(t *testing.T) {
-	fixture := newFixture(t)
-	pane := []byte("✨ Update available! 0.97.0 -> 0.104.0\n" +
-		"› 1. Update now\n  2. Skip\nPress enter to continue\n")
-	publishInteractivePrompt(t, fixture, pane)
-	controls := &blockingControls{
-		ref: domain.SessionRef{NodeID: "allowed", SessionID: "live"}, pane: pane,
-	}
-	handler, err := telegramapp.NewHandlerWithControls(
-		fixture.service, fixture.projector, fixture.codec, fixture.messenger, controls,
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
-	defer cancel()
-	handler.RunInteractiveNotifications(ctx, 5*time.Millisecond)
-	if len(fixture.messenger.sent) != 1 || len(fixture.messenger.edited) != 0 {
-		t.Fatalf("sent=%d edited=%d", len(fixture.messenger.sent), len(fixture.messenger.edited))
-	}
-	grid := telegramui.CanonicalGrid(fixture.messenger.sent[0].Grid)
-	if !strings.Contains(grid, "key_up") || !strings.Contains(grid, "key_down") ||
-		!strings.Contains(grid, "key_esc") || !strings.Contains(grid, "key_enter") {
-		t.Fatalf("grid=%s", grid)
-	}
-	if _, exists, cardErr := fixture.service.TelegramResponseCard(
-		application.Principal{UserID: 7},
-	); cardErr != nil || !exists {
-		t.Fatalf("response card exists=%v err=%v", exists, cardErr)
 	}
 }
 

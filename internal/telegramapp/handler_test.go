@@ -109,6 +109,10 @@ func (m *messengerStub) EditScreen(_ context.Context, message telegrambot.Messag
 	if m.editErr != nil {
 		return telegrambot.Message{}, m.editErr
 	}
+	message.ScreenHash = telegrambot.ScreenFingerprint(screen)
+	if screen.Pane != nil {
+		message.PaneHash = screen.Pane.Hash
+	}
 	return message, nil
 }
 func (m *messengerStub) DeleteMessage(_ context.Context, message telegrambot.Message) error {

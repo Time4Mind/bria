@@ -77,7 +77,8 @@ func (h *Handler) interactiveScreen(
 	}
 	h.rememberPrompt(actor.UserID, ref, prompt.Hash)
 	screen := telegramui.RenderInteractiveCard(telegramui.InteractiveInput{
-		Copy: h.copy(actor), Text: base.Text + "\n\n" + prompt.Content,
+		Copy: h.copy(actor), Text: base.Text + "\n\n" +
+			telegramui.FormatInteractivePrompt(prompt.Content),
 		Control: control, VerticalOnly: prompt.VerticalOnly(), Tokens: tokens,
 	})
 	screen.Checkpoint = base.Checkpoint
@@ -122,6 +123,7 @@ func (h *Handler) handleInteractiveCallback(
 		var edited telegrambot.Message
 		edited, err = h.editExplicitSessionScreen(ctx, actor, update.CallbackOrigin, screen)
 		if err == nil {
+			h.rememberInteractiveCarrier(ctx, actor, edited, screen)
 			h.schedulePaneRefresh(ctx, actor, target.Session, edited)
 		}
 		return err
@@ -147,6 +149,7 @@ func (h *Handler) handleInteractiveCallback(
 				if edited, editErr := h.editExplicitSessionScreen(
 					ctx, actor, update.CallbackOrigin, screen,
 				); editErr == nil {
+					h.rememberInteractiveCarrier(ctx, actor, edited, screen)
 					h.schedulePaneRefresh(ctx, actor, target.Session, edited)
 				}
 			}
@@ -165,10 +168,26 @@ func (h *Handler) handleInteractiveCallback(
 		return err
 	}
 	message, err := h.editExplicitSessionScreen(ctx, actor, update.CallbackOrigin, screen)
-	if err == nil && !waiting {
-		h.schedulePaneRefresh(ctx, actor, target.Session, message)
+	if err == nil {
+		h.rememberInteractiveCarrier(ctx, actor, message, screen)
+		if !waiting {
+			h.schedulePaneRefresh(ctx, actor, target.Session, message)
+		}
 	}
 	return err
+}
+
+// An automatic waiting-input carrier may have appeared while a menu was the
+// visible response card. Once the user acts on that carrier it becomes the
+// authoritative session screen, so later pane refreshes target it normally.
+func (h *Handler) rememberInteractiveCarrier(
+	ctx context.Context,
+	actor application.Principal,
+	message telegrambot.Message,
+	screen telegramui.Screen,
+) {
+	h.beginVisibleScreen(actor.UserID, screen)
+	h.rememberResponseCard(ctx, actor, message, screen)
 }
 
 func interactiveKey(action telegramui.Action) (runtimehost.InteractiveKey, bool) {

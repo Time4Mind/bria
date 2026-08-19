@@ -51,6 +51,13 @@ func screenFingerprint(screen telegramui.Screen) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// ScreenFingerprint exposes the stable Telegram-visible identity to delivery
+// coordinators that must suppress duplicate replacement messages across a
+// process restart.
+func ScreenFingerprint(screen telegramui.Screen) string {
+	return screenFingerprint(screen)
+}
+
 func stampScreen(message Message, screen telegramui.Screen) Message {
 	message.ScreenHash = screenFingerprint(screen)
 	return message

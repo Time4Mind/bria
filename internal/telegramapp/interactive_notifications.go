@@ -7,7 +7,6 @@ import (
 
 	"github.com/Time4Mind/bria/internal/application"
 	"github.com/Time4Mind/bria/internal/domain"
-	"github.com/Time4Mind/bria/internal/i18n"
 	"github.com/Time4Mind/bria/internal/telegrambot"
 	"github.com/Time4Mind/bria/internal/telegramui"
 )
@@ -50,45 +49,10 @@ func (h *Handler) scanInteractiveNotifications(ctx context.Context, seen map[str
 			seen[key] = prompt.Hash
 			continue
 		}
-		delivered := false
-		if notice.Active {
-			delivered = h.refreshActiveInteractive(ctx, notice)
-		} else {
-			delivered = h.sendInteractiveNotification(ctx, notice)
-		}
-		if delivered {
+		if h.refreshActiveInteractive(ctx, notice) {
 			seen[key] = prompt.Hash
 		}
 	}
-}
-
-func (h *Handler) sendInteractiveNotification(
-	ctx context.Context,
-	notice application.InteractiveNotice,
-) bool {
-	actor := application.Principal{UserID: notice.UserID}
-	token, err := h.tokens.Session(
-		notice.UserID, telegramui.ActionSelectSession, notice.Session.Ref(),
-	)
-	if err != nil {
-		return false
-	}
-	copy := h.copy(actor)
-	label := notice.Session.Name
-	if label == "" {
-		label = "…"
-	}
-	screen := telegramui.Screen{
-		Name: telegramui.ScreenSessionCard,
-		Text: fmt.Sprintf("❗ %s · %s\n%s", label, notice.Node.Name,
-			copy.Text(i18n.SessionPhaseWaiting)),
-		Grid: telegramui.Grid{telegramui.Row{{
-			Label:    label,
-			Callback: telegramui.Callback{Action: telegramui.ActionSelectSession, Token: token},
-		}}},
-	}
-	_, err = h.messenger.SendScreen(ctx, int64(notice.UserID), screen)
-	return err == nil
 }
 
 func (h *Handler) refreshActiveInteractive(
@@ -105,25 +69,61 @@ func (h *Handler) refreshActiveInteractive(
 		// permanently replacing the keyboard with a regular card.
 		return false
 	}
-	card, exists, err := h.service.TelegramResponseCard(actor)
+	return h.repostInteractiveResponseCard(ctx, actor, notice, screen)
+}
+
+func (h *Handler) repostInteractiveResponseCard(
+	ctx context.Context,
+	actor application.Principal,
+	notice application.InteractiveNotice,
+	screen telegramui.Screen,
+) bool {
+	ref := notice.Session.Ref()
+	if notice.Session.InteractivePrompt == nil {
+		return false
+	}
+	promptHash := notice.Session.InteractivePrompt.Hash
+	fingerprint := telegrambot.ScreenFingerprint(screen)
+	h.cancelPaneRefresh(actor.UserID)
+	h.cardEditMu.Lock()
+	defer h.cardEditMu.Unlock()
+	h.cardMutationMu.Lock()
+	defer h.cardMutationMu.Unlock()
+
+	current, exists, err := h.service.TelegramResponseCard(actor)
 	if err != nil {
 		return false
 	}
-	if !exists {
-		message, sendErr := h.messenger.SendScreen(ctx, int64(notice.UserID), screen)
-		if sendErr != nil {
-			return false
-		}
-		h.rememberResponseCard(ctx, actor, message, screen)
+	if exists && current.Session == ref && current.ScreenHash == fingerprint {
 		return true
 	}
-	if card.Session != notice.Session.Ref() {
-		// The session is selected but the user explicitly navigated elsewhere.
-		// Notify in a separate message instead of replacing that screen.
-		return h.sendInteractiveNotification(ctx, notice)
+	replacement, err := h.messenger.SendScreen(ctx, int64(actor.UserID), screen)
+	if err != nil {
+		return false
 	}
-	_, err = h.editResponseCard(ctx, actor, telegramMessage(card), screen)
-	return err == nil
+	latest, latestErr := h.service.ActiveSession(actor)
+	if latestErr != nil {
+		_ = h.messenger.DeleteMessage(ctx, replacement)
+		return false
+	}
+	if latest.Ref() != ref || latest.InteractivePrompt == nil ||
+		latest.InteractivePrompt.Hash != promptHash {
+		_ = h.messenger.DeleteMessage(ctx, replacement)
+		return true
+	}
+	h.recordResponseCard(ctx, actor, replacement, screen)
+	committed, ok, commitErr := h.service.TelegramResponseCard(actor)
+	if commitErr != nil || !ok || committed.ChatID != replacement.ChatID ||
+		committed.MessageID != replacement.MessageID || committed.ScreenHash != fingerprint {
+		_ = h.messenger.DeleteMessage(ctx, replacement)
+		return false
+	}
+	if exists {
+		// Preserve the exact screen the user was reading as history, but remove
+		// stale controls so only the new waiting-input carrier can drive the CLI.
+		_ = h.messenger.ClearKeyboard(ctx, telegramMessage(current))
+	}
+	return true
 }
 
 func telegramMessage(card domain.TelegramResponseCard) telegrambot.Message {
