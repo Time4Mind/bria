@@ -86,7 +86,6 @@ const (
 	StatusQuotaHeader            Key = "status.quota.header"
 	QuotaAlert                   Key = "quota.alert"
 	QuotaWindowFiveHour          Key = "quota.window.five_hour"
-	QuotaWindowFiveHourBudget    Key = "quota.window.five_hour_budget"
 	QuotaWindowWeek              Key = "quota.window.week"
 	ValueMinuteShort             Key = "value.minute_short"
 	ValueLines                   Key = "value.lines"

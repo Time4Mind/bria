@@ -46,7 +46,7 @@ var chineseCatalog = map[Key]string{
 	StatusNodeSettings:  "服务器设置 · %s\n\n后端：%s\n状态：%s",
 	StatusQuotaHeader:   "| 服务器 | 后端 | 已用 | 年龄，分 | 今日剩余 | 重置 |",
 	QuotaAlert:          "%s %s · %s · %s：已使用 %d%%",
-	QuotaWindowFiveHour: "5 小时", QuotaWindowFiveHourBudget: "5 小时限额", QuotaWindowWeek: "本周",
+	QuotaWindowFiveHour: "5 小时", QuotaWindowWeek: "本周",
 	ValueMinuteShort: "%d 分钟",
 	ValueLines:       "%d 行",
 	SettingsTitle:    "⚙ 设置", SettingsBody: "选择一个类别。",

@@ -46,7 +46,7 @@ var englishCatalog = map[Key]string{
 	StatusNodeSettings:  "Server settings · %s\n\nBackends: %s\nStatus: %s",
 	StatusQuotaHeader:   "| Server | Back | Used | Age, min | Today left | Reset |",
 	QuotaAlert:          "%s %s · %s · %s: %d%% used",
-	QuotaWindowFiveHour: "5h", QuotaWindowFiveHourBudget: "5h limit", QuotaWindowWeek: "week",
+	QuotaWindowFiveHour: "5h", QuotaWindowWeek: "week",
 	ValueMinuteShort: "%d min",
 	ValueLines:       "%d lines",
 	SettingsTitle:    "⚙ Settings", SettingsBody: "Choose a category.",

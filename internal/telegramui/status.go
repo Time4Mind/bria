@@ -194,7 +194,7 @@ func quotaUsage(copy i18n.Localizer, snapshot domain.QuotaSnapshot, now time.Tim
 		parts = append(parts, copy.Text(i18n.QuotaWindowFiveHour)+" "+quotaPercent(snapshot.FiveHour))
 	} else if budget, ok := calculatedFiveHourBudget(snapshot.Weekly, now); ok {
 		parts = append(parts, fmt.Sprintf(
-			"%s %.1f%%", copy.Text(i18n.QuotaWindowFiveHourBudget), budget,
+			"%s %.1f%%", copy.Text(i18n.QuotaWindowFiveHour), budget,
 		))
 	}
 	if snapshot.Weekly != nil {

@@ -99,7 +99,7 @@ the pragmatic Go engineering contract in [CONTRIBUTING.md](CONTRIBUTING.md).
   manual/automatic leader policy lives in cluster settings rather than Status;
 - node-local Claude and Codex quota collectors with replicated normalized
   snapshots, including Kimi Code weekly and rolling five-hour usage when Claude
-  is pointed at Kimi and a labeled five-hour pacing allowance when a provider
+  is pointed at Kimi and a calculated five-hour pacing allowance when a provider
   returns only a weekly window, five/ten-minute polling, CCBot-compatible
   persistent daily budget tracking, unique-account threshold alerts, and no
   provider credentials or raw terminal output in Raft;

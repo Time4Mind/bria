@@ -69,12 +69,12 @@ func TestStatusResetUsesInterfaceLocalTimezone(t *testing.T) {
 			Weekly:      &domain.QuotaWindow{UsedPercent: 50, ResetsAt: time.Date(2026, 8, 20, 10, 0, 0, 0, time.UTC)},
 		}}}},
 	})
-	if !strings.Contains(screen.Text, "| Laptop | codex | 5h limit 3.4% · week 50% | 0 | 8.2% | 20.08 13:00 |") {
+	if !strings.Contains(screen.Text, "| Laptop | codex | 5h 3.4% · week 50% | 0 | 8.2% | 20.08 13:00 |") {
 		t.Fatalf("status text=%q", screen.Text)
 	}
 }
 
-func TestStatusLabelsCalculatedFiveHourBudgetAsLimit(t *testing.T) {
+func TestStatusRendersCalculatedFiveHourBudget(t *testing.T) {
 	now := time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC)
 	screen := RenderStatus(StatusInput{
 		Copy: englishCopy, Mode: StatusChoose, Now: now,
@@ -83,7 +83,7 @@ func TestStatusLabelsCalculatedFiveHourBudgetAsLimit(t *testing.T) {
 			Weekly: &domain.QuotaWindow{UsedPercent: 85, ResetsAt: now.Add(20 * time.Hour)},
 		}}}},
 	})
-	if !strings.Contains(screen.Text, "5h limit 3.8% · week 85%") {
+	if !strings.Contains(screen.Text, "5h 3.8% · week 85%") {
 		t.Fatalf("status text=%q", screen.Text)
 	}
 }
