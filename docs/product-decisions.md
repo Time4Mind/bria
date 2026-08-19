@@ -122,9 +122,10 @@
   its enabled lifecycle; a fresh authenticated heartbeat restores it as a
   nonvoter.
 - Menu → Status always opens in `Select` mode. Its Rich Markdown table contains
-  every server/backend pair, cached quota values, age in minutes, today's
-  remaining weekly allowance and reset time;
-  offline rows retain their last value and carry an unavailable marker. Refresh
+  every server/backend pair, cached quota values, remaining daily allowance,
+  update age in minutes and reset time;
+  offline rows retain their last value and carry an unavailable marker for up
+  to three days, after which quota values become dashes. Refresh
   polls nodes asynchronously. Status contains server selection and node
   settings; leader policy is not a Status mode. Server sorting is globally
   configurable as creation time (default), name, or leader first; quota polling

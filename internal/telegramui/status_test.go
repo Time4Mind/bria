@@ -36,9 +36,9 @@ func TestStatusRendersQuotaTableAndRefreshBeforeModes(t *testing.T) {
 [🔴 Game -> node@game]
 [← Back -> menu]`)
 	for _, value := range []string{
-		"| Server | Back | Used | Age, min | Today left | Reset |\n|---|---|---|---:|---:|---|",
-		"| 👑 Laptop | codex | 5h 12% · week 50% | 2 | -4.0% | 20.08 12:30 |",
-		"| 🔴 Game | — | — | 9 | — | — |",
+		"| Server | Back | Used | Remaining | Updated | Reset |\n|---|---|---|---:|---|---|",
+		"| 👑 Laptop | codex | 5h 12% · w 50% | -4.0% | 2 | 20.08 12:30 |",
+		"| 🔴 Game | — | — | — | 9 | — |",
 	} {
 		if !strings.Contains(screen.Text, value) {
 			t.Fatalf("status text %q does not contain %q", screen.Text, value)
@@ -51,7 +51,7 @@ func TestStatusRendersQuotaTableAndRefreshBeforeModes(t *testing.T) {
 
 func TestStatusTableHeaderIsLocalized(t *testing.T) {
 	screen := RenderStatus(StatusInput{Copy: i18n.For("ru"), Mode: StatusChoose, Now: time.Now()})
-	if !strings.Contains(screen.Text, "Сервер | Бэк | Израсх. | Возраст, мин | Сегодня остаток | Сброс") {
+	if !strings.Contains(screen.Text, "Сервер | Бэк | Израсх. | Остаток | Обновлено | Сброс") {
 		t.Fatalf("status header=%q", screen.Text)
 	}
 }
@@ -69,7 +69,7 @@ func TestStatusResetUsesInterfaceLocalTimezone(t *testing.T) {
 			Weekly:      &domain.QuotaWindow{UsedPercent: 50, ResetsAt: time.Date(2026, 8, 20, 10, 0, 0, 0, time.UTC)},
 		}}}},
 	})
-	if !strings.Contains(screen.Text, "| Laptop | codex | 5h 3.4% · week 50% | 0 | 8.2% | 20.08 13:00 |") {
+	if !strings.Contains(screen.Text, "| Laptop | codex | 5h 3.4% · w 50% | 8.2% | 0 | 20.08 13:00 |") {
 		t.Fatalf("status text=%q", screen.Text)
 	}
 }
@@ -83,7 +83,26 @@ func TestStatusRendersCalculatedFiveHourBudget(t *testing.T) {
 			Weekly: &domain.QuotaWindow{UsedPercent: 85, ResetsAt: now.Add(20 * time.Hour)},
 		}}}},
 	})
-	if !strings.Contains(screen.Text, "5h 3.8% · week 85%") {
+	if !strings.Contains(screen.Text, "5h 3.8% · w 85%") {
+		t.Fatalf("status text=%q", screen.Text)
+	}
+}
+
+func TestStatusHidesValuesForNodeOfflineLongerThanThreeDays(t *testing.T) {
+	now := time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC)
+	remaining := 4.5
+	screen := RenderStatus(StatusInput{
+		Copy: englishCopy, Mode: StatusChoose, Now: now,
+		Items: []StatusItem{{
+			Name: "Old node", Status: NodeOffline, ObservedAt: now.Add(-73 * time.Hour),
+			Quotas: []domain.QuotaSnapshot{{
+				Backend: "codex", FiveHour: &domain.QuotaWindow{UsedPercent: 12},
+				Weekly:         &domain.QuotaWindow{UsedPercent: 50, ResetsAt: now.Add(time.Hour)},
+				TodayRemaining: &remaining, CollectedAt: now.Add(-73 * time.Hour),
+			}},
+		}},
+	})
+	if !strings.Contains(screen.Text, "| 🔴 Old node | codex | — | — | — | — |") {
 		t.Fatalf("status text=%q", screen.Text)
 	}
 }

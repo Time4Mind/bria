@@ -123,7 +123,7 @@ func statusNodeAction(mode StatusMode) Action {
 
 func statusTable(copy i18n.Localizer, items []StatusItem, now time.Time) string {
 	header := strings.TrimSpace(strings.ReplaceAll(copy.Text(i18n.StatusQuotaHeader), "\\|", "|"))
-	lines := []string{header, "|---|---|---|---:|---:|---|"}
+	lines := []string{header, "|---|---|---|---:|---|---|"}
 	for _, item := range items {
 		name := markdownTableCell(item.Name)
 		if item.Disabled {
@@ -135,18 +135,31 @@ func statusTable(copy i18n.Localizer, items []StatusItem, now time.Time) string 
 			name = "👑 " + name
 		}
 		if len(item.Quotas) == 0 {
-			lines = append(lines, fmt.Sprintf("| %s | — | — | %d | — | — |",
-				name, ageMinutes(now, item.ObservedAt)))
+			updated := fmt.Sprintf("%d", ageMinutes(now, item.ObservedAt))
+			if staleOfflineNode(item, now) {
+				updated = "—"
+			}
+			lines = append(lines, fmt.Sprintf("| %s | — | — | — | %s | — |", name, updated))
 			continue
 		}
 		for _, quota := range item.Quotas {
-			lines = append(lines, fmt.Sprintf("| %s | %s | %s | %d | %s | %s |",
-				name, markdownTableCell(quota.Backend), markdownTableCell(quotaUsage(copy, quota, now)),
-				quotaAgeMinutes(now, quota.CollectedAt, item.ObservedAt),
-				quotaTodayRemaining(quota), quotaResetAt(quota, now)))
+			backend := markdownTableCell(quota.Backend)
+			if staleOfflineNode(item, now) {
+				lines = append(lines, fmt.Sprintf("| %s | %s | — | — | — | — |", name, backend))
+				continue
+			}
+			lines = append(lines, fmt.Sprintf("| %s | %s | %s | %s | %d | %s |",
+				name, backend, markdownTableCell(quotaUsage(copy, quota, now)),
+				quotaTodayRemaining(quota), quotaAgeMinutes(now, quota.CollectedAt, item.ObservedAt),
+				quotaResetAt(quota, now)))
 		}
 	}
 	return strings.Join(lines, "\n")
+}
+
+func staleOfflineNode(item StatusItem, now time.Time) bool {
+	return item.Status == NodeOffline && !item.ObservedAt.IsZero() &&
+		now.Sub(item.ObservedAt) > 72*time.Hour
 }
 
 func quotaTodayRemaining(snapshot domain.QuotaSnapshot) string {
