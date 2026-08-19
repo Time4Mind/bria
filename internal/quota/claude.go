@@ -19,6 +19,7 @@ type ClaudeCollector struct {
 	tmuxSession string
 	command     string
 	flags       []string
+	kimi        kimiUsageSource
 }
 
 func NewClaudeCollector(
@@ -33,12 +34,22 @@ func NewClaudeCollector(
 	return &ClaudeCollector{
 		runner: runner, tmuxSession: tmuxSession, command: command,
 		flags: append([]string(nil), flags...),
+		kimi:  newKimiUsageSource(),
 	}, nil
 }
 
 func (c *ClaudeCollector) Backend() string { return "claude" }
 
 func (c *ClaudeCollector) Collect(ctx context.Context, nodeID domain.NodeID) (domain.QuotaSnapshot, error) {
+	if c.kimi != nil {
+		snapshot, configured, err := c.kimi.Collect(ctx, nodeID)
+		if err != nil {
+			return domain.QuotaSnapshot{}, err
+		}
+		if configured {
+			return snapshot, nil
+		}
+	}
 	tmuxPath, err := c.runner.LookPath("tmux")
 	if err != nil {
 		return domain.QuotaSnapshot{}, err

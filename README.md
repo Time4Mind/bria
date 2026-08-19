@@ -98,9 +98,10 @@ the pragmatic Go engineering contract in [CONTRIBUTING.md](CONTRIBUTING.md).
   cache, async refresh, leader marking, and global node sorting; persistent
   manual/automatic leader policy lives in cluster settings rather than Status;
 - node-local Claude and Codex quota collectors with replicated normalized
-  snapshots, five/ten-minute polling, CCBot-compatible persistent daily budget
-  tracking, unique-account threshold alerts, and no provider credentials or raw
-  terminal output in Raft;
+  snapshots, including Kimi Code weekly and rolling five-hour usage when Claude
+  is pointed at Kimi, five/ten-minute polling, CCBot-compatible persistent daily
+  budget tracking, unique-account threshold alerts, and no provider credentials
+  or raw terminal output in Raft;
 - sole-voter continuity plus three-voter Raft replication and automatic
   leader-failover integration coverage;
 - follower-safe, node-local Telegram warnings when a running node loses and
