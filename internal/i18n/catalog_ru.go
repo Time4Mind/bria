@@ -46,7 +46,7 @@ var russianCatalog = map[Key]string{
 	StatusNodeSettings:  "Настройки сервера · %s\n\nБэкенды: %s\nСтатус: %s",
 	StatusQuotaHeader:   "| Сервер | Бэк | Израсх. | Возраст, мин | Сегодня остаток | Сброс |",
 	QuotaAlert:          "%s %s · %s · %s: использовано %d%%",
-	QuotaWindowFiveHour: "5ч", QuotaWindowWeek: "неделя",
+	QuotaWindowFiveHour: "5ч", QuotaWindowFiveHourBudget: "5ч лимит", QuotaWindowWeek: "неделя",
 	ValueMinuteShort: "%d мин",
 	ValueLines:       "%d строк",
 	SettingsTitle:    "⚙ Настройки", SettingsBody: "Выберите раздел.",

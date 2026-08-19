@@ -135,6 +135,10 @@
   day, overspend is shown as a negative remainder, and redistribution happens
   only on the next day. The baseline is replicated with the quota snapshot so a
   process restart does not reset it.
+- When a provider omits a native five-hour quota window, Status shows a
+  calculated `5h limit` instead: the remaining weekly percentage prorated over
+  the next five hours until reset. It is labeled as a limit so it cannot be
+  confused with provider-reported usage; a native five-hour window always wins.
 - Telegram is an interaction adapter, not a core dependency. Replacing it must
   require a new adapter and presentation mapping, not changes to domain,
   consensus, membership, or node runtime behavior.
