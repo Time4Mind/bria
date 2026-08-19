@@ -22,21 +22,31 @@ func dailyRemainder(
 	sameWindow := previous.ResetsAt.Equal(resetsAt)
 	sameDay := previous.Date == date
 	if !sameWindow || !sameDay || used < previous.DayStartUsed {
-		resetLocal := resetsAt.In(now.Location())
-		todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
-		resetStart := time.Date(
-			resetLocal.Year(), resetLocal.Month(), resetLocal.Day(), 0, 0, 0, 0, now.Location(),
-		)
-		days := 1
-		for day := todayStart; day.Before(resetStart); days++ {
-			day = day.AddDate(0, 0, 1)
-		}
 		previous = dailyState{
 			Date: date, ResetsAt: resetsAt, DayStartUsed: used,
-			Budget: float64(max(0, 100-used)) / float64(days),
 		}
 	}
+	// Recompute even for restored state so snapshots created by the former
+	// whole-calendar-day allocation migrate immediately to hourly allocation.
+	previous.Budget = hourlyDailyBudget(previous.DayStartUsed, resetsAt, now)
 	spent := max(0, used-previous.DayStartUsed)
 	remaining := previous.Budget - float64(spent)
 	return remaining, previous, true
+}
+
+func hourlyDailyBudget(dayStartUsed int, resetsAt, now time.Time) float64 {
+	resetLocal := resetsAt.In(now.Location())
+	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	tomorrowStart := todayStart.AddDate(0, 0, 1)
+	todayEnd := minTime(tomorrowStart, resetLocal)
+	windowHours := resetLocal.Sub(todayStart).Hours()
+	todayHours := todayEnd.Sub(todayStart).Hours()
+	return float64(max(0, 100-dayStartUsed)) * todayHours / windowHours
+}
+
+func minTime(left, right time.Time) time.Time {
+	if left.Before(right) {
+		return left
+	}
+	return right
 }

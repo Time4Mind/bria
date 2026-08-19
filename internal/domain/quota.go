@@ -12,9 +12,9 @@ type QuotaWindow struct {
 	ResetsAt    time.Time `json:"resets_at,omitempty"`
 }
 
-// QuotaDailyBudget preserves the start-of-day baseline used to divide a
-// weekly quota over the remaining local calendar days. It travels with the
-// quota snapshot so a node restart cannot silently reset today's allowance.
+// QuotaDailyBudget preserves the start-of-day baseline used to distribute a
+// weekly quota over the exact remaining hours before reset. It travels with
+// the quota snapshot so a node restart cannot silently reset today's allowance.
 type QuotaDailyBudget struct {
 	Date         string    `json:"date"`
 	ResetsAt     time.Time `json:"resets_at"`

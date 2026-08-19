@@ -44,7 +44,7 @@ var englishCatalog = map[Key]string{
 	StatusSettingsBody:  "Select a server to inspect its settings.",
 	StatusConfirmLeader: "Assign %s as the cluster leader?",
 	StatusNodeSettings:  "Server settings · %s\n\nBackends: %s\nStatus: %s",
-	StatusQuotaHeader:   "| Server | Back | Used | Age, min | Today used | Reset |",
+	StatusQuotaHeader:   "| Server | Back | Used | Age, min | Today left | Reset |",
 	QuotaAlert:          "%s %s · %s · %s: %d%% used",
 	QuotaWindowFiveHour: "5h", QuotaWindowWeek: "week",
 	ValueMinuteShort: "%d min",

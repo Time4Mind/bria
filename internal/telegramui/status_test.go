@@ -36,8 +36,8 @@ func TestStatusRendersQuotaTableAndRefreshBeforeModes(t *testing.T) {
 [🔴 Game -> node@game]
 [← Back -> menu]`)
 	for _, value := range []string{
-		"| Server | Back | Used | Age, min | Today used | Reset |\n|---|---|---|---:|---:|---|",
-		"| 👑 Laptop | codex | 5h 12% · week 50% | 2 | 140.0% | 20.08 12:30 |",
+		"| Server | Back | Used | Age, min | Today left | Reset |\n|---|---|---|---:|---:|---|",
+		"| 👑 Laptop | codex | 5h 12% · week 50% | 2 | -4.0% | 20.08 12:30 |",
 		"| 🔴 Game | — | — | 9 | — | — |",
 	} {
 		if !strings.Contains(screen.Text, value) {
@@ -51,7 +51,7 @@ func TestStatusRendersQuotaTableAndRefreshBeforeModes(t *testing.T) {
 
 func TestStatusTableHeaderIsLocalized(t *testing.T) {
 	screen := RenderStatus(StatusInput{Copy: i18n.For("ru"), Mode: StatusChoose, Now: time.Now()})
-	if !strings.Contains(screen.Text, "Сервер | Бэк | Израсх. | Возраст, мин | Сегодня израсх. | Сброс") {
+	if !strings.Contains(screen.Text, "Сервер | Бэк | Израсх. | Возраст, мин | Сегодня остаток | Сброс") {
 		t.Fatalf("status header=%q", screen.Text)
 	}
 }
@@ -69,7 +69,7 @@ func TestStatusResetUsesInterfaceLocalTimezone(t *testing.T) {
 			Weekly:      &domain.QuotaWindow{UsedPercent: 50, ResetsAt: time.Date(2026, 8, 20, 10, 0, 0, 0, time.UTC)},
 		}}}},
 	})
-	if !strings.Contains(screen.Text, "| Laptop | codex | week 50% | 0 | 17.5% | 20.08 13:00 |") {
+	if !strings.Contains(screen.Text, "| Laptop | codex | week 50% | 0 | 8.2% | 20.08 13:00 |") {
 		t.Fatalf("status text=%q", screen.Text)
 	}
 }

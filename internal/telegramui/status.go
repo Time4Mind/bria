@@ -143,19 +143,17 @@ func statusTable(copy i18n.Localizer, items []StatusItem, now time.Time) string 
 			lines = append(lines, fmt.Sprintf("| %s | %s | %s | %d | %s | %s |",
 				name, markdownTableCell(quota.Backend), markdownTableCell(quotaUsage(copy, quota)),
 				quotaAgeMinutes(now, quota.CollectedAt, item.ObservedAt),
-				quotaTodayUsage(quota), quotaResetAt(quota, now)))
+				quotaTodayRemaining(quota), quotaResetAt(quota, now)))
 		}
 	}
 	return strings.Join(lines, "\n")
 }
 
-func quotaTodayUsage(snapshot domain.QuotaSnapshot) string {
-	if snapshot.TodayRemaining == nil || snapshot.DailyBudget == nil ||
-		snapshot.DailyBudget.Budget <= 0 {
+func quotaTodayRemaining(snapshot domain.QuotaSnapshot) string {
+	if snapshot.TodayRemaining == nil {
 		return "—"
 	}
-	spent := snapshot.DailyBudget.Budget - *snapshot.TodayRemaining
-	return fmt.Sprintf("%.1f%%", max(0, spent)/snapshot.DailyBudget.Budget*100)
+	return fmt.Sprintf("%.1f%%", *snapshot.TodayRemaining)
 }
 
 func quotaResetAt(snapshot domain.QuotaSnapshot, now time.Time) string {

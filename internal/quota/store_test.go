@@ -52,8 +52,8 @@ func TestStoreRestoresDailyBaselineFromReplicatedQuota(t *testing.T) {
 
 	snapshots := store.Snapshots()
 	if len(snapshots) != 1 || snapshots[0].TodayRemaining == nil ||
-		*snapshots[0].TodayRemaining != -4 || snapshots[0].DailyBudget == nil ||
-		snapshots[0].DailyBudget.DayStartUsed != 50 {
+		snapshots[0].DailyBudget == nil || snapshots[0].DailyBudget.DayStartUsed != 50 ||
+		*snapshots[0].TodayRemaining != snapshots[0].DailyBudget.Budget-14 {
 		t.Fatalf("snapshots=%#v", snapshots)
 	}
 }
