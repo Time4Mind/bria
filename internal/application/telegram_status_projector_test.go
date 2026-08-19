@@ -43,7 +43,7 @@ func TestStatusUsesGlobalNodeSortAndReplicatedQuota(t *testing.T) {
 	if gammaAt < 0 || !(gammaAt < betaAt && betaAt < alphaAt) {
 		t.Fatalf("unexpected leader-first order:\n%s", grid)
 	}
-	if !strings.Contains(screen.Text, "👑 Gamma | codex | week 41%") {
+	if !strings.Contains(screen.Text, "👑 Gamma | codex | w 41%") {
 		t.Fatalf("quota missing from status: %q", screen.Text)
 	}
 }
