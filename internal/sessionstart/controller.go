@@ -134,6 +134,9 @@ func (c *Controller) provision(ctx context.Context, session domain.Session) erro
 	if err := c.router.Provision(ctx, request); err != nil {
 		return err
 	}
+	if err := c.confirmResumedProvider(ctx, session); err != nil {
+		return err
+	}
 	if err := c.bindProvider(ctx, session); err != nil {
 		return err
 	}
@@ -160,6 +163,31 @@ func (c *Controller) provision(ctx context.Context, session domain.Session) erro
 		return c.application.PublishSessionRuntime(promoteCtx, current, domain.RuntimeRunning, nil)
 	}
 	return nil
+}
+
+// A tmux window can outlive a provider just long enough to pass the process
+// startup probe. For an explicit Codex resume, the SessionStart hook is the
+// authoritative readiness proof: it binds the requested provider identity to
+// this exact Bria runtime. Without it, publishing idle would create a live
+// control-plane session whose provider has already exited.
+func (c *Controller) confirmResumedProvider(ctx context.Context, session domain.Session) error {
+	if !session.ProviderResume || !strings.EqualFold(session.Backend, "codex") {
+		return nil
+	}
+	discovery, err := c.router.Discover(ctx, DiscoverRequest{
+		ActorID: session.OwnerID, NodeID: session.NodeID, Backend: session.Backend,
+		Session: session.Ref(), Workdir: session.Workdir, Limit: 1,
+		After: session.ProviderBindingSince,
+	})
+	if err != nil {
+		return err
+	}
+	for _, item := range discovery.Candidates {
+		if item.ProviderSessionID == session.ProviderSessionID {
+			return nil
+		}
+	}
+	return errProviderBindingPending
 }
 
 func (c *Controller) bindMissingProviders(ctx context.Context) {

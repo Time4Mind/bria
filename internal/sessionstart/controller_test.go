@@ -57,7 +57,9 @@ func newControllerFixture(t *testing.T) (*Controller, *clusterstate.Machine, *st
 	state := domain.NewState()
 	if err := state.AddNode(domain.Node{
 		ID: "alpha", Name: "Alpha", Status: domain.NodeOnline,
-		Backends: []domain.BackendDescriptor{{Name: "codex", Capabilities: []string{"session.create"}}},
+		Backends: []domain.BackendDescriptor{{
+			Name: "codex", Capabilities: []string{"session.create", "session.resume"},
+		}},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -119,6 +121,40 @@ func TestReconcileStartsRunningWhenInputWasQueuedDuringProvision(t *testing.T) {
 	controller.reconcile(context.Background())
 	if got := machine.State().Sessions[session.Ref().Key()].RuntimePhase; got != domain.RuntimeRunning {
 		t.Fatalf("phase=%q", got)
+	}
+}
+
+func TestCodexResumeWaitsForExactProviderBinding(t *testing.T) {
+	controller, machine, router := newControllerFixture(t)
+	router.discoveries = nil
+	session, err := controller.Create(
+		context.Background(), application.Principal{UserID: 7},
+		application.CreateSessionRequest{
+			NodeID: "alpha", Backend: "codex", Workdir: t.TempDir(),
+			ProviderSessionID: "provider-resume",
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := machine.State().Sessions[session.Ref().Key()].RuntimePhase; got != domain.RuntimeStarting {
+		t.Fatalf("unbound resume phase=%q", got)
+	}
+	if len(router.requests) != 1 || router.requests[0].Session != session.Ref() ||
+		router.requests[0].After != session.ProviderBindingSince {
+		t.Fatalf("resume binding discovery=%#v", router.requests)
+	}
+
+	router.discoveries = []transcript.Candidate{{ProviderSessionID: "foreign-provider"}}
+	controller.reconcile(context.Background())
+	if got := machine.State().Sessions[session.Ref().Key()].RuntimePhase; got != domain.RuntimeStarting {
+		t.Fatalf("foreign binding promoted resume: phase=%q", got)
+	}
+
+	router.discoveries = []transcript.Candidate{{ProviderSessionID: "provider-resume"}}
+	controller.reconcile(context.Background())
+	if got := machine.State().Sessions[session.Ref().Key()].RuntimePhase; got != domain.RuntimeIdle {
+		t.Fatalf("confirmed resume phase=%q", got)
 	}
 }
 
