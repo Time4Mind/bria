@@ -24,7 +24,7 @@ func TestLiveCardCarriesThreePerRowModeAwareSessionSwitcher(t *testing.T) {
 	}
 	hostGrid := telegramui.CanonicalGrid(hostFirst.Grid)
 	if !strings.Contains(hostGrid,
-		"[a-old · 21% -> session@s-ao] | [✓ a-new · 34% -> session@s-an] | [shared · 55% -> session@s-as]") {
+		"[a-old ✅ · 21% -> session@s-ao] | [✓ a-new ✅ · 34% -> session@s-an] | [shared ✅ · 55% -> session@s-as]") {
 		t.Fatalf("host-first switcher=%s", hostGrid)
 	}
 	preferences := state.Preferences[2]
@@ -35,9 +35,9 @@ func TestLiveCardCarriesThreePerRowModeAwareSessionSwitcher(t *testing.T) {
 		t.Fatal(err)
 	}
 	allGrid := telegramui.CanonicalGrid(allHosts.Grid)
-	if !strings.Contains(allGrid, "a-old · Alpha") ||
-		!strings.Contains(allGrid, "g-new · Gamma · 13%") ||
-		!strings.Contains(allGrid, "✓ 🟥 a-new · Alpha · 34%") {
+	if !strings.Contains(allGrid, "a-old · Alpha ✅") ||
+		!strings.Contains(allGrid, "g-new · Gamma ✅ · 13%") ||
+		!strings.Contains(allGrid, "✓ 🟥 a-new · Alpha ✅ · 34%") {
 		t.Fatalf("all-host switcher=%s", allGrid)
 	}
 }

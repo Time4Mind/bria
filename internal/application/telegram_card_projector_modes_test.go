@@ -44,7 +44,7 @@ func TestEveryCardDisplayCombinationPreservesValidSessionNavigation(t *testing.T
 				if err := screen.Validate(); err != nil {
 					t.Fatalf("%s/%s/%v: invalid card: %v", cardMode, terminalMode, hidden, err)
 				}
-				if !strings.Contains(telegramui.CanonicalGrid(screen.Grid), "[… -> session@s-ao]") {
+				if !strings.Contains(telegramui.CanonicalGrid(screen.Grid), "[… ✅ -> session@s-ao]") {
 					t.Fatalf("%s/%s/%v: session switcher disappeared", cardMode, terminalMode, hidden)
 				}
 			}

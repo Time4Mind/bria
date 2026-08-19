@@ -122,7 +122,7 @@ func sessionStatusGlyph(session domain.Session) string {
 		}
 		return "⚠️"
 	case domain.RuntimeIdle:
-		return ""
+		return "✅"
 	default:
 		return "⚪"
 	}
