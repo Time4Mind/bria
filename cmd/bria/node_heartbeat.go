@@ -56,6 +56,7 @@ func startNodeHeartbeatLoops(
 	}
 	quotaStore := quota.NewStore(domain.NodeID(nodeConfig.NodeID), node.State(), claudeQuota, codexQuota)
 	snapshot := func(snapshotCtx context.Context) (nodecontrol.Heartbeat, error) {
+		state := node.State().State()
 		archives := []string(nil)
 		if inventory, ok := archiveVerifier.(archiveInventory); ok {
 			archives, _ = inventory.ReadyArchiveIDs()
@@ -63,14 +64,20 @@ func startNodeHeartbeatLoops(
 		captureCtx, cancel := context.WithTimeout(snapshotCtx, 1500*time.Millisecond)
 		interactive := localExecutor.InteractiveSnapshot(captureCtx)
 		finals := collectTranscriptFinals(
-			captureCtx, domain.NodeID(nodeConfig.NodeID), node.State().State(), transcripts,
+			captureCtx, domain.NodeID(nodeConfig.NodeID), state, transcripts,
 		)
+		runtimeReports := []domain.TranscriptRuntimeReport(nil)
+		if transcriptRuntimeHeartbeatEnabled(state, node.LeaderID(), localBuildVersion()) {
+			runtimeReports = collectTranscriptRuntime(
+				captureCtx, domain.NodeID(nodeConfig.NodeID), state, transcripts,
+			)
+		}
 		cancel()
 		return nodecontrol.Heartbeat{
 			NodeID: nodeConfig.NodeID, BootID: bootID, Version: localBuildVersion(),
 			OS: runtime.GOOS, Arch: runtime.GOARCH,
 			Backends: inventory.Backends(), Archives: archives, Interactive: interactive,
-			Finals: finals,
+			Finals: finals, Runtime: runtimeReports,
 			Quotas: quotaStore.Snapshots(),
 			BackendIsolation: domain.BackendIsolationReport{
 				Mode: nodeConfig.EffectiveRunnerMode(), Ready: nodeConfig.IsolatedRunner(),

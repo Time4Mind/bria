@@ -31,6 +31,7 @@ type Heartbeat struct {
 	Archives                       []string                         `json:"archives,omitempty"`
 	Interactive                    []domain.InteractivePromptReport `json:"interactive,omitempty"`
 	Finals                         []domain.TranscriptFinalReport   `json:"transcript_finals,omitempty"`
+	Runtime                        []domain.TranscriptRuntimeReport `json:"transcript_runtime,omitempty"`
 	Quotas                         []domain.QuotaSnapshot           `json:"quotas,omitempty"`
 	BackendIsolation               domain.BackendIsolationReport    `json:"backend_isolation,omitempty"`
 }
@@ -51,14 +52,25 @@ type CommandApplier interface {
 // converts authenticated reports to ordinary deterministic Raft commands.
 type ConsensusHeartbeatCommitter struct {
 	apply CommandApplier
+	state StateReader
 	now   func() time.Time
 }
 
-func NewConsensusHeartbeatCommitter(apply CommandApplier) (*ConsensusHeartbeatCommitter, error) {
+func NewConsensusHeartbeatCommitter(
+	apply CommandApplier,
+	readers ...StateReader,
+) (*ConsensusHeartbeatCommitter, error) {
 	if apply == nil {
 		return nil, errors.New("command applier is required")
 	}
-	return &ConsensusHeartbeatCommitter{apply: apply, now: time.Now}, nil
+	if len(readers) > 1 || (len(readers) == 1 && readers[0] == nil) {
+		return nil, errors.New("at most one state reader is supported")
+	}
+	committer := &ConsensusHeartbeatCommitter{apply: apply, now: time.Now}
+	if len(readers) == 1 {
+		committer.state = readers[0]
+	}
+	return committer, nil
 }
 
 func (c *ConsensusHeartbeatCommitter) CommitHeartbeat(
@@ -97,7 +109,60 @@ func (c *ConsensusHeartbeatCommitter) CommitHeartbeat(
 	if err := json.Unmarshal(result.Value, &plan); err != nil {
 		return HeartbeatAck{}, fmt.Errorf("decode heartbeat recovery plan: %w", err)
 	}
+	if err := c.commitTranscriptRuntime(ctx, report); err != nil {
+		return HeartbeatAck{}, err
+	}
 	return HeartbeatAck{Recovery: plan}, nil
+}
+
+func (c *ConsensusHeartbeatCommitter) commitTranscriptRuntime(
+	ctx context.Context,
+	report Heartbeat,
+) error {
+	if len(report.Runtime) == 0 {
+		return nil
+	}
+	if c.state == nil {
+		return errors.New("heartbeat runtime reports require a state reader")
+	}
+	for _, runtimeReport := range report.Runtime {
+		if runtimeReport.Timestamp.After(c.now().UTC().Add(5 * time.Minute)) {
+			return errors.New("heartbeat transcript runtime is from the future")
+		}
+		state := c.state.State()
+		if state == nil {
+			return errors.New("cluster state is unavailable")
+		}
+		ref := domain.SessionRef{
+			NodeID: domain.NodeID(report.NodeID), SessionID: runtimeReport.SessionID,
+		}
+		session, exists := state.Sessions[ref.Key()]
+		if !exists || !session.IsLive() || session.RuntimeGeneration != runtimeReport.Generation ||
+			runtimeReport.Timestamp.Before(session.LastEventAt) ||
+			session.RuntimePhase == runtimeReport.Phase ||
+			(session.RuntimePhase != domain.RuntimeIdle &&
+				session.RuntimePhase != domain.RuntimeRunning) {
+			continue
+		}
+		command, err := clusterstate.NewCommand(
+			transcriptRuntimeOperationID(report.NodeID, runtimeReport),
+			clusterstate.CommandPublishSessionRuntime, runtimeReport.Timestamp,
+			clusterstate.PublishSessionRuntime{
+				Session: ref, Generation: runtimeReport.Generation, Phase: runtimeReport.Phase,
+			},
+		)
+		if err != nil {
+			return err
+		}
+		result, err := c.apply.Apply(ctx, command)
+		if err != nil {
+			return fmt.Errorf("commit transcript runtime: %w", err)
+		}
+		if err := result.Err(); err != nil {
+			return fmt.Errorf("commit transcript runtime: %w", err)
+		}
+	}
+	return nil
 }
 
 func validateHeartbeat(report Heartbeat) error {
@@ -144,6 +209,19 @@ func validateHeartbeat(report Heartbeat) error {
 			return errors.New("heartbeat transcript final is invalid")
 		}
 	}
+	if len(report.Runtime) > 512 {
+		return errors.New("heartbeat transcript runtime inventory is too large")
+	}
+	for _, runtimeReport := range report.Runtime {
+		if err := (domain.SessionRef{
+			NodeID: domain.NodeID(report.NodeID), SessionID: runtimeReport.SessionID,
+		}).Validate(); err != nil || runtimeReport.Generation == 0 ||
+			(runtimeReport.Phase != domain.RuntimeIdle &&
+				runtimeReport.Phase != domain.RuntimeRunning) ||
+			runtimeReport.Timestamp.IsZero() {
+			return errors.New("heartbeat transcript runtime is invalid")
+		}
+	}
 	if len(report.Quotas) > 16 {
 		return errors.New("heartbeat quota inventory is too large")
 	}
@@ -182,4 +260,13 @@ func lowerHex(value string) bool {
 func heartbeatOperationID(nodeID, reportID string) string {
 	digest := sha256.Sum256([]byte(nodeID + "\x00" + reportID))
 	return "node-heartbeat-" + hex.EncodeToString(digest[:16])
+}
+
+func transcriptRuntimeOperationID(nodeID string, report domain.TranscriptRuntimeReport) string {
+	value := fmt.Sprintf(
+		"%s\x00%s\x00%d\x00%s\x00%s", nodeID, report.SessionID, report.Generation,
+		report.Phase, report.Timestamp.UTC().Format(time.RFC3339Nano),
+	)
+	digest := sha256.Sum256([]byte(value))
+	return "transcript-runtime-" + hex.EncodeToString(digest[:16])
 }

@@ -59,3 +59,14 @@ func TestHeartbeatLeaderResolverHasNoAutomaticFallback(t *testing.T) {
 		t.Fatalf("automatic fallback leader=%q", got)
 	}
 }
+
+func TestTranscriptRuntimeHeartbeatWaitsForMatchingLeaderVersion(t *testing.T) {
+	state := domain.NewState()
+	state.Nodes["leader"] = domain.Node{ID: "leader", Name: "Leader", Version: "new"}
+	if !transcriptRuntimeHeartbeatEnabled(state, "leader", "new") {
+		t.Fatal("matching leader version did not enable transcript runtime")
+	}
+	if transcriptRuntimeHeartbeatEnabled(state, "leader", "old") {
+		t.Fatal("mismatched leader version enabled a new heartbeat field")
+	}
+}

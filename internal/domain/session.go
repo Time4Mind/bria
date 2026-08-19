@@ -38,6 +38,15 @@ const (
 	RuntimeDegraded     RuntimePhase = "degraded"
 )
 
+// TranscriptRuntimeReport is bounded provider evidence about an open or
+// completed turn. Transcript text never enters cluster state or node control.
+type TranscriptRuntimeReport struct {
+	SessionID  SessionID    `json:"session_id"`
+	Generation uint64       `json:"generation"`
+	Phase      RuntimePhase `json:"phase"`
+	Timestamp  time.Time    `json:"timestamp"`
+}
+
 type ArchiveReason string
 
 const (

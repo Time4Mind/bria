@@ -82,6 +82,51 @@ func TestCollectTranscriptFinalsRejectsAnswerForEarlierQueuedPrompt(t *testing.T
 	}
 }
 
+func TestCollectTranscriptFinalsAcceptsProviderUserTimestampSkew(t *testing.T) {
+	state := transcriptReconcileState(t, domain.RuntimeRunning)
+	finalAt := time.Unix(120, 0).UTC()
+	reports := collectTranscriptFinals(
+		context.Background(), "node", state,
+		&transcriptReconcileReader{events: []transcript.Event{
+			{Kind: transcript.EventUserText, Timestamp: time.Unix(99, 0).UTC().Format(time.RFC3339Nano)},
+			{Kind: transcript.EventAssistantFinal, Timestamp: finalAt.Format(time.RFC3339Nano)},
+			{Kind: transcript.EventTurnComplete, Timestamp: finalAt.Add(time.Second).Format(time.RFC3339Nano)},
+		}},
+	)
+	if len(reports) != 1 || reports[0].Timestamp != finalAt {
+		t.Fatalf("reports=%#v", reports)
+	}
+}
+
+func TestCollectTranscriptRuntimeRepairsRecoveredOpenTurn(t *testing.T) {
+	state := transcriptReconcileState(t, domain.RuntimeIdle)
+	reports := collectTranscriptRuntime(
+		context.Background(), "node", state,
+		&transcriptReconcileReader{events: []transcript.Event{
+			{Kind: transcript.EventTurnComplete, Timestamp: time.Unix(110, 0).UTC().Format(time.RFC3339Nano)},
+			{Kind: transcript.EventToolCall, Timestamp: time.Unix(120, 0).UTC().Format(time.RFC3339Nano)},
+		}},
+	)
+	if len(reports) != 1 || reports[0].Phase != domain.RuntimeRunning ||
+		reports[0].Generation != 3 {
+		t.Fatalf("reports=%#v", reports)
+	}
+}
+
+func TestCollectTranscriptRuntimeRejectsStaleObservation(t *testing.T) {
+	state := transcriptReconcileState(t, domain.RuntimeRunning)
+	reports := collectTranscriptRuntime(
+		context.Background(), "node", state,
+		&transcriptReconcileReader{events: []transcript.Event{{
+			Kind:      transcript.EventTurnComplete,
+			Timestamp: time.Unix(90, 0).UTC().Format(time.RFC3339Nano),
+		}}},
+	)
+	if len(reports) != 0 {
+		t.Fatalf("stale reports=%#v", reports)
+	}
+}
+
 func transcriptReconcileState(t *testing.T, phase domain.RuntimePhase) *domain.State {
 	t.Helper()
 	state := domain.NewState()

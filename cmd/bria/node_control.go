@@ -196,7 +196,7 @@ func startNodeRuntimeControl(
 	if err != nil {
 		return closeFailedRuntime(executor, store, err)
 	}
-	heartbeats, err := nodecontrol.NewConsensusHeartbeatCommitter(node)
+	heartbeats, err := nodecontrol.NewConsensusHeartbeatCommitter(node, node.State())
 	if err != nil {
 		return closeFailedRuntime(executor, store, err)
 	}
