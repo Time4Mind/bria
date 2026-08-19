@@ -1,22 +1,2 @@
-# Existing debt at repository publication. New Go modules remain capped at
-# 320 lines; these files may shrink but cannot grow without failing CI.
-cmd/bria/node.go 345
-cmd/bria/node_control.go 341
-internal/application/telegram_sessions.go 350
-internal/domain/node_runtime.go 375
-internal/domain/node_runtime_test.go 349
-internal/domain/preferences.go 352
-internal/nodecontrol/client.go 348
-internal/nodecontrol/nodecontrol_test.go 467
-internal/nodecontrol/server.go 496
-internal/runtimehost/local_executor_test.go 332
-internal/telegramapp/handler.go 449
-internal/telegramapp/handler_test.go 409
-internal/telegramapp/session_controls_test.go 506
-internal/telegramapp/session_create.go 366
-internal/telegramapp/session_create_test.go 575
-internal/telegramapp/settings.go 557
-internal/telegrambot/client.go 371
-internal/telegrambot/poller_test.go 397
-internal/telegrambot/rich_test.go 374
-internal/telegramui/settings.go 379
+# All Go modules now satisfy the strict 320-line limit. Keep this file as the
+# explicit empty baseline consumed by CI; new exceptions are not grandfathered.
