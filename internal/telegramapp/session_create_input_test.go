@@ -141,6 +141,38 @@ func TestTextDuringIncompleteCreateFlowNeverFallsThroughToOldSession(t *testing.
 	}
 }
 
+func TestMenuCancelsIncompleteCreateFlowBeforeNextInput(t *testing.T) {
+	fixture := newFixture(t)
+	enableCreateBackend(t, fixture)
+	oldRef := domain.SessionRef{NodeID: "allowed", SessionID: "live"}
+	controls := &activeSessionControls{
+		blockingControls: &blockingControls{ref: oldRef}, service: fixture.service,
+	}
+	handler, err := telegramapp.NewHandlerWithControls(
+		fixture.service, fixture.projector, fixture.codec, fixture.messenger, controls,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := handler.SetSessionStarter(inputRoutingStarter{service: fixture.service}); err != nil {
+		t.Fatal(err)
+	}
+	origin := telegrambot.Message{ChatID: 7, MessageID: 10}
+	invokeCreateCallback(t, handler, 906, origin, telegramui.ActionNewSession, "")
+	invokeCreateCallback(t, handler, 907, origin, telegramui.ActionMenu, "")
+	if err := handler.HandleTelegramUpdate(context.Background(), telegrambot.IncomingUpdate{
+		UpdateID: 908, Kind: telegrambot.IncomingMessage, ChatID: 7, UserID: 7,
+		Text: "must reach the active session",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	controls.mu.RLock()
+	defer controls.mu.RUnlock()
+	if controls.ref != oldRef || controls.text != "must reach the active session" {
+		t.Fatalf("routed ref=%s text=%q", controls.ref.Key(), controls.text)
+	}
+}
+
 func invokeCreateCallback(
 	t *testing.T,
 	handler *telegramapp.Handler,

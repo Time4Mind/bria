@@ -149,8 +149,8 @@ func statusTable(copy i18n.Localizer, items []StatusItem, now time.Time) string 
 				continue
 			}
 			lines = append(lines, fmt.Sprintf("| %s | %s | %s | %s | %d | %s |",
-				name, backend, markdownTableCell(quotaUsage(copy, quota, now)),
-				quotaTodayRemaining(quota), quotaAgeMinutes(now, quota.CollectedAt, item.ObservedAt),
+				name, backend, markdownTableCell(quotaUsage(copy, quota)),
+				quotaRemaining(copy, quota, now), quotaAgeMinutes(now, quota.CollectedAt, item.ObservedAt),
 				quotaResetAt(quota, now)))
 		}
 	}
@@ -162,11 +162,22 @@ func staleOfflineNode(item StatusItem, now time.Time) bool {
 		now.Sub(item.ObservedAt) > 72*time.Hour
 }
 
-func quotaTodayRemaining(snapshot domain.QuotaSnapshot) string {
-	if snapshot.TodayRemaining == nil {
+func quotaRemaining(copy i18n.Localizer, snapshot domain.QuotaSnapshot, now time.Time) string {
+	parts := make([]string, 0, 2)
+	if snapshot.TodayRemaining != nil {
+		parts = append(parts, fmt.Sprintf("%.1f%%", *snapshot.TodayRemaining))
+	}
+	if snapshot.FiveHour == nil {
+		if budget, ok := calculatedFiveHourBudget(snapshot.Weekly, now); ok {
+			parts = append(parts, fmt.Sprintf(
+				"%s %.1f%%", copy.Text(i18n.QuotaWindowFiveHour), budget,
+			))
+		}
+	}
+	if len(parts) == 0 {
 		return "—"
 	}
-	return fmt.Sprintf("%.1f%%", *snapshot.TodayRemaining)
+	return strings.Join(parts, " · ")
 }
 
 func quotaResetAt(snapshot domain.QuotaSnapshot, now time.Time) string {
@@ -201,14 +212,10 @@ func quotaPercent(window *domain.QuotaWindow) string {
 	return fmt.Sprintf("%d%%", window.UsedPercent)
 }
 
-func quotaUsage(copy i18n.Localizer, snapshot domain.QuotaSnapshot, now time.Time) string {
+func quotaUsage(copy i18n.Localizer, snapshot domain.QuotaSnapshot) string {
 	parts := make([]string, 0, 2)
 	if snapshot.FiveHour != nil {
 		parts = append(parts, copy.Text(i18n.QuotaWindowFiveHour)+" "+quotaPercent(snapshot.FiveHour))
-	} else if budget, ok := calculatedFiveHourBudget(snapshot.Weekly, now); ok {
-		parts = append(parts, fmt.Sprintf(
-			"%s %.1f%%", copy.Text(i18n.QuotaWindowFiveHour), budget,
-		))
 	}
 	if snapshot.Weekly != nil {
 		parts = append(parts, copy.Text(i18n.QuotaWindowWeek)+" "+quotaPercent(snapshot.Weekly))

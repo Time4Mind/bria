@@ -23,6 +23,7 @@ func (h *Handler) handleNavigationCallback(
 	var err error
 	switch callback.Action {
 	case telegramui.ActionMenu:
+		h.clearCreateFlow(actor.UserID)
 		screen, err = h.projector.MainMenu(actor)
 	case telegramui.ActionSessions:
 		h.clearCreateFlow(actor.UserID)

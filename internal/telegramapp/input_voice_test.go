@@ -37,6 +37,13 @@ func TestVoiceInputIsRejectedBeforeNodeTransferWhenRecognitionIsOff(t *testing.T
 	if controls.external != nil {
 		t.Fatalf("disabled voice was transferred to a node: %#v", controls.external)
 	}
+	if len(fixture.messenger.sent) != 1 ||
+		!strings.Contains(fixture.messenger.sent[0].Text, "voice message was not sent") {
+		t.Fatalf("disabled voice explanation=%#v", fixture.messenger.sent)
+	}
+	if grid := telegramui.CanonicalGrid(fixture.messenger.sent[0].Grid); !strings.Contains(grid, "voice_enable_yes") {
+		t.Fatalf("disabled voice setup actions=%s", grid)
+	}
 }
 
 func TestVoiceInputUsesTheExplicitInterfaceLanguage(t *testing.T) {

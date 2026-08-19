@@ -58,6 +58,12 @@ func RenderVoiceEnableConfirmation(copy i18n.Localizer, plans []string) Screen {
 	}
 }
 
+func RenderVoiceInputEnableConfirmation(copy i18n.Localizer, plans []string) Screen {
+	screen := RenderVoiceEnableConfirmation(copy, plans)
+	screen.Text = html.EscapeString(copy.Text(i18n.VoiceInputDisabled)) + "\n\n" + screen.Text
+	return screen
+}
+
 func RenderVoiceSetupStarted(copy i18n.Localizer, lines []string) Screen {
 	items := make([]string, 0, len(lines))
 	for _, line := range lines {

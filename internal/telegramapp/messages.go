@@ -59,9 +59,18 @@ func (h *Handler) handleMessage(
 	inputBaseline := inputPendingBaseline{}
 	if update.Content.Kind == telegrambot.IncomingVoice {
 		preferences, preferencesErr := h.service.Preferences(actor)
-		if preferencesErr == nil && preferences.EffectiveVoiceBackend() != domain.VoiceOff {
-			voiceBaseline = h.captureVoiceBaseline(ctx, actor)
+		if preferencesErr != nil {
+			return preferencesErr
 		}
+		if preferences.EffectiveVoiceBackend() == domain.VoiceOff {
+			plans, planErr := h.voiceEnablePlans(actor)
+			if planErr != nil {
+				return planErr
+			}
+			return h.sendProjected(ctx, update.ChatID,
+				telegramui.RenderVoiceInputEnableConfirmation(h.copy(actor), plans), nil)
+		}
+		voiceBaseline = h.captureVoiceBaseline(ctx, actor)
 	} else if pendingInputText(update) != "" {
 		inputBaseline = h.captureInputBaseline(ctx, actor)
 	}

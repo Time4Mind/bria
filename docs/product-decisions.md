@@ -130,15 +130,18 @@
   settings; leader policy is not a Status mode. Server sorting is globally
   configurable as creation time (default), name, or leader first; quota polling
   is 5 or 10 minutes (default 10).
-- The daily allowance uses the CCBot calculation: at the first observation on
-  each local calendar day, remaining weekly quota is divided over all calendar
-  days through the reset date (inclusive). The baseline stays fixed during that
-  day, overspend is shown as a negative remainder, and redistribution happens
-  only on the next day. The baseline is replicated with the quota snapshot so a
-  process restart does not reset it.
+- At the first observation on each local calendar day, the daily allowance
+  allocates the remaining weekly quota in proportion to clock hours: hours in
+  the current local calendar day (or its partial segment before reset) divided
+  by all hours from that day's midnight until reset. The baseline stays fixed
+  during that day, overspend is shown as a negative remainder, and allocation
+  is recalculated on the next day. The baseline is replicated with the quota
+  snapshot so a process restart does not reset it.
 - When a provider omits a native five-hour quota window, Status shows a
-  calculated `5h` value instead: the remaining weekly percentage prorated over
-  the next five hours until reset. A native five-hour window always wins.
+  calculated `5h` allowance in the Remaining column: the remaining weekly
+  percentage prorated over the next five hours until reset. The Used column
+  contains only native provider usage windows; a native five-hour window always
+  wins and suppresses the calculated allowance.
 - Telegram is an interaction adapter, not a core dependency. Replacing it must
   require a new adapter and presentation mapping, not changes to domain,
   consensus, membership, or node runtime behavior.
