@@ -203,42 +203,6 @@ func (r *Reader) resolveTranscriptPath(ctx context.Context, request Request) (st
 	}
 }
 
-func parseRecentEvents(
-	backend Backend,
-	lines [][]byte,
-	maxBodyBytes int,
-	maxEvents int,
-) ([]Event, int) {
-	if len(lines) == 0 {
-		return nil, 0
-	}
-	count := min(initialParseLines, len(lines))
-	for {
-		suffix := lines[len(lines)-count:]
-		var events []Event
-		switch backend {
-		case BackendClaude:
-			events = parseClaude(suffix, maxBodyBytes)
-		case BackendCodex:
-			events = parseCodex(suffix, maxBodyBytes)
-		}
-		hasContext := false
-		for index := len(events) - 1; index >= 0; index-- {
-			if events[index].ContextPercent != nil {
-				hasContext = true
-				break
-			}
-		}
-		if count == len(lines) || (len(events) >= maxEvents && hasContext) {
-			if len(events) > maxEvents {
-				events = events[len(events)-maxEvents:]
-			}
-			return events, count
-		}
-		count = min(len(lines), count*2)
-	}
-}
-
 func validateRequest(request Request) error {
 	if !providerSessionIDPattern.MatchString(request.ProviderSessionID) {
 		return fmt.Errorf("%w: invalid provider session id", ErrInvalidRequest)

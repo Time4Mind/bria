@@ -55,13 +55,7 @@ func (h *Handler) schedulePaneRefresh(
 	h.paneWorkers[actor.UserID] = generation
 	h.paneCancels[actor.UserID] = cancel
 	h.paneMu.Unlock()
-	lastTyping := time.Time{}
-	if session, err := h.service.Session(actor, ref); err == nil &&
-		(session.RuntimePhase == domain.RuntimeStarting || session.RuntimePhase == domain.RuntimeRunning) {
-		_ = h.messenger.SendTyping(ctx, message.ChatID)
-		lastTyping = time.Now()
-	}
-	go h.runPaneRefresh(workerCtx, actor, ref, message, generation, lastTyping)
+	go h.runPaneRefresh(workerCtx, actor, ref, message, generation)
 }
 
 // ensurePaneRefresh restores the live-card poller after a leader or Bria
@@ -88,11 +82,11 @@ func (h *Handler) runPaneRefresh(
 	ref domain.SessionRef,
 	message telegrambot.Message,
 	generation uint64,
-	lastTyping time.Time,
 ) {
 	defer h.finishPaneRefresh(actor.UserID, generation)
 	delay := paneInitialDelay
 	responseRefresh := false
+	lastTyping := time.Time{}
 	for attempt := 0; attempt < paneRefreshLimit; attempt++ {
 		if !waitPaneRefresh(ctx, delay) || !h.canRefresh() ||
 			!h.currentPaneGeneration(actor.UserID, generation) {
@@ -112,15 +106,11 @@ func (h *Handler) runPaneRefresh(
 		if !h.sessionIsActive(actor, ref) {
 			return
 		}
-		if (session.RuntimePhase == domain.RuntimeStarting ||
-			session.RuntimePhase == domain.RuntimeRunning) &&
-			time.Since(lastTyping) >= typingRefreshDelay {
-			// Ephemeral transport feedback is best effort and cannot reject a
-			// durably accepted prompt.
-			_ = h.messenger.SendTyping(ctx, message.ChatID)
-			lastTyping = time.Now()
-		}
 		if session.RuntimePhase == domain.RuntimeStarting {
+			if time.Since(lastTyping) >= typingRefreshDelay {
+				_ = h.messenger.SendTyping(ctx, message.ChatID)
+				lastTyping = time.Now()
+			}
 			delay = paneWorkingRefreshDelay
 			continue
 		}
@@ -186,6 +176,13 @@ func (h *Handler) runPaneRefresh(
 		if !h.sessionIsActive(actor, ref) ||
 			!h.currentPaneGeneration(actor.UserID, generation) {
 			return
+		}
+		if !settled && time.Since(lastTyping) >= typingRefreshDelay {
+			// Check the provider completion marker first. Telegram offers no
+			// cancellation for chat actions, so sending here avoids starting a
+			// fresh five-second typing indicator for an already completed turn.
+			_ = h.messenger.SendTyping(ctx, message.ChatID)
+			lastTyping = time.Now()
 		}
 		preferences, preferencesErr := h.service.Preferences(actor)
 		panePhase := session.RuntimePhase

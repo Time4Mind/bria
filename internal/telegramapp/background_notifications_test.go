@@ -93,6 +93,8 @@ func TestReconciliationRefreshesActiveResponseCardWithRecoveredFinal(t *testing.
 			Kind: transcript.EventAssistantFinal, Text: "RECOVERED FINAL",
 			Timestamp: runningAt.Add(2 * time.Second).Format(time.RFC3339Nano),
 		},
+		{Kind: transcript.EventTurnComplete,
+			Timestamp: runningAt.Add(3 * time.Second).Format(time.RFC3339Nano)},
 	}}
 	handler, err := telegramapp.NewHandlerWithControls(
 		fixture.service, fixture.projector, fixture.codec, fixture.messenger, controls,

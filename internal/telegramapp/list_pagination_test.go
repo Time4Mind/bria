@@ -178,6 +178,10 @@ func TestRunningCardRefreshKeepsTheExplicitlySelectedPage(t *testing.T) {
 		Kind: transcript.EventAssistantFinal, Text: "PINNED FINAL ANSWER",
 		Timestamp: time.Now().Add(time.Millisecond).Format(time.RFC3339Nano),
 	})
+	controls.appendTranscriptEvent(transcript.Event{
+		Kind:      transcript.EventTurnComplete,
+		Timestamp: time.Now().Add(2 * time.Millisecond).Format(time.RFC3339Nano),
+	})
 	deadline = time.Now().Add(3 * time.Second)
 	for len(sent) < 2 && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)

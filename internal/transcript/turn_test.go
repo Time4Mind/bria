@@ -30,3 +30,14 @@ func TestLatestCompletedTurnRejectsNewerUnfinishedTurn(t *testing.T) {
 		t.Fatal("older final completed a newer prompt")
 	}
 }
+
+func TestLatestCompletedTurnRejectsCodexWorkAfterCompletionMarker(t *testing.T) {
+	_, ok := LatestCompletedTurn([]Event{
+		{Kind: EventAssistantFinal, Timestamp: time.Unix(110, 0).UTC().Format(time.RFC3339Nano)},
+		{Kind: EventTurnComplete, Timestamp: time.Unix(111, 0).UTC().Format(time.RFC3339Nano)},
+		{Kind: EventUserText, Timestamp: time.Unix(120, 0).UTC().Format(time.RFC3339Nano)},
+	}, BackendCodex)
+	if ok {
+		t.Fatal("older task_complete settled a newer Codex turn")
+	}
+}

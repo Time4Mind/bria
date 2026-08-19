@@ -53,6 +53,7 @@ func TestProviderStopImmediatelyPublishesFirstVerifiedFinalOnly(t *testing.T) {
 	controls := &blockingControls{ref: ref, events: []transcript.Event{
 		{Kind: transcript.EventUserText, Text: "prompt", Timestamp: promptAt.Format(time.RFC3339Nano)},
 		{Kind: transcript.EventAssistantFinal, Text: "EVENT DRIVEN FINAL", Timestamp: finalAt.Format(time.RFC3339Nano)},
+		{Kind: transcript.EventTurnComplete, Timestamp: finalAt.Add(time.Millisecond).Format(time.RFC3339Nano)},
 	}}
 	handler, err := telegramapp.NewHandlerWithControls(
 		fixture.service, fixture.projector, fixture.codec, fixture.messenger, controls,

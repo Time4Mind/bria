@@ -28,6 +28,9 @@ const (
 	EventThinking       EventKind = "thinking"
 	EventToolCall       EventKind = "tool_call"
 	EventToolResult     EventKind = "tool_result"
+	// EventTurnComplete is provider control metadata. It is intentionally not
+	// rendered in cards; Codex emits it only after the turn has actually stopped.
+	EventTurnComplete EventKind = "turn_complete"
 )
 
 type Event struct {

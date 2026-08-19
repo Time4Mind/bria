@@ -78,7 +78,16 @@ func (s *Service) BackgroundDeliveries() []BackgroundDelivery {
 				continue
 			}
 			canControl := state.CanControlSession(userID, notice.Session)
+			storedKind := notice.Kind
+			if kind, current := domain.CurrentBackgroundKind(session); current {
+				notice.Kind = kind
+			}
 			sendPush := !notice.Notified && preferences.SendsBackgroundNotification(notice.Kind)
+			if notice.Kind != storedKind {
+				// A stale delivery checkpoint must never manufacture a notification
+				// for a transition that was not durably published.
+				sendPush = false
+			}
 			if notice.Kind == domain.BackgroundNeedsAction && !canControl {
 				sendPush = false
 			}

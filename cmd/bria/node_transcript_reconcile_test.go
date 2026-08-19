@@ -32,6 +32,7 @@ func TestCollectTranscriptFinalsExportsOnlyBoundedEvidence(t *testing.T) {
 	reader := &transcriptReconcileReader{events: []transcript.Event{
 		{Kind: transcript.EventUserText, Text: "private prompt", Timestamp: time.Unix(150, 0).UTC().Format(time.RFC3339Nano)},
 		{Kind: transcript.EventAssistantFinal, Text: "private answer", Timestamp: finalAt.Format(time.RFC3339Nano)},
+		{Kind: transcript.EventTurnComplete, Timestamp: finalAt.Add(time.Second).Format(time.RFC3339Nano)},
 	}}
 	reports := collectTranscriptFinals(context.Background(), "node", state, reader)
 	if len(reports) != 1 || reports[0].SessionID != "session" ||

@@ -21,7 +21,7 @@ func (h *Handler) settleFromTranscript(
 	if session.RuntimePhase != domain.RuntimeRunning {
 		return false
 	}
-	turn, ok := transcript.LatestCompletedTurn(events)
+	turn, ok := transcript.LatestCompletedTurn(events, transcript.Backend(session.Backend))
 	if !ok {
 		return false
 	}

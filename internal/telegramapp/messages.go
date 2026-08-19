@@ -83,6 +83,9 @@ func (h *Handler) handleMessage(
 	if err != nil {
 		return err
 	}
+	if inputBaseline.ref == accepted.Session || voiceBaseline.ref == accepted.Session {
+		h.restoreFollowForInput(actor.UserID, accepted.Session)
+	}
 	// The prompt is already durably queued. Reuse the exact transcript snapshot
 	// that backed the previous card, but do not invent a chronological user row:
 	// only the provider transcript knows where the CLI processed it relative to

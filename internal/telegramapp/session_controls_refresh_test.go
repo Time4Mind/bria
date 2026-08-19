@@ -75,6 +75,8 @@ func TestPaneRefreshRendersFinalAnswerWhenRuntimeAlreadySettledIdle(t *testing.T
 		{Kind: transcript.EventAssistantFinal,
 			Text:      "FINAL ANSWER START " + strings.Repeat("middle ", 1000) + "FINAL ANSWER END",
 			Timestamp: time.Now().Add(time.Millisecond).Format(time.RFC3339Nano)},
+		{Kind: transcript.EventTurnComplete,
+			Timestamp: time.Now().Add(2 * time.Millisecond).Format(time.RFC3339Nano)},
 	}}
 	handler, err := telegramapp.NewHandlerWithControls(
 		fixture.service, fixture.projector, fixture.codec, fixture.messenger, controls,
@@ -97,6 +99,12 @@ func TestPaneRefreshRendersFinalAnswerWhenRuntimeAlreadySettledIdle(t *testing.T
 		t.Fatal("settled idle card was not promoted to a rich final card")
 	}
 	waitTestNotification(t, fixture.messenger.clearNotify, "old active carrier was not frozen")
+	fixture.messenger.mu.Lock()
+	typing := fixture.messenger.typing
+	fixture.messenger.mu.Unlock()
+	if typing != 0 {
+		t.Fatalf("completed turn emitted %d stale typing actions", typing)
+	}
 	if len(fixture.messenger.sent) < 2 {
 		t.Fatal("settled idle card was not promoted to a rich final card")
 	}
@@ -134,7 +142,8 @@ func TestPaneRefreshSettlesClaudeProviderErrorAsDegraded(t *testing.T) {
 	controls := &blockingControls{ref: ref, events: []transcript.Event{{
 		Kind: transcript.EventAssistantFinal, Text: "subscription access is disabled",
 		Error: true, Timestamp: time.Now().Add(time.Second).UTC().Format(time.RFC3339Nano),
-	}}}
+	}, {Kind: transcript.EventTurnComplete,
+		Timestamp: time.Now().Add(time.Second + time.Millisecond).UTC().Format(time.RFC3339Nano)}}}
 	handler, err := telegramapp.NewHandlerWithControls(
 		fixture.service, fixture.projector, fixture.codec, fixture.messenger, controls,
 	)

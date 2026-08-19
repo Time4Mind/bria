@@ -242,6 +242,22 @@ func (h *Handler) rememberedCardAnchor(
 	return state.anchor
 }
 
+// restoreFollowForInput converts a numerical last-page position into explicit
+// follow intent at the moment the user submits a new prompt. Merely landing on
+// the last page during a background reflow must not do this; input is the
+// deliberate boundary that makes the latest page live again.
+func (h *Handler) restoreFollowForInput(userID domain.UserID, ref domain.SessionRef) {
+	state, ok := h.cardPageState(userID, ref)
+	if !ok || state.follow || state.page < 1 || state.page != state.pages {
+		return
+	}
+	state.follow = true
+	state.anchor = ""
+	h.pageMu.Lock()
+	h.sessionPages[pageKey(userID, ref)] = state
+	h.pageMu.Unlock()
+}
+
 func pageKey(userID domain.UserID, ref domain.SessionRef) sessionPageKey {
 	return sessionPageKey{userID: userID, nodeID: ref.NodeID, sessionID: ref.SessionID}
 }

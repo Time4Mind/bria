@@ -11,9 +11,28 @@ type CompletedTurn struct {
 	HasUser bool
 }
 
-func LatestCompletedTurn(events []Event) (CompletedTurn, bool) {
+func LatestCompletedTurn(events []Event, backend ...Backend) (CompletedTurn, bool) {
+	end := len(events)
+	if len(backend) > 0 && backend[0] == BackendCodex {
+		completeIndex := -1
+		for index := len(events) - 1; index >= 0; index-- {
+			if events[index].Kind == EventTurnComplete {
+				completeIndex = index
+				break
+			}
+			switch events[index].Kind {
+			case EventUserText, EventAssistantText, EventAssistantFinal, EventThinking,
+				EventToolCall, EventToolResult:
+				return CompletedTurn{}, false
+			}
+		}
+		if completeIndex < 0 {
+			return CompletedTurn{}, false
+		}
+		end = completeIndex
+	}
 	finalIndex := -1
-	for index := len(events) - 1; index >= 0; index-- {
+	for index := end - 1; index >= 0; index-- {
 		if events[index].Kind == EventAssistantFinal {
 			finalIndex = index
 			break

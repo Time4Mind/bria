@@ -97,7 +97,9 @@ def test_explicit_profile_overrides_installed_profile(tmp_path: Path) -> None:
     assert config == str(selected / "node.json")
 
 
-def test_bare_reinstall_fails_if_installed_profile_cannot_be_read(tmp_path: Path) -> None:
+def test_bare_reinstall_fails_if_installed_profile_cannot_be_read(
+    tmp_path: Path,
+) -> None:
     launch_agents = tmp_path / "Library" / "LaunchAgents"
     launch_agents.mkdir(parents=True)
     (launch_agents / "com.time4mind.bria.plist").write_text("broken", encoding="utf-8")
@@ -110,7 +112,9 @@ def test_bare_reinstall_fails_if_installed_profile_cannot_be_read(tmp_path: Path
     assert "PlistBuddy is not executable" in result.stderr
 
 
-def test_bare_reinstall_fails_if_installed_profile_paths_are_invalid(tmp_path: Path) -> None:
+def test_bare_reinstall_fails_if_installed_profile_paths_are_invalid(
+    tmp_path: Path,
+) -> None:
     helper = install_fake_plist_buddy(tmp_path, tmp_path / ".bria-standalone")
 
     result = run_resolver(

@@ -83,6 +83,9 @@ func codexContextPercent(info *codexTokenInfo) *int {
 }
 
 func parseCodexEventMessage(payload codexPayload, timestamp string, maxBodyBytes int) (Event, bool) {
+	if payload.Type == "task_complete" {
+		return Event{Kind: EventTurnComplete, Timestamp: timestamp}, true
+	}
 	text := strings.TrimSpace(payload.Message)
 	if text == "" {
 		return Event{}, false

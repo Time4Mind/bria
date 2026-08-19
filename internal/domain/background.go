@@ -163,7 +163,10 @@ func (s *State) activeSessionRef(userID UserID) SessionRef {
 	return SessionRef{NodeID: nodeID, SessionID: s.Navigation.ActiveSessionByUserNode[userID][nodeID]}
 }
 
-func currentBackgroundKind(session Session) (BackgroundNoticeKind, bool) {
+// CurrentBackgroundKind projects the user-facing status from the authoritative
+// runtime phase. Stored notices are delivery checkpoints, not a second source
+// of truth for whether a session is still working.
+func CurrentBackgroundKind(session Session) (BackgroundNoticeKind, bool) {
 	switch session.RuntimePhase {
 	case RuntimeStarting, RuntimeRunning, RuntimeStopping:
 		return BackgroundWorking, true
@@ -179,6 +182,10 @@ func currentBackgroundKind(session Session) (BackgroundNoticeKind, bool) {
 		}
 	}
 	return "", false
+}
+
+func currentBackgroundKind(session Session) (BackgroundNoticeKind, bool) {
+	return CurrentBackgroundKind(session)
 }
 
 func (s *State) publishBackgroundTransition(

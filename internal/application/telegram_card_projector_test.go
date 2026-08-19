@@ -238,9 +238,33 @@ func TestBackgroundPanelFollowsSessionViewMode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(allHosts.Text, "g-new · Gamma ❌ · 82%") ||
+	if !strings.Contains(allHosts.Text, "g-new · Gamma ✅ · 82%") ||
 		!strings.Contains(allHosts.Text, "a-old · Alpha ✅ · 37%") ||
 		strings.Contains(allHosts.Text, "g-old") {
 		t.Fatalf("all-host panel=%q", allHosts.Text)
+	}
+}
+
+func TestBackgroundPanelUsesRuntimePhaseOverStaleNoticeKind(t *testing.T) {
+	projector, state, _ := projectorFixture(t)
+	ref := domain.SessionRef{NodeID: "alpha", SessionID: "a-old"}
+	session := state.Sessions[ref.Key()]
+	session.RuntimePhase = domain.RuntimeIdle
+	state.Sessions[ref.Key()] = session
+	state.Navigation.BackgroundByUser[2] = map[string]domain.BackgroundNotice{
+		ref.Key(): {
+			Session: ref, Kind: domain.BackgroundWorking,
+			EventRevision: session.Revision, ChangedAt: time.Unix(95, 0).UTC(),
+		},
+	}
+	screen, err := projector.SessionCard(
+		application.Principal{UserID: 2},
+		domain.SessionRef{NodeID: "alpha", SessionID: "a-new"},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(screen.Text, "a-old ✅") || strings.Contains(screen.Text, "a-old ⏳") {
+		t.Fatalf("stale notice overrode runtime phase: %q", screen.Text)
 	}
 }

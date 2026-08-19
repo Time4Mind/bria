@@ -40,7 +40,9 @@ func collectTranscriptFinals(
 			}
 			continue
 		}
-		turn, ok := transcript.LatestCompletedTurn(events)
+		turn, ok := transcript.LatestCompletedTurn(
+			events, transcript.Backend(session.Backend),
+		)
 		if !ok || turn.FinalAt.Before(session.LastEventAt) ||
 			(turn.HasUser && turn.UserAt.Before(session.LastEventAt)) {
 			continue

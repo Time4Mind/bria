@@ -63,7 +63,7 @@ func installHook(binary, configPath, hooksPath, backend string, events []string)
 		if !ok && hooks[event] != nil {
 			return fmt.Errorf("Codex %s hooks are invalid", event)
 		}
-		entries = removeBriaProviderCommands(entries, configPath, backend)
+		entries = removeBriaProviderCommands(entries, backend)
 		entries = append(entries, map[string]any{"hooks": []any{map[string]any{
 			"type": "command", "command": command, "timeout": float64(5),
 		}}})
@@ -102,9 +102,9 @@ func installHook(binary, configPath, hooksPath, backend string, events []string)
 }
 
 // removeBriaProviderCommands makes a single installer invocation the owner of
-// the selected Bria environment. It removes current and stale Bria binaries
-// for the same config/backend while preserving other environments and tools.
-func removeBriaProviderCommands(entries []any, configPath, backend string) []any {
+// the selected provider backend. It removes current and stale Bria environments
+// while preserving hooks owned by other tools and providers.
+func removeBriaProviderCommands(entries []any, backend string) []any {
 	result := make([]any, 0, len(entries))
 	for _, rawEntry := range entries {
 		entry, ok := rawEntry.(map[string]any)
@@ -121,7 +121,7 @@ func removeBriaProviderCommands(entries []any, configPath, backend string) []any
 		for _, rawHook := range inner {
 			hook, _ := rawHook.(map[string]any)
 			command, _ := hook["command"].(string)
-			if !isBriaProviderCommand(command, configPath, backend) {
+			if !isBriaProviderCommand(command, backend) {
 				filtered = append(filtered, rawHook)
 			}
 		}
@@ -138,8 +138,8 @@ func removeBriaProviderCommands(entries []any, configPath, backend string) []any
 	return result
 }
 
-func isBriaProviderCommand(command, configPath, backend string) bool {
-	marker := " provider-hook --config " + shellQuote(configPath)
+func isBriaProviderCommand(command, backend string) bool {
+	const marker = " provider-hook --config "
 	position := strings.Index(command, marker)
 	if position <= 0 {
 		return false
@@ -150,9 +150,9 @@ func isBriaProviderCommand(command, configPath, backend string) bool {
 	}
 	remainder := strings.TrimSpace(command[position+len(marker):])
 	if backend == "codex" {
-		return remainder == ""
+		return remainder != "" && !strings.Contains(remainder, " --backend ")
 	}
-	return remainder == "--backend "+shellQuote(backend)
+	return strings.HasSuffix(remainder, " --backend "+shellQuote(backend))
 }
 
 func shellQuote(value string) string {

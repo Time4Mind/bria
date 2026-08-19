@@ -51,6 +51,7 @@ type messengerStub struct {
 	editedMessages                                    []telegrambot.Message
 	deleted                                           []telegrambot.Message
 	cleared                                           []telegrambot.Message
+	typing                                            int
 	editErr                                           error
 	sendErr                                           error
 	events                                            *[]string
@@ -67,7 +68,12 @@ func (m *messengerStub) AnswerCallbackQuery(_ context.Context, id, text string) 
 	return nil
 }
 
-func (m *messengerStub) SendTyping(context.Context, int64) error { return nil }
+func (m *messengerStub) SendTyping(context.Context, int64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.typing++
+	return nil
+}
 func (m *messengerStub) SendDocument(context.Context, telegrambot.DocumentRequest) (telegrambot.Message, error) {
 	return telegrambot.Message{ChatID: 7, MessageID: 1}, nil
 }

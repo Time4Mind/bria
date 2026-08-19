@@ -25,6 +25,7 @@ func TestReaderParsesCodexEvents(t *testing.T) {
 {"timestamp":"t6","type":"event_msg","payload":{"type":"agent_message","message":"answer","phase":"final_answer"}}
 {"timestamp":"t7","ordinal":1,"type":"response_item","payload":{"type":"message","role":"assistant","phase":"final","content":[{"type":"output_text","text":"new-format answer"}]}}
 {"timestamp":"t8","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"total_tokens":47720},"model_context_window":258400}}}
+{"timestamp":"t9","type":"event_msg","payload":{"type":"task_complete"}}
 `)
 	events, err := newTestReader(t, layout, nil).Read(context.Background(), Request{
 		Backend: BackendCodex, ProviderSessionID: sessionID, Workdir: workdir,
@@ -34,7 +35,7 @@ func TestReaderParsesCodexEvents(t *testing.T) {
 	}
 	wantKinds := []EventKind{
 		EventUserText, EventAssistantText, EventThinking, EventToolCall,
-		EventToolResult, EventAssistantFinal, EventAssistantFinal,
+		EventToolResult, EventAssistantFinal, EventAssistantFinal, EventTurnComplete,
 	}
 	if len(events) != len(wantKinds) {
 		t.Fatalf("got %d events: %#v", len(events), events)
@@ -55,6 +56,23 @@ func TestReaderParsesCodexEvents(t *testing.T) {
 	}
 	if events[len(events)-1].ContextPercent == nil || *events[len(events)-1].ContextPercent != 18 {
 		t.Errorf("Codex context percent = %#v, want 18", events[len(events)-1].ContextPercent)
+	}
+}
+
+func TestCodexTurnCompletesOnlyOnTaskComplete(t *testing.T) {
+	finalAt := "2026-08-19T05:36:54.607Z"
+	events := parseCodex([][]byte{
+		[]byte(`{"timestamp":"` + finalAt + `","type":"event_msg","payload":{"type":"agent_message","message":"answer","phase":"final_answer"}}`),
+	}, 1<<20)
+	if _, ok := LatestCompletedTurn(events, BackendCodex); ok {
+		t.Fatal("final_answer settled Codex before task_complete")
+	}
+	events = append(events, parseCodex([][]byte{
+		[]byte(`{"timestamp":"2026-08-19T05:36:54.652Z","type":"event_msg","payload":{"type":"task_complete"}}`),
+	}, 1<<20)...)
+	turn, ok := LatestCompletedTurn(events, BackendCodex)
+	if !ok || turn.Final.Text != "answer" {
+		t.Fatalf("completed turn=%#v ok=%v", turn, ok)
 	}
 }
 
@@ -164,6 +182,21 @@ func TestReaderDefaultsToFourHundredEvents(t *testing.T) {
 	reader := newTestReader(t, layout, nil)
 	if reader.config.MaxEvents != 400 {
 		t.Fatalf("default max events=%d, want 400", reader.config.MaxEvents)
+	}
+}
+
+func TestTurnCompletionMarkersDoNotConsumeVisibleEventWindow(t *testing.T) {
+	lines := [][]byte{
+		[]byte(`{"timestamp":"t1","type":"event_msg","payload":{"type":"user_message","message":"one"}}`),
+		[]byte(`{"timestamp":"t2","type":"event_msg","payload":{"type":"agent_message","message":"answer","phase":"final"}}`),
+		[]byte(`{"timestamp":"t3","type":"event_msg","payload":{"type":"task_complete"}}`),
+		[]byte(`{"timestamp":"t4","type":"event_msg","payload":{"type":"user_message","message":"two"}}`),
+		[]byte(`{"timestamp":"t5","type":"event_msg","payload":{"type":"user_message","message":"three"}}`),
+	}
+	events, _ := parseRecentEvents(BackendCodex, lines, 1<<20, 3)
+	if visibleEventCount(events) != 3 || events[0].Kind != EventAssistantFinal ||
+		events[len(events)-1].Text != "three" {
+		t.Fatalf("completion marker changed visible window: %#v", events)
 	}
 }
 

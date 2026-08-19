@@ -32,8 +32,8 @@ func (r *Reader) readAppended(
 		backend, lines, r.config.MaxBodyBytes, r.config.MaxEvents,
 	)
 	events := append(cloneEvents(entry.events), added...)
-	if len(events) > r.config.MaxEvents {
-		events = cloneEvents(events[len(events)-r.config.MaxEvents:])
+	if visibleEventCount(events) > r.config.MaxEvents {
+		events = cloneEvents(trimRecentVisibleEvents(events, r.config.MaxEvents))
 	}
 	return events, len(lines), parsed, true, nil
 }

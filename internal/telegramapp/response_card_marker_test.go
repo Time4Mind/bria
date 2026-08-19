@@ -76,3 +76,29 @@ func TestResolvedLastPageDoesNotInventFollowIntent(t *testing.T) {
 		t.Fatalf("pinned last page became follow state: %#v ok=%v", state, ok)
 	}
 }
+
+func TestInputOnLastPageRestoresFollowIntent(t *testing.T) {
+	handler := &Handler{sessionPages: make(map[sessionPageKey]cardPageState)}
+	ref := domain.SessionRef{NodeID: "node-1", SessionID: "session-1"}
+	key := pageKey(7, ref)
+	handler.sessionPages[key] = cardPageState{
+		page: 12, pages: 12, anchor: "last-chunk.0", follow: false,
+	}
+	handler.restoreFollowForInput(7, ref)
+	state := handler.sessionPages[key]
+	if !state.follow || state.anchor != "" || state.page != 12 || state.pages != 12 {
+		t.Fatalf("input did not restore follow: %#v", state)
+	}
+}
+
+func TestInputOnHistoricalPageKeepsPinnedIntent(t *testing.T) {
+	handler := &Handler{sessionPages: make(map[sessionPageKey]cardPageState)}
+	ref := domain.SessionRef{NodeID: "node-1", SessionID: "session-1"}
+	key := pageKey(7, ref)
+	want := cardPageState{page: 11, pages: 12, anchor: "older-chunk.0", follow: false}
+	handler.sessionPages[key] = want
+	handler.restoreFollowForInput(7, ref)
+	if got := handler.sessionPages[key]; got != want {
+		t.Fatalf("historical input changed pin: got=%#v want=%#v", got, want)
+	}
+}

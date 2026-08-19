@@ -97,7 +97,7 @@ func TestInstallHookPreservesExistingHooksAndIsIdempotent(t *testing.T) {
 	}
 }
 
-func TestInstallHookReplacesOnlyStaleBriaForSameEnvironment(t *testing.T) {
+func TestInstallHookReplacesStaleBriaAcrossEnvironments(t *testing.T) {
 	directory := t.TempDir()
 	path := filepath.Join(directory, "hooks.json")
 	current := "/opt/bria/current/bria"
@@ -127,8 +127,11 @@ func TestInstallHookReplacesOnlyStaleBriaForSameEnvironment(t *testing.T) {
 	if strings.Count(encoded, current) != len(codexHookEvents) {
 		t.Fatalf("current Bria hook count is not canonical: %s", encoded)
 	}
-	if !strings.Contains(encoded, "ccbot hook") || !strings.Contains(encoded, "/var/bria/other.json") {
-		t.Fatalf("unrelated hook was removed: %s", encoded)
+	if !strings.Contains(encoded, "ccbot hook") {
+		t.Fatalf("unrelated tool hook was removed: %s", encoded)
+	}
+	if strings.Contains(encoded, "/var/bria/other.json") {
+		t.Fatalf("stale Bria environment survived: %s", encoded)
 	}
 }
 

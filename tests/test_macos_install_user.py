@@ -8,7 +8,11 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 INSTALLER = PROJECT_ROOT / "deploy" / "launchd" / "install-user.sh"
 
 
-def install_fixture(tmp_path: Path, *, service_running: bool = True) -> tuple[dict[str, str], Path]:
+def install_fixture(
+    tmp_path: Path,
+    *,
+    service_running: bool = True,
+) -> tuple[dict[str, str], Path]:
     home = tmp_path / "home"
     data_dir = home / ".bria-standalone"
     data_dir.mkdir(parents=True)

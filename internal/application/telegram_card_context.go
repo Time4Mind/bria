@@ -58,6 +58,9 @@ func backgroundPanel(
 	rendered := make([]telegramui.BackgroundItem, 0, len(items))
 	for _, notice := range items {
 		session := state.Sessions[notice.Session.Key()]
+		if kind, ok := domain.CurrentBackgroundKind(session); ok {
+			notice.Kind = kind
+		}
 		name := session.Name
 		if name == "" {
 			name = "…"
