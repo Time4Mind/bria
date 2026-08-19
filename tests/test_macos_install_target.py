@@ -8,18 +8,25 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 RESOLVER = PROJECT_ROOT / "scripts" / "macos-install-target.sh"
 
 
-def resolve_target(
+def run_resolver(
     home: Path, environment: dict[str, str] | None = None
-) -> tuple[str, str]:
+) -> subprocess.CompletedProcess[str]:
     command = (
-        f'. "{RESOLVER}"; resolve_macos_install_target; '
+        f'. "{RESOLVER}"; resolve_macos_install_target || exit $?; '
         "printf '%s\\n%s\\n' \"$resolved_data_dir\" \"$resolved_config\""
     )
     env = {"HOME": str(home), "PATH": os.environ["PATH"]}
     env.update(environment or {})
-    result = subprocess.run(
-        ["sh", "-c", command], check=True, capture_output=True, text=True, env=env
+    return subprocess.run(
+        ["sh", "-c", command], check=False, capture_output=True, text=True, env=env
     )
+
+
+def resolve_target(
+    home: Path, environment: dict[str, str] | None = None
+) -> tuple[str, str]:
+    result = run_resolver(home, environment)
+    result.check_returncode()
     data_dir, config = result.stdout.splitlines()
     return data_dir, config
 
@@ -88,3 +95,32 @@ def test_explicit_profile_overrides_installed_profile(tmp_path: Path) -> None:
 
     assert data_dir == str(selected)
     assert config == str(selected / "node.json")
+
+
+def test_bare_reinstall_fails_if_installed_profile_cannot_be_read(tmp_path: Path) -> None:
+    launch_agents = tmp_path / "Library" / "LaunchAgents"
+    launch_agents.mkdir(parents=True)
+    (launch_agents / "com.time4mind.bria.plist").write_text("broken", encoding="utf-8")
+
+    result = run_resolver(
+        tmp_path, {"BRIA_PLIST_BUDDY": str(tmp_path / "missing-plist-buddy")}
+    )
+
+    assert result.returncode != 0
+    assert "PlistBuddy is not executable" in result.stderr
+
+
+def test_bare_reinstall_fails_if_installed_profile_paths_are_invalid(tmp_path: Path) -> None:
+    helper = install_fake_plist_buddy(tmp_path, tmp_path / ".bria-standalone")
+
+    result = run_resolver(
+        tmp_path,
+        {
+            "BRIA_PLIST_BUDDY": str(helper),
+            "FAKE_DATA_DIR": "relative-data",
+            "FAKE_CONFIG": "relative-config.json",
+        },
+    )
+
+    assert result.returncode != 0
+    assert "installed config path is not absolute" in result.stderr

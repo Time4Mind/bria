@@ -1,6 +1,9 @@
 package runtimehost
 
-import "sync"
+import (
+	"sync"
+	"time"
+)
 
 type OperationState string
 
@@ -11,16 +14,19 @@ const (
 
 type OperationRecord struct {
 	Fingerprint string         `json:"fingerprint"`
+	Action      Action         `json:"action,omitempty"`
 	State       OperationState `json:"state"`
 	Result      Result         `json:"result"`
 	Error       string         `json:"error,omitempty"`
+	CreatedAt   time.Time      `json:"created_at,omitempty"`
+	CompletedAt time.Time      `json:"completed_at,omitempty"`
 }
 
 // OperationStore persists the intent before Submit acknowledges it. A pending
 // record left by a crash has an unknown outcome and must never be re-executed
 // automatically with the same operation ID.
 type OperationStore interface {
-	CreatePending(operationID, fingerprint string) (OperationRecord, bool, error)
+	CreatePending(operationID, fingerprint string, action Action) (OperationRecord, bool, error)
 	Complete(operationID, fingerprint string, result Result, executionError error) error
 	Lookup(operationID string) (OperationRecord, bool, error)
 }
@@ -37,6 +43,7 @@ func NewMemoryOperationStore() *MemoryOperationStore {
 func (s *MemoryOperationStore) CreatePending(
 	operationID string,
 	fingerprint string,
+	action Action,
 ) (OperationRecord, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -47,7 +54,9 @@ func (s *MemoryOperationStore) CreatePending(
 		}
 		return record, false, nil
 	}
-	record = OperationRecord{Fingerprint: fingerprint, State: OperationPending}
+	record = OperationRecord{
+		Fingerprint: fingerprint, Action: action, State: OperationPending, CreatedAt: time.Now(),
+	}
 	s.entries[operationID] = record
 	return record, true, nil
 }
@@ -66,6 +75,7 @@ func (s *MemoryOperationStore) Complete(
 	}
 	record.State = OperationCompleted
 	record.Result = result
+	record.CompletedAt = time.Now()
 	if executionError != nil {
 		record.Error = executionError.Error()
 	}

@@ -190,7 +190,7 @@ func (e *LocalExecutor) Submit(ctx context.Context, request Request) (Receipt, e
 
 	e.submitMu.Lock()
 	defer e.submitMu.Unlock()
-	record, created, err := e.store.CreatePending(request.OperationID, fingerprint)
+	record, created, err := e.store.CreatePending(request.OperationID, fingerprint, request.Action)
 	if err != nil {
 		return Receipt{}, err
 	}

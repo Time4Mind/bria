@@ -30,7 +30,9 @@ func TestLocalExecutorRefusesRecoveredPendingOperation(t *testing.T) {
 	store := NewMemoryOperationStore()
 	request := testRequest("uncertain-input", ActionSendInput)
 	request.Text = "must not be replayed"
-	if _, _, err := store.CreatePending(request.OperationID, requestFingerprint(request)); err != nil {
+	if _, _, err := store.CreatePending(
+		request.OperationID, requestFingerprint(request), request.Action,
+	); err != nil {
 		t.Fatal(err)
 	}
 	executor, err := NewLocalExecutor("node-a", driver, store)

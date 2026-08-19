@@ -57,4 +57,20 @@ until launchctl bootstrap "$domain" "$destination"; do
   [ "$attempt" -lt 5 ] || exit 1
   sleep 1
 done
+
+# A successful bootstrap only confirms LaunchAgent registration. Do not report
+# installation success until the node serves a quorum-ready control response.
+attempt=0
+until "$binary" node probe --config "$config" >/dev/null 2>&1; do
+  attempt=$((attempt + 1))
+  [ "$attempt" -lt 20 ] || {
+    echo "Bria was loaded but did not become ready after 20 probes" >&2
+    exit 1
+  }
+  launchctl print "$service" >/dev/null 2>&1 || {
+    echo "Bria exited before becoming ready" >&2
+    exit 1
+  }
+  sleep 1
+done
 echo "installed $destination"
