@@ -92,3 +92,28 @@ func TestClaudeSyntheticProviderErrorIsFinal(t *testing.T) {
 		t.Fatalf("provider error was not emitted as a failed final: %#v", events)
 	}
 }
+
+func TestClaudeLocalCommandProducesHiddenCompletionBoundary(t *testing.T) {
+	layout := newTestLayout(t)
+	workdir := "/tmp/project"
+	sessionID := "local-command"
+	path := filepath.Join(layout.claude, encodeClaudeWorkdir(workdir), sessionID+".jsonl")
+	writeTestFile(t, path, `{"type":"user","timestamp":"2026-08-20T06:10:29Z","message":{"content":"<local-command-caveat>ignore this provider metadata</local-command-caveat>"}}
+{"type":"user","timestamp":"2026-08-20T06:10:30Z","message":{"content":"<command-name>/model</command-name>\n<command-message>model</command-message>"}}
+{"type":"user","timestamp":"2026-08-20T06:10:31Z","message":{"content":"<local-command-stdout>Set model to kimi</local-command-stdout>"}}
+`)
+	events, err := newTestReader(t, layout, nil).Read(context.Background(), Request{
+		Backend: BackendClaude, ProviderSessionID: sessionID, Workdir: workdir,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 2 || events[0].Kind != EventUserText || events[0].Text != "/model" ||
+		events[1].Kind != EventAssistantFinal || !events[1].LocalCommand || events[1].Text != "" {
+		t.Fatalf("local command events=%#v", events)
+	}
+	turn, ok := LatestCompletedTurn(events, BackendClaude)
+	if !ok || !turn.Final.LocalCommand {
+		t.Fatalf("local command turn=%#v ok=%v", turn, ok)
+	}
+}

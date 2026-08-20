@@ -62,6 +62,28 @@ func TestSessionCardSeparatesContextAndBackgroundLikeCCBot(t *testing.T) {
 	}
 }
 
+func TestSessionCardContextCanHideBackgroundForInteractivePrompt(t *testing.T) {
+	projector, state, _ := projectorFixture(t)
+	ref := domain.SessionRef{NodeID: "alpha", SessionID: "a-new"}
+	backgroundRef := domain.SessionRef{NodeID: "alpha", SessionID: "a-old"}
+	state.Navigation.BackgroundByUser[2] = map[string]domain.BackgroundNotice{
+		backgroundRef.Key(): {
+			Session: backgroundRef, Kind: domain.BackgroundFinished,
+			EventRevision: 2, ChangedAt: time.Unix(80, 0).UTC(),
+		},
+	}
+	screen, err := projector.SessionCardPageWithContext(
+		application.Principal{UserID: 2}, ref, nil, 1,
+		application.CardContext{HideBackground: true},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(screen.Text, "─── background ───") || strings.Contains(screen.Text, "a-old") {
+		t.Fatalf("interactive base leaked background panel: %q", screen.Text)
+	}
+}
+
 func TestSessionCardAnchorSurvivesLeadingPageEviction(t *testing.T) {
 	projector, _, _ := projectorFixture(t)
 	actor := application.Principal{UserID: 2}

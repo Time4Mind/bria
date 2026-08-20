@@ -33,6 +33,7 @@ func (p *TelegramProjector) SessionCardPage(
 type CardContext struct {
 	ActivePercent     *int
 	BackgroundPercent map[string]int
+	HideBackground    bool
 }
 
 func (p *TelegramProjector) SessionCardPageWithContext(
@@ -196,7 +197,8 @@ func (p *TelegramProjector) SessionCardViewWithContext(
 		if err != nil {
 			return telegramui.Screen{}, err
 		}
-		if state.Navigation.ActiveNodeByUser[actor.UserID] == session.NodeID &&
+		if !context.HideBackground &&
+			state.Navigation.ActiveNodeByUser[actor.UserID] == session.NodeID &&
 			state.Navigation.ActiveSessionByUserNode[actor.UserID][session.NodeID] == session.ID {
 			if panel := backgroundPanel(
 				state, actor, session.Ref(), allHosts, context.BackgroundPercent,

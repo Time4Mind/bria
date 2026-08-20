@@ -174,6 +174,45 @@ func TestHeartbeatPublishesAndClearsBoundedInteractivePrompt(t *testing.T) {
 	}
 }
 
+func TestHeartbeatClearsSettingsPromptToIdle(t *testing.T) {
+	state := domain.NewState()
+	if err := state.AddNode(domain.Node{ID: "node", Name: "Node", Status: domain.NodeOnline}); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.SetNodeAccess(7, domain.RoleOwner, "node"); err != nil {
+		t.Fatal(err)
+	}
+	created := time.Unix(10, 0).UTC()
+	if err := state.AddSession(domain.Session{
+		ID: "session", NodeID: "node", OwnerID: 7, Name: "Model switch", Backend: "claude",
+		State: domain.SessionLive, RuntimePhase: domain.RuntimeRunning,
+		CreatedAt: created, LiveSinceAt: created,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	report := domain.InteractivePromptReport{
+		SessionID: "session", Generation: 1, Present: true,
+		Kind: "settings", Hash: "0123456789abcdef0123456789abcdef",
+	}
+	if _, err := state.PublishNodeHeartbeat(
+		"node", "boot", "v1", "", "", "", "", nil, nil,
+		[]domain.InteractivePromptReport{report}, nil, created,
+	); err != nil {
+		t.Fatal(err)
+	}
+	report.Present, report.Kind, report.Hash = false, "", ""
+	if _, err := state.PublishNodeHeartbeat(
+		"node", "boot", "v1", "", "", "", "", nil, nil,
+		[]domain.InteractivePromptReport{report}, nil, created.Add(time.Second),
+	); err != nil {
+		t.Fatal(err)
+	}
+	session := state.Sessions["node/session"]
+	if session.RuntimePhase != domain.RuntimeIdle || session.InteractivePrompt != nil {
+		t.Fatalf("cleared settings session=%#v", session)
+	}
+}
+
 func TestHeartbeatReconcilesMissedTranscriptFinalWithoutTranscriptBody(t *testing.T) {
 	state := domain.NewState()
 	if err := state.AddNode(domain.Node{ID: "node", Name: "Node", Status: domain.NodeOnline}); err != nil {

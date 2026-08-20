@@ -59,7 +59,7 @@ func TestSelectingWaitingSessionAutomaticallyOpensKeyboard(t *testing.T) {
 	grid := telegramui.CanonicalGrid(fixture.messenger.edited[0].Grid)
 	if !strings.Contains(grid, "key_enter") || !strings.Contains(grid, "key_ctrlc") ||
 		!strings.Contains(fixture.messenger.edited[0].Text,
-			"run this command?\n\n─────\n\n› 1. Yes\n\n─────\n\nPress enter") {
+			"run this command?\n\n› 1. Yes\nPress enter") {
 		t.Fatalf("screen=%#v grid=%s", fixture.messenger.edited[0], grid)
 	}
 }

@@ -15,6 +15,11 @@
   native Claude/Codex sessions for resume plus `Start fresh`. Choosing either
   immediately creates the tmux/provider runtime and opens an empty live card;
   no first user message is required.
+- The first directory page is ordered by bounded project activity rather than
+  the directory inode timestamp: recent regular files and source directories
+  count, while hidden, dependency, cache, and generated build trees do not.
+  The scan has fixed global, per-project, and depth budgets so opening the
+  picker remains responsive.
 - A session creation intent is committed before node-local provisioning. It is
   idempotently retried after leader/daemon/host restart. A persistently failed
   launch is archived as `resume_failed`, never shown as `Lost`.
@@ -75,6 +80,11 @@
   5, or 10 such switches and defaults to 1. Leaving a session that is still
   running starts its working-status counter again; other dismissed states need
   a new runtime event before they return.
+- Interactive provider selectors are rendered without the background-session
+  panel. Provider tmux windows use a fixed 80x40 viewport so Claude's five-model
+  selector remains visible as one prompt; closing a settings selector returns
+  an otherwise idle session to `idle` even though Claude emits no assistant
+  response for that local command.
 - Input received while an archived session is being restored is pinned to that
   session and held in its ordered card queue until the origin runtime is ready.
   `Lost` remains reserved for an unavailable origin node.

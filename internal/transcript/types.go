@@ -41,6 +41,7 @@ type Event struct {
 	Head           string    `json:"head,omitempty"`
 	Body           string    `json:"body,omitempty"`
 	Error          bool      `json:"error,omitempty"`
+	LocalCommand   bool      `json:"local_command,omitempty"`
 	Timestamp      string    `json:"timestamp,omitempty"`
 	ContextPercent *int      `json:"context_percent,omitempty"`
 }

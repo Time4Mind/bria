@@ -17,7 +17,11 @@ type BackendCommand struct {
 	Flags      []string
 }
 
-const providerStartupGrace = 250 * time.Millisecond
+const (
+	providerStartupGrace = 250 * time.Millisecond
+	providerWindowWidth  = 80
+	providerWindowHeight = 40
+)
 
 // TmuxRecoveryRuntime restores a provider session into a deterministic tmux
 // window. All command components are passed as argv; session metadata is never
@@ -103,7 +107,7 @@ func (r *TmuxRecoveryRuntime) Resume(
 	if exists, err := r.windowExists(runCtx, tmuxPath, target); err != nil {
 		return err
 	} else if exists {
-		return nil
+		return r.resizeProviderWindow(runCtx, tmuxPath, target)
 	}
 	if err := r.ensureSession(runCtx, tmuxPath); err != nil {
 		return err
@@ -128,7 +132,28 @@ func (r *TmuxRecoveryRuntime) Resume(
 		}
 		return commandExitError("create recovery window", result)
 	}
+	if err := r.resizeProviderWindow(runCtx, tmuxPath, target); err != nil {
+		return err
+	}
 	return r.awaitProviderStartup(runCtx, tmuxPath, target)
+}
+
+func (r *TmuxRecoveryRuntime) resizeProviderWindow(
+	ctx context.Context,
+	tmuxPath string,
+	target string,
+) error {
+	result, err := r.runner.Run(
+		ctx, tmuxPath, "resize-window", "-t", target,
+		"-x", fmt.Sprint(providerWindowWidth), "-y", fmt.Sprint(providerWindowHeight),
+	)
+	if err != nil {
+		return fmt.Errorf("resize provider window: %w", err)
+	}
+	if result.ExitCode != 0 {
+		return commandExitError("resize provider window", result)
+	}
+	return nil
 }
 
 func (r *TmuxRecoveryRuntime) awaitProviderStartup(

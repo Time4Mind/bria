@@ -67,6 +67,12 @@ func TestRussianPluralForms(t *testing.T) {
 	}
 }
 
+func TestRussianSessionsUseNodesButton(t *testing.T) {
+	if got := For("ru").Text(ButtonServers); got != "Ноды" {
+		t.Fatalf("ButtonServers=%q, want %q", got, "Ноды")
+	}
+}
+
 func TestFallbackIsEnglishAndUnknownKeyIsVisible(t *testing.T) {
 	copy := For("de")
 	if copy.Language() != "en" || copy.Text(MenuTitle) != "Menu" {

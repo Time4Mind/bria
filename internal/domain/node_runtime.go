@@ -220,17 +220,26 @@ func (s *State) observeInteractivePrompts(
 			continue
 		}
 		if !report.Present && session.InteractivePrompt != nil {
+			promptKind := session.InteractivePrompt.Kind
 			if session.Revision == math.MaxUint64 {
 				return fmt.Errorf("%w: session revision exhausted", ErrInvalidState)
 			}
 			session.InteractivePrompt = nil
 			if session.RuntimePhase == RuntimeWaitingInput {
-				session.RuntimePhase = RuntimeRunning
+				if promptKind == "settings" {
+					session.RuntimePhase = RuntimeIdle
+				} else {
+					session.RuntimePhase = RuntimeRunning
+				}
 			}
 			session.LastEventAt = at
 			session.Revision++
 			s.Sessions[key] = session
-			s.publishBackgroundNotice(session, BackgroundWorking, at)
+			if session.RuntimePhase == RuntimeIdle {
+				s.publishBackgroundNotice(session, BackgroundFinished, at)
+			} else {
+				s.publishBackgroundNotice(session, BackgroundWorking, at)
+			}
 		}
 	}
 	return nil

@@ -98,6 +98,24 @@ func TestCollectTranscriptFinalsAcceptsProviderUserTimestampSkew(t *testing.T) {
 	}
 }
 
+func TestCollectTranscriptFinalsRepairsCompletedClaudeLocalCommand(t *testing.T) {
+	state := transcriptReconcileState(t, domain.RuntimeRunning)
+	session := state.Sessions["node/session"]
+	session.Backend = "claude"
+	session.LastEventAt = time.Unix(130, 0).UTC()
+	state.Sessions["node/session"] = session
+	reports := collectTranscriptFinals(
+		context.Background(), "node", state,
+		&transcriptReconcileReader{events: []transcript.Event{
+			{Kind: transcript.EventUserText, Text: "/model", Timestamp: time.Unix(119, 0).UTC().Format(time.RFC3339Nano)},
+			{Kind: transcript.EventAssistantFinal, LocalCommand: true, Timestamp: time.Unix(120, 0).UTC().Format(time.RFC3339Nano)},
+		}},
+	)
+	if len(reports) != 1 || reports[0].Timestamp != session.LastEventAt {
+		t.Fatalf("local command reports=%#v", reports)
+	}
+}
+
 func TestCollectTranscriptRuntimeRepairsRecoveredOpenTurn(t *testing.T) {
 	state := transcriptReconcileState(t, domain.RuntimeIdle)
 	reports := collectTranscriptRuntime(

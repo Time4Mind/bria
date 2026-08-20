@@ -85,7 +85,7 @@ func TestTmuxRecoveryRuntimeStartsBackendWithArgv(t *testing.T) {
 			if err := runtime.Resume(context.Background(), session, "operation"); err != nil {
 				t.Fatalf("Resume(): %v", err)
 			}
-			if len(runner.calls) != 5 {
+			if len(runner.calls) != 6 {
 				t.Fatalf("calls=%#v", runner.calls)
 			}
 			last := runner.calls[3]
@@ -105,6 +105,13 @@ func TestTmuxRecoveryRuntimeStartsBackendWithArgv(t *testing.T) {
 			}
 			if test.backend == "claude" && !slices.Contains(last.args, "IS_SANDBOX=1") {
 				t.Fatalf("Claude launch has no root-compatible sandbox marker: %#v", last.args)
+			}
+			resize := runner.calls[4]
+			if !reflect.DeepEqual(resize.args, []string{
+				"resize-window", "-t", "bria:" + TmuxWindowName("n", "s"),
+				"-x", "80", "-y", "40",
+			}) {
+				t.Fatalf("provider window resize=%#v", resize.args)
 			}
 		})
 	}
@@ -126,7 +133,8 @@ func TestTmuxRecoveryRuntimeReturnsExistingDeterministicWindow(t *testing.T) {
 	}, "same-operation"); err != nil {
 		t.Fatal(err)
 	}
-	if len(runner.calls) != 1 || runner.calls[0].args[0] != "has-session" {
+	if len(runner.calls) != 2 || runner.calls[0].args[0] != "has-session" ||
+		runner.calls[1].args[0] != "resize-window" {
 		t.Fatalf("idempotent calls=%#v", runner.calls)
 	}
 }
@@ -188,7 +196,7 @@ func TestTmuxSessionRuntimeRejectsProviderThatExitsDuringStartup(t *testing.T) {
 	runner := &scriptedRunner{
 		paths: map[string]string{"tmux": "/tmux", "claude": "/claude"},
 		results: []CommandResult{
-			{ExitCode: 1}, {ExitCode: 0}, {ExitCode: 0}, {ExitCode: 1},
+			{ExitCode: 1}, {ExitCode: 0}, {ExitCode: 0}, {ExitCode: 0}, {ExitCode: 1},
 		},
 	}
 	runtime, err := NewTmuxRecoveryRuntime(runner, "bria", map[string]BackendCommand{

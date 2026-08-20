@@ -38,7 +38,7 @@ func (r *TmuxRecoveryRuntime) Start(ctx context.Context, session domain.Session)
 	if exists, checkErr := r.windowExists(ctx, tmuxPath, target); checkErr != nil {
 		return "", checkErr
 	} else if exists {
-		return target, nil
+		return target, r.resizeProviderWindow(ctx, tmuxPath, target)
 	}
 	if err := r.ensureSession(ctx, tmuxPath); err != nil {
 		return "", err
@@ -60,6 +60,9 @@ func (r *TmuxRecoveryRuntime) Start(ctx context.Context, session domain.Session)
 			return target, nil
 		}
 		return "", commandExitError("create session window", result)
+	}
+	if err := r.resizeProviderWindow(ctx, tmuxPath, target); err != nil {
+		return "", err
 	}
 	if err := r.awaitProviderStartup(ctx, tmuxPath, target); err != nil {
 		return "", err

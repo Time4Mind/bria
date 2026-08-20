@@ -163,9 +163,24 @@ func claudeUserEvents(blocks []claudeBlock, timestamp string, maxBodyBytes int) 
 		switch block.Type {
 		case "text":
 			text := strings.TrimSpace(block.Text)
-			if text != "" {
-				events = append(events, Event{Kind: EventUserText, Text: bounded(text, maxBodyBytes), Timestamp: timestamp})
+			if text == "" || strings.HasPrefix(text, "<local-command-caveat>") {
+				continue
 			}
+			if command, ok := claudeTaggedText(text, "command-name"); ok {
+				events = append(events, Event{
+					Kind: EventUserText, Text: bounded(command, maxBodyBytes), Timestamp: timestamp,
+				})
+				continue
+			}
+			if _, ok := claudeTaggedText(text, "local-command-stdout"); ok {
+				events = append(events, Event{
+					Kind: EventAssistantFinal, LocalCommand: true, Timestamp: timestamp,
+				})
+				continue
+			}
+			events = append(events, Event{
+				Kind: EventUserText, Text: bounded(text, maxBodyBytes), Timestamp: timestamp,
+			})
 		case "tool_result":
 			body := extractTextContent(block.Content, maxBodyBytes)
 			body = strings.ReplaceAll(body, "<tool_use_error>", "")
@@ -177,6 +192,18 @@ func claudeUserEvents(blocks []claudeBlock, timestamp string, maxBodyBytes int) 
 		}
 	}
 	return events
+}
+
+func claudeTaggedText(text, tag string) (string, bool) {
+	prefix, suffix := "<"+tag+">", "</"+tag+">"
+	if !strings.HasPrefix(text, prefix) {
+		return "", false
+	}
+	end := strings.Index(text[len(prefix):], suffix)
+	if end < 0 {
+		return "", false
+	}
+	return strings.TrimSpace(text[len(prefix) : len(prefix)+end]), true
 }
 
 func compactJSON(raw json.RawMessage, maxBodyBytes int) string {

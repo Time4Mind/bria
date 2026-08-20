@@ -6,7 +6,7 @@ import (
 	"unicode"
 )
 
-var interactiveNumberedOption = regexp.MustCompile(`^\s*[>›❯▶]?\s*\d+\.\s`)
+var interactiveNumberedOption = regexp.MustCompile(`^\s*[>›❯▶↑↓]?\s*\d+\.\s`)
 
 const interactiveBlockSeparator = "\n\n─────\n\n"
 
@@ -22,35 +22,39 @@ func FormatInteractivePrompt(raw string) string {
 	if len(paragraphs) == 0 {
 		return ""
 	}
-	blocks := make([][]string, 0, len(paragraphs))
-	hasOptions := false
+	renderedParagraphs := make([]string, 0, len(paragraphs))
 	for _, paragraph := range paragraphs {
-		buffer := make([]string, 0, len(paragraph))
+		blocks := make([]interactiveBlock, 0, len(paragraph))
+		var current *interactiveBlock
 		for _, line := range paragraph {
 			if interactiveNumberedOption.MatchString(line) {
-				if len(buffer) > 0 {
-					blocks = append(blocks, buffer)
-					buffer = nil
-				}
-				blocks = append(blocks, []string{line})
-				hasOptions = true
-				continue
+				blocks = append(blocks, interactiveBlock{option: true})
+				current = &blocks[len(blocks)-1]
+			} else if current == nil {
+				blocks = append(blocks, interactiveBlock{})
+				current = &blocks[len(blocks)-1]
 			}
-			buffer = append(buffer, line)
+			current.lines = append(current.lines, line)
 		}
-		if len(buffer) > 0 {
-			blocks = append(blocks, buffer)
+		var rendered strings.Builder
+		for index, block := range blocks {
+			if index > 0 {
+				separator := "\n\n"
+				if blocks[index-1].option && block.option {
+					separator = interactiveBlockSeparator
+				}
+				rendered.WriteString(separator)
+			}
+			rendered.WriteString(strings.Join(block.lines, "\n"))
 		}
+		renderedParagraphs = append(renderedParagraphs, rendered.String())
 	}
-	separator := "\n\n"
-	if hasOptions {
-		separator = interactiveBlockSeparator
-	}
-	rendered := make([]string, 0, len(blocks))
-	for _, block := range blocks {
-		rendered = append(rendered, strings.Join(block, "\n"))
-	}
-	return strings.Join(rendered, separator)
+	return strings.Join(renderedParagraphs, "\n\n")
+}
+
+type interactiveBlock struct {
+	lines  []string
+	option bool
 }
 
 func interactiveParagraphs(raw string) [][]string {

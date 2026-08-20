@@ -6,7 +6,7 @@ var russianCatalog = map[Key]string{
 	MenuTitle: "Меню", MenuActive: "активная: %s",
 	ButtonSessions: "📋 Сессии", ButtonArchive: "🗄 Архив", ButtonStatus: "📊 Статус",
 	ButtonNew: "🆕 Новая", ButtonSettings: "⚙ Настройки", ButtonBack: "← Назад",
-	ButtonBackServers: "← Серверы", ButtonServers: "Серверы", ButtonRefresh: "🔄 Обновить", ButtonMenu: "≡ Меню",
+	ButtonBackServers: "← Серверы", ButtonServers: "Ноды", ButtonRefresh: "🔄 Обновить", ButtonMenu: "≡ Меню",
 	ButtonNewShort: "+ новая", ButtonClose: "✖ Закрыть", ButtonStop: "⏹ Остановить",
 	ButtonRestore: "↻ Восстановить",
 	ButtonHistory: "История", ButtonOlder: "◀ Раньше", ButtonNewer: "Позже ▶",

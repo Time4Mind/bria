@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"time"
 
 	"github.com/Time4Mind/bria/internal/domain"
 	"github.com/Time4Mind/bria/internal/transcript"
@@ -43,18 +44,25 @@ func collectTranscriptFinals(
 		turn, ok := transcript.LatestCompletedTurn(
 			events, transcript.Backend(session.Backend),
 		)
-		if !ok || turn.FinalAt.Before(session.LastEventAt) {
+		if !ok || (!turn.Final.LocalCommand && turn.FinalAt.Before(session.LastEventAt)) {
 			continue
 		}
 		reports = append(reports, domain.TranscriptFinalReport{
 			SessionID: session.ID, Generation: session.RuntimeGeneration,
-			Timestamp: turn.FinalAt, Digest: transcriptEventDigest(turn.Final),
+			Timestamp: transcriptFinalTimestamp(session, turn), Digest: transcriptEventDigest(turn.Final),
 		})
 		if len(reports) == 512 {
 			break
 		}
 	}
 	return reports
+}
+
+func transcriptFinalTimestamp(session domain.Session, turn transcript.CompletedTurn) time.Time {
+	if turn.Final.LocalCommand && turn.FinalAt.Before(session.LastEventAt) {
+		return session.LastEventAt
+	}
+	return turn.FinalAt
 }
 
 func collectTranscriptRuntime(
