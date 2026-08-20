@@ -140,6 +140,19 @@ func (d *TmuxDriver) TargetExists(ctx context.Context, target string) (bool, err
 	return result.ExitCode == 0, nil
 }
 
+// ResizeViewport applies the provider viewport to an already attached runtime.
+// This is intentionally separate from TargetExists so periodic health probes
+// stay read-only.
+func (d *TmuxDriver) ResizeViewport(ctx context.Context, target string) error {
+	if target == "" {
+		return errors.New("tmux target is required")
+	}
+	return d.run(
+		ctx, "resize tmux viewport", "resize-window", "-t", target,
+		"-x", fmt.Sprint(providerWindowWidth), "-y", fmt.Sprint(providerWindowHeight),
+	)
+}
+
 func (d *TmuxDriver) sendKey(ctx context.Context, target, key string) error {
 	result, err := d.runner.Run(ctx, d.tmuxPath, "send-keys", "-t", target, key)
 	if err != nil {

@@ -52,6 +52,21 @@ func TestTmuxDriverChecksExactRuntimeTarget(t *testing.T) {
 	}
 }
 
+func TestTmuxDriverResizesExistingRuntimeViewport(t *testing.T) {
+	runner := &recordingInputRunner{}
+	driver, err := NewTmuxDriver(runner, time.Second, 0, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := driver.ResizeViewport(context.Background(), "bria:window"); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"resize-window", "-t", "bria:window", "-x", "80", "-y", "40"}
+	if got := runner.calls[0].args; !reflect.DeepEqual(got, want) {
+		t.Fatalf("resize args=%v, want %v", got, want)
+	}
+}
+
 func (r *recordingInputRunner) RunInput(
 	_ context.Context,
 	input []byte,

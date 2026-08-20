@@ -94,6 +94,9 @@ func startNodeRuntimeControl(
 				continue
 			}
 			if err == nil {
+				err = driver.ResizeViewport(ctx, binding.TmuxTarget)
+			}
+			if err == nil {
 				err = executor.Register(binding)
 			}
 		}
