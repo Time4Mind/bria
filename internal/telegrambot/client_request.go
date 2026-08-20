@@ -19,6 +19,17 @@ func (c *Client) call(
 	result any,
 	timeout time.Duration,
 ) error {
+	return c.callWithConnectionPolicy(ctx, method, payload, result, timeout, false)
+}
+
+func (c *Client) callWithConnectionPolicy(
+	ctx context.Context,
+	method string,
+	payload any,
+	result any,
+	timeout time.Duration,
+	closeConnection bool,
+) error {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("encode telegram %s payload: %w", method, err)
@@ -34,6 +45,11 @@ func (c *Client) call(
 	if err != nil {
 		return fmt.Errorf("build telegram %s request: %w", method, err)
 	}
+	// A long-lived proxy tunnel can remain writable while its upstream Bot API
+	// connection is stale. In that state getUpdates keeps returning empty long
+	// polls even though Telegram has pending updates. Polling requests opt out of
+	// connection reuse so every cycle gets a fresh end-to-end proxy tunnel.
+	request.Close = closeConnection
 	request.Header.Set("Content-Type", "application/json")
 	response, err := c.httpClient.Do(request)
 	if err != nil {

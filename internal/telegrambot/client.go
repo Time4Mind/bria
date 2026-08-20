@@ -172,7 +172,9 @@ func (c *Client) GetUpdates(ctx context.Context, request GetUpdatesRequest) ([]U
 	}
 	var raw []apiUpdate
 	timeout := time.Duration(request.Timeout)*time.Second + c.longPollSlack
-	if err := c.call(ctx, "getUpdates", payload, &raw, timeout); err != nil {
+	if err := c.callWithConnectionPolicy(
+		ctx, "getUpdates", payload, &raw, timeout, true,
+	); err != nil {
 		return nil, err
 	}
 	updates := make([]Update, 0, len(raw))

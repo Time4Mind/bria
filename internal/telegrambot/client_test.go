@@ -19,6 +19,9 @@ func TestClientGetUpdatesUsesBoundedLongPollPayload(t *testing.T) {
 		if request.URL.Path != "/bot"+testToken+"/getUpdates" {
 			t.Errorf("unexpected path %q", request.URL.Path)
 		}
+		if !request.Close {
+			t.Error("getUpdates must not reuse a proxy connection")
+		}
 		var payload getUpdatesPayload
 		if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
 			t.Fatalf("decode payload: %v", err)
