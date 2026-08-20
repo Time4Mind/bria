@@ -2,6 +2,7 @@
 package workspace
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -15,25 +16,9 @@ var ErrUnsafePath = errors.New("unsafe workspace path")
 const MaxEntries = 256
 
 const (
-	maxPathBytes              = 4096
-	listingWireBudget         = 32 << 10
-	activityScanMaxEntries    = 8192
-	activityProjectMaxEntries = 256
-	activityProjectMinEntries = 32
-	activityMaxDirectoryDepth = 4
+	maxPathBytes      = 4096
+	listingWireBudget = 32 << 10
 )
-
-var ignoredActivityDirectories = map[string]struct{}{
-	"__pycache__":  {},
-	"build":        {},
-	"coverage":     {},
-	"dist":         {},
-	"node_modules": {},
-	"out":          {},
-	"pods":         {},
-	"target":       {},
-	"vendor":       {},
-}
 
 type Directory struct {
 	Name      string    `json:"name"`
@@ -57,7 +42,13 @@ func (b *Browser) Home() string { return b.home }
 
 func (b *Browser) Resolve(path string) (string, error) { return canonicalDirectory(path) }
 
-func (b *Browser) List(path string) ([]Directory, error) {
+func (b *Browser) List(ctx context.Context, path string) ([]Directory, error) {
+	if ctx == nil {
+		return nil, errors.New("workspace list context is required")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	path, err := canonicalDirectory(path)
 	if err != nil {
 		return nil, err
@@ -66,36 +57,28 @@ func (b *Browser) List(path string) ([]Directory, error) {
 	if err != nil {
 		return nil, err
 	}
-	candidates := make([]Directory, 0, min(len(entries), MaxEntries))
+	candidates := make([]Directory, 0, len(entries))
 	for _, entry := range entries {
 		if strings.HasPrefix(entry.Name(), ".") ||
-			entry.Type()&os.ModeSymlink != 0 || !entry.IsDir() {
+			entry.Type()&os.ModeSymlink != 0 {
 			continue
 		}
+		// Read only the immediate directory's metadata. Ranking must never
+		// traverse descendants from the Telegram polling path.
 		info, infoErr := entry.Info()
-		if infoErr != nil {
+		if infoErr != nil || !info.IsDir() {
 			continue
 		}
 		candidates = append(candidates, Directory{
-			Name: entry.Name(), Path: filepath.Join(path, entry.Name()), UpdatedAt: info.ModTime().UTC(),
+			Name:      entry.Name(),
+			Path:      filepath.Join(path, entry.Name()),
+			UpdatedAt: info.ModTime().UTC(),
 		})
 	}
 	sortDirectories(candidates)
 	if len(candidates) > MaxEntries {
 		candidates = candidates[:MaxEntries]
 	}
-	activityBudget := activityProjectMaxEntries
-	if len(candidates) > 0 {
-		activityBudget = min(activityBudget, max(
-			activityProjectMinEntries, activityScanMaxEntries/len(candidates),
-		))
-	}
-	for index := range candidates {
-		candidates[index].UpdatedAt = latestProjectActivity(
-			candidates[index].Path, candidates[index].UpdatedAt, activityBudget,
-		)
-	}
-	sortDirectories(candidates)
 
 	result := make([]Directory, 0, len(candidates))
 	wireCost := 0
@@ -117,54 +100,6 @@ func sortDirectories(directories []Directory) {
 		}
 		return directories[i].UpdatedAt.After(directories[j].UpdatedAt)
 	})
-}
-
-type activityDirectory struct {
-	path  string
-	depth int
-}
-
-func latestProjectActivity(path string, latest time.Time, maxEntries int) time.Time {
-	queue := []activityDirectory{{path: path}}
-	visited := 0
-	for len(queue) > 0 && visited < maxEntries {
-		current := queue[0]
-		queue = queue[1:]
-		directory, err := os.Open(current.path)
-		if err != nil {
-			continue
-		}
-		entries, readErr := directory.ReadDir(maxEntries - visited)
-		closeErr := directory.Close()
-		if (readErr != nil && len(entries) == 0) || closeErr != nil {
-			continue
-		}
-		visited += len(entries)
-		for _, entry := range entries {
-			name := entry.Name()
-			if strings.HasPrefix(name, ".") || entry.Type()&os.ModeSymlink != 0 {
-				continue
-			}
-			if entry.IsDir() {
-				if _, ignored := ignoredActivityDirectories[strings.ToLower(name)]; ignored {
-					continue
-				}
-			}
-			info, infoErr := entry.Info()
-			if infoErr != nil || (!info.IsDir() && !info.Mode().IsRegular()) {
-				continue
-			}
-			if info.ModTime().After(latest) {
-				latest = info.ModTime().UTC()
-			}
-			if info.IsDir() && current.depth < activityMaxDirectoryDepth {
-				queue = append(queue, activityDirectory{
-					path: filepath.Join(current.path, name), depth: current.depth + 1,
-				})
-			}
-		}
-	}
-	return latest
 }
 
 func Parent(path string) (string, error) {

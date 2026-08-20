@@ -40,7 +40,7 @@ func NewLocal(
 	return &Local{nodeID: nodeID, state: state, browser: browser, transcripts: transcripts, bindings: bindings, runtime: runtime, executor: executor}, nil
 }
 
-func (l *Local) Browse(_ context.Context, request BrowseRequest) (BrowseResult, error) {
+func (l *Local) Browse(ctx context.Context, request BrowseRequest) (BrowseResult, error) {
 	if err := l.authorize(request.ActorID, request.NodeID); err != nil {
 		return BrowseResult{}, err
 	}
@@ -52,7 +52,7 @@ func (l *Local) Browse(_ context.Context, request BrowseRequest) (BrowseResult, 
 	if err != nil {
 		return BrowseResult{}, err
 	}
-	directories, err := l.browser.List(path)
+	directories, err := l.browser.List(ctx, path)
 	if err != nil {
 		return BrowseResult{}, err
 	}

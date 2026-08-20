@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -28,7 +29,7 @@ func TestBrowserListsRealVisibleDirectoriesByRecency(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	items, err := browser.List(home)
+	items, err := browser.List(context.Background(), home)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,7 +38,7 @@ func TestBrowserListsRealVisibleDirectoriesByRecency(t *testing.T) {
 	}
 }
 
-func TestBrowserUsesBoundedNestedProjectActivity(t *testing.T) {
+func TestBrowserUsesDirectoryMetadataWithoutScanningNestedFiles(t *testing.T) {
 	home := t.TempDir()
 	active := filepath.Join(home, "active")
 	quiet := filepath.Join(home, "quiet")
@@ -70,12 +71,12 @@ func TestBrowserUsesBoundedNestedProjectActivity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	items, err := browser.List(home)
+	items, err := browser.List(context.Background(), home)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != 2 || items[0].Name != "active" || !items[0].UpdatedAt.Equal(newest) {
-		t.Fatalf("directories=%#v", items)
+	if len(items) != 2 || items[0].Name != "quiet" || !items[1].UpdatedAt.Equal(old) {
+		t.Fatalf("nested file metadata changed directory order: %#v", items)
 	}
 }
 
@@ -112,7 +113,7 @@ func TestBrowserIgnoresGeneratedActivityTrees(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	items, err := browser.List(home)
+	items, err := browser.List(context.Background(), home)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +146,7 @@ func TestBrowserSelectsCandidatesBeforeApplyingEntryLimit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	items, err := browser.List(home)
+	items, err := browser.List(context.Background(), home)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,15 +160,20 @@ func TestBrowserRejectsRelativeAndNondirectoryPaths(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := browser.List("relative"); err == nil {
+	if _, err := browser.List(context.Background(), "relative"); err == nil {
 		t.Fatal("relative path accepted")
 	}
 	file := filepath.Join(t.TempDir(), "file")
 	if err := os.WriteFile(file, []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := browser.List(file); err == nil {
+	if _, err := browser.List(context.Background(), file); err == nil {
 		t.Fatal("regular file accepted")
+	}
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := browser.List(canceled, browser.Home()); err == nil {
+		t.Fatal("canceled context accepted")
 	}
 }
 
@@ -191,7 +197,7 @@ func BenchmarkBrowserListByProjectActivity(b *testing.B) {
 	}
 	b.ResetTimer()
 	for range b.N {
-		if _, err := browser.List(home); err != nil {
+		if _, err := browser.List(context.Background(), home); err != nil {
 			b.Fatal(err)
 		}
 	}
