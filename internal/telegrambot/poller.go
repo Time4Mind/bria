@@ -15,11 +15,13 @@ type PollerConfig struct {
 	Cursor                  Cursor
 	Handler                 UpdateHandler
 	LongPollTimeout         time.Duration
+	PollRequestTimeout      time.Duration
 	LeadershipCheckInterval time.Duration
 	RetryDelay              time.Duration
 	MaxCallbackAttempts     int
 	OnLeaderActivated       func(context.Context) error
 	OnCallbackDropped       func(IncomingUpdate, error, int)
+	OnError                 func(string, error)
 }
 
 type Poller struct {
@@ -28,13 +30,16 @@ type Poller struct {
 	cursor              Cursor
 	handler             UpdateHandler
 	longPollSecs        int
+	pollRequestTimeout  time.Duration
 	leadershipTick      time.Duration
 	retryDelay          time.Duration
 	offset              int64
 	maxCallbackAttempts int
 	onLeaderActivated   func(context.Context) error
 	onCallbackDropped   func(IncomingUpdate, error, int)
+	onError             func(string, error)
 	callbackAttempts    map[int64]int
+	lastFailure         string
 }
 
 func NewPoller(config PollerConfig) (*Poller, error) {
@@ -48,6 +53,10 @@ func NewPoller(config PollerConfig) (*Poller, error) {
 	}
 	if longPoll < time.Second || longPoll > 50*time.Second {
 		return nil, errors.New("Telegram long-poll timeout must be between 1s and 50s")
+	}
+	pollRequestTimeout := config.PollRequestTimeout
+	if pollRequestTimeout <= 0 {
+		pollRequestTimeout = longPoll + 10*time.Second
 	}
 	leadershipTick := config.LeadershipCheckInterval
 	if leadershipTick <= 0 {
@@ -67,10 +76,12 @@ func NewPoller(config PollerConfig) (*Poller, error) {
 	return &Poller{
 		api: config.API, leadership: config.Leadership, cursor: config.Cursor,
 		handler:      config.Handler,
-		longPollSecs: int(longPoll / time.Second), leadershipTick: leadershipTick,
-		retryDelay: retryDelay, maxCallbackAttempts: maxCallbackAttempts,
+		longPollSecs: int(longPoll / time.Second), pollRequestTimeout: pollRequestTimeout,
+		leadershipTick: leadershipTick,
+		retryDelay:     retryDelay, maxCallbackAttempts: maxCallbackAttempts,
 		onLeaderActivated: config.OnLeaderActivated,
 		onCallbackDropped: config.OnCallbackDropped,
+		onError:           config.OnError,
 		callbackAttempts:  make(map[int64]int),
 	}, nil
 }
@@ -93,6 +104,7 @@ func (p *Poller) Run(ctx context.Context) error {
 		if !leaderActive {
 			if p.onLeaderActivated != nil {
 				if err := p.onLeaderActivated(ctx); err != nil {
+					p.reportFailure("activation", err)
 					if err := waitOrDone(ctx, p.retryDelay); err != nil {
 						return err
 					}
@@ -118,11 +130,13 @@ func (p *Poller) Run(ctx context.Context) error {
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
+			p.reportFailure("get_updates", err)
 			if err := waitOrDone(ctx, p.retryDelay); err != nil {
 				return err
 			}
 			continue
 		}
+		p.clearFailure()
 		if !p.leadership.IsLeader() {
 			continue
 		}
@@ -189,34 +203,56 @@ func (p *Poller) dropFailedCallback(update IncomingUpdate, err error) bool {
 
 func (p *Poller) getUpdatesWhileLeader(ctx context.Context) ([]Update, error) {
 	pollCtx, cancel := context.WithCancel(ctx)
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		ticker := time.NewTicker(p.leadershipTick)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-pollCtx.Done():
-				return
-			case <-ticker.C:
-				if !p.leadership.IsLeader() {
-					cancel()
-					return
-				}
-			}
-		}
-	}()
-	updates, err := p.api.GetUpdates(pollCtx, GetUpdatesRequest{
-		Offset: p.offset, Limit: 100, Timeout: p.longPollSecs,
-	})
-	stillLeader := p.leadership.IsLeader()
-	cancel()
-	<-done
-	if !stillLeader {
-		return nil, errLeadershipLost
+	defer cancel()
+	type result struct {
+		updates []Update
+		err     error
 	}
-	return updates, err
+	completed := make(chan result, 1)
+	go func() {
+		updates, err := p.api.GetUpdates(pollCtx, GetUpdatesRequest{
+			Offset: p.offset, Limit: 100, Timeout: p.longPollSecs,
+		})
+		completed <- result{updates: updates, err: err}
+	}()
+	leadershipTicker := time.NewTicker(p.leadershipTick)
+	defer leadershipTicker.Stop()
+	deadline := time.NewTimer(p.pollRequestTimeout)
+	defer deadline.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-leadershipTicker.C:
+			if !p.leadership.IsLeader() {
+				return nil, errLeadershipLost
+			}
+		case <-deadline.C:
+			if !p.leadership.IsLeader() {
+				return nil, errLeadershipLost
+			}
+			return nil, context.DeadlineExceeded
+		case result := <-completed:
+			if !p.leadership.IsLeader() {
+				return nil, errLeadershipLost
+			}
+			return result.updates, result.err
+		}
+	}
 }
+
+func (p *Poller) reportFailure(stage string, err error) {
+	failure := stage + ": " + err.Error()
+	if failure == p.lastFailure {
+		return
+	}
+	p.lastFailure = failure
+	if p.onError != nil {
+		p.onError(stage, err)
+	}
+}
+
+func (p *Poller) clearFailure() { p.lastFailure = "" }
 
 func waitOrDone(ctx context.Context, duration time.Duration) error {
 	timer := time.NewTimer(duration)

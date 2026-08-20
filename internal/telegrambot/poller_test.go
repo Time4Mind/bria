@@ -3,6 +3,7 @@ package telegrambot
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 )
@@ -30,6 +31,64 @@ func TestPollerCallsGetUpdatesOnlyAsLeader(t *testing.T) {
 	case <-done:
 	case <-time.After(time.Second):
 		t.Fatal("poller did not stop after context cancellation")
+	}
+}
+
+type contextIgnoringAPI struct {
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (a *contextIgnoringAPI) GetUpdates(context.Context, GetUpdatesRequest) ([]Update, error) {
+	a.once.Do(func() { close(a.started) })
+	<-a.release
+	return nil, nil
+}
+func (*contextIgnoringAPI) AnswerCallbackQuery(context.Context, string, string) error { return nil }
+func (*contextIgnoringAPI) SendMessage(context.Context, MessageRequest) (Message, error) {
+	return Message{}, nil
+}
+func (*contextIgnoringAPI) EditMessage(context.Context, EditMessageRequest) (Message, error) {
+	return Message{}, nil
+}
+
+func TestPollRequestHasOuterDeadline(t *testing.T) {
+	api := &contextIgnoringAPI{started: make(chan struct{}), release: make(chan struct{})}
+	defer close(api.release)
+	leader := &testLeadership{}
+	leader.leader.Store(true)
+	poller := newTestPoller(t, api, leader, UpdateHandlerFunc(func(
+		context.Context, IncomingUpdate,
+	) error {
+		return nil
+	}))
+	poller.pollRequestTimeout = 20 * time.Millisecond
+	startedAt := time.Now()
+	_, err := poller.getUpdatesWhileLeader(context.Background())
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("poll error=%v, want deadline exceeded", err)
+	}
+	if elapsed := time.Since(startedAt); elapsed > 200*time.Millisecond {
+		t.Fatalf("outer poll deadline took %s", elapsed)
+	}
+}
+
+func TestPollerDeduplicatesContinuousErrors(t *testing.T) {
+	var reports []string
+	poller := &Poller{onError: func(stage string, err error) {
+		reports = append(reports, stage+":"+err.Error())
+	}}
+	err := errors.New("proxy unavailable")
+	poller.reportFailure("get_updates", err)
+	poller.reportFailure("get_updates", err)
+	if len(reports) != 1 {
+		t.Fatalf("continuous error reports=%v", reports)
+	}
+	poller.clearFailure()
+	poller.reportFailure("get_updates", err)
+	if len(reports) != 2 {
+		t.Fatalf("recovered error reports=%v", reports)
 	}
 }
 

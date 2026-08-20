@@ -175,6 +175,12 @@ func newTelegramAdapter(
 		OnLeaderActivated: func(activationCtx context.Context) error {
 			return activateTelegramLeader(activationCtx, client, service)
 		},
+		OnError: func(stage string, pollErr error) {
+			processlog.Criticalf(
+				"bria telegram: poller stage=%s%s",
+				stage, telegramErrorSuffix(pollErr, token),
+			)
+		},
 		OnCallbackDropped: func(update telegrambot.IncomingUpdate, dropErr error, attempts int) {
 			processlog.Criticalf(
 				"bria telegram: update=%d kind=%s%s dropped_after=%d%s",
