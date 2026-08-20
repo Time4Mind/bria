@@ -173,6 +173,20 @@ func (e *LocalExecutor) completeAbandoned(requests []Request, failure error) {
 	}
 }
 
+func (e *LocalExecutor) retireClosedRuntime(binding RuntimeBinding) {
+	key := runtimeKey(binding.NodeID, binding.SessionID)
+	e.mu.Lock()
+	session := e.sessions[key]
+	if session == nil || session.snapshot().Generation != binding.Generation {
+		e.mu.Unlock()
+		return
+	}
+	delete(e.sessions, key)
+	pending := session.stopAndDrain()
+	e.mu.Unlock()
+	e.completeAbandoned(pending, ErrRuntimeUnavailable)
+}
+
 // Submit persists the operation intent and appends it to the host-local FIFO.
 // It never waits for tmux or provider processing.
 func (e *LocalExecutor) Submit(ctx context.Context, request Request) (Receipt, error) {

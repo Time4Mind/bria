@@ -18,6 +18,20 @@ func (s *State) SetSoleOwner(userID UserID) error {
 	if userID <= 0 {
 		return ErrInvalidState
 	}
+	if access, ok := s.Users[userID]; ok && len(s.Users) == 1 && access.Role == RoleOwner {
+		// Startup reconciles the bootstrap owner's node access after membership
+		// changes. That is not an ownership migration: transport checkpoints and
+		// navigation still belong to the same private actor and must survive it.
+		allowed := make(map[NodeID]bool, len(s.Nodes))
+		for nodeID := range s.Nodes {
+			allowed[nodeID] = true
+		}
+		access.AllowedNodes = allowed
+		s.Users[userID] = access
+		s.Grants = make(map[string]SessionGrant)
+		s.ensureActiveSession(userID)
+		return nil
+	}
 	previous := s.OwnerID()
 	if access, ok := s.Users[userID]; ok && access.Role == RoleOwner {
 		previous = userID

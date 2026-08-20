@@ -18,6 +18,7 @@ type codexProcess struct {
 	stdin    io.WriteCloser
 	messages chan map[string]any
 	exit     chan error
+	done     chan struct{}
 	loginID  string
 	url      string
 	userCode string
@@ -38,7 +39,7 @@ func launchCodex(ctx context.Context, executable string) (Process, error) {
 	}
 	process := &codexProcess{
 		command: command, stdin: stdin, messages: make(chan map[string]any, 16),
-		exit: make(chan error, 1),
+		exit: make(chan error, 1), done: make(chan struct{}),
 	}
 	if err := command.Start(); err != nil {
 		return nil, err
@@ -123,6 +124,7 @@ func (p *codexProcess) Wait() (bool, string) {
 func (p *codexProcess) Cancel() error {
 	var result error
 	p.once.Do(func() {
+		close(p.done)
 		_ = p.stdin.Close()
 		if p.command.Process != nil {
 			result = p.command.Process.Kill()
@@ -165,7 +167,11 @@ func (p *codexProcess) scan(reader io.Reader) {
 	for scanner.Scan() {
 		var message map[string]any
 		if json.Unmarshal(scanner.Bytes(), &message) == nil {
-			p.messages <- message
+			select {
+			case p.messages <- message:
+			case <-p.done:
+				return
+			}
 		}
 	}
 }

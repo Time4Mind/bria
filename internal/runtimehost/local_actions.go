@@ -83,6 +83,9 @@ func (e *LocalExecutor) executeOnce(
 	}
 	result.Delivered = true
 	result.Detail = "runtime operation delivered"
+	if request.Action == ActionClose {
+		e.retireClosedRuntime(binding)
+	}
 	return result, nil
 }
 

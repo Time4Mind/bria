@@ -110,33 +110,68 @@ func (r *Reader) cachedResolve(key resolveCacheKey) (path string, negative, ok b
 		return "", false, false
 	}
 	if entry.path != "" {
+		r.touchResolveLocked(key)
 		return entry.path, false, true
 	}
 	if time.Now().Before(entry.expiresAt) {
+		r.touchResolveLocked(key)
 		return "", true, true
 	}
-	delete(r.resolveCache, key)
+	r.deleteResolveLocked(key)
 	return "", false, false
 }
 
 func (r *Reader) rememberResolve(key resolveCacheKey, path string) {
 	r.resolveMu.Lock()
-	r.resolveCache[key] = resolveCacheEntry{path: path}
+	r.rememberResolveLocked(key, resolveCacheEntry{path: path})
 	r.resolveMu.Unlock()
 }
 
 func (r *Reader) rememberNegativeResolve(key resolveCacheKey) {
 	r.resolveMu.Lock()
-	r.resolveCache[key] = resolveCacheEntry{expiresAt: time.Now().Add(negativeResolveTTL)}
+	r.rememberResolveLocked(key, resolveCacheEntry{expiresAt: time.Now().Add(negativeResolveTTL)})
 	r.resolveMu.Unlock()
 }
 
 func (r *Reader) invalidateResolve(key resolveCacheKey, stalePath string) {
 	r.resolveMu.Lock()
 	if entry, ok := r.resolveCache[key]; ok && entry.path == stalePath {
-		delete(r.resolveCache, key)
+		r.deleteResolveLocked(key)
 	}
 	r.resolveMu.Unlock()
+}
+
+func (r *Reader) rememberResolveLocked(key resolveCacheKey, entry resolveCacheEntry) {
+	if _, exists := r.resolveCache[key]; exists {
+		r.deleteResolveLocked(key)
+	}
+	r.resolveCache[key] = entry
+	r.resolveOrder = append(r.resolveOrder, key)
+	for len(r.resolveOrder) > maxResolveCacheEntries {
+		oldest := r.resolveOrder[0]
+		r.resolveOrder = r.resolveOrder[1:]
+		delete(r.resolveCache, oldest)
+	}
+}
+
+func (r *Reader) touchResolveLocked(key resolveCacheKey) {
+	for index, current := range r.resolveOrder {
+		if current == key {
+			r.resolveOrder = append(r.resolveOrder[:index], r.resolveOrder[index+1:]...)
+			break
+		}
+	}
+	r.resolveOrder = append(r.resolveOrder, key)
+}
+
+func (r *Reader) deleteResolveLocked(key resolveCacheKey) {
+	delete(r.resolveCache, key)
+	for index, current := range r.resolveOrder {
+		if current == key {
+			r.resolveOrder = append(r.resolveOrder[:index], r.resolveOrder[index+1:]...)
+			return
+		}
+	}
 }
 
 func (r *Reader) codexCandidates(ctx context.Context) ([]codexCandidate, error) {

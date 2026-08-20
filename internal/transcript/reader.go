@@ -23,6 +23,7 @@ type Reader struct {
 	config       Config
 	resolveMu    sync.Mutex
 	resolveCache map[resolveCacheKey]resolveCacheEntry
+	resolveOrder []resolveCacheKey
 	codexIndexMu sync.Mutex
 	codexIndex   *codexIndexSnapshot
 	codexFlight  *codexIndexFlight
@@ -52,6 +53,7 @@ type readCacheEntry struct {
 }
 
 const negativeResolveTTL = time.Second
+const maxResolveCacheEntries = 512
 const maxReadCacheEntries = 32
 const initialParseLines = 256
 

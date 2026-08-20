@@ -24,6 +24,7 @@ type claudeProcess struct {
 
 	chunks chan []byte
 	exit   chan error
+	done   chan struct{}
 	once   sync.Once
 }
 
@@ -36,6 +37,7 @@ func launchClaude(ctx context.Context, executable string) (Process, error) {
 	}
 	process := &claudeProcess{
 		command: command, pty: terminal, chunks: make(chan []byte, 16), exit: make(chan error, 1),
+		done: make(chan struct{}),
 	}
 	go process.read()
 	go func() { process.exit <- command.Wait(); close(process.exit) }()
@@ -103,6 +105,7 @@ func (p *claudeProcess) Wait() (bool, string) {
 func (p *claudeProcess) Cancel() error {
 	var result error
 	p.once.Do(func() {
+		close(p.done)
 		if p.command.Process != nil {
 			result = p.command.Process.Kill()
 		}
@@ -119,7 +122,11 @@ func (p *claudeProcess) read() {
 	for {
 		count, err := p.pty.Read(buffer)
 		if count > 0 {
-			p.chunks <- append([]byte(nil), buffer[:count]...)
+			select {
+			case p.chunks <- append([]byte(nil), buffer[:count]...):
+			case <-p.done:
+				return
+			}
 		}
 		if err != nil {
 			return

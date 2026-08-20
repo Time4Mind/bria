@@ -93,15 +93,11 @@ func (ExecCommandRunner) RunJSONRPC(
 	}()
 	lines := make(chan []byte, 8)
 	scanErrors := make(chan error, 1)
-	go func() {
-		scanner := bufio.NewScanner(stdout)
-		scanner.Buffer(make([]byte, 4096), 1<<20)
-		for scanner.Scan() {
-			lines <- append([]byte(nil), scanner.Bytes()...)
-		}
-		scanErrors <- scanner.Err()
-		close(lines)
-	}()
+	stopScan := make(chan struct{})
+	var stopScanOnce sync.Once
+	stopScanner := func() { stopScanOnce.Do(func() { close(stopScan) }) }
+	defer stopScanner()
+	go scanJSONRPCLines(stdout, lines, scanErrors, stopScan)
 	write := func(data []byte) error {
 		if _, writeErr := stdin.Write(data); writeErr != nil {
 			return writeErr
@@ -109,6 +105,7 @@ func (ExecCommandRunner) RunJSONRPC(
 		return nil
 	}
 	if err := write(initialize); err != nil {
+		stopScanner()
 		_ = command.Process.Kill()
 		_ = command.Wait()
 		stderrWait.Wait()
@@ -120,6 +117,7 @@ func (ExecCommandRunner) RunJSONRPC(
 	for !found {
 		select {
 		case <-ctx.Done():
+			stopScanner()
 			_ = command.Process.Kill()
 			_ = command.Wait()
 			stderrWait.Wait()
@@ -144,6 +142,7 @@ func (ExecCommandRunner) RunJSONRPC(
 			}
 			if response.ID == 0 && !requestsSent {
 				if err := write(requests); err != nil {
+					stopScanner()
 					_ = command.Process.Kill()
 					_ = command.Wait()
 					stderrWait.Wait()
@@ -187,6 +186,29 @@ func (ExecCommandRunner) RunJSONRPC(
 		return result, nil
 	}
 	return result, waitErr
+}
+
+func scanJSONRPCLines(
+	reader io.Reader,
+	lines chan<- []byte,
+	scanErrors chan<- error,
+	stop <-chan struct{},
+) {
+	defer close(lines)
+	scanner := bufio.NewScanner(reader)
+	scanner.Buffer(make([]byte, 4096), 1<<20)
+	for scanner.Scan() {
+		line := append([]byte(nil), scanner.Bytes()...)
+		select {
+		case lines <- line:
+		case <-stop:
+			return
+		}
+	}
+	select {
+	case scanErrors <- scanner.Err():
+	case <-stop:
+	}
 }
 
 func runCommand(

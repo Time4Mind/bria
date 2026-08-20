@@ -243,14 +243,19 @@ func (m *Manager) expire(flowID string, entry *flow) {
 	<-timer.C
 	m.mu.Lock()
 	current, exists := m.flows[flowID]
-	if !exists || current != entry || entry.state.Terminal() {
+	if !exists || current != entry {
 		m.mu.Unlock()
 		return
 	}
-	entry.state = StateCancelled
+	terminal := entry.state.Terminal()
+	if !terminal {
+		entry.state = StateCancelled
+	}
 	delete(m.flows, flowID)
 	m.mu.Unlock()
-	_ = entry.process.Cancel()
+	if !terminal {
+		_ = entry.process.Cancel()
+	}
 }
 
 func (m *Manager) authorizedFlowLocked(actorID int64, nodeID, flowID string) (*flow, bool) {
