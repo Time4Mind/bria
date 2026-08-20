@@ -19,14 +19,20 @@ var privateHomeDirectories = map[string]struct{}{
 	"Movies": {}, "Music": {}, "Pictures": {},
 }
 
+var ignoredActivityDirectories = map[string]struct{}{
+	"__pycache__": {}, "build": {}, "coverage": {}, "dist": {},
+	"node_modules": {}, "out": {}, "pods": {}, "target": {}, "vendor": {},
+}
+
 const MaxEntries = 256
 
 const (
-	maxPathBytes               = 4096
-	listingWireBudget          = 32 << 10
-	secondLevelMaxCandidates   = 1024
-	secondLevelMaxEntries      = 1024
-	secondLevelRefreshInterval = 30 * time.Second
+	maxPathBytes                 = 4096
+	listingWireBudget            = 32 << 10
+	activityMaxCandidates        = 1024
+	activityMaxEntriesPerFolder  = 1024
+	activityMaxEntriesPerProject = 4096
+	activityRefreshInterval      = 30 * time.Second
 )
 
 type Directory struct {
@@ -36,11 +42,11 @@ type Directory struct {
 }
 
 type Browser struct {
-	home            string
-	scanSecondLevel func(string, time.Time) time.Time
-	activityMu      sync.RWMutex
-	activity        map[string]cachedActivity
-	refreshing      map[string]bool
+	home         string
+	scanActivity func(string, time.Time) time.Time
+	activityMu   sync.RWMutex
+	activity     map[string]cachedActivity
+	refreshing   map[string]bool
 }
 
 type cachedActivity struct {
@@ -54,7 +60,7 @@ func NewBrowser(home string) (*Browser, error) {
 		return nil, err
 	}
 	return &Browser{
-		home: home, scanSecondLevel: latestSecondLevelActivity,
+		home: home, scanActivity: latestThirdLevelActivity,
 		activity: make(map[string]cachedActivity), refreshing: make(map[string]bool),
 	}, nil
 }
@@ -97,13 +103,13 @@ func (b *Browser) List(ctx context.Context, path string) ([]Directory, error) {
 		})
 	}
 	for index := range candidates {
-		if updatedAt, found := b.cachedSecondLevelActivity(candidates[index].Path); found &&
+		if updatedAt, found := b.cachedActivity(candidates[index].Path); found &&
 			updatedAt.After(candidates[index].UpdatedAt) {
 			candidates[index].UpdatedAt = updatedAt
 		}
 	}
 	sortDirectories(candidates)
-	b.scheduleSecondLevelRefresh(candidates)
+	b.scheduleActivityRefresh(candidates)
 	if len(candidates) > MaxEntries {
 		candidates = candidates[:MaxEntries]
 	}
@@ -121,23 +127,23 @@ func (b *Browser) List(ctx context.Context, path string) ([]Directory, error) {
 	return result, nil
 }
 
-// scheduleSecondLevelRefresh keeps the additional directory read outside the
-// Telegram polling path. It refreshes only immediate entries of each visible
-// directory and never descends into them.
-func (b *Browser) scheduleSecondLevelRefresh(candidates []Directory) {
+// scheduleActivityRefresh keeps depth-two and depth-three metadata reads
+// outside the Telegram polling path. The scan is bounded and never descends
+// into depth four.
+func (b *Browser) scheduleActivityRefresh(candidates []Directory) {
 	now := time.Now()
-	refresh := make([]Directory, 0, min(len(candidates), secondLevelMaxCandidates))
+	refresh := make([]Directory, 0, min(len(candidates), activityMaxCandidates))
 	b.activityMu.Lock()
 	for _, candidate := range candidates {
-		if len(refresh) == secondLevelMaxCandidates {
+		if len(refresh) == activityMaxCandidates {
 			break
 		}
-		if !b.canScanSecondLevel(candidate.Path) {
+		if !b.canScanActivity(candidate.Path) {
 			continue
 		}
 		cached := b.activity[candidate.Path]
 		if b.refreshing[candidate.Path] ||
-			(!cached.refreshedAt.IsZero() && now.Sub(cached.refreshedAt) < secondLevelRefreshInterval) {
+			(!cached.refreshedAt.IsZero() && now.Sub(cached.refreshedAt) < activityRefreshInterval) {
 			continue
 		}
 		b.refreshing[candidate.Path] = true
@@ -149,7 +155,7 @@ func (b *Browser) scheduleSecondLevelRefresh(candidates []Directory) {
 	}
 	go func() {
 		for _, candidate := range refresh {
-			updatedAt := b.scanSecondLevel(candidate.Path, candidate.UpdatedAt)
+			updatedAt := b.scanActivity(candidate.Path, candidate.UpdatedAt)
 			b.activityMu.Lock()
 			b.activity[candidate.Path] = cachedActivity{
 				updatedAt: updatedAt.UTC(), refreshedAt: time.Now(),
@@ -160,7 +166,7 @@ func (b *Browser) scheduleSecondLevelRefresh(candidates []Directory) {
 	}()
 }
 
-func (b *Browser) canScanSecondLevel(path string) bool {
+func (b *Browser) canScanActivity(path string) bool {
 	if filepath.Dir(path) != b.home {
 		return true
 	}
@@ -168,35 +174,65 @@ func (b *Browser) canScanSecondLevel(path string) bool {
 	return !private
 }
 
-func (b *Browser) cachedSecondLevelActivity(path string) (time.Time, bool) {
+func (b *Browser) cachedActivity(path string) (time.Time, bool) {
 	b.activityMu.RLock()
 	defer b.activityMu.RUnlock()
 	activity, found := b.activity[path]
 	return activity.updatedAt, found
 }
 
-func latestSecondLevelActivity(path string, latest time.Time) time.Time {
-	directory, err := os.Open(path)
-	if err != nil {
-		return latest
-	}
-	entries, readErr := directory.Readdir(secondLevelMaxEntries)
-	closeErr := directory.Close()
-	if (readErr != nil && len(entries) == 0) || closeErr != nil {
-		return latest
-	}
+func latestThirdLevelActivity(path string, latest time.Time) time.Time {
+	budget := activityMaxEntriesPerProject
+	entries := readActivityDirectory(path, &budget)
 	for _, info := range entries {
-		if strings.HasPrefix(info.Name(), ".") || info.Mode()&os.ModeSymlink != 0 {
-			continue
-		}
-		if !info.IsDir() && !info.Mode().IsRegular() {
+		if ignoreActivityEntry(info) {
 			continue
 		}
 		if info.ModTime().After(latest) {
 			latest = info.ModTime().UTC()
 		}
+		if !info.IsDir() {
+			continue
+		}
+		for _, nested := range readActivityDirectory(filepath.Join(path, info.Name()), &budget) {
+			if ignoreActivityEntry(nested) {
+				continue
+			}
+			if nested.ModTime().After(latest) {
+				latest = nested.ModTime().UTC()
+			}
+		}
 	}
 	return latest
+}
+
+func readActivityDirectory(path string, budget *int) []os.FileInfo {
+	if *budget <= 0 {
+		return nil
+	}
+	directory, err := os.Open(path)
+	if err != nil {
+		return nil
+	}
+	entries, readErr := directory.Readdir(min(activityMaxEntriesPerFolder, *budget))
+	closeErr := directory.Close()
+	if (readErr != nil && len(entries) == 0) || closeErr != nil {
+		return nil
+	}
+	*budget -= len(entries)
+	return entries
+}
+
+func ignoreActivityEntry(info os.FileInfo) bool {
+	if strings.HasPrefix(info.Name(), ".") || info.Mode()&os.ModeSymlink != 0 ||
+		(!info.IsDir() && !info.Mode().IsRegular()) {
+		return true
+	}
+	if info.IsDir() {
+		_, ignored := ignoredActivityDirectories[strings.ToLower(info.Name())]
+		return ignored
+	}
+	return false
 }
 
 func sortDirectories(directories []Directory) {

@@ -72,7 +72,7 @@ func TestBrowserUsesCachedSecondLevelMetadata(t *testing.T) {
 	if _, err := browser.List(context.Background(), home); err != nil {
 		t.Fatal(err)
 	}
-	waitForSecondLevelActivity(t, browser, active, newest)
+	waitForActivity(t, browser, active, newest)
 	items, err := browser.List(context.Background(), home)
 	if err != nil {
 		t.Fatal(err)
@@ -82,7 +82,7 @@ func TestBrowserUsesCachedSecondLevelMetadata(t *testing.T) {
 	}
 }
 
-func TestBrowserDoesNotScanThirdLevel(t *testing.T) {
+func TestBrowserUsesCachedThirdLevelMetadata(t *testing.T) {
 	home := t.TempDir()
 	active := filepath.Join(home, "active")
 	quiet := filepath.Join(home, "quiet")
@@ -118,13 +118,60 @@ func TestBrowserDoesNotScanThirdLevel(t *testing.T) {
 	if _, err := browser.List(context.Background(), home); err != nil {
 		t.Fatal(err)
 	}
-	waitForSecondLevelActivity(t, browser, active, old)
+	waitForActivity(t, browser, active, newest)
+	items, err := browser.List(context.Background(), home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 2 || items[0].Name != "active" || !items[0].UpdatedAt.Equal(newest) {
+		t.Fatalf("third-level file metadata was not used: %#v", items)
+	}
+}
+
+func TestBrowserDoesNotScanFourthLevel(t *testing.T) {
+	home := t.TempDir()
+	active := filepath.Join(home, "active")
+	quiet := filepath.Join(home, "quiet")
+	secondLevel := filepath.Join(active, "internal")
+	thirdLevel := filepath.Join(secondLevel, "feature")
+	for _, path := range []string{thirdLevel, quiet} {
+		if err := os.MkdirAll(path, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	old := time.Unix(100, 0)
+	middle := time.Unix(200, 0)
+	newest := time.Unix(300, 0)
+	file := filepath.Join(thirdLevel, "feature.go")
+	if err := os.WriteFile(file, []byte("package feature\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{active, secondLevel, thirdLevel} {
+		if err := os.Chtimes(path, old, old); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Chtimes(quiet, middle, middle); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(file, newest, newest); err != nil {
+		t.Fatal(err)
+	}
+
+	browser, err := NewBrowser(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := browser.List(context.Background(), home); err != nil {
+		t.Fatal(err)
+	}
+	waitForActivity(t, browser, active, old)
 	items, err := browser.List(context.Background(), home)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(items) != 2 || items[0].Name != "quiet" {
-		t.Fatalf("third-level file metadata changed directory order: %#v", items)
+		t.Fatalf("fourth-level file metadata changed directory order: %#v", items)
 	}
 }
 
@@ -161,6 +208,10 @@ func TestBrowserIgnoresGeneratedActivityTrees(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := browser.List(context.Background(), home); err != nil {
+		t.Fatal(err)
+	}
+	waitForActivity(t, browser, generated, old)
 	items, err := browser.List(context.Background(), home)
 	if err != nil {
 		t.Fatal(err)
@@ -225,7 +276,7 @@ func TestBrowserRejectsRelativeAndNondirectoryPaths(t *testing.T) {
 	}
 }
 
-func TestBrowserSecondLevelScanDoesNotDelayList(t *testing.T) {
+func TestBrowserActivityScanDoesNotDelayList(t *testing.T) {
 	home := t.TempDir()
 	project := filepath.Join(home, "project")
 	private := filepath.Join(home, "Downloads")
@@ -242,7 +293,7 @@ func TestBrowserSecondLevelScanDoesNotDelayList(t *testing.T) {
 	release := make(chan struct{})
 	defer close(release)
 	var calls atomic.Int32
-	browser.scanSecondLevel = func(path string, latest time.Time) time.Time {
+	browser.scanActivity = func(path string, latest time.Time) time.Time {
 		calls.Add(1)
 		started <- path
 		<-release
@@ -255,7 +306,7 @@ func TestBrowserSecondLevelScanDoesNotDelayList(t *testing.T) {
 		t.Fatal(err)
 	}
 	if elapsed := time.Since(startedAt); elapsed > 100*time.Millisecond {
-		t.Fatalf("second-level scan delayed list by %s", elapsed)
+		t.Fatalf("activity scan delayed list by %s", elapsed)
 	}
 	if len(items) != 2 {
 		t.Fatalf("directories=%#v", items)
@@ -267,14 +318,14 @@ func TestBrowserSecondLevelScanDoesNotDelayList(t *testing.T) {
 			t.Fatalf("scanned path=%q want project=%q err=%v", path, canonicalProject, resolveErr)
 		}
 	case <-time.After(time.Second):
-		t.Fatal("background second-level scan did not start")
+		t.Fatal("background activity scan did not start")
 	}
 	if calls.Load() != 1 {
-		t.Fatalf("second-level scans=%d want=1", calls.Load())
+		t.Fatalf("activity scans=%d want=1", calls.Load())
 	}
 }
 
-func waitForSecondLevelActivity(t *testing.T, browser *Browser, path string, want time.Time) {
+func waitForActivity(t *testing.T, browser *Browser, path string, want time.Time) {
 	t.Helper()
 	path, err := browser.Resolve(path)
 	if err != nil {
@@ -282,13 +333,13 @@ func waitForSecondLevelActivity(t *testing.T, browser *Browser, path string, wan
 	}
 	deadline := time.Now().Add(time.Second)
 	for time.Now().Before(deadline) {
-		if got, found := browser.cachedSecondLevelActivity(path); found && got.Equal(want) {
+		if got, found := browser.cachedActivity(path); found && got.Equal(want) {
 			return
 		}
 		time.Sleep(time.Millisecond)
 	}
-	got, found := browser.cachedSecondLevelActivity(path)
-	t.Fatalf("cached second-level activity for %q = %v, %t; want %v", path, got, found, want)
+	got, found := browser.cachedActivity(path)
+	t.Fatalf("cached activity for %q = %v, %t; want %v", path, got, found, want)
 }
 
 func BenchmarkBrowserListByProjectActivity(b *testing.B) {
@@ -317,7 +368,7 @@ func BenchmarkBrowserListByProjectActivity(b *testing.B) {
 	}
 }
 
-func BenchmarkSecondLevelActivityMetadata(b *testing.B) {
+func BenchmarkThirdLevelActivityMetadata(b *testing.B) {
 	home := b.TempDir()
 	projects := make([]string, 0, 28)
 	for project := 0; project < 28; project++ {
@@ -326,17 +377,23 @@ func BenchmarkSecondLevelActivityMetadata(b *testing.B) {
 			b.Fatal(err)
 		}
 		projects = append(projects, path)
-		for file := 0; file < 128; file++ {
-			name := filepath.Join(path, fmt.Sprintf("file-%03d.go", file))
-			if err := os.WriteFile(name, []byte("package feature\n"), 0o600); err != nil {
+		for directory := 0; directory < 16; directory++ {
+			source := filepath.Join(path, fmt.Sprintf("dir-%02d", directory))
+			if err := os.Mkdir(source, 0o700); err != nil {
 				b.Fatal(err)
+			}
+			for file := 0; file < 7; file++ {
+				name := filepath.Join(source, fmt.Sprintf("file-%02d.go", file))
+				if err := os.WriteFile(name, []byte("package feature\n"), 0o600); err != nil {
+					b.Fatal(err)
+				}
 			}
 		}
 	}
 	b.ResetTimer()
 	for range b.N {
 		for _, project := range projects {
-			latestSecondLevelActivity(project, time.Time{})
+			latestThirdLevelActivity(project, time.Time{})
 		}
 	}
 }
