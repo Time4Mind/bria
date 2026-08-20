@@ -89,7 +89,11 @@ func (l *Local) Discover(ctx context.Context, request DiscoverRequest) (transcri
 		}
 		return transcript.Discovery{Candidates: []transcript.Candidate{candidate}, Total: 1}, nil
 	}
-	discovery, err := l.transcripts.Discover(
+	discover := l.transcripts.Discover
+	if request.Session.SessionID != "" {
+		discover = l.transcripts.DiscoverFresh
+	}
+	discovery, err := discover(
 		ctx, transcript.Backend(strings.ToLower(request.Backend)), request.Workdir,
 		request.Offset, request.Limit,
 	)

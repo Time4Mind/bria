@@ -23,6 +23,10 @@ type Reader struct {
 	config       Config
 	resolveMu    sync.Mutex
 	resolveCache map[resolveCacheKey]resolveCacheEntry
+	codexIndexMu sync.Mutex
+	codexIndex   *codexIndexSnapshot
+	codexFlight  *codexIndexFlight
+	scanCodex    func(context.Context) (*codexIndexSnapshot, error)
 	readMu       sync.Mutex
 	readCache    map[string]readCacheEntry
 	readOrder    []string
@@ -56,12 +60,14 @@ func NewReader(config Config) (*Reader, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Reader{
+	reader := &Reader{
 		config:       normalized,
 		resolveCache: make(map[resolveCacheKey]resolveCacheEntry),
 		readCache:    make(map[string]readCacheEntry),
 		readFlights:  make(map[string]chan struct{}),
-	}, nil
+	}
+	reader.scanCodex = reader.buildCodexIndex
+	return reader, nil
 }
 
 func (r *Reader) Read(ctx context.Context, request Request) ([]Event, error) {
@@ -155,6 +161,10 @@ func (r *Reader) ReadFirstUserText(ctx context.Context, request Request) (string
 	if err != nil {
 		return "", err
 	}
+	return r.readFirstUserTextPath(ctx, request.Backend, path)
+}
+
+func (r *Reader) readFirstUserTextPath(ctx context.Context, backend Backend, path string) (string, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return "", fmt.Errorf("open transcript: %w", err)
@@ -170,7 +180,7 @@ func (r *Reader) ReadFirstUserText(ctx context.Context, request Request) (string
 			line = bytes.TrimSpace(line)
 			if len(line) > 0 {
 				var events []Event
-				switch request.Backend {
+				switch backend {
 				case BackendClaude:
 					events = parseClaude([][]byte{line}, r.config.MaxBodyBytes)
 				case BackendCodex:

@@ -16,6 +16,7 @@ import (
 type codexCandidate struct {
 	path     string
 	modified int64
+	size     int64
 }
 
 func (r *Reader) resolveClaude(request Request) (string, error) {
@@ -56,21 +57,31 @@ func (r *Reader) resolveCodex(ctx context.Context, request Request) (string, err
 		r.invalidateResolve(key, path)
 	}
 
-	candidates, err := r.codexCandidates(ctx)
-	if err != nil {
-		if errors.Is(err, ErrTranscriptNotFound) {
-			r.rememberNegativeResolve(key)
-		}
-		return "", err
-	}
-	for _, candidate := range candidates {
-		if err := ctx.Err(); err != nil {
+	for attempt := 0; attempt < 2; attempt++ {
+		index, cacheHit, err := r.loadCodexIndex(ctx, attempt > 0)
+		if err != nil {
+			if errors.Is(err, ErrTranscriptNotFound) {
+				r.rememberNegativeResolve(key)
+			}
 			return "", err
 		}
-		path, valid := r.verifyCodexPath(candidate.path, request)
-		if valid {
-			r.rememberResolve(key, path)
-			return path, nil
+		matched := false
+		for _, candidate := range index.bySession[request.ProviderSessionID] {
+			if err := ctx.Err(); err != nil {
+				return "", err
+			}
+			if candidate.workdir != filepath.Clean(request.Workdir) {
+				continue
+			}
+			matched = true
+			path, valid := r.verifyCodexPath(candidate.path, request)
+			if valid {
+				r.rememberResolve(key, path)
+				return path, nil
+			}
+		}
+		if attempt == 0 && !cacheHit && !matched {
+			break
 		}
 	}
 	r.rememberNegativeResolve(key)
@@ -176,7 +187,9 @@ func (r *Reader) codexCandidates(ctx context.Context) ([]codexCandidate, error) 
 		if err != nil || !info.Mode().IsRegular() {
 			return nil
 		}
-		entries = append(entries, codexCandidate{path: path, modified: info.ModTime().UnixNano()})
+		entries = append(entries, codexCandidate{
+			path: path, modified: info.ModTime().UnixNano(), size: info.Size(),
+		})
 		return nil
 	})
 	if err != nil {
@@ -199,6 +212,10 @@ func readCodexMeta(path string, maxLineBytes int) (codexMeta, bool) {
 	if err != nil {
 		return codexMeta{}, false
 	}
+	return parseCodexMeta(lines)
+}
+
+func parseCodexMeta(lines [][]byte) (codexMeta, bool) {
 	for _, line := range lines {
 		var row struct {
 			Type    string `json:"type"`
