@@ -139,9 +139,8 @@
   snapshot so a process restart does not reset it.
 - The Used column contains weekly provider usage. The Remaining column contains
   today's weekly allowance plus `5h`: a provider-reported five-hour window is
-  inverted from used to remaining percentage; when the provider omits that
-  window, the remaining weekly percentage is prorated over the next five hours
-  until reset. This keeps Claude/Kimi and Codex rows in the same format.
+  inverted from used to remaining percentage. When the provider omits that
+  window, Status omits `5h` too; it never invents a provider limit.
 - Telegram is an interaction adapter, not a core dependency. Replacing it must
   require a new adapter and presentation mapping, not changes to domain,
   consensus, membership, or node runtime behavior.

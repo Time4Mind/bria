@@ -150,7 +150,7 @@ func statusTable(copy i18n.Localizer, items []StatusItem, now time.Time) string 
 			}
 			lines = append(lines, fmt.Sprintf("| %s | %s | %s | %s | %d | %s |",
 				name, backend, markdownTableCell(quotaUsage(copy, quota)),
-				quotaRemaining(copy, quota, now), quotaAgeMinutes(now, quota.CollectedAt, item.ObservedAt),
+				quotaRemaining(copy, quota), quotaAgeMinutes(now, quota.CollectedAt, item.ObservedAt),
 				quotaResetAt(quota, now)))
 		}
 	}
@@ -162,7 +162,7 @@ func staleOfflineNode(item StatusItem, now time.Time) bool {
 		now.Sub(item.ObservedAt) > 72*time.Hour
 }
 
-func quotaRemaining(copy i18n.Localizer, snapshot domain.QuotaSnapshot, now time.Time) string {
+func quotaRemaining(copy i18n.Localizer, snapshot domain.QuotaSnapshot) string {
 	parts := make([]string, 0, 2)
 	if snapshot.TodayRemaining != nil {
 		parts = append(parts, fmt.Sprintf("%.1f%%", *snapshot.TodayRemaining))
@@ -171,12 +171,6 @@ func quotaRemaining(copy i18n.Localizer, snapshot domain.QuotaSnapshot, now time
 		parts = append(parts, fmt.Sprintf(
 			"%s %d%%", copy.Text(i18n.QuotaWindowFiveHour), 100-snapshot.FiveHour.UsedPercent,
 		))
-	} else {
-		if budget, ok := calculatedFiveHourBudget(snapshot.Weekly, now); ok {
-			parts = append(parts, fmt.Sprintf(
-				"%s %.1f%%", copy.Text(i18n.QuotaWindowFiveHour), budget,
-			))
-		}
 	}
 	if len(parts) == 0 {
 		return "—"
@@ -221,15 +215,6 @@ func quotaUsage(copy i18n.Localizer, snapshot domain.QuotaSnapshot) string {
 		return "—"
 	}
 	return copy.Text(i18n.QuotaWindowWeek) + " " + quotaPercent(snapshot.Weekly)
-}
-
-func calculatedFiveHourBudget(weekly *domain.QuotaWindow, now time.Time) (float64, bool) {
-	if weekly == nil || weekly.ResetsAt.IsZero() || !weekly.ResetsAt.After(now) {
-		return 0, false
-	}
-	hoursLeft := weekly.ResetsAt.Sub(now).Hours()
-	budgetHours := min(5.0, hoursLeft)
-	return float64(100-weekly.UsedPercent) * budgetHours / hoursLeft, true
 }
 
 func markdownTableCell(value string) string {
