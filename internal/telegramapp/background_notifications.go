@@ -17,6 +17,13 @@ const backgroundSettleWorkers = 8
 
 var backgroundTranscriptBudget = 3 * time.Second
 
+type settledCardCheck struct {
+	messageID       int64
+	session         domain.SessionRef
+	sessionRevision uint64
+	renderedFinalAt time.Time
+}
+
 func (h *Handler) RunBackgroundNotifications(ctx context.Context, interval time.Duration) {
 	if interval <= 0 {
 		interval = 1200 * time.Millisecond
@@ -66,8 +73,7 @@ func (h *Handler) reconcileActiveFinalCards(ctx context.Context) {
 		if card.Session != session.Ref() {
 			continue
 		}
-		if card.Session == session.Ref() && card.SessionRevision >= session.Revision &&
-			!card.RenderedFinalAt.IsZero() {
+		if h.validatedSettledCard(actor.UserID, card, session) {
 			continue
 		}
 		snapshot, err := h.renderSessionCardSnapshot(
@@ -81,12 +87,40 @@ func (h *Handler) reconcileActiveFinalCards(ctx context.Context) {
 			continue
 		}
 		if responseCardCoversFinal(card, session.Ref(), finalAt) {
+			h.rememberValidatedSettledCard(actor.UserID, card, session)
 			continue
 		}
 		_, _ = h.repostFinalResponseCard(
 			ctx, actor, telegramMessage(card), session.Ref(), snapshot.screen,
 		)
 	}
+}
+
+func (h *Handler) validatedSettledCard(
+	userID domain.UserID,
+	card domain.TelegramResponseCard,
+	session domain.Session,
+) bool {
+	h.cardDataMu.RLock()
+	check, ok := h.settledCards[userID]
+	h.cardDataMu.RUnlock()
+	return ok && check == (settledCardCheck{
+		messageID: card.MessageID, session: card.Session,
+		sessionRevision: session.Revision, renderedFinalAt: card.RenderedFinalAt,
+	})
+}
+
+func (h *Handler) rememberValidatedSettledCard(
+	userID domain.UserID,
+	card domain.TelegramResponseCard,
+	session domain.Session,
+) {
+	h.cardDataMu.Lock()
+	h.settledCards[userID] = settledCardCheck{
+		messageID: card.MessageID, session: card.Session,
+		sessionRevision: session.Revision, renderedFinalAt: card.RenderedFinalAt,
+	}
+	h.cardDataMu.Unlock()
 }
 
 func (h *Handler) restoreActivePaneRefreshes(ctx context.Context) {

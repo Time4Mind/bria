@@ -10,7 +10,14 @@ import (
 	"github.com/Time4Mind/bria/internal/providerstop"
 )
 
-var providerStopRetryDelays = []time.Duration{0, 40 * time.Millisecond, 120 * time.Millisecond}
+var providerStopRetryDelays = []time.Duration{
+	0,
+	50 * time.Millisecond,
+	150 * time.Millisecond,
+	400 * time.Millisecond,
+	800 * time.Millisecond,
+	1500 * time.Millisecond,
+}
 
 // RunProviderStopNotifications preempts the periodic live-card cadence. The
 // provider hook is only a wake-up hint: every attempt rereads the canonical
@@ -90,7 +97,14 @@ func (h *Handler) handleProviderStop(
 	}
 	if session.RuntimePhase == domain.RuntimeRunning &&
 		!h.settleFromTranscript(ctx, actor, session, events) {
-		return false, "settlement_pending"
+		// A node heartbeat can publish the same transcript final between the
+		// snapshot above and our command. Treat that stale-write race as success
+		// once the replicated runtime has already reached a settled phase.
+		latest, latestErr := h.service.Session(actor, session.Ref())
+		if latestErr != nil || (latest.RuntimePhase != domain.RuntimeIdle &&
+			latest.RuntimePhase != domain.RuntimeDegraded) {
+			return false, "settlement_pending"
+		}
 	}
 	latest, err := h.service.Session(actor, session.Ref())
 	if err != nil || (latest.RuntimePhase != domain.RuntimeIdle &&

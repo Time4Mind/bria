@@ -112,6 +112,7 @@ type cardRuntimeState struct {
 	cardDataMu      sync.RWMutex
 	cardContexts    map[string]cardContextEntry
 	cardTranscripts map[string]cardTranscriptEntry
+	settledCards    map[domain.UserID]settledCardCheck
 	cardCacheOrder  []string
 	cardCacheHits   uint64
 	cardCacheMisses uint64
@@ -127,5 +128,6 @@ func newCardRuntimeState() cardRuntimeState {
 	return cardRuntimeState{
 		cardContexts:    make(map[string]cardContextEntry),
 		cardTranscripts: make(map[string]cardTranscriptEntry),
+		settledCards:    make(map[domain.UserID]settledCardCheck),
 	}
 }

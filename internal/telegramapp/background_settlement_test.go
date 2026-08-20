@@ -49,11 +49,18 @@ func TestReconciliationRepublishesFinalAfterInterruptedTelegramSettlement(t *tes
 		domain.TelegramResponseCard{
 			ChatID: 7, MessageID: 82, Rich: true, Session: ref,
 			SessionRevision: settled.Revision, SessionEventAt: settled.LastEventAt,
+			// A previous response watermark must not make the new turn look
+			// delivered merely because a stale edit recorded the settled revision.
+			RenderedFinalAt: promptAt.Add(-time.Second),
 		},
 	); err != nil {
 		t.Fatal(err)
 	}
 	controls := &blockingControls{ref: ref, events: []transcript.Event{
+		{
+			Kind: transcript.EventAssistantFinal, Text: "PREVIOUS FINAL",
+			Timestamp: promptAt.Add(-time.Second).Format(time.RFC3339Nano),
+		},
 		{
 			Kind: transcript.EventUserText, Text: "prompt before restart",
 			Timestamp: promptAt.Format(time.RFC3339Nano),
@@ -79,6 +86,12 @@ func TestReconciliationRepublishesFinalAfterInterruptedTelegramSettlement(t *tes
 	card, ok, cardErr := fixture.service.TelegramResponseCard(actor)
 	if cardErr != nil || !ok || !card.RenderedFinalAt.Equal(finalAt) {
 		t.Fatalf("response card checkpoint = %#v / %v / %v", card, ok, cardErr)
+	}
+	controls.mu.RLock()
+	transcriptCalls := controls.transcriptCalls
+	controls.mu.RUnlock()
+	if transcriptCalls > 3 {
+		t.Fatalf("settled card kept polling transcript: calls=%d", transcriptCalls)
 	}
 }
 
