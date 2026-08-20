@@ -37,7 +37,7 @@ func TestStatusRendersQuotaTableAndRefreshBeforeModes(t *testing.T) {
 [← Back -> menu]`)
 	for _, value := range []string{
 		"| Server | Back | Used | Remaining | Updated | Reset |\n|---|---|---|---:|---|---|",
-		"| 👑 Laptop | codex | 5h 12% · w 50% | -4.0% | 2 | 20.08 12:30 |",
+		"| 👑 Laptop | codex | w 50% | -4.0% · 5h 88% | 2 | 20.08 12:30 |",
 		"| 🔴 Game | — | — | — | 9 | — |",
 	} {
 		if !strings.Contains(screen.Text, value) {
@@ -84,6 +84,22 @@ func TestStatusRendersCalculatedFiveHourBudget(t *testing.T) {
 		}}}},
 	})
 	if !strings.Contains(screen.Text, "| Laptop | codex | w 85% | 5h 3.8% |") {
+		t.Fatalf("status text=%q", screen.Text)
+	}
+}
+
+func TestStatusRendersNativeFiveHourAsRemaining(t *testing.T) {
+	now := time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC)
+	remaining := 12.4
+	screen := RenderStatus(StatusInput{
+		Copy: englishCopy, Mode: StatusChoose, Now: now,
+		Items: []StatusItem{{Name: "Laptop", Status: NodeOnline, Quotas: []domain.QuotaSnapshot{{
+			NodeID: "laptop", Backend: "claude", TodayRemaining: &remaining,
+			FiveHour: &domain.QuotaWindow{UsedPercent: 3},
+			Weekly:   &domain.QuotaWindow{UsedPercent: 7, ResetsAt: now.Add(7 * 24 * time.Hour)},
+		}}}},
+	})
+	if !strings.Contains(screen.Text, "| Laptop | claude | w 7% | 12.4% · 5h 97% |") {
 		t.Fatalf("status text=%q", screen.Text)
 	}
 }

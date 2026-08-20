@@ -137,11 +137,11 @@
   during that day, overspend is shown as a negative remainder, and allocation
   is recalculated on the next day. The baseline is replicated with the quota
   snapshot so a process restart does not reset it.
-- When a provider omits a native five-hour quota window, Status shows a
-  calculated `5h` allowance in the Remaining column: the remaining weekly
-  percentage prorated over the next five hours until reset. The Used column
-  contains only native provider usage windows; a native five-hour window always
-  wins and suppresses the calculated allowance.
+- The Used column contains weekly provider usage. The Remaining column contains
+  today's weekly allowance plus `5h`: a provider-reported five-hour window is
+  inverted from used to remaining percentage; when the provider omits that
+  window, the remaining weekly percentage is prorated over the next five hours
+  until reset. This keeps Claude/Kimi and Codex rows in the same format.
 - Telegram is an interaction adapter, not a core dependency. Replacing it must
   require a new adapter and presentation mapping, not changes to domain,
   consensus, membership, or node runtime behavior.

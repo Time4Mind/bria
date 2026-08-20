@@ -167,7 +167,11 @@ func quotaRemaining(copy i18n.Localizer, snapshot domain.QuotaSnapshot, now time
 	if snapshot.TodayRemaining != nil {
 		parts = append(parts, fmt.Sprintf("%.1f%%", *snapshot.TodayRemaining))
 	}
-	if snapshot.FiveHour == nil {
+	if snapshot.FiveHour != nil {
+		parts = append(parts, fmt.Sprintf(
+			"%s %d%%", copy.Text(i18n.QuotaWindowFiveHour), 100-snapshot.FiveHour.UsedPercent,
+		))
+	} else {
 		if budget, ok := calculatedFiveHourBudget(snapshot.Weekly, now); ok {
 			parts = append(parts, fmt.Sprintf(
 				"%s %.1f%%", copy.Text(i18n.QuotaWindowFiveHour), budget,
@@ -213,17 +217,10 @@ func quotaPercent(window *domain.QuotaWindow) string {
 }
 
 func quotaUsage(copy i18n.Localizer, snapshot domain.QuotaSnapshot) string {
-	parts := make([]string, 0, 2)
-	if snapshot.FiveHour != nil {
-		parts = append(parts, copy.Text(i18n.QuotaWindowFiveHour)+" "+quotaPercent(snapshot.FiveHour))
-	}
-	if snapshot.Weekly != nil {
-		parts = append(parts, copy.Text(i18n.QuotaWindowWeek)+" "+quotaPercent(snapshot.Weekly))
-	}
-	if len(parts) == 0 {
+	if snapshot.Weekly == nil {
 		return "—"
 	}
-	return strings.Join(parts, " · ")
+	return copy.Text(i18n.QuotaWindowWeek) + " " + quotaPercent(snapshot.Weekly)
 }
 
 func calculatedFiveHourBudget(weekly *domain.QuotaWindow, now time.Time) (float64, bool) {
