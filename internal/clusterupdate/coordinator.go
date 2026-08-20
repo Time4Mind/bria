@@ -60,15 +60,17 @@ func (c *Coordinator) Start(ctx context.Context) (domain.ClusterUpdate, error) {
 	if err != nil {
 		return domain.ClusterUpdate{}, err
 	}
-	current := true
+	eligible := order[:0]
 	for _, nodeID := range order {
-		if state.Nodes[nodeID].Version != manifest.Version {
-			current = false
-			break
+		if releaseNeedsUpdate(state.Nodes[nodeID].Version, manifest.Version) {
+			eligible = append(eligible, nodeID)
 		}
 	}
-	if current {
-		return domain.ClusterUpdate{}, fmt.Errorf("cluster already runs %s", manifest.Version)
+	order = eligible
+	if len(order) == 0 {
+		return domain.ClusterUpdate{}, fmt.Errorf(
+			"cluster already runs %s or a newer build", manifest.Version,
+		)
 	}
 	if err := c.preflight(ctx, state, order); err != nil {
 		return domain.ClusterUpdate{}, err

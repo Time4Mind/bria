@@ -192,6 +192,11 @@ transfers leadership to an updated healthy follower, and updates the former
 leader last. Progress is one refreshable Telegram card, not one message per
 node.
 
+Nodes already running the target release or a newer semantic release are
+excluded from the rollout. A `git describe` development build after the target
+tag is also newer than that tag, so the update action cannot silently act as a
+rollback to the older tagged binary.
+
 The activation symlink and previous target are retained locally. A detached
 watchdog requires the new daemon to start its authenticated control endpoint
 and Telegram adapter within 90 seconds; otherwise it restores the previous
