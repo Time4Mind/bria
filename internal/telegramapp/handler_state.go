@@ -134,6 +134,18 @@ type cardRuntimeState struct {
 	cardMutationMu  sync.Mutex
 }
 
+type providerStopRetryState struct {
+	mu          sync.Mutex
+	turns       map[string]*providerStopFlight
+	activeByRef map[string]string
+}
+
+func newProviderStopRetryState() providerStopRetryState {
+	return providerStopRetryState{
+		turns: make(map[string]*providerStopFlight), activeByRef: make(map[string]string),
+	}
+}
+
 func newCardRuntimeState() cardRuntimeState {
 	return cardRuntimeState{
 		cardContexts:    make(map[string]cardContextEntry),

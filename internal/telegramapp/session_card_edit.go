@@ -2,6 +2,7 @@ package telegramapp
 
 import (
 	"context"
+	"time"
 
 	"github.com/Time4Mind/bria/internal/application"
 	"github.com/Time4Mind/bria/internal/telegrambot"
@@ -19,7 +20,13 @@ func (h *Handler) editExplicitSessionScreen(
 	screen telegramui.Screen,
 ) (telegrambot.Message, error) {
 	h.cancelPaneRefresh(actor.UserID)
+	queuedAt := time.Now()
 	h.cardEditMu.Lock()
 	defer h.cardEditMu.Unlock()
+	if _, restoreTagged := restoreTimingFromContext(ctx); restoreTagged {
+		logSlowTelegramOperationContext(
+			ctx, "card_edit_queue", origin.MessageID, queuedAt, nil,
+		)
+	}
 	return h.editCardTransportLocked(ctx, origin, screen)
 }

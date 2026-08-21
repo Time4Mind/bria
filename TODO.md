@@ -20,12 +20,16 @@
   runtime generation, provider binding и visible epoch; stale replacement
   удаляется. Runtime generation протянута в provider Stop как optional поле с
   legacy-совместимостью.
-- [ ] P7. Ограничить retry `provider_stop`: один сигнал занял 5,566 с и три
-  попытки, после чего был признан устаревшим (`outcome=ignored`). Нужны общий
-  deadline, дедупликация по turn и явная причина остановки retry.
-- [ ] P8. Разобрать задержку callback восстановления сессии 1,421 с. Само
-  восстановление завершилось успешно; нужен phase timing, чтобы отделить
-  transcript, Raft apply, tmux resume и Telegram edit.
+- [x] P7. `provider_stop` ограничен единым deadline 3 с. Сигналы одного turn
+  объединяются в один bounded flight, новый turn отменяет старый, а retry
+  разрешён только для явного списка временных исходов. Итоговая строка содержит
+  attempts, число дублей и причину handoff в 5-секундный watchdog.
+- [x] P8. Restore получил единый коррелируемый `restore_timing` по
+  `ref+generation`: callback/ACK, Raft restore/select, ожидание heartbeat,
+  archive verify, tmux resume/register, recovery commit и settled card. Медленные
+  render/outbound строки помечаются restore stage; отдельно измеряется ожидание
+  card-edit lock, transcript/pane, очередь и Telegram transport. Failed и
+  superseded generation не маркируются как ready.
 - [ ] P9. Разобрать задержку доставки voice input 8,766 с. Запрос не потерян и
   был доставлен один раз; нужно разнести speech recognition, host FIFO,
   attachment wait и tmux send по отдельным метрикам.

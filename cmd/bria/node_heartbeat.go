@@ -200,31 +200,100 @@ func (r attachingRecoveryRuntime) Resume(
 	ctx context.Context,
 	session domain.Session,
 	operationID string,
-) error {
+) (returnErr error) {
+	startedAt := time.Now()
+	heartbeatWait := restoreHeartbeatWait(session, startedAt)
+	prepareDuration := time.Duration(0)
+	verifyDuration := time.Duration(0)
+	tmuxDuration := time.Duration(0)
+	registerDuration := time.Duration(0)
+	outcome := "prepare_failed"
+	defer func() {
+		logRestoreRuntimeTiming(
+			session.Ref(), session.RuntimeGeneration, outcome, startedAt, heartbeatWait,
+			prepareDuration, verifyDuration, tmuxDuration, registerDuration,
+		)
+	}()
 	binding := runtimehost.RuntimeBinding{
 		NodeID: r.nodeID, SessionID: string(session.ID),
 		Generation: session.RuntimeGeneration, Backend: session.Backend, Workdir: session.Workdir,
 	}
+	phaseStartedAt := time.Now()
 	if err := r.executor.PrepareRecovery(binding); err != nil {
+		prepareDuration = time.Since(phaseStartedAt)
 		return err
 	}
+	prepareDuration = time.Since(phaseStartedAt)
 	if session.ArchiveID != "" && session.ArchiveReason != "" {
 		if r.archives == nil {
+			outcome = "archive_verify_failed"
 			return fmt.Errorf("native archive verifier is unavailable")
 		}
+		phaseStartedAt = time.Now()
 		if err := r.archives.Verify(ctx, session); err != nil {
+			verifyDuration = time.Since(phaseStartedAt)
+			outcome = "archive_verify_failed"
 			return err
 		}
+		verifyDuration = time.Since(phaseStartedAt)
 	}
+	phaseStartedAt = time.Now()
 	if err := r.Runtime.Resume(ctx, session, operationID); err != nil {
+		tmuxDuration = time.Since(phaseStartedAt)
+		outcome = "tmux_resume_failed"
 		return err
 	}
-	return r.executor.Register(runtimehost.RuntimeBinding{
+	tmuxDuration = time.Since(phaseStartedAt)
+	phaseStartedAt = time.Now()
+	returnErr = r.executor.Register(runtimehost.RuntimeBinding{
 		NodeID: r.nodeID, SessionID: string(session.ID),
 		Generation: session.RuntimeGeneration,
 		TmuxTarget: runtimehost.TmuxTarget(r.tmuxSession, r.nodeID, string(session.ID)),
 		Backend:    session.Backend, Workdir: session.Workdir,
 	})
+	registerDuration = time.Since(phaseStartedAt)
+	if returnErr != nil {
+		outcome = "register_failed"
+		return returnErr
+	}
+	outcome = "ok"
+	return nil
+}
+
+func restoreHeartbeatWait(session domain.Session, startedAt time.Time) time.Duration {
+	// Archive restore resets LiveSinceAt when it is accepted, so this is the
+	// queueing delay until the origin heartbeat starts recovery. Boot recovery
+	// retains the original LiveSinceAt and must not be reported as heartbeat
+	// latency for an unrelated, potentially old live session.
+	if session.ArchiveID == "" || session.ArchiveReason == "" ||
+		session.LiveSinceAt.IsZero() || !startedAt.After(session.LiveSinceAt) {
+		return 0
+	}
+	return startedAt.Sub(session.LiveSinceAt)
+}
+
+func logRestoreRuntimeTiming(
+	ref domain.SessionRef,
+	generation uint64,
+	outcome string,
+	startedAt time.Time,
+	heartbeatWait time.Duration,
+	prepare time.Duration,
+	verify time.Duration,
+	tmuxResume time.Duration,
+	register time.Duration,
+) {
+	total := time.Since(startedAt)
+	format := "bria restore_timing: stage=runtime ref=%q generation=%d outcome=%s total_ms=%d heartbeat_wait_ms=%d prepare_ms=%d archive_verify_ms=%d tmux_resume_ms=%d register_ms=%d slow_restore=%t"
+	arguments := []any{
+		ref.Key(), generation, outcome, total.Milliseconds(), heartbeatWait.Milliseconds(),
+		prepare.Milliseconds(), verify.Milliseconds(), tmuxResume.Milliseconds(),
+		register.Milliseconds(), total > time.Second,
+	}
+	processlog.Detailf(format, arguments...)
+	if total > time.Second {
+		processlog.Servicef(format, arguments...)
+	}
 }
 
 func runRecoveryPlans(

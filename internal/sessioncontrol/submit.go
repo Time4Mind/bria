@@ -207,24 +207,76 @@ func (c *Controller) Restore(
 	operationID string,
 	ref domain.SessionRef,
 ) (Accepted, error) {
+	startedAt := time.Now()
+	lookupDuration := time.Duration(0)
+	validateDuration := time.Duration(0)
+	restoreDuration := time.Duration(0)
+	selectDuration := time.Duration(0)
+	generation := uint64(0)
+	outcome := "lookup_failed"
+	defer func() {
+		logRestoreControlTiming(
+			ref, generation, outcome, startedAt, lookupDuration, validateDuration,
+			restoreDuration, selectDuration,
+		)
+	}()
+	phaseStartedAt := time.Now()
 	session, err := c.service.Session(actor, ref)
+	lookupDuration = time.Since(phaseStartedAt)
 	if err != nil {
 		return Accepted{}, err
 	}
+	phaseStartedAt = time.Now()
 	if err := c.service.RequireSessionAction(actor, ref, domain.ActionRestore); err != nil {
+		validateDuration = time.Since(phaseStartedAt)
+		outcome = "validation_failed"
 		return Accepted{}, err
 	}
+	validateDuration = time.Since(phaseStartedAt)
+	generation = session.RuntimeGeneration + 1
 	restoreCtx := application.WithOperationScope(ctx, operationID+"-restore")
+	phaseStartedAt = time.Now()
 	if err := c.service.RestoreSession(restoreCtx, actor, session); err != nil {
+		restoreDuration = time.Since(phaseStartedAt)
+		outcome = "restore_apply_failed"
 		return Accepted{}, err
 	}
+	restoreDuration = time.Since(phaseStartedAt)
 	selectCtx := application.WithOperationScope(ctx, operationID+"-select")
+	phaseStartedAt = time.Now()
 	if err := c.service.SelectSession(selectCtx, actor, ref); err != nil {
+		selectDuration = time.Since(phaseStartedAt)
+		outcome = "select_apply_failed"
 		return Accepted{}, err
 	}
+	selectDuration = time.Since(phaseStartedAt)
+	outcome = "ok"
 	return Accepted{Session: ref, Receipt: runtimehost.Receipt{
 		OperationID: operationID, Accepted: true, Detail: "restore queued on origin node",
 	}}, nil
+}
+
+func logRestoreControlTiming(
+	ref domain.SessionRef,
+	generation uint64,
+	outcome string,
+	startedAt time.Time,
+	lookup time.Duration,
+	validate time.Duration,
+	restoreApply time.Duration,
+	selectApply time.Duration,
+) {
+	total := time.Since(startedAt)
+	format := "bria restore_timing: stage=control ref=%q generation=%d outcome=%s total_ms=%d lookup_ms=%d validate_ms=%d raft_restore_ms=%d raft_select_ms=%d slow_restore=%t"
+	arguments := []any{
+		ref.Key(), generation, outcome, total.Milliseconds(), lookup.Milliseconds(),
+		validate.Milliseconds(), restoreApply.Milliseconds(), selectApply.Milliseconds(),
+		total > time.Second,
+	}
+	processlog.Detailf(format, arguments...)
+	if total > time.Second {
+		processlog.Servicef(format, arguments...)
+	}
 }
 
 func (c *Controller) submit(

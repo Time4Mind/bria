@@ -37,43 +37,69 @@ func (h *Handler) RunProviderStopNotifications(
 			if !ok {
 				return
 			}
-			go h.handleProviderStopWithRetry(ctx, signal)
+			h.scheduleProviderStop(ctx, signal)
 		}
 	}
 }
 
-func (h *Handler) handleProviderStopWithRetry(ctx context.Context, signal providerstop.Signal) {
+func (h *Handler) scheduleProviderStop(ctx context.Context, signal providerstop.Signal) {
 	startedAt := time.Now()
-	lastOutcome := "not_attempted"
-	for attempt, delay := range providerStopRetryDelays {
-		if delay > 0 {
-			timer := time.NewTimer(delay)
-			select {
-			case <-ctx.Done():
-				timer.Stop()
-				return
-			case <-timer.C:
-			}
-		}
-		if !h.canRefresh() {
-			return
-		}
-		done, outcome := h.handleProviderStop(ctx, signal)
-		lastOutcome = outcome
-		if done {
-			processlog.Detailf(
-				"bria telegram: provider_stop ref=%q outcome=%s attempts=%d duration_ms=%d",
-				signal.NodeID+"/"+signal.SessionID, outcome, attempt+1,
-				time.Since(startedAt).Milliseconds(),
-			)
-			return
-		}
+	_, session, ok := h.providerStopSession(signal)
+	if !ok {
+		processlog.Detailf(
+			"bria telegram: provider_stop ref=%q generation=%d outcome=ignored reason=stale_or_replaced attempts=0 duration_ms=%d",
+			signal.NodeID+"/"+signal.SessionID, signal.RuntimeGeneration,
+			time.Since(startedAt).Milliseconds(),
+		)
+		return
 	}
-	processlog.Servicef(
-		"bria telegram: provider_stop ref=%q outcome=retry_exhausted last=%s attempts=%d duration_ms=%d",
-		signal.NodeID+"/"+signal.SessionID, lastOutcome, len(providerStopRetryDelays),
-		time.Since(startedAt).Milliseconds(),
+	identity := providerStopTurnIdentityFor(session)
+	flightCtx, cancel := context.WithCancel(ctx)
+	flight, started := h.startProviderStopTurn(identity, startedAt, cancel)
+	if !started {
+		cancel()
+		return
+	}
+	go h.handleProviderStopWithRetry(flightCtx, signal, identity, flight)
+}
+
+func (h *Handler) handleProviderStopWithRetry(
+	ctx context.Context,
+	signal providerstop.Signal,
+	identity providerStopTurnIdentity,
+	flight *providerStopFlight,
+) {
+	startedAt := flight.startedAt
+	defer flight.cancel()
+	result := runProviderStopRetry(
+		ctx, signal, providerStopRetryDeadline, providerStopRetryDelays,
+		h.canRefresh, flight.wake, flight.superseded,
+		func(attemptCtx context.Context, attemptSignal providerstop.Signal) (bool, string) {
+			_, current, ok := h.providerStopSession(attemptSignal)
+			if !ok {
+				return true, "ignored"
+			}
+			if providerStopTurnIdentityFor(current).key != identity.key {
+				return true, "superseded"
+			}
+			return h.handleProviderStop(attemptCtx, attemptSignal)
+		},
 	)
+	duplicates := h.finishProviderStopTurn(identity.key)
+	if !result.log {
+		return
+	}
+	format := "bria telegram: provider_stop ref=%q generation=%d operation=%q outcome=%s reason=%s last=%s attempts=%d duplicates=%d duration_ms=%d"
+	arguments := []any{
+		signal.NodeID + "/" + signal.SessionID, identity.generation, identity.operation,
+		result.outcome, result.reason, result.last, result.attempts, duplicates,
+		time.Since(startedAt).Milliseconds(),
+	}
+	if result.outcome == "watchdog_handoff" {
+		processlog.Servicef(format, arguments...)
+		return
+	}
+	processlog.Detailf(format, arguments...)
 }
 
 func (h *Handler) handleProviderStop(

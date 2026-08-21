@@ -2,6 +2,7 @@ package main
 
 import (
 	"testing"
+	"time"
 
 	"github.com/Time4Mind/bria/internal/domain"
 )
@@ -68,5 +69,23 @@ func TestTranscriptRuntimeHeartbeatWaitsForMatchingLeaderVersion(t *testing.T) {
 	}
 	if transcriptRuntimeHeartbeatEnabled(state, "leader", "old") {
 		t.Fatal("mismatched leader version enabled a new heartbeat field")
+	}
+}
+
+func TestRestoreHeartbeatWaitOnlyMeasuresArchiveRestore(t *testing.T) {
+	startedAt := time.Date(2026, 8, 21, 12, 0, 5, 0, time.UTC)
+	archiveRestore := domain.Session{
+		ArchiveID: "archive", ArchiveReason: "closed",
+		LiveSinceAt: startedAt.Add(-5 * time.Second),
+	}
+	if got := restoreHeartbeatWait(archiveRestore, startedAt); got != 5*time.Second {
+		t.Fatalf("archive restore heartbeat wait=%s", got)
+	}
+	bootRecovery := archiveRestore
+	bootRecovery.ArchiveID = ""
+	bootRecovery.ArchiveReason = ""
+	bootRecovery.LiveSinceAt = startedAt.Add(-24 * time.Hour)
+	if got := restoreHeartbeatWait(bootRecovery, startedAt); got != 0 {
+		t.Fatalf("boot recovery reported stale live age as heartbeat wait=%s", got)
 	}
 }

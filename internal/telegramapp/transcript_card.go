@@ -36,16 +36,22 @@ type sessionCardTiming struct {
 	events           int
 }
 
-func (timing sessionCardTiming) log(ref domain.SessionRef, page int) {
+func (timing sessionCardTiming) log(ctx context.Context, ref domain.SessionRef, page int) {
 	total := time.Since(timing.startedAt)
 	if !shouldLogSessionCardTiming(timing, total) {
 		return
+	}
+	restoreTag, restoreTagged := restoreTimingFromContext(ctx)
+	restoreFields := ""
+	if restoreTagged {
+		restoreFields = " restore_stage=" + restoreTag.stage +
+			" restore_generation=" + strconv.FormatUint(restoreTag.generation, 10)
 	}
 	processlog.Detailf(
 		"bria telegram: card_timing ref=%q page=%d total_ms=%d session_ms=%d "+
 			"transcript_ms=%d cache_ms=%d pending_ms=%d projection_ms=%d "+
 			"preferences_ms=%d pane_ms=%d pane_cache_ms=%d pane_capture_ms=%d pane_render_ms=%d "+
-			"events=%d transcript_source=%s pane_outcome=%s outcome=%s",
+			"events=%d transcript_source=%s pane_outcome=%s outcome=%s%s",
 		ref.Key(), page, total.Milliseconds(), timing.session.Milliseconds(),
 		timing.transcript.Milliseconds(), timing.cache.Milliseconds(),
 		timing.pending.Milliseconds(), timing.projection.Milliseconds(),
@@ -53,6 +59,7 @@ func (timing sessionCardTiming) log(ref domain.SessionRef, page int) {
 		timing.pane.cache.Milliseconds(), timing.pane.capture.Milliseconds(),
 		timing.pane.render.Milliseconds(),
 		timing.events, timing.transcriptSource, timing.pane.outcome, timing.outcome,
+		restoreFields,
 	)
 }
 

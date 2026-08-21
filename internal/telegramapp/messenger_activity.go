@@ -2,6 +2,7 @@ package telegramapp
 
 import (
 	"context"
+	"strconv"
 	"sync"
 	"time"
 
@@ -94,13 +95,16 @@ func (m *activityMessenger) EditScreen(
 	queuedAt := time.Now()
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	logSlowTelegramOperation("edit_screen_queue", message.MessageID, queuedAt, nil)
+	logSlowTelegramOperationContext(
+		ctx, "edit_screen_queue", message.MessageID, queuedAt, nil,
+	)
 	if err := m.localFloodWaitLocked("editScreen", message.ChatID); err != nil {
 		return telegrambot.Message{}, err
 	}
 	startedAt := time.Now()
 	edited, err := m.inner.EditScreen(ctx, message, screen)
-	logSlowTelegramOperation(
+	logSlowTelegramOperationContext(
+		ctx,
 		screenOperation("edit_screen", screen), message.MessageID, startedAt, err,
 	)
 	m.rememberFloodWaitLocked(message.ChatID, err)
@@ -164,6 +168,18 @@ func logSlowTelegramOperation(
 	startedAt time.Time,
 	err error,
 ) {
+	logSlowTelegramOperationContext(
+		context.Background(), operation, messageID, startedAt, err,
+	)
+}
+
+func logSlowTelegramOperationContext(
+	ctx context.Context,
+	operation string,
+	messageID int64,
+	startedAt time.Time,
+	err error,
+) {
 	duration := time.Since(startedAt)
 	if duration < tracedTelegramOperation {
 		return
@@ -172,16 +188,21 @@ func logSlowTelegramOperation(
 	if err != nil {
 		outcome = "failed"
 	}
+	restoreFields := ""
+	if tag, ok := restoreTimingFromContext(ctx); ok {
+		restoreFields = " restore_ref=" + strconv.Quote(tag.ref.Key()) + " restore_generation=" +
+			strconv.FormatUint(tag.generation, 10) + " restore_stage=" + tag.stage
+	}
 	processlog.Detailf(
-		"bria telegram: outbound_timing operation=%s message_id=%d duration_ms=%d outcome=%s",
-		operation, messageID, duration.Milliseconds(), outcome,
+		"bria telegram: outbound_timing operation=%s message_id=%d duration_ms=%d outcome=%s%s",
+		operation, messageID, duration.Milliseconds(), outcome, restoreFields,
 	)
 	if duration < slowTelegramOperation {
 		return
 	}
 	processlog.Servicef(
-		"bria telegram: slow_outbound operation=%s message_id=%d duration_ms=%d outcome=%s",
-		operation, messageID, duration.Milliseconds(), outcome,
+		"bria telegram: slow_outbound operation=%s message_id=%d duration_ms=%d outcome=%s%s",
+		operation, messageID, duration.Milliseconds(), outcome, restoreFields,
 	)
 }
 

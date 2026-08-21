@@ -189,7 +189,7 @@ func (h *Handler) renderSessionCardSnapshotWithPane(
 		startedAt: time.Now(), transcriptSource: "none", outcome: "ok",
 		pane: paneAttachTiming{outcome: "skipped"},
 	}
-	defer func() { timing.log(ref, page) }()
+	defer func() { timing.log(ctx, ref, page) }()
 	phaseStarted := time.Now()
 	session, sessionErr := h.service.Session(actor, ref)
 	timing.session = time.Since(phaseStarted)

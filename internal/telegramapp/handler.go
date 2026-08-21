@@ -40,6 +40,7 @@ type Handler struct {
 	paneRefreshState
 	voicePendingState
 	cardRuntimeState
+	providerStopRetryState
 	transcriptTriggers  transcriptTriggerTracker
 	fileMu              sync.Mutex
 	deliveredFiles      map[string]bool
@@ -90,31 +91,32 @@ func NewHandler(
 	activity := newActivityMessenger(messenger)
 	return &Handler{
 		service: service, projector: projector, tokens: tokens, messenger: activity,
-		activity:           activity,
-		paneRefreshState:   newPaneRefreshState(),
-		voicePendingState:  newVoicePendingState(),
-		cardRuntimeState:   newCardRuntimeState(),
-		transcriptTriggers: newTranscriptTriggerTracker(time.Now()),
-		deliveredFiles:     make(map[string]bool),
-		promptHashes:       make(map[domain.UserID]map[string]string),
-		createFlows:        make(map[domain.UserID]*createFlow),
-		flowTTL:            10 * time.Minute,
-		contractFlows:      make(map[domain.UserID]time.Time),
-		renameFlows:        make(map[domain.UserID]nodeRenameFlow),
-		providerAliasFlows: make(map[domain.UserID]providerAliasFlow),
-		providerAuthFlows:  make(map[domain.UserID]providerAuthFlow),
-		providerAuthEpochs: make(map[domain.UserID]uint64),
-		nodeSettingsBack:   make(map[domain.UserID]settingsReturn),
-		statusBack:         make(map[domain.UserID]settingsReturn),
-		speechTargets:      make(map[domain.UserID]domain.NodeID),
-		knownSpeechNodes:   make(map[domain.NodeID]bool),
-		speechWatchStarted: time.Now(),
-		sessionPages:       make(map[sessionPageKey]cardPageState),
-		visibleCardViews:   make(map[domain.UserID]visibleCardView),
-		cardTransports:     make(map[string]telegrambot.Message),
-		clusterEventLogs:   make(map[int64]clusterEventLog),
-		clusterUpdateWatch: make(map[domain.UserID]uint64),
-		clusterUpdateJobs:  make(map[domain.UserID]string),
+		activity:               activity,
+		paneRefreshState:       newPaneRefreshState(),
+		voicePendingState:      newVoicePendingState(),
+		cardRuntimeState:       newCardRuntimeState(),
+		providerStopRetryState: newProviderStopRetryState(),
+		transcriptTriggers:     newTranscriptTriggerTracker(time.Now()),
+		deliveredFiles:         make(map[string]bool),
+		promptHashes:           make(map[domain.UserID]map[string]string),
+		createFlows:            make(map[domain.UserID]*createFlow),
+		flowTTL:                10 * time.Minute,
+		contractFlows:          make(map[domain.UserID]time.Time),
+		renameFlows:            make(map[domain.UserID]nodeRenameFlow),
+		providerAliasFlows:     make(map[domain.UserID]providerAliasFlow),
+		providerAuthFlows:      make(map[domain.UserID]providerAuthFlow),
+		providerAuthEpochs:     make(map[domain.UserID]uint64),
+		nodeSettingsBack:       make(map[domain.UserID]settingsReturn),
+		statusBack:             make(map[domain.UserID]settingsReturn),
+		speechTargets:          make(map[domain.UserID]domain.NodeID),
+		knownSpeechNodes:       make(map[domain.NodeID]bool),
+		speechWatchStarted:     time.Now(),
+		sessionPages:           make(map[sessionPageKey]cardPageState),
+		visibleCardViews:       make(map[domain.UserID]visibleCardView),
+		cardTransports:         make(map[string]telegrambot.Message),
+		clusterEventLogs:       make(map[int64]clusterEventLog),
+		clusterUpdateWatch:     make(map[domain.UserID]uint64),
+		clusterUpdateJobs:      make(map[domain.UserID]string),
 	}, nil
 }
 

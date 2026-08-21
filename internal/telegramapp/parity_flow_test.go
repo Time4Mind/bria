@@ -4,8 +4,10 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Time4Mind/bria/internal/application"
+	"github.com/Time4Mind/bria/internal/clusterstate"
 	"github.com/Time4Mind/bria/internal/domain"
 	"github.com/Time4Mind/bria/internal/sessioncontrol"
 	"github.com/Time4Mind/bria/internal/telegramapp"
@@ -94,6 +96,67 @@ func TestCarrierFlowArchiveRestoreReturnsToLiveCard(t *testing.T) {
 	session := fixture.machine.State().Sessions[ref.Key()]
 	if !session.IsLive() || !session.ResumePending || session.RuntimePhase != domain.RuntimeDegraded {
 		t.Fatalf("restored state=%#v", session)
+	}
+	_, initialScreens, _ := fixture.messenger.screensSnapshot()
+	wantEdits := len(initialScreens) + 1
+	applyBackgroundCommand(
+		t, fixture, "complete-carrier-restore", clusterstate.CommandCompleteBootRecovery,
+		time.Now().UTC(), clusterstate.BootRecovery{Session: ref},
+	)
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		_, edited, _ := fixture.messenger.screensSnapshot()
+		if len(edited) >= wantEdits {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	_, edited, _ := fixture.messenger.screensSnapshot()
+	if len(edited) != wantEdits {
+		t.Fatalf("settled restore edits=%d", len(edited))
+	}
+	settled := fixture.machine.State().Sessions[ref.Key()]
+	if !settled.IsLive() || settled.ResumePending || settled.RuntimePhase != domain.RuntimeIdle {
+		t.Fatalf("settled restore state=%#v", settled)
+	}
+}
+
+func TestCarrierRestoreWorkerDoesNotRenderSupersedingGeneration(t *testing.T) {
+	fixture := newFixture(t)
+	actor := application.Principal{UserID: 7}
+	ref := addReadyArchive(t, fixture, actor)
+	controls := restoringControls{
+		blockingControls: &blockingControls{ref: ref}, service: fixture.service,
+	}
+	handler, err := telegramapp.NewHandlerWithControls(
+		fixture.service, fixture.projector, fixture.codec, fixture.messenger, controls,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	origin := telegrambot.Message{ChatID: 7, MessageID: 505}
+	invokeCarrierAction(t, handler, 540, origin, telegramui.ActionArchive, "")
+	invokeCarrierData(t, handler, 541, origin,
+		callbackForAction(t, lastEdited(t, fixture), telegramui.ActionSelectArchive))
+	invokeCarrierData(t, handler, 542, origin,
+		callbackForAction(t, lastEdited(t, fixture), telegramui.ActionRestore))
+	first := fixture.machine.State().Sessions[ref.Key()]
+	if err := fixture.service.ClearSession(
+		application.WithOperationScope(context.Background(), "superseding-clear"), actor, first,
+	); err != nil {
+		t.Fatal(err)
+	}
+	second := fixture.machine.State().Sessions[ref.Key()]
+	if second.RuntimeGeneration != first.RuntimeGeneration+1 || second.ResumePending {
+		t.Fatalf("superseding generation state=%#v first=%#v", second, first)
+	}
+	_, initialScreens, _ := fixture.messenger.screensSnapshot()
+	initialEdits := len(initialScreens)
+	time.Sleep(200 * time.Millisecond)
+	_, afterScreens, _ := fixture.messenger.screensSnapshot()
+	if got := len(afterScreens); got != initialEdits {
+		t.Fatalf("stale restore worker edited superseding generation: before=%d after=%d",
+			initialEdits, got)
 	}
 }
 

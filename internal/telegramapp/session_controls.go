@@ -49,12 +49,33 @@ func (h *Handler) handleSessionControlCallback(
 	update telegrambot.IncomingUpdate,
 	callback telegramui.Callback,
 ) error {
+	var restoreTiming *restoreCallbackTiming
+	if callback.Action == telegramui.ActionRestore {
+		restoreTiming = newRestoreCallbackTiming()
+		defer restoreTiming.log()
+	}
 	if h.controls == nil {
+		if restoreTiming != nil {
+			restoreTiming.outcome = "controls_unavailable"
+		}
 		return h.answerAndDrop(ctx, update.CallbackID, h.copy(actor).Text(i18n.ToastUnavailable))
 	}
+	phaseStartedAt := time.Now()
 	ref, err := h.resolveSession(actor, callback.Action, callback.Token)
+	if restoreTiming != nil {
+		restoreTiming.resolve = time.Since(phaseStartedAt)
+		restoreTiming.ref = ref
+	}
 	if err != nil {
+		if restoreTiming != nil {
+			restoreTiming.outcome = "resolve_failed"
+		}
 		return h.controlError(ctx, actor, update.CallbackID, err)
+	}
+	if restoreTiming != nil {
+		if current, sessionErr := h.service.Session(actor, ref); sessionErr == nil {
+			restoreTiming.generation = current.RuntimeGeneration + 1
+		}
 	}
 	if callback.Action == telegramui.ActionClose || callback.Action == telegramui.ActionClear {
 		screen, renderErr := h.confirmation(actor, ref, callback.Action)
@@ -91,8 +112,16 @@ func (h *Handler) handleSessionControlCallback(
 
 	// Stop the Telegram spinner before network or tmux work. The node executor
 	// ACKs after durable enqueue and never waits for the actual terminal action.
+	phaseStartedAt = time.Now()
 	if err := h.messenger.AnswerCallbackQuery(ctx, update.CallbackID, ""); err != nil {
+		if restoreTiming != nil {
+			restoreTiming.ack = time.Since(phaseStartedAt)
+			restoreTiming.outcome = "callback_ack_failed"
+		}
 		return err
+	}
+	if restoreTiming != nil {
+		restoreTiming.ack = time.Since(phaseStartedAt)
 	}
 	operationID := fmt.Sprintf("tg-%d-%s", update.UpdateID, callback.Action)
 	switch callback.Action {
@@ -103,11 +132,16 @@ func (h *Handler) handleSessionControlCallback(
 	case telegramui.ActionConfirmClose:
 		_, err = h.controls.Close(ctx, actor, operationID, ref)
 	case telegramui.ActionRestore:
+		phaseStartedAt = time.Now()
 		_, err = h.controls.Restore(ctx, actor, operationID, ref)
+		restoreTiming.control = time.Since(phaseStartedAt)
 	case telegramui.ActionTerminal:
 		_, err = h.controls.OpenTerminal(ctx, actor, operationID, ref)
 	}
 	if err != nil {
+		if restoreTiming != nil {
+			restoreTiming.outcome = "control_failed"
+		}
 		if (callback.Action == telegramui.ActionConfirmClose ||
 			callback.Action == telegramui.ActionConfirmClear) &&
 			errors.Is(err, domain.ErrInvalidState) {
@@ -119,6 +153,7 @@ func (h *Handler) handleSessionControlCallback(
 		return h.controlError(ctx, actor, "", err)
 	}
 	var screen telegramui.Screen
+	cardCtx := ctx
 	if callback.Action == telegramui.ActionConfirmClose {
 		// CloseSession may select the most recently used live session on the same
 		// node. If that node is now empty, preserve the configured session scope:
@@ -142,14 +177,35 @@ func (h *Handler) handleSessionControlCallback(
 			err = activeErr
 		}
 	} else {
-		screen, err = h.renderSessionCard(ctx, actor, ref, 0)
+		if restoreTiming != nil {
+			phaseStartedAt = time.Now()
+			cardCtx = withRestoreTiming(ctx, ref, restoreTiming.generation, "initial")
+		}
+		screen, err = h.renderSessionCard(cardCtx, actor, ref, 0)
+		if restoreTiming != nil {
+			restoreTiming.render = time.Since(phaseStartedAt)
+		}
 	}
 	if err != nil {
+		if restoreTiming != nil {
+			restoreTiming.outcome = "initial_render_failed"
+		}
 		return err
 	}
 	var edited telegrambot.Message
-	if edited, err = h.editExplicitSessionScreen(ctx, actor, update.CallbackOrigin, screen); err != nil {
+	if restoreTiming != nil {
+		phaseStartedAt = time.Now()
+	}
+	if edited, err = h.editExplicitSessionScreen(cardCtx, actor, update.CallbackOrigin, screen); err != nil {
+		if restoreTiming != nil {
+			restoreTiming.edit = time.Since(phaseStartedAt)
+			restoreTiming.outcome = "initial_edit_failed"
+		}
 		return err
+	}
+	if restoreTiming != nil {
+		restoreTiming.edit = time.Since(phaseStartedAt)
+		restoreTiming.outcome = "initial_ready"
 	}
 	if callback.Action == telegramui.ActionTerminal {
 		h.schedulePaneRefresh(ctx, actor, ref, edited)
@@ -158,7 +214,10 @@ func (h *Handler) handleSessionControlCallback(
 		go h.refreshSettledCard(ctx, actor, ref, operationID, update.CallbackOrigin)
 	}
 	if callback.Action == telegramui.ActionRestore {
-		go h.refreshRestoredCard(ctx, actor, ref, update.CallbackOrigin)
+		go h.refreshRestoredCard(
+			ctx, actor, ref, update.CallbackOrigin,
+			restoreTiming.startedAt, time.Now(), restoreTiming.generation,
+		)
 	}
 	return nil
 }
@@ -168,7 +227,15 @@ func (h *Handler) refreshRestoredCard(
 	actor application.Principal,
 	ref domain.SessionRef,
 	origin telegrambot.Message,
+	startedAt time.Time,
+	waitStartedAt time.Time,
+	generation uint64,
 ) {
+	timing := &restoreReadyTiming{
+		startedAt: startedAt, waitStartedAt: waitStartedAt,
+		ref: ref, generation: generation, outcome: "waiting",
+	}
+	defer timing.log()
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 	timer := time.NewTimer(35 * time.Second)
@@ -176,24 +243,48 @@ func (h *Handler) refreshRestoredCard(
 	for {
 		select {
 		case <-ctx.Done():
+			timing.outcome = "cancelled"
 			return
 		case <-timer.C:
+			timing.outcome = "timeout"
 			return
 		case <-ticker.C:
 			if !h.canRefresh() {
+				timing.outcome = "leadership_lost"
 				return
 			}
 			session, err := h.service.Session(actor, ref)
-			if err != nil || session.ResumePending {
+			if err != nil {
 				continue
 			}
-			screen, err := h.renderSessionCard(ctx, actor, ref, 0)
+			timing.observedGeneration = session.RuntimeGeneration
+			settled, settledOutcome := restoreSettlementOutcome(session, generation)
+			if !settled {
+				continue
+			}
+			if settledOutcome == "superseded" {
+				timing.outcome = settledOutcome
+				return
+			}
+			timing.wait = time.Since(waitStartedAt)
+			settledCtx := withRestoreTiming(ctx, ref, session.RuntimeGeneration, "settled")
+			phaseStartedAt := time.Now()
+			screen, err := h.renderSessionCard(settledCtx, actor, ref, 0)
+			timing.render = time.Since(phaseStartedAt)
 			if err == nil {
+				phaseStartedAt = time.Now()
 				if edited, editErr := h.editExplicitSessionScreen(
-					ctx, actor, origin, screen,
+					settledCtx, actor, origin, screen,
 				); editErr == nil {
+					timing.edit = time.Since(phaseStartedAt)
+					timing.outcome = settledOutcome
 					h.schedulePaneRefresh(ctx, actor, ref, edited)
+				} else {
+					timing.edit = time.Since(phaseStartedAt)
+					timing.outcome = "settled_edit_failed"
 				}
+			} else {
+				timing.outcome = "settled_render_failed"
 			}
 			return
 		}

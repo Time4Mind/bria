@@ -181,7 +181,17 @@ func TestProviderStopRecoversMissingCardForActiveSessionOnce(t *testing.T) {
 	if len(sent) != 1 || !strings.Contains(sent[0].Text, "RECOVERED WITHOUT REGISTRY") {
 		t.Fatalf("recovered screens=%#v", sent)
 	}
-	card, ok, cardErr := fixture.service.TelegramResponseCard(actor)
+	var card domain.TelegramResponseCard
+	var ok bool
+	var cardErr error
+	cardDeadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(cardDeadline) {
+		card, ok, cardErr = fixture.service.TelegramResponseCard(actor)
+		if cardErr != nil || ok {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 	if cardErr != nil || !ok || card.Session != ref || !card.RenderedFinalAt.Equal(finalAt) {
 		t.Fatalf("recovered card=%#v present=%v err=%v", card, ok, cardErr)
 	}

@@ -12,6 +12,7 @@ import (
 
 	"github.com/Time4Mind/bria/internal/clusterstate"
 	"github.com/Time4Mind/bria/internal/domain"
+	"github.com/Time4Mind/bria/internal/processlog"
 )
 
 type StateReader interface {
@@ -78,16 +79,63 @@ func (e *Executor) recoverOne(ctx context.Context, ref domain.SessionRef) error 
 	if !ok || !session.IsLive() || !session.ResumePending {
 		return domain.ErrNotFound
 	}
+	startedAt := time.Now()
+	runtimeDuration := time.Duration(0)
+	commitDuration := time.Duration(0)
+	outcome := "runtime_failed"
+	defer func() {
+		logRestoreRecoveryTiming(
+			ref, session.RuntimeGeneration, outcome, startedAt,
+			runtimeDuration, commitDuration,
+		)
+	}()
 	node, ok := state.Nodes[e.nodeID]
 	if !ok || node.BootID == "" {
+		outcome = "identity_failed"
 		return fmt.Errorf("current node boot id is unavailable")
 	}
 	runtimeOperationID := stableRecoveryOperationID(node.BootID, ref)
+	phaseStartedAt := time.Now()
 	if err := e.runtime.Resume(ctx, session, runtimeOperationID); err != nil {
+		runtimeDuration = time.Since(phaseStartedAt)
+		phaseStartedAt = time.Now()
 		markErr := e.applyTransition(ctx, clusterstate.CommandFailBootRecovery, ref)
+		commitDuration = time.Since(phaseStartedAt)
+		if markErr != nil {
+			outcome = "runtime_failure_commit_failed"
+		}
 		return errors.Join(fmt.Errorf("runtime resume: %w", err), markErr)
 	}
-	return e.applyTransition(ctx, clusterstate.CommandCompleteBootRecovery, ref)
+	runtimeDuration = time.Since(phaseStartedAt)
+	phaseStartedAt = time.Now()
+	err := e.applyTransition(ctx, clusterstate.CommandCompleteBootRecovery, ref)
+	commitDuration = time.Since(phaseStartedAt)
+	if err != nil {
+		outcome = "raft_complete_failed"
+		return err
+	}
+	outcome = "ok"
+	return nil
+}
+
+func logRestoreRecoveryTiming(
+	ref domain.SessionRef,
+	generation uint64,
+	outcome string,
+	startedAt time.Time,
+	runtime time.Duration,
+	commit time.Duration,
+) {
+	total := time.Since(startedAt)
+	format := "bria restore_timing: stage=recovery ref=%q generation=%d outcome=%s total_ms=%d runtime_ms=%d raft_complete_ms=%d slow_restore=%t"
+	arguments := []any{
+		ref.Key(), generation, outcome, total.Milliseconds(), runtime.Milliseconds(),
+		commit.Milliseconds(), total > time.Second,
+	}
+	processlog.Detailf(format, arguments...)
+	if total > time.Second {
+		processlog.Servicef(format, arguments...)
+	}
 }
 
 func stableRecoveryOperationID(bootID string, ref domain.SessionRef) string {
