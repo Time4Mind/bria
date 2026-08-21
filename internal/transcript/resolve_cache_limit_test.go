@@ -3,6 +3,7 @@ package transcript
 import (
 	"fmt"
 	"testing"
+	"time"
 )
 
 func TestResolveCacheEvictsLeastRecentlyUsedEntries(t *testing.T) {
@@ -34,5 +35,22 @@ func TestResolveCacheEvictsLeastRecentlyUsedEntries(t *testing.T) {
 	}
 	if _, ok := reader.resolveCache[firstInsertedAfterOldest]; ok {
 		t.Fatal("least-recently-used entry was not evicted")
+	}
+}
+
+func TestResolveCacheMissRemovesExpiredNegativeEntry(t *testing.T) {
+	reader := &Reader{resolveCache: make(map[resolveCacheKey]resolveCacheEntry)}
+	missing := resolveCacheKey{backend: BackendCodex, sessionID: "missing", workdir: "/work"}
+	if _, _, ok := reader.cachedResolve(missing); ok {
+		t.Fatal("empty cache unexpectedly returned a hit")
+	}
+
+	reader.resolveCache[missing] = resolveCacheEntry{expiresAt: time.Now().Add(-time.Second)}
+	reader.resolveOrder = []resolveCacheKey{missing}
+	if _, negative, ok := reader.cachedResolve(missing); ok || negative {
+		t.Fatalf("expired negative entry returned path=%q negative=%v ok=%v", "", negative, ok)
+	}
+	if len(reader.resolveCache) != 0 || len(reader.resolveOrder) != 0 {
+		t.Fatalf("expired entry was not removed: cache=%d order=%d", len(reader.resolveCache), len(reader.resolveOrder))
 	}
 }

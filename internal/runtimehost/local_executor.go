@@ -196,11 +196,14 @@ func (e *LocalExecutor) Submit(ctx context.Context, request Request) (Receipt, e
 	if err := request.validate(); err != nil {
 		return Receipt{}, err
 	}
+	fingerprint := requestFingerprint(request)
+	if receipt, existing, err := e.existingOperationReceipt(request.OperationID, fingerprint); err != nil || existing {
+		return receipt, err
+	}
 	session, err := e.resolveSession(request)
 	if err != nil {
 		return Receipt{}, err
 	}
-	fingerprint := requestFingerprint(request)
 
 	e.submitMu.Lock()
 	defer e.submitMu.Unlock()

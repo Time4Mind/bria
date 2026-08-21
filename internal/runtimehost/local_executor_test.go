@@ -17,12 +17,14 @@ type driverCall struct {
 }
 
 type fakeRuntimeDriver struct {
-	mu         sync.Mutex
-	calls      []driverCall
-	firstInput chan struct{}
-	release    chan struct{}
-	pane       []byte
-	err        error
+	mu           sync.Mutex
+	calls        []driverCall
+	firstInput   chan struct{}
+	release      chan struct{}
+	closeStarted chan struct{}
+	releaseClose chan struct{}
+	pane         []byte
+	err          error
 }
 
 func (d *fakeRuntimeDriver) SendLiteral(
@@ -49,6 +51,13 @@ func (d *fakeRuntimeDriver) SendKey(_ context.Context, target, key string) error
 
 func (d *fakeRuntimeDriver) Close(_ context.Context, target string) error {
 	d.record(driverCall{"close", target, "", ""})
+	if d.closeStarted != nil {
+		select {
+		case d.closeStarted <- struct{}{}:
+		default:
+		}
+		<-d.releaseClose
+	}
 	return d.err
 }
 

@@ -3,6 +3,7 @@ package sessionstart
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 
@@ -141,6 +142,13 @@ func (l *Local) Provision(ctx context.Context, request ProvisionRequest) error {
 	}
 	target, err := l.runtime.Start(ctx, session)
 	if err != nil {
+		if session.ProviderResume && strings.EqualFold(session.Backend, "codex") &&
+			errors.Is(err, runtimehost.ErrProviderExitedDuringStartup) {
+			// CCBot may still own the Codex writer for a short time after its
+			// window is closed. Preserve the exact resume intent and let the
+			// controller retry it; archiving here loses a valid candidate.
+			return fmt.Errorf("%w: %v", errProviderResumePending, err)
+		}
 		return err
 	}
 	binding.TmuxTarget = target

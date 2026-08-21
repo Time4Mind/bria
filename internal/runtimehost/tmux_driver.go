@@ -57,6 +57,15 @@ func (d *TmuxDriver) SendLiteral(
 	buffer := tmuxBufferName(operationID)
 	runCtx, cancel := context.WithTimeout(ctx, d.timeout)
 	defer cancel()
+	pasted := false
+	defer func() {
+		if pasted {
+			return
+		}
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), d.timeout)
+		defer cleanupCancel()
+		d.deleteBuffer(cleanupCtx, buffer)
+	}()
 	result, err := d.runner.RunInput(
 		runCtx, []byte(text), d.tmuxPath, "load-buffer", "-b", buffer, "-",
 	)
@@ -73,9 +82,9 @@ func (d *TmuxDriver) SendLiteral(
 		return fmt.Errorf("paste tmux input buffer: %w", err)
 	}
 	if result.ExitCode != 0 {
-		d.deleteBuffer(runCtx, buffer)
 		return commandExitError("paste tmux input buffer", result)
 	}
+	pasted = true
 	if err := waitContext(runCtx, d.submitDelay); err != nil {
 		return err
 	}

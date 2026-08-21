@@ -12,7 +12,10 @@ import (
 
 const (
 	defaultFlowTTL = 15 * time.Minute
-	maxCodeBytes   = 4096
+	// Keep terminal status readable briefly so the caller can observe the
+	// result before the in-memory flow and provider process are retired.
+	terminalObservationTTL = time.Minute
+	maxCodeBytes           = 4096
 )
 
 type Authorizer interface {
@@ -31,15 +34,16 @@ type Launcher interface {
 }
 
 type flow struct {
-	actorID   int64
-	nodeID    string
-	backend   string
-	expiresAt time.Time
-	process   Process
-	state     State
-	detail    string
-	url       string
-	userCode  string
+	actorID    int64
+	nodeID     string
+	backend    string
+	expiresAt  time.Time
+	process    Process
+	state      State
+	detail     string
+	url        string
+	userCode   string
+	terminalAt time.Time
 }
 
 type Manager struct {
@@ -138,7 +142,7 @@ func (m *Manager) Submit(ctx context.Context, request SubmitRequest) (Status, er
 	m.mu.Unlock()
 	if err := entry.process.Submit(ctx, code); err != nil {
 		m.mu.Lock()
-		entry.state, entry.detail = StateFailed, "provider rejected the authorization code"
+		m.markTerminalLocked(request.FlowID, entry, StateFailed, "provider rejected the authorization code")
 		status := statusOf(request.FlowID, entry)
 		m.mu.Unlock()
 		_ = entry.process.Cancel()
@@ -198,8 +202,11 @@ func (m *Manager) Cancel(ctx context.Context, request FlowRequest) error {
 		m.mu.Unlock()
 		return ErrFlowNotFound
 	}
-	entry.state = StateCancelled
-	delete(m.flows, request.FlowID)
+	if entry.state.Terminal() {
+		m.mu.Unlock()
+		return nil
+	}
+	m.markTerminalLocked(request.FlowID, entry, StateCancelled, "")
 	m.mu.Unlock()
 	return entry.process.Cancel()
 }
@@ -231,54 +238,9 @@ func (m *Manager) observe(flowID string, entry *flow) {
 		return
 	}
 	if ok {
-		entry.state, entry.detail = StateSucceeded, ""
+		m.markTerminalLocked(flowID, entry, StateSucceeded, "")
 	} else {
-		entry.state, entry.detail = StateFailed, "provider did not complete authentication"
-	}
-}
-
-func (m *Manager) expire(flowID string, entry *flow) {
-	timer := time.NewTimer(time.Until(entry.expiresAt))
-	defer timer.Stop()
-	<-timer.C
-	m.mu.Lock()
-	current, exists := m.flows[flowID]
-	if !exists || current != entry {
-		m.mu.Unlock()
-		return
-	}
-	terminal := entry.state.Terminal()
-	if !terminal {
-		entry.state = StateCancelled
-	}
-	delete(m.flows, flowID)
-	m.mu.Unlock()
-	if !terminal {
-		_ = entry.process.Cancel()
-	}
-}
-
-func (m *Manager) authorizedFlowLocked(actorID int64, nodeID, flowID string) (*flow, bool) {
-	entry, ok := m.flows[flowID]
-	if !ok || entry.actorID != actorID || entry.nodeID != nodeID {
-		return nil, false
-	}
-	if !time.Now().Before(entry.expiresAt) {
-		delete(m.flows, flowID)
-		entry.state = StateCancelled
-		go entry.process.Cancel()
-		return nil, false
-	}
-	return entry, true
-}
-
-func (m *Manager) cancelMatchingLocked(actorID int64, backend string) {
-	for id, entry := range m.flows {
-		if entry.actorID == actorID && entry.backend == backend && !entry.state.Terminal() {
-			entry.state = StateCancelled
-			delete(m.flows, id)
-			go entry.process.Cancel()
-		}
+		m.markTerminalLocked(flowID, entry, StateFailed, "provider did not complete authentication")
 	}
 }
 

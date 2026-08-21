@@ -47,6 +47,48 @@ func TestCodexResolveCacheKeepsVerifiedSessionPath(t *testing.T) {
 	}
 }
 
+func TestCodexResolveCacheHitSkipsIndexScan(t *testing.T) {
+	layout := newTestLayout(t)
+	request := Request{Backend: BackendCodex, ProviderSessionID: "codex-hit", Workdir: "/srv/project"}
+	path := filepath.Join(layout.codex, "2026", "08", "10", "rollout-hit.jsonl")
+	writeTestFile(t, path, `{"type":"session_meta","payload":{"id":"codex-hit","cwd":"/srv/project"}}
+`)
+	reader := newTestReader(t, layout, nil)
+	if _, err := reader.resolveCodex(context.Background(), request); err != nil {
+		t.Fatal(err)
+	}
+
+	scanCalls := 0
+	reader.scanCodex = func(context.Context) (*codexIndexSnapshot, error) {
+		scanCalls++
+		return nil, errors.New("unexpected index scan on resolve-cache hit")
+	}
+	if _, err := reader.resolveCodex(context.Background(), request); err != nil {
+		t.Fatalf("cached resolve failed: %v", err)
+	}
+	if scanCalls != 0 {
+		t.Fatalf("cache hit triggered %d index scans", scanCalls)
+	}
+}
+
+func TestCodexResolveCacheRejectsMetadataMismatch(t *testing.T) {
+	layout := newTestLayout(t)
+	request := Request{Backend: BackendCodex, ProviderSessionID: "codex-mismatch", Workdir: "/srv/project"}
+	path := filepath.Join(layout.codex, "2026", "08", "10", "rollout-mismatch.jsonl")
+	writeTestFile(t, path, `{"type":"session_meta","payload":{"id":"codex-mismatch","cwd":"/srv/project"}}
+`)
+	reader := newTestReader(t, layout, nil)
+	if _, err := reader.resolveCodex(context.Background(), request); err != nil {
+		t.Fatal(err)
+	}
+
+	writeTestFile(t, path, `{"type":"session_meta","payload":{"id":"different-session","cwd":"/srv/project"}}
+`)
+	if _, err := reader.resolveCodex(context.Background(), request); !errors.Is(err, ErrTranscriptNotFound) {
+		t.Fatalf("metadata mismatch returned %v, want transcript not found", err)
+	}
+}
+
 func TestCodexResolveCacheInvalidatesDeletedPathAndFindsReplacement(t *testing.T) {
 	layout := newTestLayout(t)
 	request := Request{Backend: BackendCodex, ProviderSessionID: "codex-moved", Workdir: "/srv/project"}

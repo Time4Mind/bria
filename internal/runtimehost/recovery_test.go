@@ -2,6 +2,7 @@ package runtimehost
 
 import (
 	"context"
+	"errors"
 	"os/exec"
 	"reflect"
 	"slices"
@@ -105,6 +106,16 @@ func TestTmuxRecoveryRuntimeStartsBackendWithArgv(t *testing.T) {
 			}
 			if test.backend == "claude" && !slices.Contains(last.args, "IS_SANDBOX=1") {
 				t.Fatalf("Claude launch has no root-compatible sandbox marker: %#v", last.args)
+			}
+			for _, variable := range []string{
+				"BRIA_BINDING_NODE_ID=n",
+				"BRIA_BINDING_SESSION_ID=s",
+				"BRIA_BINDING_TMUX_SESSION=bria",
+				"BRIA_BINDING_TMUX_WINDOW=" + TmuxWindowName("n", "s"),
+			} {
+				if !slices.Contains(last.args, variable) {
+					t.Fatalf("provider launch has no %s: %#v", variable, last.args)
+				}
 			}
 			resize := runner.calls[4]
 			if !reflect.DeepEqual(resize.args, []string{
@@ -211,5 +222,32 @@ func TestTmuxSessionRuntimeRejectsProviderThatExitsDuringStartup(t *testing.T) {
 	})
 	if err == nil || err.Error() != "provider exited during startup" {
 		t.Fatalf("startup error=%v", err)
+	}
+}
+
+func TestTmuxSessionRuntimeClassifiesCodexResumeStartupExit(t *testing.T) {
+	runner := &scriptedRunner{
+		paths: map[string]string{"tmux": "/tmux", "codex": "/codex"},
+		results: []CommandResult{
+			{ExitCode: 1}, {ExitCode: 0}, {ExitCode: 0}, {ExitCode: 1},
+		},
+	}
+	runtime, err := NewTmuxRecoveryRuntime(runner, "bria", map[string]BackendCommand{
+		"codex": {Executable: "codex"},
+	}, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = runtime.Start(context.Background(), domain.Session{
+		ID: "s", NodeID: "n", Backend: "codex", Workdir: t.TempDir(),
+		ProviderSessionID: "ccbot-provider", ProviderResume: true, RuntimeGeneration: 1,
+	})
+	if !errors.Is(err, ErrProviderExitedDuringStartup) {
+		t.Fatalf("startup error=%v, want provider-exited sentinel", err)
+	}
+	for _, call := range runner.calls {
+		if len(call.args) > 0 && call.args[0] == "resize-window" {
+			t.Fatalf("dead Codex resume was resized before liveness probe: %#v", runner.calls)
+		}
 	}
 }

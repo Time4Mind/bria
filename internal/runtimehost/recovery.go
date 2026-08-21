@@ -173,7 +173,7 @@ func (r *TmuxRecoveryRuntime) awaitProviderStartup(
 		return err
 	}
 	if !exists {
-		return errors.New("provider exited during startup")
+		return ErrProviderExitedDuringStartup
 	}
 	return nil
 }

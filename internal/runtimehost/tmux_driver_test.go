@@ -2,6 +2,7 @@ package runtimehost
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"testing"
 	"time"
@@ -17,6 +18,8 @@ type recordingInputRunner struct {
 	calls    []runnerInvocation
 	stdout   []byte
 	exitCode int
+	runError error
+	inputErr error
 }
 
 func (r *recordingInputRunner) LookPath(name string) (string, error) {
@@ -29,7 +32,7 @@ func (r *recordingInputRunner) Run(
 	args ...string,
 ) (CommandResult, error) {
 	r.calls = append(r.calls, runnerInvocation{name: name, args: append([]string(nil), args...)})
-	return CommandResult{Stdout: append([]byte(nil), r.stdout...), ExitCode: r.exitCode}, nil
+	return CommandResult{Stdout: append([]byte(nil), r.stdout...), ExitCode: r.exitCode}, r.runError
 }
 
 func TestTmuxDriverChecksExactRuntimeTarget(t *testing.T) {
@@ -76,7 +79,7 @@ func (r *recordingInputRunner) RunInput(
 	r.calls = append(r.calls, runnerInvocation{
 		input: append([]byte(nil), input...), name: name, args: append([]string(nil), args...),
 	})
-	return CommandResult{}, nil
+	return CommandResult{}, r.inputErr
 }
 
 func TestTmuxDriverSendsLiteralInputThroughStdin(t *testing.T) {
@@ -107,6 +110,42 @@ func TestTmuxDriverSendsLiteralInputThroughStdin(t *testing.T) {
 	}
 	if got := runner.calls[2].args; !reflect.DeepEqual(got, []string{"send-keys", "-t", "@9", "Enter"}) {
 		t.Fatalf("enter args = %v", got)
+	}
+}
+
+func TestTmuxDriverDeletesLoadedBufferWhenPasteFails(t *testing.T) {
+	runner := &recordingInputRunner{runError: errors.New("tmux unavailable")}
+	driver, err := NewTmuxDriver(runner, time.Second, 0, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := driver.SendLiteral(context.Background(), "@9", "operation-1", "input"); err == nil {
+		t.Fatal("expected paste error")
+	}
+	if len(runner.calls) != 3 {
+		t.Fatalf("calls = %d, want load, paste, cleanup", len(runner.calls))
+	}
+	wantDelete := []string{"delete-buffer", "-b", tmuxBufferName("operation-1")}
+	if got := runner.calls[2].args; !reflect.DeepEqual(got, wantDelete) {
+		t.Fatalf("cleanup args = %v, want %v", got, wantDelete)
+	}
+}
+
+func TestTmuxDriverDeletesPossibleBufferWhenLoadTransportFails(t *testing.T) {
+	runner := &recordingInputRunner{inputErr: errors.New("transport interrupted")}
+	driver, err := NewTmuxDriver(runner, time.Second, 0, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := driver.SendLiteral(context.Background(), "@9", "operation-1", "input"); err == nil {
+		t.Fatal("expected load transport error")
+	}
+	if len(runner.calls) != 2 {
+		t.Fatalf("calls = %d, want load and best-effort cleanup", len(runner.calls))
+	}
+	wantDelete := []string{"delete-buffer", "-b", tmuxBufferName("operation-1")}
+	if got := runner.calls[1].args; !reflect.DeepEqual(got, wantDelete) {
+		t.Fatalf("cleanup args = %v, want %v", got, wantDelete)
 	}
 }
 

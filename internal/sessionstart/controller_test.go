@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -178,6 +179,57 @@ func TestReconcileArchivesPersistentlyFailedStart(t *testing.T) {
 	got := machine.State().Sessions[session.Ref().Key()]
 	if got.State != domain.SessionArchived || got.ArchiveReason != domain.ArchiveResumeFailed {
 		t.Fatalf("failed start=%#v", got)
+	}
+}
+
+func TestReconcileKeepsCodexResumeWhenProviderStartIsPending(t *testing.T) {
+	controller, machine, router := newControllerFixture(t)
+	created := time.Now().Add(-2*controller.startTimeout + time.Second).UTC()
+	session := domain.Session{
+		ID: "resume-pending", NodeID: "alpha", OwnerID: 7, Backend: "codex", Workdir: t.TempDir(),
+		ProviderSessionID: "ccbot-provider", ProviderResume: true,
+		State: domain.SessionLive, RuntimePhase: domain.RuntimeStarting,
+		CreatedAt: created, LiveSinceAt: created, LastEventAt: created,
+	}
+	command, err := clusterstate.NewCommand("add-resume-pending", clusterstate.CommandAddSession, created, session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result := machine.Apply(command); result.Err() != nil {
+		t.Fatal(result.Err())
+	}
+	// The local start adapter wraps a Codex resume startup failure with the
+	// retryable sentinel. Reproduce that boundary here without invoking tmux.
+	router.provisionErr = fmt.Errorf("%w: provider exited during startup", errProviderResumePending)
+	controller.reconcile(context.Background())
+	controller.reconcile(context.Background())
+	got := machine.State().Sessions[session.Ref().Key()]
+	if !got.IsLive() || got.RuntimePhase != domain.RuntimeStarting {
+		t.Fatalf("codex resume was archived after retryable start failure=%#v", got)
+	}
+}
+
+func TestReconcileArchivesCodexResumeAfterRetryWindow(t *testing.T) {
+	controller, machine, router := newControllerFixture(t)
+	created := time.Now().Add(-2 * controller.startTimeout).UTC()
+	session := domain.Session{
+		ID: "resume-expired", NodeID: "alpha", OwnerID: 7, Backend: "codex", Workdir: t.TempDir(),
+		ProviderSessionID: "invalid-provider", ProviderResume: true,
+		State: domain.SessionLive, RuntimePhase: domain.RuntimeStarting,
+		CreatedAt: created, LiveSinceAt: created, LastEventAt: created,
+	}
+	command, err := clusterstate.NewCommand("add-resume-expired", clusterstate.CommandAddSession, created, session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result := machine.Apply(command); result.Err() != nil {
+		t.Fatal(result.Err())
+	}
+	router.provisionErr = fmt.Errorf("%w: provider exited during startup", errProviderResumePending)
+	controller.reconcile(context.Background())
+	got := machine.State().Sessions[session.Ref().Key()]
+	if got.State != domain.SessionArchived || got.ArchiveReason != domain.ArchiveResumeFailed {
+		t.Fatalf("expired codex resume was not archived=%#v", got)
 	}
 }
 

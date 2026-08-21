@@ -29,6 +29,7 @@ type testProcess struct {
 	wait      chan struct{}
 	ok        bool
 	detail    string
+	submitErr error
 	mu        sync.Mutex
 	submitted string
 	cancelled bool
@@ -39,7 +40,7 @@ func (p *testProcess) Submit(_ context.Context, code string) error {
 	p.mu.Lock()
 	p.submitted = code
 	p.mu.Unlock()
-	return nil
+	return p.submitErr
 }
 func (p *testProcess) Wait() (bool, string) { <-p.wait; return p.ok, p.detail }
 func (p *testProcess) Cancel() error {
@@ -123,8 +124,8 @@ func TestManagerRejectsUnauthorizedAndCancelsReplacedFlow(t *testing.T) {
 	}
 }
 
-func TestManagerExpiresCompletedFlowAfterStatusWindow(t *testing.T) {
-	process := &testProcess{wait: make(chan struct{}), ok: true}
+func TestManagerRetainsCancelledFlowForImmediateStatus(t *testing.T) {
+	process := &testProcess{wait: make(chan struct{})}
 	manager, err := NewManager("node", testAuthorizer{}, testLauncher{process: process})
 	if err != nil {
 		t.Fatal(err)
@@ -136,26 +137,123 @@ func TestManagerExpiresCompletedFlowAfterStatusWindow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := manager.Cancel(context.Background(), FlowRequest{
+		ActorID: 7, NodeID: "node", FlowID: status.FlowID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	status, err = manager.Status(context.Background(), FlowRequest{
+		ActorID: 7, NodeID: "node", FlowID: status.FlowID,
+	})
+	if err != nil || status.State != StateCancelled {
+		t.Fatalf("cancelled status=%+v err=%v", status, err)
+	}
+	waitForNotFound(t, manager, status)
 	close(process.wait)
-	status = waitForState(t, manager, status, StateSucceeded)
+}
+
+func TestManagerRetainsFailedFlowForImmediateStatus(t *testing.T) {
+	process := &testProcess{
+		wait: make(chan struct{}), input: true,
+		submitErr: errors.New("rejected"),
+	}
+	manager, err := NewManager("node", testAuthorizer{}, testLauncher{process: process})
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager.ttl = 25 * time.Millisecond
+	status, err := manager.Start(context.Background(), StartRequest{
+		ActorID: 7, NodeID: "node", Backend: BackendClaude,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = manager.Submit(context.Background(), SubmitRequest{
+		ActorID: 7, NodeID: "node", FlowID: status.FlowID, Code: "secret-code",
+	})
+	if err == nil {
+		t.Fatal("rejected submit succeeded")
+	}
+	status, statusErr := manager.Status(context.Background(), FlowRequest{
+		ActorID: 7, NodeID: "node", FlowID: status.FlowID,
+	})
+	if statusErr != nil || status.State != StateFailed {
+		t.Fatalf("failed status=%+v err=%v", status, statusErr)
+	}
+	waitForNotFound(t, manager, status)
+	close(process.wait)
+}
+
+func TestManagerPendingFlowStillExpiresAsBefore(t *testing.T) {
+	process := &testProcess{wait: make(chan struct{})}
+	manager, err := NewManager("node", testAuthorizer{}, testLauncher{process: process})
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager.ttl = 25 * time.Millisecond
+	status, err := manager.Start(context.Background(), StartRequest{
+		ActorID: 7, NodeID: "node", Backend: BackendCodex,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.State != StateWaitingUser {
+		t.Fatalf("initial status=%+v", status)
+	}
+	if current, err := manager.Status(context.Background(), FlowRequest{
+		ActorID: 7, NodeID: "node", FlowID: status.FlowID,
+	}); err != nil || current.State != StateWaitingUser {
+		t.Fatalf("pending status=%+v err=%v", current, err)
+	}
+	waitForNotFound(t, manager, status)
+	waitForProcessCancellation(t, process)
+	close(process.wait)
+}
+
+func TestManagerConcurrentStatusAndCancel(t *testing.T) {
+	process := &testProcess{wait: make(chan struct{})}
+	manager, err := NewManager("node", testAuthorizer{}, testLauncher{process: process})
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, err := manager.Start(context.Background(), StartRequest{
+		ActorID: 7, NodeID: "node", Backend: BackendCodex,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := FlowRequest{ActorID: 7, NodeID: "node", FlowID: status.FlowID}
+	var group sync.WaitGroup
+	for index := 0; index < 16; index++ {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			_, _ = manager.Status(context.Background(), request)
+		}()
+	}
+	group.Add(1)
+	go func() {
+		defer group.Done()
+		_ = manager.Cancel(context.Background(), request)
+	}()
+	group.Wait()
+	close(process.wait)
+}
+
+func waitForNotFound(t *testing.T, manager *Manager, current Status) {
+	t.Helper()
 	deadline := time.Now().Add(time.Second)
 	for {
-		_, statusErr := manager.Status(context.Background(), FlowRequest{
-			ActorID: 7, NodeID: "node", FlowID: status.FlowID,
+		_, err := manager.Status(context.Background(), FlowRequest{
+			ActorID: 7, NodeID: "node", FlowID: current.FlowID,
 		})
-		if errors.Is(statusErr, ErrFlowNotFound) {
-			break
+		if errors.Is(err, ErrFlowNotFound) {
+			return
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("terminal flow survived expiry: %v", statusErr)
+			t.Fatalf("flow was not cleaned up: err=%v", err)
 		}
 		time.Sleep(time.Millisecond)
-	}
-	manager.mu.Lock()
-	remaining := len(manager.flows)
-	manager.mu.Unlock()
-	if remaining != 0 {
-		t.Fatalf("retained flows=%d", remaining)
 	}
 }
 
@@ -171,6 +269,23 @@ func waitForState(t *testing.T, manager *Manager, current Status, want State) St
 		}
 		if time.Now().After(deadline) {
 			t.Fatalf("flow did not complete: status=%+v err=%v", status, err)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+func waitForProcessCancellation(t *testing.T, process *testProcess) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for {
+		process.mu.Lock()
+		cancelled := process.cancelled
+		process.mu.Unlock()
+		if cancelled {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("expired pending process was not cancelled")
 		}
 		time.Sleep(time.Millisecond)
 	}

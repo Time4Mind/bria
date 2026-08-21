@@ -11,6 +11,11 @@ import (
 	"github.com/Time4Mind/bria/internal/providerbinding"
 )
 
+// ErrProviderExitedDuringStartup identifies a provider process that vanished
+// before its deterministic tmux target became ready. Callers may retry an
+// explicit provider resume, while infrastructure errors remain fatal.
+var ErrProviderExitedDuringStartup = errors.New("provider exited during startup")
+
 // Start creates or resumes a provider in the deterministic Bria tmux window.
 // Repeated calls are safe: an existing target is treated as success.
 func (r *TmuxRecoveryRuntime) Start(ctx context.Context, session domain.Session) (string, error) {
@@ -61,11 +66,22 @@ func (r *TmuxRecoveryRuntime) Start(ctx context.Context, session domain.Session)
 		}
 		return "", commandExitError("create session window", result)
 	}
+	if session.ProviderResume && strings.EqualFold(session.Backend, "codex") {
+		// A failed Codex resume can destroy the pane before tmux accepts a
+		// resize command. Probe liveness first so callers see the provider
+		// startup failure and can retry the exact session instead of receiving
+		// the misleading "can't find window" resize error.
+		if err := r.awaitProviderStartup(ctx, tmuxPath, target); err != nil {
+			return "", err
+		}
+	}
 	if err := r.resizeProviderWindow(ctx, tmuxPath, target); err != nil {
 		return "", err
 	}
-	if err := r.awaitProviderStartup(ctx, tmuxPath, target); err != nil {
-		return "", err
+	if !session.ProviderResume || !strings.EqualFold(session.Backend, "codex") {
+		if err := r.awaitProviderStartup(ctx, tmuxPath, target); err != nil {
+			return "", err
+		}
 	}
 	return target, nil
 }
@@ -76,23 +92,24 @@ func providerEnvironment(
 	tmuxSession string,
 	window string,
 ) []string {
+	binding := []string{
+		"-e", providerbinding.EnvNodeID + "=" + string(session.NodeID),
+		"-e", providerbinding.EnvSessionID + "=" + string(session.ID),
+		"-e", providerbinding.EnvTmuxSession + "=" + tmuxSession,
+		"-e", providerbinding.EnvTmuxWindow + "=" + window,
+	}
 	if strings.EqualFold(session.Backend, "claude") {
 		for _, flag := range flags {
 			if flag == "--dangerously-skip-permissions" {
 				// Claude refuses its explicit bypass flag under root unless the
 				// caller declares the already trusted/sandboxed execution context.
-				return []string{"-e", "IS_SANDBOX=1"}
+				return append(binding, "-e", "IS_SANDBOX=1")
 			}
 		}
-		return nil
+		return binding
 	}
 	if strings.EqualFold(session.Backend, "codex") {
-		return []string{
-			"-e", providerbinding.EnvNodeID + "=" + string(session.NodeID),
-			"-e", providerbinding.EnvSessionID + "=" + string(session.ID),
-			"-e", providerbinding.EnvTmuxSession + "=" + tmuxSession,
-			"-e", providerbinding.EnvTmuxWindow + "=" + window,
-		}
+		return binding
 	}
 	return nil
 }

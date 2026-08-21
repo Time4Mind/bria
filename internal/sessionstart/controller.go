@@ -16,6 +16,13 @@ type Leadership interface{ IsLeader() bool }
 
 var errProviderBindingPending = errors.New("provider binding is pending")
 
+// A provider resume can fail before its tmux target is materialized when the
+// same Codex thread is still being released by CCBot (or when Codex is
+// cleaning up a stale writer). Keep the durable start intent in that case so
+// the next reconciliation can retry the exact provider id instead of
+// converting a temporary provider-side race into resume_failed.
+var errProviderResumePending = errors.New("provider resume is pending")
+
 type Controller struct {
 	application  *application.Service
 	state        StateReader
@@ -119,8 +126,10 @@ func (c *Controller) reconcile(ctx context.Context) {
 		requestCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		err := c.provision(requestCtx, session)
 		cancel()
+		age := time.Since(session.CreatedAt)
+		resumePending := errors.Is(err, errProviderResumePending) && age < 2*c.startTimeout
 		if err != nil && !errors.Is(err, errProviderBindingPending) &&
-			time.Since(session.CreatedAt) >= c.startTimeout {
+			!resumePending && age >= c.startTimeout {
 			archiveScope := fmt.Sprintf("session-start-failed-%s-%d", session.Ref().Key(), session.Revision)
 			archiveCtx := application.WithOperationScope(ctx, archiveScope)
 			_ = c.application.ArchiveFailedStart(archiveCtx, session)
