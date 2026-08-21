@@ -36,17 +36,19 @@ func (h *Handler) RunBackgroundNotifications(ctx context.Context, interval time.
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
+		now := time.Now()
+		h.maybeSweepSessionLocalState(now)
 		if h.canRefresh() {
 			// Keep runtime settlement and card delivery in one ordered pass. Two
 			// independent loops can observe the same revision in opposite order,
 			// allowing a routine panel edit to consume a just-finished turn before
 			// the completion carrier is reposted.
-			h.settleDueRunningSessions(ctx, time.Now(), interval, settlementSchedule)
-			h.reconcileActiveFinalCards(ctx, time.Now(), finalReconcileSchedule)
+			h.settleDueRunningSessions(ctx, now, interval, settlementSchedule)
+			h.reconcileActiveFinalCards(ctx, now, finalReconcileSchedule)
 			h.restoreActivePaneRefreshes(ctx)
 			h.restoreClusterUpdateRefreshes(ctx)
 			h.scanBackgroundNotifications(ctx, panelFingerprints)
-			h.flushTranscriptTriggerGaps(time.Now())
+			h.flushTranscriptTriggerGaps(now)
 		}
 		select {
 		case <-ctx.Done():

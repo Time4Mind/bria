@@ -244,16 +244,9 @@ func (h *Handler) resolveInteractive(
 }
 
 func (h *Handler) rememberPrompt(userID domain.UserID, ref domain.SessionRef, hash string) {
-	h.paneMu.Lock()
-	defer h.paneMu.Unlock()
-	if h.promptHashes[userID] == nil {
-		h.promptHashes[userID] = make(map[string]string)
-	}
-	h.promptHashes[userID][ref.Key()] = hash
+	h.storePromptHash(pageKey(userID, ref), hash)
 }
 
 func (h *Handler) rememberedPrompt(userID domain.UserID, ref domain.SessionRef) string {
-	h.paneMu.Lock()
-	defer h.paneMu.Unlock()
-	return h.promptHashes[userID][ref.Key()]
+	return h.loadPromptHash(pageKey(userID, ref))
 }

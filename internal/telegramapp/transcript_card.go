@@ -113,9 +113,7 @@ func (h *Handler) openSessionPage(
 		page = 0
 	} else if action == telegramui.ActionPagePrevious || action == telegramui.ActionPageNext {
 		key := pageKey(actor.UserID, target.Session)
-		h.pageMu.Lock()
-		state, ok := h.sessionPages[key]
-		h.pageMu.Unlock()
+		state, ok := h.loadSessionPageState(key)
 		if ok && state.page > 0 && state.pages > 0 {
 			page = state.page - 1
 			if action == telegramui.ActionPageNext {
@@ -186,12 +184,9 @@ func (h *Handler) rememberResolvedCardPageWithFollow(
 	if screen.Checkpoint != nil {
 		anchor = screen.Checkpoint.PageAnchor
 	}
-	key := pageKey(userID, ref)
-	h.pageMu.Lock()
-	h.sessionPages[key] = cardPageState{
+	h.storeSessionPageState(pageKey(userID, ref), cardPageState{
 		page: page, pages: pages, anchor: anchor, follow: follow,
-	}
-	h.pageMu.Unlock()
+	})
 }
 
 func (h *Handler) cardPageState(
@@ -199,9 +194,7 @@ func (h *Handler) cardPageState(
 	ref domain.SessionRef,
 ) (cardPageState, bool) {
 	key := pageKey(userID, ref)
-	h.pageMu.Lock()
-	state, ok := h.sessionPages[key]
-	h.pageMu.Unlock()
+	state, ok := h.loadSessionPageState(key)
 	if ok {
 		return state, true
 	}
@@ -226,9 +219,7 @@ func (h *Handler) cardPageState(
 		}
 	}
 	if ok {
-		h.pageMu.Lock()
-		h.sessionPages[key] = state
-		h.pageMu.Unlock()
+		h.storeSessionPageState(key, state)
 	}
 	return state, ok
 }
@@ -273,9 +264,7 @@ func (h *Handler) restoreFollowForInput(userID domain.UserID, ref domain.Session
 	}
 	state.follow = true
 	state.anchor = ""
-	h.pageMu.Lock()
-	h.sessionPages[pageKey(userID, ref)] = state
-	h.pageMu.Unlock()
+	h.storeSessionPageState(pageKey(userID, ref), state)
 }
 
 func pageKey(userID domain.UserID, ref domain.SessionRef) sessionPageKey {

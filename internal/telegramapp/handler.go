@@ -44,7 +44,6 @@ type Handler struct {
 	transcriptTriggers  transcriptTriggerTracker
 	fileMu              sync.Mutex
 	deliveredFiles      map[string]bool
-	promptHashes        map[domain.UserID]map[string]string
 	createFlows         map[domain.UserID]*createFlow
 	flowTTL             time.Duration
 	membershipMu        sync.Mutex
@@ -63,8 +62,12 @@ type Handler struct {
 	speechTargets       map[domain.UserID]domain.NodeID
 	knownSpeechNodes    map[domain.NodeID]bool
 	speechWatchStarted  time.Time
-	pageMu              sync.Mutex
+	sessionStateMu      sync.Mutex
 	sessionPages        map[sessionPageKey]cardPageState
+	sessionPageTouched  map[sessionPageKey]time.Time
+	promptHashes        map[sessionPageKey]string
+	promptHashTouched   map[sessionPageKey]time.Time
+	sessionStateSweepAt time.Time
 	viewMu              sync.Mutex
 	visibleCardViews    map[domain.UserID]visibleCardView
 	cardEditMu          sync.Mutex
@@ -98,7 +101,6 @@ func NewHandler(
 		providerStopRetryState: newProviderStopRetryState(),
 		transcriptTriggers:     newTranscriptTriggerTracker(time.Now()),
 		deliveredFiles:         make(map[string]bool),
-		promptHashes:           make(map[domain.UserID]map[string]string),
 		createFlows:            make(map[domain.UserID]*createFlow),
 		flowTTL:                10 * time.Minute,
 		contractFlows:          make(map[domain.UserID]time.Time),
@@ -112,6 +114,9 @@ func NewHandler(
 		knownSpeechNodes:       make(map[domain.NodeID]bool),
 		speechWatchStarted:     time.Now(),
 		sessionPages:           make(map[sessionPageKey]cardPageState),
+		sessionPageTouched:     make(map[sessionPageKey]time.Time),
+		promptHashes:           make(map[sessionPageKey]string),
+		promptHashTouched:      make(map[sessionPageKey]time.Time),
 		visibleCardViews:       make(map[domain.UserID]visibleCardView),
 		cardTransports:         make(map[string]telegrambot.Message),
 		clusterEventLogs:       make(map[int64]clusterEventLog),
