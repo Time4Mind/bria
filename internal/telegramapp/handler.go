@@ -40,6 +40,7 @@ type Handler struct {
 	paneRefreshState
 	voicePendingState
 	cardRuntimeState
+	transcriptTriggers  transcriptTriggerTracker
 	fileMu              sync.Mutex
 	deliveredFiles      map[string]bool
 	promptHashes        map[domain.UserID]map[string]string
@@ -93,6 +94,7 @@ func NewHandler(
 		paneRefreshState:   newPaneRefreshState(),
 		voicePendingState:  newVoicePendingState(),
 		cardRuntimeState:   newCardRuntimeState(),
+		transcriptTriggers: newTranscriptTriggerTracker(time.Now()),
 		deliveredFiles:     make(map[string]bool),
 		promptHashes:       make(map[domain.UserID]map[string]string),
 		createFlows:        make(map[domain.UserID]*createFlow),

@@ -58,6 +58,7 @@ func (h *Handler) schedulePaneRefresh(
 	generation := h.paneGeneration[actor.UserID]
 	workerCtx, cancel := context.WithCancel(ctx)
 	h.paneWorkers[actor.UserID] = generation
+	h.paneWorkerRefs[actor.UserID] = ref
 	h.paneCancels[actor.UserID] = cancel
 	h.paneMu.Unlock()
 	go h.runPaneRefresh(workerCtx, actor, ref, message, generation)
@@ -75,10 +76,21 @@ func (h *Handler) ensurePaneRefresh(
 ) {
 	h.paneMu.Lock()
 	_, running := h.paneWorkers[actor.UserID]
+	running = running && h.paneWorkerRefs[actor.UserID] == ref
 	h.paneMu.Unlock()
 	if !running {
 		h.schedulePaneRefresh(ctx, actor, ref, message)
 	}
+}
+
+func (h *Handler) hasPaneRefresh(
+	userID domain.UserID,
+	ref domain.SessionRef,
+) bool {
+	h.paneMu.Lock()
+	defer h.paneMu.Unlock()
+	_, running := h.paneWorkers[userID]
+	return running && h.paneWorkerRefs[userID] == ref
 }
 
 func (h *Handler) runPaneRefresh(
@@ -137,6 +149,9 @@ func (h *Handler) runPaneRefresh(
 		if session.RuntimePhase == domain.RuntimeIdle {
 			page := h.rememberedCardPage(actor.UserID, ref)
 			snapshot, renderErr := h.renderSessionCardSnapshot(ctx, actor, ref, page)
+			if renderErr == nil {
+				h.observeTranscriptWatchdog(session, snapshot.events, "live_card", time.Now())
+			}
 			if renderErr == nil && h.sessionIsActive(actor, ref) &&
 				h.currentPaneGeneration(actor.UserID, generation) {
 				if finalAt, ok := finalTranscriptAt(snapshot.events); ok &&
@@ -172,6 +187,7 @@ func (h *Handler) runPaneRefresh(
 		if err != nil {
 			return
 		}
+		h.observeTranscriptWatchdog(session, snapshot.events, "live_card", time.Now())
 		settled := h.settleFromTranscript(ctx, actor, session, snapshot.events)
 		if settled {
 			snapshot, err = h.renderSessionCardSnapshotWithoutPane(

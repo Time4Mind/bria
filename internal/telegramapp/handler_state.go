@@ -20,6 +20,7 @@ type paneRefreshState struct {
 	paneMu         sync.Mutex
 	paneGeneration map[domain.UserID]uint64
 	paneWorkers    map[domain.UserID]uint64
+	paneWorkerRefs map[domain.UserID]domain.SessionRef
 	paneCancels    map[domain.UserID]context.CancelFunc
 	paneImages     map[string]paneCacheEntry
 	paneImageOrder []string
@@ -36,6 +37,7 @@ func newPaneRefreshState() paneRefreshState {
 	return paneRefreshState{
 		paneGeneration: make(map[domain.UserID]uint64),
 		paneWorkers:    make(map[domain.UserID]uint64),
+		paneWorkerRefs: make(map[domain.UserID]domain.SessionRef),
 		paneCancels:    make(map[domain.UserID]context.CancelFunc),
 		paneImages:     make(map[string]paneCacheEntry),
 		paneCaptures:   make(map[string]*paneCaptureFlight),

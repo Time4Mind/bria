@@ -3,6 +3,7 @@ package telegramapp
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/Time4Mind/bria/internal/application"
 	"github.com/Time4Mind/bria/internal/domain"
@@ -238,6 +239,9 @@ func (h *Handler) refreshBackgroundContexts(
 				ctx, application.Principal{UserID: delivery.UserID}, delivery.Session.Ref(),
 			)
 			if err == nil {
+				h.observeTranscriptWatchdog(
+					delivery.Session, events, "background_context", time.Now(),
+				)
 				h.rememberCardTranscript(
 					delivery.Session.Ref(), delivery.Notice.EventRevision,
 					delivery.Session.ProviderSessionID, events,

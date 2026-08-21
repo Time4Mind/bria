@@ -75,6 +75,7 @@ func (h *Handler) finishPaneRefresh(userID domain.UserID, generation uint64) {
 	defer h.paneMu.Unlock()
 	if h.paneWorkers[userID] == generation {
 		delete(h.paneWorkers, userID)
+		delete(h.paneWorkerRefs, userID)
 		delete(h.paneCancels, userID)
 	}
 }

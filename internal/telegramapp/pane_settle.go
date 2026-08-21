@@ -109,6 +109,7 @@ func (h *Handler) cancelPaneRefresh(userID domain.UserID) {
 	cancel := h.paneCancels[userID]
 	h.paneGeneration[userID]++
 	delete(h.paneWorkers, userID)
+	delete(h.paneWorkerRefs, userID)
 	delete(h.paneCancels, userID)
 	h.paneMu.Unlock()
 	if cancel != nil {

@@ -88,6 +88,7 @@ func (h *Handler) handleProviderStop(
 	if err != nil {
 		return false, "transcript_unavailable"
 	}
+	h.confirmTranscriptTrigger(session, events)
 	h.rememberCardTranscript(
 		session.Ref(), session.Revision, session.ProviderSessionID, events,
 	)

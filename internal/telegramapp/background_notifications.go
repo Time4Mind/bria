@@ -27,6 +27,7 @@ func (h *Handler) RunBackgroundNotifications(ctx context.Context, interval time.
 		interval = 1200 * time.Millisecond
 	}
 	panelFingerprints := make(map[domain.UserID]string)
+	settlementSchedule := make(backgroundSettlementSchedule)
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
@@ -35,11 +36,12 @@ func (h *Handler) RunBackgroundNotifications(ctx context.Context, interval time.
 			// independent loops can observe the same revision in opposite order,
 			// allowing a routine panel edit to consume a just-finished turn before
 			// the completion carrier is reposted.
-			h.settleRunningSessions(ctx)
+			h.settleDueRunningSessions(ctx, time.Now(), interval, settlementSchedule)
 			h.reconcileActiveFinalCards(ctx)
 			h.restoreActivePaneRefreshes(ctx)
 			h.restoreClusterUpdateRefreshes(ctx)
 			h.scanBackgroundNotifications(ctx, panelFingerprints)
+			h.flushTranscriptTriggerGaps(time.Now())
 		}
 		select {
 		case <-ctx.Done():
@@ -80,6 +82,7 @@ func (h *Handler) reconcileActiveFinalCards(ctx context.Context) {
 		if err != nil {
 			continue
 		}
+		h.observeTranscriptWatchdog(session, snapshot.events, "card_reconcile", time.Now())
 		finalAt, final := finalTranscriptAt(snapshot.events)
 		if !final || !transcriptFinalBelongsToCurrentTurn(session, finalAt, time.Now()) {
 			continue

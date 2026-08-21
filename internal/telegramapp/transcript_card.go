@@ -15,6 +15,7 @@ import (
 )
 
 const maxCallbackCardPages = 512
+const tracedSessionCardTiming = 25 * time.Millisecond
 
 type sessionCardSnapshot struct {
 	screen telegramui.Screen
@@ -37,6 +38,9 @@ type sessionCardTiming struct {
 
 func (timing sessionCardTiming) log(ref domain.SessionRef, page int) {
 	total := time.Since(timing.startedAt)
+	if !shouldLogSessionCardTiming(timing, total) {
+		return
+	}
 	processlog.Detailf(
 		"bria telegram: card_timing ref=%q page=%d total_ms=%d session_ms=%d "+
 			"transcript_ms=%d cache_ms=%d pending_ms=%d projection_ms=%d "+
@@ -50,6 +54,11 @@ func (timing sessionCardTiming) log(ref domain.SessionRef, page int) {
 		timing.pane.render.Milliseconds(),
 		timing.events, timing.transcriptSource, timing.pane.outcome, timing.outcome,
 	)
+}
+
+func shouldLogSessionCardTiming(timing sessionCardTiming, total time.Duration) bool {
+	return total >= tracedSessionCardTiming || timing.outcome != "ok" ||
+		strings.Contains(timing.pane.outcome, "error")
 }
 
 type sessionPageKey struct {

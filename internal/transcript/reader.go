@@ -58,6 +58,7 @@ const negativeResolveTTL = time.Second
 const maxResolveCacheEntries = 512
 const maxReadCacheEntries = 32
 const initialParseLines = 256
+const tracedTranscriptRead = 25 * time.Millisecond
 
 func NewReader(config Config) (*Reader, error) {
 	normalized, err := config.normalized()
@@ -138,7 +139,7 @@ func (r *Reader) Warm(ctx context.Context, requests []Request, concurrency int) 
 	}
 }
 
-func (r *Reader) Read(ctx context.Context, request Request) ([]Event, error) {
+func (r *Reader) Read(ctx context.Context, request Request) (_ []Event, resultErr error) {
 	startedAt := time.Now()
 	cacheHit := false
 	readMode := "full"
@@ -146,10 +147,14 @@ func (r *Reader) Read(ctx context.Context, request Request) ([]Event, error) {
 	lineCount := 0
 	parsedLineCount := 0
 	defer func() {
+		duration := time.Since(startedAt)
+		if !shouldLogTranscriptRead(cacheHit, duration, resultErr) {
+			return
+		}
 		processlog.Detailf(
 			"bria transcript: read_timing backend=%s total_ms=%d cache=%t "+
 				"mode=%s lines=%d parsed_lines=%d events=%d",
-			request.Backend, time.Since(startedAt).Milliseconds(), cacheHit,
+			request.Backend, duration.Milliseconds(), cacheHit,
 			readMode, lineCount, parsedLineCount, eventCount,
 		)
 	}()
@@ -215,6 +220,10 @@ func (r *Reader) Read(ctx context.Context, request Request) ([]Event, error) {
 		r.rememberRead(path, after, events)
 	}
 	return events, nil
+}
+
+func shouldLogTranscriptRead(cacheHit bool, duration time.Duration, err error) bool {
+	return !cacheHit || err != nil || duration >= tracedTranscriptRead
 }
 
 // ReadFirstUserText scans from the start of the JSONL instead of using the
