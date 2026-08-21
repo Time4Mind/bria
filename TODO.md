@@ -9,7 +9,7 @@
 - [x] R1. Ограничить и периодически очищать process-local состояние сессий,
   прежде всего `sessionPages` и `promptHashes`. Очистка должна учитывать active,
   archived и удалённые сессии и не менять пользовательский flow.
-- [ ] R2. Свести изменение response-card к одному per-user coordinator вместо
+- [x] R2. Свести изменение response-card к одному per-user coordinator вместо
   распределённого управления `cardEditMu`/`cardMutationMu`. Не держать state
   lock во время Telegram I/O; сохранить epoch/generation guards и режимы
   response-card.

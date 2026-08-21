@@ -24,8 +24,11 @@ func (h *Handler) editPaneScreen(
 	generation uint64,
 	screen telegramui.Screen,
 ) (telegrambot.Message, error) {
-	h.cardEditMu.Lock()
-	defer h.cardEditMu.Unlock()
+	release, err := h.responseCards.acquire(ctx, actor.UserID)
+	if err != nil {
+		return message, err
+	}
+	defer release()
 	if !h.currentPaneGeneration(actor.UserID, generation) ||
 		!h.screenMatchesRememberedPage(actor.UserID, ref, screen) ||
 		!h.visibleSessionMatches(actor, ref) {
@@ -35,7 +38,7 @@ func (h *Handler) editPaneScreen(
 	if err != nil || !ok || card.Session != ref {
 		return message, nil
 	}
-	edited, err := h.editCardTransportLocked(ctx, message, screen)
+	edited, err := h.editCardTransportCoordinated(ctx, message, screen)
 	if err == nil {
 		if screen.Pane != nil {
 			h.rememberPaneFileID(ref, screen.Pane.Hash, edited.RichMediaFileID)

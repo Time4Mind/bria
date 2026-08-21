@@ -131,7 +131,6 @@ type cardRuntimeState struct {
 	transcriptSlow  uint64
 	transcriptTotal time.Duration
 	transcriptMax   time.Duration
-	cardMutationMu  sync.Mutex
 }
 
 type providerStopRetryState struct {

@@ -5,6 +5,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/Time4Mind/bria/internal/domain"
 	"github.com/Time4Mind/bria/internal/telegrambot"
 	"github.com/Time4Mind/bria/internal/telegramui"
 )
@@ -54,15 +55,21 @@ func TestCardTransportCoalescesSameConcurrentProjection(t *testing.T) {
 	origin := telegrambot.Message{ChatID: 7, MessageID: 11, Rich: true}
 	screen := telegramui.Screen{Text: "same", Pane: &telegramui.PaneImage{Hash: "pane"}}
 
-	handler.cardEditMu.Lock()
-	first, err := handler.editCardTransportLocked(context.Background(), origin, screen)
-	handler.cardEditMu.Unlock()
+	release, err := handler.responseCards.acquire(context.Background(), domain.UserID(7))
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler.cardEditMu.Lock()
-	second, err := handler.editCardTransportLocked(context.Background(), origin, screen)
-	handler.cardEditMu.Unlock()
+	first, err := handler.editCardTransportCoordinated(context.Background(), origin, screen)
+	release()
+	if err != nil {
+		t.Fatal(err)
+	}
+	release, err = handler.responseCards.acquire(context.Background(), domain.UserID(7))
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := handler.editCardTransportCoordinated(context.Background(), origin, screen)
+	release()
 	if err != nil {
 		t.Fatal(err)
 	}

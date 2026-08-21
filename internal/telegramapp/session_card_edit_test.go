@@ -85,11 +85,15 @@ func TestExplicitSessionEditWinsOverPaneEditAlreadyInFlight(t *testing.T) {
 
 	paneDone := make(chan struct{})
 	go func() {
-		handler.cardEditMu.Lock()
+		release, err := handler.responseCards.acquire(context.Background(), actor.UserID)
+		if err != nil {
+			close(paneDone)
+			return
+		}
 		_, _ = handler.messenger.EditScreen(
 			context.Background(), origin, telegramui.Screen{Text: "pane"},
 		)
-		handler.cardEditMu.Unlock()
+		release()
 		close(paneDone)
 	}()
 	if got := <-messenger.started; got != "pane" {

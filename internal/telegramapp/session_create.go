@@ -89,13 +89,17 @@ func (h *Handler) handleCreateCallback(
 	// same navigation ordering: an in-flight pane edit finishes first and the
 	// non-session screen becomes durable before workers can resume.
 	viewChange := h.beginVisibleScreen(actor.UserID, screen)
-	h.cardEditMu.Lock()
+	release, acquireErr := h.responseCards.acquire(ctx, actor.UserID)
+	if acquireErr != nil {
+		h.rollbackVisibleScreen(viewChange)
+		return acquireErr
+	}
 	edited, err := h.messenger.EditScreen(ctx, update.CallbackOrigin, screen)
 	if err == nil {
-		h.rememberResponseCard(ctx, actor, edited, screen)
+		h.rememberResponseCardCoordinated(ctx, actor, edited, screen)
 		h.cancelPaneRefresh(actor.UserID)
 	}
-	h.cardEditMu.Unlock()
+	release()
 	if err != nil {
 		h.rollbackVisibleScreen(viewChange)
 	}

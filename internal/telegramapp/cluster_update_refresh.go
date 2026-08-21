@@ -113,18 +113,21 @@ func (h *Handler) refreshClusterUpdateCard(
 			next.Reset(750 * time.Millisecond)
 			continue
 		}
-		h.cardEditMu.Lock()
+		release, acquireErr := h.responseCards.acquire(ctx, actor.UserID)
+		if acquireErr != nil {
+			return
+		}
 		if !h.clusterUpdateRefreshCurrent(actor.UserID, generation) {
-			h.cardEditMu.Unlock()
+			release()
 			return
 		}
 		edited, editErr := h.messenger.EditScreen(ctx, message, screen)
 		if editErr == nil {
 			message = edited
-			h.rememberResponseCard(ctx, actor, edited, screen)
+			h.rememberResponseCardCoordinated(ctx, actor, edited, screen)
 			lastText = screen.Text
 		}
-		h.cardEditMu.Unlock()
+		release()
 		if !update.Active() && editErr == nil {
 			if restored {
 				processlog.Detailf(

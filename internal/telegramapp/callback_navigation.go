@@ -172,7 +172,6 @@ func (h *Handler) handleNavigationCallback(
 			Hash:   update.CallbackOrigin.PaneHash, AnchorOffset: paneAnchorOffset(screen),
 		}
 	}
-	serializeCardEdit := pageEdit || leavesSessionCard(callback.Action)
 	viewChange := h.beginVisibleScreen(actor.UserID, screen)
 	if pageEdit {
 		// Stop the live worker before serializing the page edit. If it already
@@ -181,11 +180,13 @@ func (h *Handler) handleNavigationCallback(
 		h.cancelPaneRefresh(actor.UserID)
 		h.rememberResolvedCardPage(actor.UserID, pageRef, screen)
 	}
-	if serializeCardEdit {
-		// An explicit navigation must be the final writer. The live worker uses
-		// the same lock, so a pane edit that was already in flight finishes first
-		// and cannot repaint the session after the requested screen is visible.
-		h.cardEditMu.Lock()
+	// Every navigation that changes the response card uses the actor's lane.
+	// The visible intent is published before waiting, so a slow background send
+	// cannot commit over the requested screen.
+	release, acquireErr := h.responseCards.acquire(ctx, actor.UserID)
+	if acquireErr != nil {
+		h.rollbackVisibleScreen(viewChange)
+		return acquireErr
 	}
 	if replaceCarrier {
 		// Telegram cannot safely promote a legacy carrier to Rich in place.
@@ -202,7 +203,7 @@ func (h *Handler) handleNavigationCallback(
 		// Persist every carrier screen, including non-session navigation. An empty
 		// session checkpoint is intentional state: background workers must not
 		// infer that the selected session is still visible.
-		h.rememberResponseCard(ctx, actor, edited, screen)
+		h.rememberResponseCardCoordinated(ctx, actor, edited, screen)
 		if leavesSessionCard(callback.Action) {
 			// A background reconciliation can start a replacement worker while a
 			// slow navigation screen is being projected. Invalidate that generation
@@ -214,9 +215,7 @@ func (h *Handler) handleNavigationCallback(
 	if err != nil {
 		h.rollbackVisibleScreen(viewChange)
 	}
-	if serializeCardEdit {
-		h.cardEditMu.Unlock()
-	}
+	release()
 	if err == nil && (callback.Action == telegramui.ActionStatus ||
 		callback.Action == telegramui.ActionStatusRefresh) {
 		h.scheduleStatusRefresh(ctx, actor, edited, statusMode(callback.Token), viewChange.epoch)

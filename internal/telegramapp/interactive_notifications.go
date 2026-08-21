@@ -85,10 +85,11 @@ func (h *Handler) repostInteractiveResponseCard(
 	promptHash := notice.Session.InteractivePrompt.Hash
 	fingerprint := telegrambot.ScreenFingerprint(screen)
 	h.cancelPaneRefresh(actor.UserID)
-	h.cardEditMu.Lock()
-	defer h.cardEditMu.Unlock()
-	h.cardMutationMu.Lock()
-	defer h.cardMutationMu.Unlock()
+	release, err := h.responseCards.acquire(ctx, actor.UserID)
+	if err != nil {
+		return false
+	}
+	defer release()
 
 	current, exists, err := h.service.TelegramResponseCard(actor)
 	if err != nil {
@@ -111,7 +112,7 @@ func (h *Handler) repostInteractiveResponseCard(
 		_ = h.messenger.DeleteMessage(ctx, replacement)
 		return true
 	}
-	h.recordResponseCard(ctx, actor, replacement, screen)
+	h.recordResponseCardCoordinated(ctx, actor, replacement, screen)
 	committed, ok, commitErr := h.service.TelegramResponseCard(actor)
 	if commitErr != nil || !ok || committed.ChatID != replacement.ChatID ||
 		committed.MessageID != replacement.MessageID || committed.ScreenHash != fingerprint {

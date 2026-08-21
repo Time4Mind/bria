@@ -10,17 +10,19 @@ import (
 
 const maxCardTransports = 32
 
-// editCardTransportLocked is the single local writer for a Telegram card.
-// Callers hold cardEditMu. Replicated card metadata intentionally does not
+// editCardTransportCoordinated is the single local writer for a Telegram card.
+// Callers hold the actor's response-card lane. Replicated card metadata intentionally does not
 // advance for every live pane frame, so this small process-local projection is
 // what lets a background renderer rebase onto the pane worker's latest edit.
-func (h *Handler) editCardTransportLocked(
+func (h *Handler) editCardTransportCoordinated(
 	ctx context.Context,
 	message telegrambot.Message,
 	screen telegramui.Screen,
 ) (telegrambot.Message, error) {
 	key := cardTransportKey(message)
+	h.cardTransportMu.Lock()
 	current, locallyKnown := h.cardTransports[key]
+	h.cardTransportMu.Unlock()
 	if locallyKnown {
 		message = current
 	}
@@ -42,14 +44,16 @@ func (h *Handler) editCardTransportLocked(
 	// coordinator authoritative as well (and make transport fakes behave like
 	// the real Telegram client).
 	edited.ScreenHash = fingerprint
-	h.rememberCardTransportLocked(edited)
+	h.rememberCardTransport(edited)
 	return edited, nil
 }
 
-func (h *Handler) rememberCardTransportLocked(message telegrambot.Message) {
+func (h *Handler) rememberCardTransport(message telegrambot.Message) {
 	if message.ChatID == 0 || message.MessageID == 0 {
 		return
 	}
+	h.cardTransportMu.Lock()
+	defer h.cardTransportMu.Unlock()
 	if h.cardTransports == nil {
 		h.cardTransports = make(map[string]telegrambot.Message)
 	}

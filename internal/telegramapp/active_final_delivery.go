@@ -123,10 +123,11 @@ func (h *Handler) publishRecoveredFinalCard(
 	finalAt time.Time,
 	screen telegramui.Screen,
 ) error {
-	h.cardEditMu.Lock()
-	defer h.cardEditMu.Unlock()
-	h.cardMutationMu.Lock()
-	defer h.cardMutationMu.Unlock()
+	release, err := h.responseCards.acquire(ctx, actor.UserID)
+	if err != nil {
+		return err
+	}
+	defer release()
 
 	latest, err := h.service.Session(actor, expected.Ref())
 	if err != nil || !sameProviderRuntime(latest, expected) ||
@@ -167,7 +168,7 @@ func (h *Handler) publishRecoveredFinalCard(
 		return deleteReplacement(domain.ErrInvalidState)
 	}
 	h.rememberResolvedCardPageWithFollow(actor.UserID, expected.Ref(), screen, false)
-	h.rememberResponseCardLocked(ctx, actor, replacement, screen)
+	h.rememberResponseCardCoordinated(ctx, actor, replacement, screen)
 	committed, ok, commitErr := h.service.TelegramResponseCard(actor)
 	if commitErr != nil || !ok || committed.ChatID != replacement.ChatID ||
 		committed.MessageID != replacement.MessageID ||

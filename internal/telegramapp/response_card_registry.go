@@ -21,9 +21,12 @@ func (h *Handler) rememberResponseCard(
 	message telegrambot.Message,
 	screen telegramui.Screen,
 ) {
-	h.cardMutationMu.Lock()
-	defer h.cardMutationMu.Unlock()
-	h.rememberResponseCardLocked(ctx, actor, message, screen)
+	release, err := h.responseCards.acquire(ctx, actor.UserID)
+	if err != nil {
+		return
+	}
+	defer release()
+	h.rememberResponseCardCoordinated(ctx, actor, message, screen)
 }
 
 func (h *Handler) resolveCallbackCarrier(
@@ -39,13 +42,13 @@ func (h *Handler) resolveCallbackCarrier(
 	return resolved
 }
 
-func (h *Handler) rememberResponseCardLocked(
+func (h *Handler) rememberResponseCardCoordinated(
 	ctx context.Context,
 	actor application.Principal,
 	message telegrambot.Message,
 	screen telegramui.Screen,
 ) {
-	previous, exists, changed := h.recordResponseCard(ctx, actor, message, screen)
+	previous, exists, changed := h.recordResponseCardCoordinated(ctx, actor, message, screen)
 	if !changed {
 		return
 	}
@@ -64,7 +67,7 @@ func (h *Handler) rememberResponseCardLocked(
 	h.freezeHistoricalCard(ctx, actor, previousMessage, previous.Session)
 }
 
-func (h *Handler) recordResponseCard(
+func (h *Handler) recordResponseCardCoordinated(
 	ctx context.Context,
 	actor application.Principal,
 	message telegrambot.Message,

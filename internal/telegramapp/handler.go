@@ -41,6 +41,7 @@ type Handler struct {
 	voicePendingState
 	cardRuntimeState
 	providerStopRetryState
+	responseCards       responseCardCoordinator
 	transcriptTriggers  transcriptTriggerTracker
 	fileMu              sync.Mutex
 	deliveredFiles      map[string]bool
@@ -70,7 +71,7 @@ type Handler struct {
 	sessionStateSweepAt time.Time
 	viewMu              sync.Mutex
 	visibleCardViews    map[domain.UserID]visibleCardView
-	cardEditMu          sync.Mutex
+	cardTransportMu     sync.Mutex
 	cardTransports      map[string]telegrambot.Message
 	cardTransportOrder  []string
 	activity            *activityMessenger
@@ -99,6 +100,7 @@ func NewHandler(
 		voicePendingState:      newVoicePendingState(),
 		cardRuntimeState:       newCardRuntimeState(),
 		providerStopRetryState: newProviderStopRetryState(),
+		responseCards:          newResponseCardCoordinator(),
 		transcriptTriggers:     newTranscriptTriggerTracker(time.Now()),
 		deliveredFiles:         make(map[string]bool),
 		createFlows:            make(map[domain.UserID]*createFlow),

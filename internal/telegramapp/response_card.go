@@ -16,10 +16,11 @@ func (h *Handler) editResponseCard(
 	message telegrambot.Message,
 	screen telegramui.Screen,
 ) (telegrambot.Message, error) {
-	h.cardEditMu.Lock()
-	defer h.cardEditMu.Unlock()
-	h.cardMutationMu.Lock()
-	defer h.cardMutationMu.Unlock()
+	release, err := h.responseCards.acquire(ctx, actor.UserID)
+	if err != nil {
+		return telegrambot.Message{}, err
+	}
+	defer release()
 	// A background reconciliation may have already promoted this carrier while
 	// an older live-card worker was sleeping. Re-read the replicated identity so
 	// concurrent recovery paths cannot create two replacement cards.
@@ -56,15 +57,15 @@ func (h *Handler) editResponseCard(
 			return telegrambot.Message{}, err
 		}
 		_ = h.messenger.DeleteMessage(ctx, message)
-		h.recordResponseCard(ctx, actor, replacement, screen)
+		h.recordResponseCardCoordinated(ctx, actor, replacement, screen)
 		if activeErr == nil {
 			h.rememberResolvedCardPage(actor.UserID, active.Ref(), screen)
 		}
 		return replacement, nil
 	}
-	edited, err := h.editCardTransportLocked(ctx, message, screen)
+	edited, err := h.editCardTransportCoordinated(ctx, message, screen)
 	if err == nil {
-		h.rememberResponseCardLocked(ctx, actor, edited, screen)
+		h.rememberResponseCardCoordinated(ctx, actor, edited, screen)
 		if activeErr == nil {
 			h.rememberResolvedCardPage(actor.UserID, active.Ref(), screen)
 		}
@@ -82,10 +83,11 @@ func (h *Handler) repostFinalResponseCard(
 	// Completion can be observed both by the live worker and the heartbeat
 	// reconciler. Serialize promotion and compare the replicated carrier so one
 	// backend turn creates exactly one new Telegram message.
-	h.cardEditMu.Lock()
-	defer h.cardEditMu.Unlock()
-	h.cardMutationMu.Lock()
-	defer h.cardMutationMu.Unlock()
+	release, err := h.responseCards.acquire(ctx, actor.UserID)
+	if err != nil {
+		return telegrambot.Message{}, err
+	}
+	defer release()
 	current, currentOK, currentErr := h.service.TelegramResponseCard(actor)
 	if active, activeErr := h.service.ActiveSession(actor); activeErr != nil ||
 		active.Ref() != ref {
@@ -138,7 +140,7 @@ func (h *Handler) repostFinalResponseCard(
 	// response. Treat that content position as pinned; only an explicit Latest
 	// action may restore follow mode.
 	h.rememberResolvedCardPageWithFollow(actor.UserID, ref, screen, false)
-	h.recordResponseCard(ctx, actor, replacement, screen)
+	h.recordResponseCardCoordinated(ctx, actor, replacement, screen)
 	current, ok, recordErr := h.service.TelegramResponseCard(actor)
 	if recordErr != nil || !ok || current.ChatID != replacement.ChatID ||
 		current.MessageID != replacement.MessageID {

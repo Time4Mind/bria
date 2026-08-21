@@ -21,12 +21,15 @@ func (h *Handler) editExplicitSessionScreen(
 ) (telegrambot.Message, error) {
 	h.cancelPaneRefresh(actor.UserID)
 	queuedAt := time.Now()
-	h.cardEditMu.Lock()
-	defer h.cardEditMu.Unlock()
+	release, err := h.responseCards.acquire(ctx, actor.UserID)
+	if err != nil {
+		return telegrambot.Message{}, err
+	}
+	defer release()
 	if _, restoreTagged := restoreTimingFromContext(ctx); restoreTagged {
 		logSlowTelegramOperationContext(
 			ctx, "card_edit_queue", origin.MessageID, queuedAt, nil,
 		)
 	}
-	return h.editCardTransportLocked(ctx, origin, screen)
+	return h.editCardTransportCoordinated(ctx, origin, screen)
 }
