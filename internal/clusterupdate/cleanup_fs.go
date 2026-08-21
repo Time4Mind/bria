@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/Time4Mind/bria/internal/binaryidentity"
 )
 
 type releaseCandidate struct {
@@ -18,7 +20,11 @@ type releaseCandidate struct {
 	successful bool
 }
 
-func cleanupUpdateArtifacts(installRoot, activationPath string, now time.Time) (CleanupReport, error) {
+func cleanupUpdateArtifacts(
+	installRoot, activationPath string,
+	now time.Time,
+	additionalProtected []string,
+) (CleanupReport, error) {
 	root, present, err := secureCleanupRoot(installRoot)
 	if err != nil || !present {
 		return CleanupReport{}, err
@@ -36,6 +42,25 @@ func cleanupUpdateArtifacts(installRoot, activationPath string, now time.Time) (
 		if err := protectPathReference(activationPath, releasesRoot, lexicalReleasesRoot, protected); err != nil {
 			return CleanupReport{}, err
 		}
+		previousPath := filepath.Join(root, "previous")
+		if _, err := os.Lstat(previousPath); err == nil {
+			if err := protectPathReference(previousPath, releasesRoot, lexicalReleasesRoot, protected); err != nil {
+				return CleanupReport{}, err
+			}
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return CleanupReport{}, fmt.Errorf("inspect previous release: %w", err)
+		}
+		for _, path := range additionalProtected {
+			if path == "" {
+				continue
+			}
+			if !filepath.IsAbs(path) {
+				return CleanupReport{}, errors.New("additional protected release path is not absolute")
+			}
+			if err := protectPathReference(path, releasesRoot, lexicalReleasesRoot, protected); err != nil {
+				return CleanupReport{}, err
+			}
+		}
 		if err := protectPendingReference(filepath.Join(root, "update-pending.json"), releasesRoot, lexicalReleasesRoot, protected); err != nil {
 			return CleanupReport{}, err
 		}
@@ -51,7 +76,9 @@ func cleanupUpdateArtifacts(installRoot, activationPath string, now time.Time) (
 		return report, nil
 	}
 	if err := cleanupStaleEntries(releasesRoot, now, staleUpdateArtifactAge,
-		func(name string) bool { return strings.HasSuffix(name, ".stage") },
+		func(name string) bool {
+			return strings.HasSuffix(name, ".stage") || strings.HasPrefix(name, ".candidate-")
+		},
 		protected, &report); err != nil {
 		return report, err
 	}
@@ -142,7 +169,8 @@ func releaseCandidates(releasesRoot string, report *CleanupReport) ([]releaseCan
 			}
 			return nil, fmt.Errorf("inspect release %q: %w", path, err)
 		}
-		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() || strings.HasSuffix(entry.Name(), ".stage") {
+		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() || strings.HasSuffix(entry.Name(), ".stage") ||
+			strings.HasPrefix(entry.Name(), ".candidate-") {
 			if info.Mode()&os.ModeSymlink != 0 {
 				report.Skipped = append(report.Skipped, path)
 			}
@@ -273,9 +301,34 @@ func canonicalCleanupPath(path string) string {
 func hasReleaseBinary(path string) bool {
 	for _, name := range []string{"bria", "bria.exe"} {
 		info, err := os.Lstat(filepath.Join(path, name))
-		if err == nil && info.Mode().IsRegular() {
+		if err != nil || !info.Mode().IsRegular() || info.Size() <= 0 ||
+			info.Size() > binaryidentity.MaxExecutableBytes || name == "bria" && info.Mode().Perm()&0o111 == 0 {
+			continue
+		}
+		base := filepath.Base(path)
+		if len(base) != 64 {
 			return true
 		}
+		if _, err := hex.DecodeString(base); err != nil || strings.ToLower(base) != base {
+			return true
+		}
+		metadata, err := os.ReadFile(filepath.Join(path, "release.json"))
+		if err != nil || len(metadata) > 8<<10 {
+			return false
+		}
+		var identity struct {
+			Schema       int    `json:"schema"`
+			Commit       string `json:"commit"`
+			BuiltAt      string `json:"built_at"`
+			BinarySHA256 string `json:"binary_sha256"`
+		}
+		if json.Unmarshal(metadata, &identity) != nil || identity.Schema != 1 ||
+			!exactReleaseCommit(identity.Commit) || !exactReleaseTimestamp(identity.BuiltAt) ||
+			identity.BinarySHA256 != base {
+			return false
+		}
+		actual, err := binaryidentity.SHA256(filepath.Join(path, name))
+		return err == nil && actual == base
 	}
 	return false
 }

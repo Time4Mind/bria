@@ -23,18 +23,29 @@ escaped_home=$(xml_escape "$data_dir")
 escaped_user_home=$(xml_escape "$HOME")
 escaped_config=$(xml_escape "$config")
 escaped_binary=$(xml_escape "$binary")
+escaped_bin_dir=$(xml_escape "$(dirname -- "$binary")")
+install_prefix=$(dirname -- "$(dirname -- "$binary")")
+launcher="$install_prefix/launch-current"
+launcher_temporary="$launcher.tmp.$$"
+install -m 0755 "$project_root/scripts/launch-current-macos.sh" "$launcher_temporary"
+/bin/mv -f "$launcher_temporary" "$launcher"
+escaped_launcher=$(xml_escape "$launcher")
 temporary="$destination.tmp.$$"
 trap 'rm -f "$temporary"' EXIT HUP INT TERM
 sed -e "s|__BRIA_HOME__|$escaped_home|g" \
 	-e "s|__USER_HOME__|$escaped_user_home|g" \
+  -e "s|__BRIA_BIN_DIR__|$escaped_bin_dir|g" \
   -e "s|__BRIA_CONFIG__|$escaped_config|g" \
   -e "s|__BRIA_BINARY__|$escaped_binary|g" \
+  -e "s|__BRIA_LAUNCHER__|$escaped_launcher|g" \
   "$template" >"$temporary"
 plutil -lint "$temporary" >/dev/null
 chmod 0600 "$temporary"
 mv "$temporary" "$destination"
 trap - EXIT HUP INT TERM
-"$binary" provider-hook --config "$config" --install
+if [ "${BRIA_SKIP_PROVIDER_HOOKS:-0}" != 1 ]; then
+  BRIA_PROVIDER_HOOK_BINARY="$binary" "$binary" provider-hook --config "$config" --install
+fi
 service="gui/$(id -u)/com.time4mind.bria"
 domain="gui/$(id -u)"
 launchctl bootout "$service" 2>/dev/null || true

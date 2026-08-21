@@ -13,11 +13,15 @@ import (
 	"github.com/Time4Mind/bria/internal/processlog"
 )
 
-func confirmRunningUpdate(nodeConfig config.Config, manager *clusterupdate.Manager) {
+func confirmRunningUpdate(
+	nodeConfig config.Config,
+	manager *clusterupdate.Manager,
+	binarySHA256 string,
+) {
 	if nodeConfig.UpdateManifestURL == "" || manager == nil {
 		return
 	}
-	if err := manager.ConfirmInstalled(localBuildVersion()); err != nil {
+	if err := manager.ConfirmInstalled(localBuildVersion(), binarySHA256); err != nil {
 		processlog.Failuref(
 			processlog.Critical, processlog.FailureConsistency,
 			"bria update confirmation: outcome=failed",

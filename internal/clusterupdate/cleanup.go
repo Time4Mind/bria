@@ -31,16 +31,24 @@ type CleanupReport struct {
 }
 
 // CleanupUpdateArtifacts removes only Bria-owned update artifacts below the
-// configured install root. It keeps the active release, the pending rollback
-// target, and the two newest other release directories containing a Bria binary.
+// configured install root. It keeps the active, previous, explicitly supplied
+// running and pending rollback targets, plus the two newest other release
+// directories containing a Bria binary.
 // Staged releases and downloads older than 24 hours are removed separately.
 // The install root and activation path must be absolute. A missing root is a
 // successful no-op, which makes repeated cleanup idempotent.
-func CleanupUpdateArtifacts(installRoot, activationPath string, now time.Time) (CleanupReport, error) {
+func CleanupUpdateArtifacts(
+	installRoot, activationPath string,
+	now time.Time,
+	additionalProtected ...string,
+) (CleanupReport, error) {
 	if !filepath.IsAbs(installRoot) || !filepath.IsAbs(activationPath) {
 		return CleanupReport{}, errors.New("cleanup paths must be absolute")
 	}
-	return cleanupUpdateArtifacts(filepath.Clean(installRoot), filepath.Clean(activationPath), cleanupNow(now))
+	return cleanupUpdateArtifacts(
+		filepath.Clean(installRoot), filepath.Clean(activationPath), cleanupNow(now),
+		additionalProtected,
+	)
 }
 
 // CleanupRestoreAppliedArtifacts removes only files produced by
@@ -74,7 +82,9 @@ func (m *Manager) CleanupArtifacts(now time.Time) (CleanupReport, error) {
 	if activeManagerPhase(m.status.Phase) {
 		return CleanupReport{}, ErrCleanupBusy
 	}
-	updateReport, err := CleanupUpdateArtifacts(m.config.InstallRoot, m.config.ActivationPath, now)
+	updateReport, err := CleanupUpdateArtifacts(
+		m.config.InstallRoot, m.config.ActivationPath, now, m.config.RunningPath,
+	)
 	if err != nil {
 		return updateReport, err
 	}

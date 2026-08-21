@@ -73,6 +73,7 @@ type ManagerConfig struct {
 	NodeID         string
 	InstallRoot    string
 	ActivationPath string
+	RunningPath    string
 	Fetcher        Fetcher
 	Client         *http.Client
 	Preflight      func(context.Context, string) error
@@ -95,6 +96,12 @@ func NewManager(config ManagerConfig) (*Manager, error) {
 	}
 	config.InstallRoot = filepath.Clean(config.InstallRoot)
 	config.ActivationPath = filepath.Clean(config.ActivationPath)
+	if config.RunningPath != "" {
+		if !filepath.IsAbs(config.RunningPath) {
+			return nil, errors.New("cluster update running path must be absolute")
+		}
+		config.RunningPath = filepath.Clean(config.RunningPath)
+	}
 	if config.Client != nil {
 		config.Fetcher.Client = config.Client
 	}
@@ -166,16 +173,6 @@ func (m *Manager) EnsureCompatible(
 		m.persistBootstrapFailure(request, err)
 		return result, err
 	}
-	if m.config.Watchdog != nil {
-		err = m.config.Watchdog(request)
-	} else {
-		err = m.startWatchdog(request)
-	}
-	if err != nil {
-		_, _ = restorePending(filepath.Join(m.config.InstallRoot, "update-pending.json"), request.UpdateID)
-		m.persistBootstrapFailure(request, err)
-		return result, err
-	}
 	result.ActivationPath = m.config.ActivationPath
 	return result, nil
 }
@@ -218,16 +215,6 @@ func (m *Manager) install(request Request) {
 	}
 	if err == nil {
 		err = m.installVerified(ctx, request, manifest)
-	}
-	if err == nil {
-		if m.config.Watchdog != nil {
-			err = m.config.Watchdog(request)
-		} else {
-			err = m.startWatchdog(request)
-		}
-		if err != nil {
-			_, _ = restorePending(filepath.Join(m.config.InstallRoot, "update-pending.json"), request.UpdateID)
-		}
 	}
 	m.mu.Lock()
 	if err != nil {
@@ -276,11 +263,14 @@ func (m *Manager) startWatchdog(request Request) error {
 }
 
 type pendingUpdate struct {
-	NodeID      string `json:"node_id"`
-	UpdateID    string `json:"update_id"`
-	Version     string `json:"version"`
-	Previous    string `json:"previous"`
-	CurrentLink string `json:"current_link"`
+	NodeID         string `json:"node_id"`
+	UpdateID       string `json:"update_id"`
+	Version        string `json:"version"`
+	Previous       string `json:"previous"`
+	PreviousSHA256 string `json:"previous_sha256,omitempty"`
+	Next           string `json:"next,omitempty"`
+	NextSHA256     string `json:"next_sha256,omitempty"`
+	CurrentLink    string `json:"current_link"`
 }
 
 func shortError(err error) string {
@@ -305,13 +295,43 @@ func safeReleaseName(value string) string {
 }
 
 func writePending(path string, value pendingUpdate) error {
-	temporary := path + ".tmp"
 	data, err := json.Marshal(value)
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(temporary, data, 0o600); err != nil {
+	directory := filepath.Dir(path)
+	temporary, err := os.CreateTemp(directory, ".update-pending-*.tmp")
+	if err != nil {
 		return err
 	}
-	return os.Rename(temporary, path)
+	temporaryPath := temporary.Name()
+	defer os.Remove(temporaryPath)
+	if err := temporary.Chmod(0o600); err != nil {
+		_ = temporary.Close()
+		return err
+	}
+	if _, err := temporary.Write(data); err != nil {
+		_ = temporary.Close()
+		return err
+	}
+	if err := temporary.Sync(); err != nil {
+		_ = temporary.Close()
+		return err
+	}
+	if err := temporary.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(temporaryPath, path); err != nil {
+		return err
+	}
+	dir, err := os.Open(directory)
+	if err != nil {
+		return err
+	}
+	syncErr := dir.Sync()
+	closeErr := dir.Close()
+	if syncErr != nil {
+		return syncErr
+	}
+	return closeErr
 }

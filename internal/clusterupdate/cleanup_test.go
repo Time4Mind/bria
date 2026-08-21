@@ -159,6 +159,45 @@ func TestCleanupUpdateArtifactsKeepsTwoPreviousWhenActiveIsNewest(t *testing.T) 
 	}
 }
 
+func TestCleanupUpdateArtifactsProtectsPreviousAndRunningTargets(t *testing.T) {
+	root := t.TempDir()
+	releases := filepath.Join(root, "releases")
+	if err := os.Mkdir(releases, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Unix(3_000_000, 0).UTC()
+	active := filepath.Join(releases, "active")
+	previous := filepath.Join(releases, "previous-release")
+	running := filepath.Join(releases, "running")
+	newest := filepath.Join(releases, "newest")
+	second := filepath.Join(releases, "second")
+	old := filepath.Join(releases, "old")
+	for _, release := range []string{active, previous, running, newest, second, old} {
+		writeRelease(t, release)
+	}
+	for index, release := range []string{active, previous, running, newest, second, old} {
+		setMTime(t, release, now.Add(-time.Duration(index+1)*time.Hour))
+	}
+	activation := filepath.Join(root, "current")
+	if err := os.Symlink(active, activation); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(previous, filepath.Join(root, "previous")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := CleanupUpdateArtifacts(root, activation, now, filepath.Join(running, "bria")); err != nil {
+		t.Fatal(err)
+	}
+	for _, kept := range []string{active, previous, running, newest, second} {
+		if _, err := os.Stat(kept); err != nil {
+			t.Fatalf("protected release %q was removed: %v", kept, err)
+		}
+	}
+	if _, err := os.Stat(old); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("unprotected old release remains: %v", err)
+	}
+}
+
 func TestCleanupRestoreAppliedArtifactsKeepsRecentAndSkipsSymlinks(t *testing.T) {
 	root := t.TempDir()
 	now := time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC)
@@ -255,6 +294,9 @@ func writeRelease(t *testing.T, path string) {
 		t.Fatal(err)
 	}
 	writeFile(t, filepath.Join(path, "bria"))
+	if err := os.Chmod(filepath.Join(path, "bria"), 0o700); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func writeFile(t *testing.T, path string) {

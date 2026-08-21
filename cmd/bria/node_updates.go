@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -59,16 +60,13 @@ func newLocalUpdateManager(
 	if err != nil {
 		return nil, err
 	}
-	activationPath, err := resolveActivationPath()
+	installRoot, activationPath, runningPath, err := localInstallPaths(nodeConfig)
 	if err != nil {
 		return nil, err
 	}
-	installRoot := nodeConfig.EffectiveUpdateInstallRoot()
-	if filepath.Base(filepath.Dir(activationPath)) == "current" && nodeConfig.UpdateInstallRoot == "" {
-		installRoot = filepath.Dir(filepath.Dir(activationPath))
-	}
 	return clusterupdate.NewManager(clusterupdate.ManagerConfig{
 		NodeID: nodeConfig.NodeID, InstallRoot: installRoot, ActivationPath: activationPath,
+		RunningPath: runningPath,
 		Fetcher: clusterupdate.Fetcher{
 			URL: nodeConfig.UpdateManifestURL, PublicKey: publicKey, Client: httpClient,
 		},
@@ -78,6 +76,47 @@ func newLocalUpdateManager(
 		},
 		Restart: restart,
 	})
+}
+
+type localReleaseCleaner struct {
+	installRoot, activationPath, runningPath string
+}
+
+func (cleaner localReleaseCleaner) CleanupArtifacts(now time.Time) (clusterupdate.CleanupReport, error) {
+	return clusterupdate.CleanupUpdateArtifacts(
+		cleaner.installRoot, cleaner.activationPath, now, cleaner.runningPath,
+	)
+}
+
+func newLocalReleaseCleaner(nodeConfig config.Config) (localReleaseCleaner, error) {
+	installRoot, activationPath, runningPath, err := localInstallPaths(nodeConfig)
+	return localReleaseCleaner{
+		installRoot: installRoot, activationPath: activationPath, runningPath: runningPath,
+	}, err
+}
+
+func localInstallPaths(nodeConfig config.Config) (string, string, string, error) {
+	activationPath, err := resolveActivationPath()
+	if err != nil {
+		return "", "", "", err
+	}
+	installRoot := nodeConfig.EffectiveUpdateInstallRoot()
+	if filepath.Base(filepath.Dir(activationPath)) == "current" && nodeConfig.UpdateInstallRoot == "" {
+		installRoot = filepath.Dir(filepath.Dir(activationPath))
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		return "", "", "", errors.New("resolve running Bria executable")
+	}
+	runningPath, err := filepath.EvalSymlinks(executable)
+	if err != nil {
+		return "", "", "", errors.New("resolve immutable running Bria release")
+	}
+	runningPath, err = filepath.Abs(runningPath)
+	if err != nil {
+		return "", "", "", errors.New("resolve immutable running Bria release")
+	}
+	return installRoot, activationPath, runningPath, nil
 }
 
 func bootstrapNodeCompatibility(

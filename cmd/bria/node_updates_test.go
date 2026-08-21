@@ -7,7 +7,23 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/Time4Mind/bria/internal/config"
 )
+
+func TestLocalReleaseCleanerExistsWithoutUpdateManifest(t *testing.T) {
+	cleaner, err := newLocalReleaseCleaner(config.Config{DataDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cleaner.installRoot == "" || cleaner.activationPath == "" || cleaner.runningPath == "" {
+		t.Fatalf("cleaner paths = %#v", cleaner)
+	}
+	if _, err := cleaner.CleanupArtifacts(time.Now()); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestPreflightUpdateCandidateAcceptsCurrentConfig(t *testing.T) {
 	if runtime.GOOS == "windows" {

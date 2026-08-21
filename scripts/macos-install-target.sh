@@ -28,30 +28,23 @@ resolve_macos_install_target() {
 		return 1
 	}
 
-  installed_node=$(
+  installed_arg1=$(
     "$plist_buddy" -c 'Print :ProgramArguments:1' "$installed_plist" 2>/dev/null
 	) || {
 		macos_install_target_error "missing ProgramArguments[1]"
 		return 1
 	}
-  installed_run=$(
-    "$plist_buddy" -c 'Print :ProgramArguments:2' "$installed_plist" 2>/dev/null
-	) || {
-		macos_install_target_error "missing ProgramArguments[2]"
-		return 1
-	}
-  installed_flag=$(
-    "$plist_buddy" -c 'Print :ProgramArguments:3' "$installed_plist" 2>/dev/null
-	) || {
-		macos_install_target_error "missing ProgramArguments[3]"
-		return 1
-	}
-  installed_config=$(
-    "$plist_buddy" -c 'Print :ProgramArguments:4' "$installed_plist" 2>/dev/null
-	) || {
-		macos_install_target_error "missing ProgramArguments[4]"
-		return 1
-	}
+  if [ "$installed_arg1" = node ]; then
+    installed_node=$installed_arg1
+    installed_run=$("$plist_buddy" -c 'Print :ProgramArguments:2' "$installed_plist" 2>/dev/null) || return 1
+    installed_flag=$("$plist_buddy" -c 'Print :ProgramArguments:3' "$installed_plist" 2>/dev/null) || return 1
+    installed_config=$("$plist_buddy" -c 'Print :ProgramArguments:4' "$installed_plist" 2>/dev/null) || return 1
+  else
+    installed_node=$("$plist_buddy" -c 'Print :ProgramArguments:2' "$installed_plist" 2>/dev/null) || return 1
+    installed_run=$("$plist_buddy" -c 'Print :ProgramArguments:3' "$installed_plist" 2>/dev/null) || return 1
+    installed_flag=$("$plist_buddy" -c 'Print :ProgramArguments:4' "$installed_plist" 2>/dev/null) || return 1
+    installed_config=$("$plist_buddy" -c 'Print :ProgramArguments:5' "$installed_plist" 2>/dev/null) || return 1
+  fi
   installed_data_dir=$(
     "$plist_buddy" -c 'Print :WorkingDirectory' "$installed_plist" 2>/dev/null
 	) || {

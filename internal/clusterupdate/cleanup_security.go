@@ -49,6 +49,9 @@ func removeOwnedEntry(path, root string) error {
 		return errors.New("refusing to remove symlink artifact")
 	}
 	if info.IsDir() {
+		if err := makeOwnedTreeRemovable(path); err != nil {
+			return fmt.Errorf("prepare artifact directory %q for removal: %w", path, err)
+		}
 		if err := os.RemoveAll(path); err != nil {
 			return fmt.Errorf("remove artifact directory %q: %w", path, err)
 		}
@@ -58,6 +61,21 @@ func removeOwnedEntry(path, root string) error {
 		return fmt.Errorf("remove artifact %q: %w", path, err)
 	}
 	return nil
+}
+
+func makeOwnedTreeRemovable(root string) error {
+	return filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.Type()&os.ModeSymlink != 0 {
+			return errors.New("refusing to prepare symlink tree for removal")
+		}
+		if entry.IsDir() {
+			return os.Chmod(path, 0o700)
+		}
+		return os.Chmod(path, 0o600)
+	})
 }
 
 func pathWithin(root, path string) bool {

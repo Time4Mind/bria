@@ -293,7 +293,16 @@ func startNodeRuntimeControl(
 	go runLocalArchivePurgeReconciler(
 		ctx, domain.NodeID(nodeConfig.NodeID), node.State(), archiveWriter, bindingStore,
 	)
-	go runNodeArtifactCleanup(ctx, nodeConfig.DataDir, updates.local)
+	artifactCleaner := updateArtifactCleaner(updates.local)
+	if artifactCleaner == nil {
+		cleaner, cleanerErr := newLocalReleaseCleaner(nodeConfig)
+		if cleanerErr != nil {
+			_ = control.Close()
+			return nil, cleanerErr
+		}
+		artifactCleaner = cleaner
+	}
+	go runNodeArtifactCleanup(ctx, nodeConfig.DataDir, artifactCleaner)
 	go func() {
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)

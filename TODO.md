@@ -48,7 +48,10 @@
   sampler пишет current RSS, goroutine, FD и прямых дочерних процессов с cap,
   cancellation и partial availability; процессы внутри tmux не выдаются за
   прямых потомков Bria.
-- [ ] P12. Сохранить provenance развертываний. Startup должен печатать точные
-  version/commit и уникальный binary identity; история не должна зависеть от
-  перезаписываемого `current`-пути. В аудите промежуточный commit работал 97 с,
-  но восстановить его binary после следующей установки было невозможно.
+- [x] P12. Provenance развертываний хранится независимо от `current`: локальная
+  macOS-установка создаёт immutable `releases/<binary-sha256>` с `release.json`,
+  атомарно переключает `current` и сохраняет `previous`; legacy in-place
+  directory переносится целиком как первый rollback target. `version` и startup
+  service record содержат точные version, commit, build time и SHA-256
+  фактического executable. Cleanup защищает active, previous, running и pending
+  releases, а также сохраняет ещё два последних executable artifacts.

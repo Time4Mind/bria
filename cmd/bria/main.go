@@ -16,9 +16,12 @@ import (
 )
 
 type versionOutput struct {
+	Schema       int    `json:"schema"`
 	Name         string `json:"name"`
 	Version      string `json:"version"`
 	Commit       string `json:"commit"`
+	BuiltAt      string `json:"built_at"`
+	BinarySHA256 string `json:"binary_sha256"`
 	NodeProtocol int    `json:"node_protocol"`
 	Go           string `json:"go"`
 	OS           string `json:"os"`
@@ -35,11 +38,12 @@ type probeOutput struct {
 }
 
 type doctorOutput struct {
-	Version   versionOutput `json:"build"`
-	BootID    string        `json:"boot_id,omitempty"`
-	BootError string        `json:"boot_error,omitempty"`
-	Tmux      probeOutput   `json:"tmux"`
-	Backends  []probeOutput `json:"backends"`
+	Version    versionOutput `json:"build"`
+	BuildError string        `json:"build_error,omitempty"`
+	BootID     string        `json:"boot_id,omitempty"`
+	BootError  string        `json:"boot_error,omitempty"`
+	Tmux       probeOutput   `json:"tmux"`
+	Backends   []probeOutput `json:"backends"`
 }
 
 func main() {
@@ -51,7 +55,12 @@ func main() {
 		if len(os.Args) != 2 {
 			usage()
 		}
-		writeJSON(buildVersion())
+		build, err := buildVersion()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "bria version: binary identity unavailable")
+			os.Exit(1)
+		}
+		writeJSON(build)
 	case "doctor":
 		if len(os.Args) != 2 {
 			usage()
@@ -103,18 +112,33 @@ func usage() {
 	os.Exit(2)
 }
 
-func buildVersion() versionOutput {
-	return versionOutput{
-		Name: "bria", Version: buildinfo.Version, Commit: buildinfo.Commit,
+func buildVersion() (versionOutput, error) {
+	output := versionOutput{
+		Schema: 1, Name: "bria", Version: buildinfo.Version, Commit: buildinfo.Commit,
+		BuiltAt:      buildinfo.BuiltAt,
 		NodeProtocol: clusterupdate.NodeProtocolVersion,
 		Go:           runtime.Version(), OS: runtime.GOOS, Arch: runtime.GOARCH,
 	}
+	if !validBuildVersion(output.Version) || !validBuildCommit(output.Commit) ||
+		!validBuildTimestamp(output.BuiltAt) {
+		return versionOutput{}, errors.New("invalid embedded Bria build identity")
+	}
+	var err error
+	output.BinarySHA256, err = currentBinarySHA256()
+	if err != nil {
+		return versionOutput{}, errors.New("Bria binary identity unavailable")
+	}
+	return output, nil
 }
 
 func doctor() (doctorOutput, bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	output := doctorOutput{Version: buildVersion()}
+	build, buildErr := buildVersion()
+	output := doctorOutput{Version: build}
+	if buildErr != nil {
+		output.BuildError = "binary identity unavailable"
+	}
 	bootID, err := platform.NewBootIDProvider().Current(ctx)
 	if err != nil {
 		output.BootError = err.Error()
@@ -149,7 +173,7 @@ func doctor() (doctorOutput, bool) {
 		}
 		output.Backends = append(output.Backends, item)
 	}
-	return output, output.BootID != "" && output.Tmux.Available && availableBackends > 0
+	return output, buildErr == nil && output.BootID != "" && output.Tmux.Available && availableBackends > 0
 }
 
 func capabilityStrings(capabilities []runtimehost.Capability) []string {

@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"runtime"
 	"time"
 )
 
@@ -37,21 +36,48 @@ func (m *Manager) downloadAndActivate(
 		return err
 	}
 	m.setStatus(request, PhaseVerifying, 60, artifact.Size, artifact.Size)
-	releaseName := safeReleaseName(
-		request.Version + "-" + request.UpdateID + "-" + runtime.GOOS + "-" + runtime.GOARCH,
-	)
-	destination := filepath.Join(m.config.InstallRoot, "releases", releaseName)
+	releasesRoot := filepath.Join(m.config.InstallRoot, "releases")
+	candidateFile, err := os.CreateTemp(releasesRoot, ".candidate-*.reserve")
+	if err != nil {
+		return err
+	}
+	candidate := candidateFile.Name()
+	if err := candidateFile.Close(); err != nil {
+		return err
+	}
+	if err := os.Remove(candidate); err != nil {
+		return err
+	}
+	defer func() {
+		_ = makeOwnedTreeRemovable(candidate)
+		_ = os.RemoveAll(candidate)
+	}()
+	m.setStatus(request, PhaseExtracting, 68, artifact.Size, artifact.Size)
+	if err := extractRelease(temporaryPath, candidate); err != nil {
+		return err
+	}
+	m.setStatus(request, PhaseVerifying, 76, artifact.Size, artifact.Size)
+	binarySHA256, err := verifyReleaseBinary(candidate, request.Version, minimumNodeProtocol, artifact.SHA256)
+	if err != nil {
+		return err
+	}
+	destination := filepath.Join(releasesRoot, binarySHA256)
 	if _, err := os.Stat(destination); errors.Is(err, os.ErrNotExist) {
-		m.setStatus(request, PhaseExtracting, 68, artifact.Size, artifact.Size)
-		if err := extractRelease(temporaryPath, destination); err != nil {
+		if err := os.Rename(candidate, destination); err != nil {
 			return err
 		}
 	} else if err != nil {
 		return err
-	}
-	m.setStatus(request, PhaseVerifying, 76, artifact.Size, artifact.Size)
-	if err := verifyReleaseBinary(destination, request.Version, minimumNodeProtocol); err != nil {
-		return err
+	} else {
+		if err := verifyInstalledReleaseMetadata(destination); err != nil {
+			return err
+		}
+		if equal, err := sameRuntimeReleasePayload(candidate, destination); err != nil || !equal {
+			if err != nil {
+				return err
+			}
+			return errors.New("existing release payload does not match candidate")
+		}
 	}
 	m.setStatus(request, PhasePreflight, 84, artifact.Size, artifact.Size)
 	if err := m.config.Preflight(ctx, releaseBinary(destination)); err != nil {

@@ -20,6 +20,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Time4Mind/bria/internal/binaryidentity"
 )
 
 func TestManagerDownloadsVerifiesActivatesAndConfirms(t *testing.T) {
@@ -87,7 +89,11 @@ func TestManagerDownloadsVerifiesActivatesAndConfirms(t *testing.T) {
 	if err != nil || filepath.Base(resolved) != "bria" || resolved == activation {
 		t.Fatalf("activation target = %q, err=%v", resolved, err)
 	}
-	if err := ConfirmInstalled(filepath.Join(root, "software"), "v2"); err != nil {
+	runningSHA256, err := binaryidentity.SHA256(resolved)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ConfirmInstalled(filepath.Join(root, "software"), "v2", runningSHA256); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -189,7 +195,7 @@ func releaseFixtureWithProtocol(t *testing.T, version string, protocol int) []by
 	gzipWriter := gzip.NewWriter(&buffer)
 	tarWriter := tar.NewWriter(gzipWriter)
 	content := []byte(fmt.Sprintf(
-		"#!/bin/sh\nprintf '{\"version\":\"%s\",\"node_protocol\":%d}\\n'\n",
+		"#!/bin/sh\nif command -v shasum >/dev/null 2>&1; then sha=$(shasum -a 256 \"$0\" | awk '{print $1}'); else sha=$(sha256sum \"$0\" | awk '{print $1}'); fi\nprintf '{\"version\":\"%s\",\"commit\":\"0123456789abcdef0123456789abcdef01234567\",\"built_at\":\"1750000000\",\"binary_sha256\":\"%%s\",\"node_protocol\":%d}\\n' \"$sha\"\n",
 		version, protocol,
 	))
 	if err := tarWriter.WriteHeader(&tar.Header{Name: "bria", Mode: 0o755, Size: int64(len(content))}); err != nil {

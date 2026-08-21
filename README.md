@@ -134,8 +134,12 @@ outside the current support promise.
 On an Apple Silicon Mac, a deployment agent (including one invoked through
 CCBot) can clone this repository and run `scripts/install-macos.sh`. The
 idempotent user-level installer builds Bria and the Apple Speech helper,
-installs them under `~/.local/opt/bria/current`, and loads launchd once the
-node configuration exists. A fresh `cluster init` is a single-node bootstrap.
+installs each build under the immutable
+`~/.local/opt/bria/releases/<binary-sha256>` identity, atomically repoints
+`~/.local/opt/bria/current`, and loads launchd once the node configuration
+exists. The `previous` rollback target and two newest additional executable
+releases are retained alongside every active/running/pending target. A fresh
+`cluster init` is a single-node bootstrap.
 On later bare installs, the installer preserves the config and data directory
 already recorded in the Bria LaunchAgent, so reinstalling a binary cannot
 silently switch node profiles. Set both `BRIA_DATA_DIR` and `BRIA_CONFIG` when

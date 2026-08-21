@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -30,9 +31,14 @@ func runProviderHook(arguments []string) error {
 		return err
 	}
 	if *install {
-		binary, err := os.Executable()
-		if err != nil {
-			return err
+		binary := os.Getenv("BRIA_PROVIDER_HOOK_BINARY")
+		if binary == "" {
+			binary, err = os.Executable()
+			if err != nil {
+				return err
+			}
+		} else if !filepath.IsAbs(binary) {
+			return errors.New("installed Bria hook binary path must be absolute")
 		}
 		home, err := os.UserHomeDir()
 		if err != nil {

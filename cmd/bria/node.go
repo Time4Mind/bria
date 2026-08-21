@@ -67,6 +67,13 @@ func runNode(arguments []string) error {
 	if err != nil {
 		return err
 	}
+	build, err := buildVersion()
+	if err != nil {
+		return errors.New("Bria binary identity is unavailable")
+	}
+	if err := verifyRunningReleaseIdentity(build); err != nil {
+		return errors.New("Bria installed release identity is invalid")
+	}
 	processLogs, logErr := processlog.Start(
 		filepath.Join(nodeConfig.DataDir, "logs"),
 		processlog.Identity{Version: buildinfo.Version, Commit: buildinfo.Commit},
@@ -76,6 +83,7 @@ func runNode(arguments []string) error {
 	} else {
 		defer processLogs.Close()
 	}
+	logNodeBuildIdentity(build)
 	bootstrapCtx, cancelBootstrap := context.WithTimeout(context.Background(), 10*time.Minute)
 	bootstrapBinary, err := bootstrapNodeCompatibility(
 		bootstrapCtx, nodeConfig, absoluteConfigPath,
@@ -212,8 +220,23 @@ func runNode(arguments []string) error {
 	if err != nil {
 		return fmt.Errorf("start interaction adapters: %w", err)
 	}
-	confirmRunningUpdate(nodeConfig, runtimeControl.updates.local)
+	confirmRunningUpdate(nodeConfig, runtimeControl.updates.local, build.BinarySHA256)
 	return waitForNodeRuntime(ctx, runtimeControl, adapterErrors)
+}
+
+func logNodeBuildIdentity(build versionOutput) {
+	if len(build.BinarySHA256) != 64 {
+		processlog.Failuref(
+			processlog.Service, processlog.FailureIO,
+			"bria startup: build_version=%q build_commit=%q built_at=%q binary_sha256=unavailable outcome=identity_failed",
+			build.Version, build.Commit, build.BuiltAt,
+		)
+		return
+	}
+	processlog.Servicef(
+		"bria startup: build_version=%q build_commit=%q built_at=%q binary_sha256=%s outcome=identified",
+		build.Version, build.Commit, build.BuiltAt, build.BinarySHA256,
+	)
 }
 
 func registerLocalNode(

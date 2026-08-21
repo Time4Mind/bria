@@ -33,8 +33,8 @@ func (m *Manager) loadStatus() {
 // ConfirmInstalled disarms rollback and publishes the post-restart state to
 // local progress readers. The replicated coordinator remains the authority for
 // completing the cluster-wide rollout.
-func (m *Manager) ConfirmInstalled(version string) error {
-	if err := ConfirmInstalled(m.config.InstallRoot, version); err != nil {
+func (m *Manager) ConfirmInstalled(version string, binarySHA256 ...string) error {
+	if err := ConfirmInstalled(m.config.InstallRoot, version, binarySHA256...); err != nil {
 		return err
 	}
 	m.mu.Lock()

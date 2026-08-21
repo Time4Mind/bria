@@ -53,6 +53,29 @@ esac
     return helper
 
 
+def install_launcher_plist_buddy(home: Path) -> Path:
+    launch_agents = home / "Library" / "LaunchAgents"
+    launch_agents.mkdir(parents=True)
+    (launch_agents / "com.time4mind.bria.plist").write_text("fixture", encoding="utf-8")
+    helper = home / "fake-launcher-plist-buddy"
+    helper.write_text(
+        """#!/bin/sh
+case "$2" in
+  'Print :ProgramArguments:1') printf '%s\\n' /opt/bria/current/bria ;;
+  'Print :ProgramArguments:2') printf '%s\\n' node ;;
+  'Print :ProgramArguments:3') printf '%s\\n' run ;;
+  'Print :ProgramArguments:4') printf '%s\\n' --config ;;
+  'Print :ProgramArguments:5') printf '%s\\n' "$FAKE_CONFIG" ;;
+  'Print :WorkingDirectory') printf '%s\\n' "$FAKE_DATA_DIR" ;;
+  *) exit 1 ;;
+esac
+""",
+        encoding="utf-8",
+    )
+    helper.chmod(0o755)
+    return helper
+
+
 def test_fresh_install_uses_single_node_bootstrap_path(tmp_path: Path) -> None:
     data_dir, config = resolve_target(tmp_path)
 
@@ -63,6 +86,23 @@ def test_fresh_install_uses_single_node_bootstrap_path(tmp_path: Path) -> None:
 def test_bare_reinstall_preserves_installed_profile(tmp_path: Path) -> None:
     profile = tmp_path / ".bria-standalone"
     helper = install_fake_plist_buddy(tmp_path, profile)
+
+    data_dir, config = resolve_target(
+        tmp_path,
+        {
+            "BRIA_PLIST_BUDDY": str(helper),
+            "FAKE_DATA_DIR": str(profile),
+            "FAKE_CONFIG": str(profile / "config.json"),
+        },
+    )
+
+    assert data_dir == str(profile)
+    assert config == str(profile / "config.json")
+
+
+def test_bare_reinstall_preserves_launcher_installed_profile(tmp_path: Path) -> None:
+    profile = tmp_path / ".bria-launcher"
+    helper = install_launcher_plist_buddy(tmp_path)
 
     data_dir, config = resolve_target(
         tmp_path,
