@@ -81,17 +81,20 @@ func TestArchivePagesUseSameSixItemVisualAndKeepFinalGap(t *testing.T) {
 		t.Fatalf("archive text contains page or count metadata: %q", screen.Text)
 	}
 	want := "🗄 Archive · Mac\n\n" +
-		"7. session-7\n· Контекст сессии.\n· Нужный результат.\n─────\n\n" +
-		"8. session-8\n· Контекст сессии.\n· Нужный результат.\n─────\n\n" +
-		"9. session-9\n· Контекст сессии.\n· Нужный результат.\n─────\n\n" +
-		"10. session-10\n· Контекст сессии.\n· Нужный результат.\n─────\n\n" +
-		"11. session-11\n· Контекст сессии.\n· Нужный результат.\n─────\n\n" +
-		"12. session-12\n· Контекст сессии.\n· Нужный результат.\n─────\n⠀"
+		"7. session-7\n· Контекст сессии.\n· Нужный результат.\n\n─────\n\n" +
+		"8. session-8\n· Контекст сессии.\n· Нужный результат.\n\n─────\n\n" +
+		"9. session-9\n· Контекст сессии.\n· Нужный результат.\n\n─────\n\n" +
+		"10. session-10\n· Контекст сессии.\n· Нужный результат.\n\n─────\n\n" +
+		"11. session-11\n· Контекст сессии.\n· Нужный результат.\n\n─────\n\n" +
+		"12. session-12\n· Контекст сессии.\n· Нужный результат.\n\n─────\n⠀"
 	if screen.Text != want {
 		t.Fatalf("archive text mismatch\n--- got ---\n%s\n--- want ---\n%s", screen.Text, want)
 	}
 	if got := strings.Count(screen.Text, "─────"); got != 6 {
 		t.Fatalf("separators=%d, want 6", got)
+	}
+	if strings.Count(screen.Text, "\n\n─────\n") != 6 {
+		t.Fatalf("separator blocks are not detached from descriptions: %q", screen.Text)
 	}
 	assertGoldenGrid(t, screen, `[7. session-7 -> archive_item@s7] | [8. session-8 -> archive_item@s8]
 [9. session-9 -> archive_item@s9] | [10. session-10 -> archive_item@s10]

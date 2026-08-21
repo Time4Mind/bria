@@ -28,7 +28,8 @@ Describe the coding session in exactly two concise sentences in the language of 
 The first sentence states the context or problem. The second states the requested outcome.
 Do not use headings, labels, bullets, markdown, or quotes.
 Reply only with strict JSON in this shape: {"lines":["First sentence.","Second sentence."]}
-Each sentence must be at most 180 characters.
+Both sentences together must contain at most 16 words.
+Each sentence must also be at most 180 characters.
 
 Initial user prompts: %s`
 

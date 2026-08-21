@@ -47,7 +47,7 @@ func TestGeneratorUsesConfiguredCheapModelAndStrictTwoLineJSON(t *testing.T) {
 	}
 	joined := strings.Join(runner.args, " ")
 	if runner.executable != "codex" || !strings.Contains(joined, "--model gpt-5.6-luna") ||
-		strings.Contains(joined, "четвёртый запрос") {
+		!strings.Contains(joined, "at most 16 words") || strings.Contains(joined, "четвёртый запрос") {
 		t.Fatalf("executable=%q args=%q", runner.executable, runner.args)
 	}
 }
@@ -57,6 +57,8 @@ func TestDecodeDescriptionRejectsTrailingOrOversizedOutput(t *testing.T) {
 		[]byte(`{"lines":["One.","Two."]}{}`),
 		[]byte(`{"lines":["One."]}`),
 		[]byte(strings.Repeat("x", maxOutputBytes+1)),
+		[]byte(`{"lines":["one two three four five six seven eight.",` +
+			`"nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen."]}`),
 	} {
 		if _, err := decodeDescription(raw); err == nil {
 			t.Fatalf("accepted invalid output of %d bytes", len(raw))

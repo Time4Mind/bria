@@ -11,6 +11,7 @@ import (
 const (
 	ArchiveDescriptionVersion  = 1
 	MaxArchiveDescriptionRunes = 180
+	MaxArchiveDescriptionWords = 16
 )
 
 // NormalizeArchiveDescription bounds the only model-produced content that is
@@ -35,6 +36,9 @@ func NormalizeArchiveDescription(lines []string) ([]string, error) {
 			}
 		}
 		normalized[index] = line
+	}
+	if len(strings.Fields(strings.Join(normalized, " "))) > MaxArchiveDescriptionWords {
+		return nil, errors.New("archive description contains too many words")
 	}
 	return normalized, nil
 }

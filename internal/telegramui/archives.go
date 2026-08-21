@@ -50,7 +50,7 @@ func RenderArchiveNodes(copy i18n.Localizer, items []ArchiveNodeItem) Screen {
 func RenderArchives(input ArchiveListInput) Screen {
 	page, pages := normalizedPages(input.Page, input.Pages)
 	rows := make(Grid, 0, (len(input.Items)+1)/2+2)
-	lines := make([]string, 0, 2+len(input.Items)*5)
+	lines := make([]string, 0, 2+len(input.Items)*6)
 	lines = append(lines, input.Title, "")
 	for index, item := range input.Items {
 		if index%2 == 0 {
@@ -68,7 +68,9 @@ func RenderArchives(input ArchiveListInput) Screen {
 				lines = append(lines, "· "+description)
 			}
 		}
-		lines = append(lines, "─────")
+		// Keep the separator as its own visual block. Without the empty line above
+		// it reads as a continuation of the second description sentence.
+		lines = append(lines, "", "─────")
 		if index+1 < len(input.Items) {
 			lines = append(lines, "")
 		} else {

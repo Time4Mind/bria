@@ -59,10 +59,17 @@ func TestArchiveDescriptionValidationIsBounded(t *testing.T) {
 	if _, err := domain.NormalizeArchiveDescription([]string{valid, "Результат."}); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := domain.NormalizeArchiveDescription([]string{
+		"one two three four five six seven eight",
+		"nine ten eleven twelve thirteen fourteen fifteen sixteen",
+	}); err != nil {
+		t.Fatalf("accepted boundary rejected: %v", err)
+	}
 	for _, lines := range [][]string{
 		{"only one"},
 		{"", "result"},
 		{strings.Repeat("я", domain.MaxArchiveDescriptionRunes+1), "result"},
+		{strings.Repeat("word ", domain.MaxArchiveDescriptionWords), "extra word"},
 		{"line\x00", "result"},
 	} {
 		if _, err := domain.NormalizeArchiveDescription(lines); err == nil {
