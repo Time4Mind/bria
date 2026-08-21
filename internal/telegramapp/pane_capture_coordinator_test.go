@@ -18,6 +18,17 @@ type coalescingCaptureControls struct {
 	release chan struct{}
 }
 
+type joinedCaptureContext struct {
+	context.Context
+	once   sync.Once
+	joined chan struct{}
+}
+
+func (ctx *joinedCaptureContext) Done() <-chan struct{} {
+	ctx.once.Do(func() { close(ctx.joined) })
+	return ctx.Context.Done()
+}
+
 func (c *coalescingCaptureControls) CapturePane(
 	ctx context.Context,
 	_ application.Principal,
@@ -62,13 +73,17 @@ func TestPaneCaptureContinuesAfterForegroundTimeoutAndCoalesces(t *testing.T) {
 		pane string
 		err  error
 	}, 1)
+	joined := &joinedCaptureContext{
+		Context: context.Background(), joined: make(chan struct{}),
+	}
 	go func() {
-		pane, err := handler.capturePaneCoalesced(context.Background(), actor, ref, "second")
+		pane, err := handler.capturePaneCoalesced(joined, actor, ref, "second")
 		second <- struct {
 			pane string
 			err  error
 		}{string(pane), err}
 	}()
+	<-joined.joined
 	close(controls.release)
 	result := <-second
 	if result.err != nil || result.pane != "pane" {
