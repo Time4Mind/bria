@@ -77,6 +77,46 @@ func TestCloseAndAutomaticArchiveCommandsUseDifferentAuthority(t *testing.T) {
 	}
 }
 
+func TestPurgeSessionCommandIsStateFirstAndIdempotent(t *testing.T) {
+	machine, ref := sessionMachine(t)
+	initial := machine.State().Sessions[ref.Key()]
+	closeCommand := command(t, "purge-close", clusterstate.CommandCloseSession,
+		clusterstate.SessionRevision{
+			ActorID: 1, Session: ref, ExpectedRevision: initial.Revision,
+			ArchiveCommitID: "archive-purge",
+		})
+	if result := machine.Apply(closeCommand); result.Err() != nil {
+		t.Fatal(result.Err())
+	}
+	closed := machine.State().Sessions[ref.Key()]
+	complete := command(t, "purge-complete", clusterstate.CommandCompleteSessionArchive,
+		clusterstate.SessionRevision{
+			ActorID: 1, Session: ref, ExpectedRevision: closed.Revision,
+			ArchiveCommitID: closed.ArchiveID,
+		})
+	if result := machine.Apply(complete); result.Err() != nil {
+		t.Fatal(result.Err())
+	}
+	ready := machine.State().Sessions[ref.Key()]
+	purge := command(t, "purge-session", clusterstate.CommandPurgeSession,
+		clusterstate.PurgeSession{
+			Session: ref, ArchiveID: ready.ArchiveID, ExpectedRevision: ready.Revision,
+		})
+	if result := machine.Apply(purge); result.Err() != nil {
+		t.Fatal(result.Err())
+	}
+	if result := machine.Apply(purge); result.Err() != nil {
+		t.Fatalf("duplicate purge command: %v", result.Err())
+	}
+	state := machine.State()
+	if _, ok := state.Sessions[ref.Key()]; ok {
+		t.Fatal("purge command left session record")
+	}
+	if tombstone := state.SessionTombstones[ref.Key()]; tombstone.ArchiveID != ready.ArchiveID {
+		t.Fatalf("purge tombstone=%#v", tombstone)
+	}
+}
+
 func TestRenameCommandPersistsNameFormatVersionForDeterministicReplay(t *testing.T) {
 	machine, ref := sessionMachine(t)
 	session := machine.State().Sessions[ref.Key()]

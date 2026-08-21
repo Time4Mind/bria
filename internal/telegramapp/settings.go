@@ -212,7 +212,7 @@ func (h *Handler) openSetting(
 		telegramui.SettingToolCalls, telegramui.SettingToolResults, telegramui.SettingThinking, telegramui.SettingToolOutputLines,
 		telegramui.SettingResponseCards,
 		telegramui.SettingTerminalSnapshots,
-		telegramui.SettingIdleArchive, telegramui.SettingRetention, telegramui.SettingExpiry,
+		telegramui.SettingIdleArchive, telegramui.SettingRetention,
 		telegramui.SettingNotifyFinished, telegramui.SettingNotifyError,
 		telegramui.SettingNotifyAction, telegramui.SettingBackgroundDismiss,
 		telegramui.SettingNodeSort, telegramui.SettingQuotaPoll, telegramui.SettingLeaderMode,
@@ -263,8 +263,6 @@ func applySettingChoice(
 		return telegramui.SettingIdleArchive, setIdleArchive(preferences, value)
 	case telegramui.ActionSetRetention:
 		return telegramui.SettingRetention, setRetention(preferences, value)
-	case telegramui.ActionSetExpiry:
-		return telegramui.SettingExpiry, setExpiry(preferences, value)
 	case telegramui.ActionSetToolCalls:
 		return telegramui.SettingToolCalls, setCardVisibility(preferences, domain.CardEventToolCall, value)
 	case telegramui.ActionSetToolResults:

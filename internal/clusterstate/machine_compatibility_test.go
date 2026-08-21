@@ -44,6 +44,19 @@ func TestRollingVersionBoundaryRejectsUnknownCommandWithoutMutatingState(t *test
 	}
 }
 
+func TestCurrentMachineReplaysPreviousCommandVersion(t *testing.T) {
+	machine := clusterstate.NewMachine(nil)
+	legacy := command(t, "legacy-version", clusterstate.CommandAddNode,
+		domain.Node{ID: "legacy", Name: "Legacy"})
+	legacy.Version = clusterstate.CommandVersion - 1
+	if result := machine.Apply(legacy); result.Err() != nil {
+		t.Fatalf("previous command version: %v", result.Err())
+	}
+	if _, ok := machine.State().Nodes["legacy"]; !ok {
+		t.Fatal("previous command version did not mutate state")
+	}
+}
+
 func TestStrictPayloadRejectsUnknownFieldsButLegacyReplayRemainsReadable(t *testing.T) {
 	machine := clusterstate.NewMachine(nil)
 	strict := command(t, "strict", clusterstate.CommandAddNode,
@@ -75,5 +88,27 @@ func TestStrictPayloadRejectsUnknownFieldsButLegacyReplayRemainsReadable(t *test
 	}
 	if got := machine.State().Nodes["legacy"].Name; got != "Legacy" {
 		t.Fatalf("legacy node name=%q", got)
+	}
+}
+
+func TestStrictPreferenceReplayAcceptsDeprecatedExpiryFieldAndCanonicalizesIt(t *testing.T) {
+	state := domain.NewState()
+	if err := state.AddNode(domain.Node{ID: "alpha", Name: "Alpha"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.SetNodeAccess(7, domain.RoleOwner, "alpha"); err != nil {
+		t.Fatal(err)
+	}
+	preferences := domain.DefaultUserPreferences()
+	preferences.ArchiveExpiryAction = domain.ArchiveRemoveRecord
+	legacy := command(t, "legacy-preferences", clusterstate.CommandSetPreferences,
+		clusterstate.SetPreferences{UserID: 7, Preferences: preferences})
+	machine := clusterstate.NewMachine(state)
+	result := machine.Apply(legacy)
+	if result.Err() != nil {
+		t.Fatal(result.Err())
+	}
+	if got := machine.State().Preferences[7].ArchiveExpiryAction; got != domain.ArchiveRemoveAll {
+		t.Fatalf("legacy expiry action=%q, want canonical %q", got, domain.ArchiveRemoveAll)
 	}
 }

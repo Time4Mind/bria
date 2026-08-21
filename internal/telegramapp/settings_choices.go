@@ -194,18 +194,6 @@ func setRetention(preferences *domain.UserPreferences, value string) error {
 	return nil
 }
 
-func setExpiry(preferences *domain.UserPreferences, value string) error {
-	switch value {
-	case "record":
-		preferences.ArchiveExpiryAction = domain.ArchiveRemoveRecord
-	case "all":
-		preferences.ArchiveExpiryAction = domain.ArchiveRemoveAll
-	default:
-		return domain.ErrNotFound
-	}
-	return nil
-}
-
 func setCardVisibility(
 	preferences *domain.UserPreferences,
 	eventType domain.CardEventType,
@@ -226,7 +214,7 @@ func settingMutation(action telegramui.Action) bool {
 	case telegramui.ActionSetLanguage, telegramui.ActionSetSessionView,
 		telegramui.ActionSetResumeSelection,
 		telegramui.ActionSetIdleArchive, telegramui.ActionSetRetention,
-		telegramui.ActionSetExpiry, telegramui.ActionSetToolCalls,
+		telegramui.ActionSetToolCalls,
 		telegramui.ActionSetToolResults, telegramui.ActionSetToolOutputLines,
 		telegramui.ActionSetThinking:
 		return true

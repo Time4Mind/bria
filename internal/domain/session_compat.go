@@ -61,6 +61,11 @@ func normalizeNewSession(session *Session) error {
 // changing the persisted schema version. This keeps old snapshots readable
 // while ensuring all current code sees separate lifecycle and runtime phase.
 func (s *State) normalizeSessions() {
+	s.pruneSessionTombstones()
+	for userID, preferences := range s.Preferences {
+		preferences.normalize()
+		s.Preferences[userID] = preferences
+	}
 	s.normalizeDeferredInputs()
 	archivedLegacy := make([]SessionRef, 0)
 	for key, session := range s.Sessions {

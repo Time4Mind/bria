@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -90,6 +91,14 @@ func CaptureEvent(
 	if nodeID == "" || sessionID == "" || tmuxSession == "" || tmuxWindow == "" || pane == "" {
 		return HookResult{}, nil // The hook belongs to a provider process not launched by Bria.
 	}
+	runtimeGeneration := uint64(0) // zero is the legacy pre-generation environment
+	if generationText := strings.TrimSpace(getenv(EnvRuntimeGeneration)); generationText != "" {
+		parsed, parseErr := strconv.ParseUint(generationText, 10, 64)
+		if parseErr != nil {
+			return HookResult{}, errors.New("provider runtime generation is invalid")
+		}
+		runtimeGeneration = parsed
+	}
 	displayed, err := display(ctx, pane)
 	if err != nil {
 		return HookResult{}, fmt.Errorf("inspect provider tmux pane: %w", err)
@@ -126,7 +135,7 @@ func CaptureEvent(
 	if err := store.Put(Record{
 		NodeID: nodeID, SessionID: sessionID, ProviderSessionID: payload.SessionID,
 		Workdir: workdir, TmuxSession: tmuxSession,
-		TmuxWindow: tmuxWindow, UpdatedAt: now().UTC(),
+		TmuxWindow: tmuxWindow, RuntimeGeneration: runtimeGeneration, UpdatedAt: now().UTC(),
 	}); err != nil {
 		return HookResult{}, err
 	}

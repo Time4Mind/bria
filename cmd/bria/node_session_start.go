@@ -1,7 +1,6 @@
 package main
 
 import (
-	"path/filepath"
 	"time"
 
 	"github.com/Time4Mind/bria/internal/config"
@@ -20,6 +19,7 @@ func newLocalSessionStart(
 	nodeConfig config.Config,
 	home string,
 	reader *transcript.Reader,
+	bindings *providerbinding.Store,
 	executor *runtimehost.LocalExecutor,
 	client *nodecontrol.Client,
 	runner runtimehost.CommandRunner,
@@ -35,10 +35,6 @@ func newLocalSessionStart(
 			"codex":  {Executable: nodeConfig.CodexCommand, Flags: nodeConfig.EffectiveCodexFlags()},
 		}, 30*time.Second,
 	)
-	if err != nil {
-		return nil, nil, err
-	}
-	bindings, err := providerbinding.NewStore(filepath.Join(nodeConfig.DataDir, "provider-bindings.json"))
 	if err != nil {
 		return nil, nil, err
 	}

@@ -20,7 +20,6 @@ type SettingsInput struct {
 	TerminalSnapshots  string
 	IdleHours          int
 	RetentionDays      int
-	RemoveAllOnPurge   bool
 	NotifyFinished     bool
 	NotifyError        bool
 	NotifyAction       bool
@@ -159,8 +158,6 @@ func settingValue(input SettingsInput, id SettingID) string {
 		return durationValue(copy, input.IdleHours, i18n.CountHour)
 	case SettingRetention:
 		return durationValue(copy, input.RetentionDays, i18n.CountDay)
-	case SettingExpiry:
-		return selectedValue(input.RemoveAllOnPurge, copy.Text(i18n.ValueDeleteFiles), copy.Text(i18n.ValueRecordOnly))
 	case SettingNotifyFinished:
 		return visibilityValue(copy, input.NotifyFinished)
 	case SettingNotifyError:

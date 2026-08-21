@@ -255,7 +255,10 @@ func (c *Controller) applyResult(
 	defer cancel()
 	if executionErr == nil && result.Delivered && request.Action == runtimehost.ActionClear {
 		clearCtx := application.WithOperationScope(ctx, request.OperationID+"-clear")
-		_ = c.service.ClearSession(clearCtx, actor, session)
+		clearErr := c.service.ClearSession(clearCtx, actor, session)
+		if clearErr != nil {
+			c.retryClearCommit(actor, request, session, 1, clearErr)
+		}
 		return
 	}
 	status := domain.OperationSucceeded

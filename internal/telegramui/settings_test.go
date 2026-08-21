@@ -27,7 +27,6 @@ func TestSettingsCategoryShowsCurrentValuesGolden(t *testing.T) {
 	}
 	assertGoldenGrid(t, screen, `[Auto-archive: Unlimited -> setting@idle_archive]
 [Archive retention: Unlimited -> setting@retention]
-[On expiry: Delete files -> setting@expiry]
 [Offline-node queue: 5 -> setting@offline_queue]
 [← Back -> settings]`)
 }
@@ -226,8 +225,8 @@ func settingsFixture(language string) SettingsInput {
 		ToolOutputLines:   15,
 		ResponseCards:     "keep_paginated",
 		TerminalSnapshots: "working",
-		RetentionDays:     0, RemoveAllOnPurge: true,
-		NotifyFinished: true, NotifyError: true, NotifyAction: true,
+		RetentionDays:     0,
+		NotifyFinished:    true, NotifyError: true, NotifyAction: true,
 		BackgroundDismiss: 1,
 		NodeSort:          "created", QuotaPollMinutes: 10,
 		LeaderNodes:  []LeaderSettingNode{{Name: "node", Selected: true, Token: "node"}},

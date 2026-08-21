@@ -24,7 +24,6 @@ const (
 	SettingTerminalSnapshots SettingID = "terminal_snapshots"
 	SettingIdleArchive       SettingID = "idle_archive"
 	SettingRetention         SettingID = "retention"
-	SettingExpiry            SettingID = "expiry"
 	SettingNotifyFinished    SettingID = "notify_finished"
 	SettingNotifyError       SettingID = "notify_error"
 	SettingNotifyAction      SettingID = "notify_action"
@@ -57,7 +56,6 @@ var settingsCatalog = []settingDescriptor{
 	{id: SettingTerminalSnapshots, category: CategoryCard, label: i18n.SettingTerminalSnapshots, body: i18n.SettingTerminalSnapshotsBody},
 	{id: SettingIdleArchive, category: CategoryArchive, label: i18n.SettingIdleArchive, body: i18n.SettingIdleArchiveBody},
 	{id: SettingRetention, category: CategoryArchive, label: i18n.SettingRetention, body: i18n.SettingRetentionBody},
-	{id: SettingExpiry, category: CategoryArchive, label: i18n.SettingExpiry, body: i18n.SettingExpiryBody},
 	{id: SettingOfflineQueue, category: CategoryArchive, label: i18n.SettingOfflineQueue, body: i18n.SettingOfflineQueueBody},
 	{id: SettingNotifyFinished, category: CategoryNotifications, label: i18n.SettingNotifyFinished, body: i18n.SettingNotifyFinishedBody},
 	{id: SettingNotifyError, category: CategoryNotifications, label: i18n.SettingNotifyError, body: i18n.SettingNotifyErrorBody},

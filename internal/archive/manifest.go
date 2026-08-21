@@ -103,7 +103,7 @@ func (m Manifest) Validate() error {
 
 func validateArchiveID(id ArchiveID) error {
 	value := string(id)
-	if strings.TrimSpace(value) == "" {
+	if strings.TrimSpace(value) == "" || value == "." || value == ".." {
 		return fmt.Errorf("archive id is required")
 	}
 	if len(value) > 128 || strings.ContainsAny(value, "/\\") {

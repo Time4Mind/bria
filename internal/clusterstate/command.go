@@ -10,7 +10,7 @@ import (
 	"github.com/Time4Mind/bria/internal/domain"
 )
 
-const CommandVersion = 1
+const CommandVersion = 2
 
 type CommandKind string
 
@@ -50,6 +50,7 @@ const (
 	CommandCompleteSessionArchive CommandKind = "complete_session_archive"
 	CommandRestoreSession         CommandKind = "restore_session"
 	CommandArchiveSession         CommandKind = "archive_session"
+	CommandPurgeSession           CommandKind = "purge_session"
 	CommandIssueEnrollmentInvite  CommandKind = "issue_enrollment_invite"
 	CommandSubmitEnrollment       CommandKind = "submit_enrollment"
 	CommandSubmitNodeContract     CommandKind = "submit_node_contract"

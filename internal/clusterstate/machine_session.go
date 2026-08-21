@@ -7,6 +7,12 @@ import (
 	"github.com/Time4Mind/bria/internal/domain"
 )
 
+type PurgeSession struct {
+	Session          domain.SessionRef `json:"session"`
+	ArchiveID        string            `json:"archive_id"`
+	ExpectedRevision uint64            `json:"expected_revision"`
+}
+
 func applySessionLifecycle(state *domain.State, command Command) (json.RawMessage, error) {
 	switch command.Kind {
 	case CommandClearSession:
@@ -75,6 +81,13 @@ func applySessionLifecycle(state *domain.State, command Command) (json.RawMessag
 		return nil, decodeAnd(command.Payload, command.StrictPayload, &payload, func() error {
 			return state.ArchiveSession(
 				payload.Session, payload.ExpectedRevision, payload.Reason, command.IssuedAt,
+			)
+		})
+	case CommandPurgeSession:
+		var payload PurgeSession
+		return nil, decodeAnd(command.Payload, command.StrictPayload, &payload, func() error {
+			return state.PurgeSession(
+				payload.Session, payload.ArchiveID, payload.ExpectedRevision, command.IssuedAt,
 			)
 		})
 	default:

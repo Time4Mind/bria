@@ -34,19 +34,19 @@ func TestPlanPurgeIsPureDueInclusiveAndDeterministicallySorted(t *testing.T) {
 	candidates := []archive.PurgeCandidate{
 		{
 			Manifest: manifest("later", "node-b", "session-b", 2, now.Add(-13*24*time.Hour)),
-			Policy:   archive.RetentionPolicy{Days: archive.Retention14Days, Action: archive.ExpiryFull},
+			Policy:   archive.RetentionPolicy{Days: archive.Retention14Days},
 		},
 		{
 			Manifest: manifest("second", "node-b", "session-a", 1, base),
-			Policy:   archive.RetentionPolicy{Days: archive.Retention30Days, Action: archive.ExpiryFull},
+			Policy:   archive.RetentionPolicy{Days: archive.Retention30Days},
 		},
 		{
 			Manifest: manifest("first", "node-a", "session-z", 1, base),
-			Policy:   archive.RetentionPolicy{Days: archive.Retention14Days, Action: archive.ExpiryRecordOnly},
+			Policy:   archive.RetentionPolicy{Days: archive.Retention14Days},
 		},
 		{
 			Manifest: manifest("forever", "node-a", "session-a", 1, base),
-			Policy:   archive.RetentionPolicy{Days: archive.RetentionUnlimited, Action: archive.ExpiryFull},
+			Policy:   archive.RetentionPolicy{Days: archive.RetentionUnlimited},
 		},
 	}
 
@@ -57,10 +57,10 @@ func TestPlanPurgeIsPureDueInclusiveAndDeterministicallySorted(t *testing.T) {
 	if len(plan) != 2 {
 		t.Fatalf("plan length = %d, want 2: %#v", len(plan), plan)
 	}
-	if plan[0].ArchiveID != "first" || plan[0].Action != archive.ExpiryRecordOnly {
+	if plan[0].ArchiveID != "first" {
 		t.Fatalf("first decision = %#v", plan[0])
 	}
-	if plan[1].ArchiveID != "second" || plan[1].Action != archive.ExpiryFull {
+	if plan[1].ArchiveID != "second" {
 		t.Fatalf("second decision = %#v", plan[1])
 	}
 	if candidates[0].Manifest.ID != "later" {
@@ -72,7 +72,7 @@ func TestPlanPurgeRejectsDuplicateArchiveIdentity(t *testing.T) {
 	archivedAt := time.Unix(100, 0).UTC()
 	candidate := archive.PurgeCandidate{
 		Manifest: manifest("same", "node-a", "one", 1, archivedAt),
-		Policy:   archive.RetentionPolicy{Days: archive.Retention14Days, Action: archive.ExpiryFull},
+		Policy:   archive.RetentionPolicy{Days: archive.Retention14Days},
 	}
 	other := candidate
 	other.Manifest.Session.SessionID = "two"

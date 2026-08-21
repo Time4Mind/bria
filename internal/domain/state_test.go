@@ -317,4 +317,9 @@ func TestLegacyPreferenceJSONWithoutLanguageRemainsValid(t *testing.T) {
 	if preferences.Language != domain.LanguageAuto || preferences.Validate() != nil {
 		t.Fatalf("legacy preferences=%#v", preferences)
 	}
+	state := domain.NewState()
+	state.Preferences[1] = preferences
+	if got := state.Clone().Preferences[1].ArchiveExpiryAction; got != domain.ArchiveRemoveAll {
+		t.Fatalf("legacy expiry action after normalization=%q, want %q", got, domain.ArchiveRemoveAll)
+	}
 }

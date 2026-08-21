@@ -233,6 +233,16 @@ func (s *Service) CompleteSessionArchive(
 	})
 }
 
+// PurgeSession commits the replicated, state-first half of archive retention
+// cleanup. The origin node later removes the Bria-owned bundle by following
+// the resulting SessionTombstone, so a crash cannot leave the state pointing
+// at an archive that must be replayed as live.
+func (s *Service) PurgeSession(ctx context.Context, session domain.Session) error {
+	return s.apply(ctx, clusterstate.CommandPurgeSession, clusterstate.PurgeSession{
+		Session: session.Ref(), ArchiveID: session.ArchiveID, ExpectedRevision: session.Revision,
+	})
+}
+
 func (s *Service) RestoreSession(
 	ctx context.Context,
 	actor Principal,

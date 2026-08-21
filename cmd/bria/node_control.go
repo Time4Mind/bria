@@ -16,6 +16,7 @@ import (
 	"github.com/Time4Mind/bria/internal/localarchive"
 	"github.com/Time4Mind/bria/internal/nodecontrol"
 	"github.com/Time4Mind/bria/internal/platform"
+	"github.com/Time4Mind/bria/internal/providerbinding"
 	"github.com/Time4Mind/bria/internal/providerstop"
 	"github.com/Time4Mind/bria/internal/runtimehost"
 	"github.com/Time4Mind/bria/internal/sessionname"
@@ -139,8 +140,15 @@ func startNodeRuntimeControl(
 	if err != nil {
 		return closeFailedRuntime(executor, store, err)
 	}
+	bindingStore, err := providerbinding.NewStore(
+		filepath.Join(nodeConfig.DataDir, "provider-bindings.json"),
+	)
+	if err != nil {
+		return closeFailedRuntime(executor, store, err)
+	}
 	localStarts, startRouter, err := newLocalSessionStart(
-		node, nodeConfig, home, transcriptReader, executor, client, backendRuntime.runner,
+		node, nodeConfig, home, transcriptReader, bindingStore, executor, client,
+		backendRuntime.runner,
 	)
 	if err != nil {
 		return closeFailedRuntime(executor, store, err)
@@ -275,6 +283,14 @@ func startNodeRuntimeControl(
 	go runLocalSessionStartReconciler(
 		ctx, nodeConfig.NodeID, node.State(), localStarts, executor,
 	)
+	go runProviderBindingReconciler(
+		ctx, nodeConfig, node.State(), bindingStore, driver,
+	)
+	go runArchiveRetentionReconciler(ctx, node)
+	go runLocalArchivePurgeReconciler(
+		ctx, domain.NodeID(nodeConfig.NodeID), node.State(), archiveWriter, bindingStore,
+	)
+	go runNodeArtifactCleanup(ctx, nodeConfig.DataDir, updates.local)
 	go func() {
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)

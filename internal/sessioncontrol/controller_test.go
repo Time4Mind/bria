@@ -27,6 +27,49 @@ type runtimeStub struct {
 	failures int
 }
 
+type clearCommitApplier struct {
+	mu            sync.Mutex
+	machine       *clusterstate.Machine
+	failures      int
+	unknownCommit bool
+	attempts      int
+	operationIDs  []string
+}
+
+func (p *clearCommitApplier) State() *domain.State { return p.machine.State() }
+
+func (p *clearCommitApplier) Apply(
+	_ context.Context,
+	command clusterstate.Command,
+) (clusterstate.Result, error) {
+	if command.Kind != clusterstate.CommandClearSession {
+		return p.machine.Apply(command), nil
+	}
+	p.mu.Lock()
+	p.attempts++
+	p.operationIDs = append(p.operationIDs, command.OperationID)
+	fail := p.failures > 0
+	if fail {
+		p.failures--
+	}
+	unknown := fail && p.unknownCommit
+	p.mu.Unlock()
+	if !fail {
+		return p.machine.Apply(command), nil
+	}
+	if unknown {
+		result := p.machine.Apply(command)
+		return result, errors.New("clear commit outcome is unknown")
+	}
+	return clusterstate.Result{}, errors.New("clear commit temporarily unavailable")
+}
+
+func (p *clearCommitApplier) snapshot() (int, []string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.attempts, append([]string(nil), p.operationIDs...)
+}
+
 func (r *runtimeStub) Submit(
 	_ context.Context,
 	request runtimehost.Request,
@@ -49,6 +92,49 @@ func (r *runtimeStub) LookupResult(
 	defer r.mu.Unlock()
 	result, ok := r.results[request.OperationID]
 	return result, ok, nil
+}
+
+func clearControllerFixture(
+	t *testing.T,
+	applier *clearCommitApplier,
+) (*Controller, *runtimeStub, *clusterstate.Machine) {
+	t.Helper()
+	state := domain.NewState()
+	if err := state.AddNode(domain.Node{ID: "node", Name: "Node", Status: domain.NodeOnline}); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.SetNodeAccess(7, domain.RoleOwner, "node"); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.AddSession(domain.Session{
+		ID: "session", NodeID: "node", OwnerID: 7, Name: "Named", Backend: "claude",
+		ProviderSessionID: "provider", State: domain.SessionLive,
+		RuntimePhase: domain.RuntimeIdle, RuntimeGeneration: 1,
+		CreatedAt: time.Unix(1, 0), LiveSinceAt: time.Unix(1, 0),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	machine := clusterstate.NewMachine(state)
+	applier.machine = machine
+	service, err := application.NewService(applier, applier)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime := &runtimeStub{results: make(map[string]runtimehost.Result)}
+	controller, err := New(service, runtime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	controller.pollInterval = time.Millisecond
+	controller.retryInterval = time.Millisecond
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		if err := controller.Shutdown(ctx); err != nil {
+			t.Errorf("shutdown: %v", err)
+		}
+	})
+	return controller, runtime, machine
 }
 
 func TestSendInputPinsActiveSessionAndPublishesRunning(t *testing.T) {
@@ -235,6 +321,92 @@ func TestSuccessfulClearResetsNameAndProviderBinding(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	t.Fatal("clear result was not committed")
+}
+
+func TestClearCommitRetriesTransientFailureWithSameOperationScope(t *testing.T) {
+	applier := &clearCommitApplier{failures: 1}
+	controller, runtime, machine := clearControllerFixture(t, applier)
+	ref := domain.SessionRef{NodeID: "node", SessionID: "session"}
+	if _, err := controller.Clear(
+		context.Background(), application.Principal{UserID: 7}, "clear-transient", ref,
+	); err != nil {
+		t.Fatal(err)
+	}
+	runtime.mu.Lock()
+	runtime.results["clear-transient"] = runtimehost.Result{Accepted: true, Delivered: true}
+	runtime.mu.Unlock()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if machine.State().Sessions[ref.Key()].RuntimeGeneration == 2 {
+			attempts, operationIDs := applier.snapshot()
+			if attempts != 2 || len(operationIDs) != 2 || operationIDs[0] != operationIDs[1] {
+				t.Fatalf("clear retries=%d operation_ids=%q", attempts, operationIDs)
+			}
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("transient clear was not committed: %#v", machine.State().Sessions[ref.Key()])
+}
+
+func TestClearCommitTreatsUnknownOutcomeAsCommittedAfterReread(t *testing.T) {
+	applier := &clearCommitApplier{failures: 1, unknownCommit: true}
+	controller, runtime, machine := clearControllerFixture(t, applier)
+	ref := domain.SessionRef{NodeID: "node", SessionID: "session"}
+	if _, err := controller.Clear(
+		context.Background(), application.Principal{UserID: 7}, "clear-unknown", ref,
+	); err != nil {
+		t.Fatal(err)
+	}
+	runtime.mu.Lock()
+	runtime.results["clear-unknown"] = runtimehost.Result{Accepted: true, Delivered: true}
+	runtime.mu.Unlock()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if machine.State().Sessions[ref.Key()].RuntimeGeneration == 2 {
+			attempts, _ := applier.snapshot()
+			if attempts != 1 {
+				t.Fatalf("unknown clear outcome was replayed: attempts=%d", attempts)
+			}
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("unknown clear was not recognized: %#v", machine.State().Sessions[ref.Key()])
+}
+
+func TestClearCommitStopsAfterBoundedPermanentFailure(t *testing.T) {
+	applier := &clearCommitApplier{failures: clearCommitMaxAttempts + 1}
+	controller, runtime, machine := clearControllerFixture(t, applier)
+	ref := domain.SessionRef{NodeID: "node", SessionID: "session"}
+	if _, err := controller.Clear(
+		context.Background(), application.Principal{UserID: 7}, "clear-permanent", ref,
+	); err != nil {
+		t.Fatal(err)
+	}
+	runtime.mu.Lock()
+	runtime.results["clear-permanent"] = runtimehost.Result{Accepted: true, Delivered: true}
+	runtime.mu.Unlock()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		attempts, _ := applier.snapshot()
+		if attempts == clearCommitMaxAttempts {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	attempts, _ := applier.snapshot()
+	if attempts != clearCommitMaxAttempts {
+		t.Fatalf("permanent clear attempts=%d, want %d", attempts, clearCommitMaxAttempts)
+	}
+	time.Sleep(10 * time.Millisecond)
+	if got, _ := applier.snapshot(); got != attempts {
+		t.Fatalf("permanent clear kept retrying: attempts=%d then=%d", attempts, got)
+	}
+	got := machine.State().Sessions[ref.Key()]
+	if got.RuntimeGeneration != 1 || got.RuntimePhase != domain.RuntimeStopping {
+		t.Fatalf("permanent clear changed state despite failed commit: %#v", got)
+	}
 }
 
 func TestCloseCommitsArchiveIdentityBeforeRuntimeDeactivation(t *testing.T) {

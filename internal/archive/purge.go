@@ -15,11 +15,10 @@ type PurgeCandidate struct {
 }
 
 type PurgeDecision struct {
-	ArchiveID ArchiveID                  `json:"archive_id"`
-	Session   domain.SessionRef          `json:"session"`
-	OwnerID   domain.UserID              `json:"owner_id"`
-	DueAt     time.Time                  `json:"due_at"`
-	Action    domain.ArchiveExpiryAction `json:"action"`
+	ArchiveID ArchiveID         `json:"archive_id"`
+	Session   domain.SessionRef `json:"session"`
+	OwnerID   domain.UserID     `json:"owner_id"`
+	DueAt     time.Time         `json:"due_at"`
 }
 
 // PlanPurge is deterministic and performs no I/O. Invalid or duplicate input
@@ -50,7 +49,6 @@ func PlanPurge(now time.Time, candidates []PurgeCandidate) ([]PurgeDecision, err
 			Session:   candidate.Manifest.Session,
 			OwnerID:   candidate.Manifest.OwnerID,
 			DueAt:     dueAt,
-			Action:    candidate.Policy.Action,
 		})
 	}
 	slices.SortFunc(decisions, func(a, b PurgeDecision) int {

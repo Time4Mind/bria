@@ -58,11 +58,6 @@ func settingChoices(input SettingsInput, id SettingID) Grid {
 			button(selectedLabel(input.RetentionDays == 30, copy.Count(i18n.CountDay, 30)), ActionSetRetention, "30"),
 			button(selectedLabel(input.RetentionDays == 0, copy.Text(i18n.ValueUnlimited)), ActionSetRetention, "unlimited"),
 		)
-	case SettingExpiry:
-		return choiceRows(
-			button(selectedLabel(!input.RemoveAllOnPurge, copy.Text(i18n.ValueRecordOnly)), ActionSetExpiry, "record"),
-			button(selectedLabel(input.RemoveAllOnPurge, copy.Text(i18n.ValueDeleteFiles)), ActionSetExpiry, "all"),
-		)
 	case SettingNotifyFinished:
 		return visibilityChoices(copy, input.NotifyFinished, ActionSetNotifyFinished)
 	case SettingNotifyError:

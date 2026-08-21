@@ -13,6 +13,11 @@ const (
 
 type Language string
 
+// ArchiveExpiryAction is retained only to decode and replay schema-v1
+// snapshots/commands. Current policy is unconditionally record+bundle purge;
+// the Telegram setting and policy projection no longer expose this choice.
+type ArchiveExpiryAction string
+
 const (
 	LanguageAuto    Language = ""
 	LanguageEnglish Language = "en"
@@ -20,14 +25,17 @@ const (
 	LanguageChinese Language = "zh"
 )
 
-type ArchiveExpiryAction string
-
 type CardEventType string
 
 type ResponseCardMode string
 type NodeSortMode string
 type TerminalSnapshotMode string
 type VoiceBackend string
+
+const (
+	ArchiveRemoveRecord ArchiveExpiryAction = "remove_record"
+	ArchiveRemoveAll    ArchiveExpiryAction = "remove_all"
+)
 
 const (
 	CardEventToolCall   CardEventType = "tool_call"
@@ -60,17 +68,13 @@ const (
 	VoiceOff     VoiceBackend = "off"
 )
 
-const (
-	ArchiveRemoveRecord ArchiveExpiryAction = "remove_record"
-	ArchiveRemoveAll    ArchiveExpiryAction = "remove_all"
-)
-
 type UserPreferences struct {
-	Language                     Language               `json:"language,omitempty"`
-	SessionView                  SessionViewMode        `json:"session_view"`
-	IdleArchiveHours             int                    `json:"idle_archive_hours"`
-	ArchiveRetentionDays         int                    `json:"archive_retention_days"`
-	ArchiveExpiryAction          ArchiveExpiryAction    `json:"archive_expiry_action"`
+	Language             Language        `json:"language,omitempty"`
+	SessionView          SessionViewMode `json:"session_view"`
+	IdleArchiveHours     int             `json:"idle_archive_hours"`
+	ArchiveRetentionDays int             `json:"archive_retention_days"`
+	// Deprecated wire-compatibility field; ignored by archive policy.
+	ArchiveExpiryAction          ArchiveExpiryAction    `json:"archive_expiry_action,omitempty"`
 	ResponseCards                ResponseCardMode       `json:"response_cards,omitempty"`
 	HiddenCardEvents             []CardEventType        `json:"hidden_card_events,omitempty"`
 	MutedBackgroundNotifications []BackgroundNoticeKind `json:"muted_background_notifications,omitempty"`
@@ -89,7 +93,7 @@ func DefaultUserPreferences() UserPreferences {
 		SessionView:               ViewHostFirst,
 		IdleArchiveHours:          6,
 		ArchiveRetentionDays:      14,
-		ArchiveExpiryAction:       ArchiveRemoveRecord,
+		ArchiveExpiryAction:       ArchiveRemoveAll,
 		ResponseCards:             ResponseCardsKeepPaginated,
 		BackgroundDismissSwitches: 1,
 		NodeSort:                  NodeSortCreated,
@@ -117,9 +121,9 @@ func (p UserPreferences) Validate() error {
 		p.ArchiveRetentionDays != 30 {
 		return fmt.Errorf("archive retention days must be 0, 14, or 30")
 	}
-	if p.ArchiveExpiryAction != ArchiveRemoveRecord &&
-		p.ArchiveExpiryAction != ArchiveRemoveAll {
-		return fmt.Errorf("unsupported archive expiry action: %q", p.ArchiveExpiryAction)
+	if p.ArchiveExpiryAction != "" &&
+		p.ArchiveExpiryAction != ArchiveRemoveRecord && p.ArchiveExpiryAction != ArchiveRemoveAll {
+		return fmt.Errorf("unsupported legacy archive expiry action: %q", p.ArchiveExpiryAction)
 	}
 	if p.ResponseCards != "" &&
 		p.ResponseCards != ResponseCardsKeepPaginated &&
@@ -170,4 +174,11 @@ func (p UserPreferences) Validate() error {
 		muted[kind] = true
 	}
 	return nil
+}
+
+func (p *UserPreferences) normalize() {
+	if p.ArchiveExpiryAction == "" || p.ArchiveExpiryAction == ArchiveRemoveRecord ||
+		p.ArchiveExpiryAction == ArchiveRemoveAll {
+		p.ArchiveExpiryAction = ArchiveRemoveAll
+	}
 }

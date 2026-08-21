@@ -142,6 +142,40 @@ func (s *FileStore) MarkReady(id ArchiveID) error {
 	return errors.Join(file.Sync(), file.Close(), syncDirectory(directory))
 }
 
+// Delete removes one Bria-owned archive bundle. Missing bundles are already
+// clean, which makes origin-node tombstone retries idempotent. The validated
+// archive ID and Lstat directory check prevent a malformed state value from
+// turning a retry into a broad or symlink-following delete.
+func (s *FileStore) Delete(ctx context.Context, id ArchiveID) error {
+	if err := validateArchiveID(id); err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	directory := s.archiveDir(id)
+	if directory == s.root || filepath.Dir(directory) != s.root {
+		return errors.New("archive bundle path escapes archive root")
+	}
+	info, err := os.Lstat(directory)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return errors.New("archive bundle is unsafe")
+	}
+	if err := os.RemoveAll(directory); err != nil {
+		return fmt.Errorf("delete archive bundle: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return syncDirectory(s.root)
+}
+
 func (s *FileStore) ReadyIDs() ([]ArchiveID, error) {
 	entries, err := os.ReadDir(s.root)
 	if err != nil {

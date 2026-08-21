@@ -96,6 +96,18 @@ func TestWriterCommitsAndVerifiesNativeArtifact(t *testing.T) {
 	if err != nil || len(events) != 1 || events[0].Text != "done" {
 		t.Fatalf("archived events=%#v err=%v", events, err)
 	}
+	if err := writer.DeleteArchive(context.Background(), "archive-close"); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.DeleteArchive(context.Background(), "archive-close"); err != nil {
+		t.Fatalf("repeat archive delete: %v", err)
+	}
+	if _, err := writer.ReadArchivedTranscript(context.Background(), archived); err == nil {
+		t.Fatal("deleted archive transcript remained readable")
+	}
+	if restored, err := os.ReadFile(attachment); err != nil || string(restored) != "result" {
+		t.Fatalf("archive delete touched workdir attachment=%q err=%v", restored, err)
+	}
 }
 
 func TestWriterVerifiesLegacyV1Artifact(t *testing.T) {

@@ -44,7 +44,6 @@ func TestSettingsCallbacksReplicateClosedPreferenceChoices(t *testing.T) {
 		{Action: telegramui.ActionSetResponseCards, Token: "keep_latest"},
 		{Action: telegramui.ActionSetIdleArchive, Token: "unlimited"},
 		{Action: telegramui.ActionSetRetention, Token: "30"},
-		{Action: telegramui.ActionSetExpiry, Token: "all"},
 	}
 	for index, callback := range callbacks {
 		data, err := callback.Encode()

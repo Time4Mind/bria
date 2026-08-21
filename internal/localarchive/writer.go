@@ -182,3 +182,10 @@ func (w *Writer) ReadyArchiveIDs() ([]string, error) {
 	}
 	return result, nil
 }
+
+// DeleteArchive is the origin-node side of a replicated SessionTombstone.
+// It only removes the Bria archive bundle; workdir, .bria-inbox, and provider
+// transcript storage remain outside this lifecycle.
+func (w *Writer) DeleteArchive(ctx context.Context, archiveID string) error {
+	return w.store.Delete(ctx, archive.ArchiveID(archiveID))
+}

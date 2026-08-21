@@ -110,6 +110,7 @@ func TestTmuxRecoveryRuntimeStartsBackendWithArgv(t *testing.T) {
 			for _, variable := range []string{
 				"BRIA_BINDING_NODE_ID=n",
 				"BRIA_BINDING_SESSION_ID=s",
+				"BRIA_BINDING_RUNTIME_GENERATION=0",
 				"BRIA_BINDING_TMUX_SESSION=bria",
 				"BRIA_BINDING_TMUX_WINDOW=" + TmuxWindowName("n", "s"),
 			} {

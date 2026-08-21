@@ -126,7 +126,6 @@ func settingsInput(
 		TerminalSnapshots: string(preferences.EffectiveTerminalSnapshots()),
 		IdleHours:         preferences.IdleArchiveHours,
 		RetentionDays:     preferences.ArchiveRetentionDays,
-		RemoveAllOnPurge:  preferences.ArchiveExpiryAction == domain.ArchiveRemoveAll,
 		NotifyFinished:    preferences.SendsBackgroundNotification(domain.BackgroundFinished),
 		NotifyError:       preferences.SendsBackgroundNotification(domain.BackgroundError),
 		NotifyAction:      preferences.SendsBackgroundNotification(domain.BackgroundNeedsAction),

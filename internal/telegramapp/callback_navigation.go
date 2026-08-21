@@ -96,7 +96,7 @@ func (h *Handler) handleNavigationCallback(
 		screen, err = h.decideEnrollment(ctx, actor, callback.Action, callback.Token)
 	case telegramui.ActionSetLanguage, telegramui.ActionSetSessionView,
 		telegramui.ActionSetResumeSelection, telegramui.ActionSetIdleArchive,
-		telegramui.ActionSetRetention, telegramui.ActionSetExpiry, telegramui.ActionSetToolCalls,
+		telegramui.ActionSetRetention, telegramui.ActionSetToolCalls,
 		telegramui.ActionSetToolResults, telegramui.ActionSetToolOutputLines, telegramui.ActionSetThinking,
 		telegramui.ActionSetResponseCards, telegramui.ActionSetNotifyFinished,
 		telegramui.ActionSetTerminalSnapshots,

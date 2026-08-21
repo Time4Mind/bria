@@ -23,7 +23,7 @@ const (
 	// NodeProtocolVersion is the compatibility floor understood before a node
 	// opens Raft or needs a current cluster certificate/control API. Increment it
 	// only for a release that also publishes MinimumNodeProtocol in its manifest.
-	NodeProtocolVersion = 1
+	NodeProtocolVersion = 2
 )
 
 type Artifact struct {

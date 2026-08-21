@@ -19,7 +19,7 @@ func TestRetentionDueAtChoices(t *testing.T) {
 		{
 			name: "fourteen days",
 			policy: archive.RetentionPolicy{
-				Days: archive.Retention14Days, Action: archive.ExpiryRecordOnly,
+				Days: archive.Retention14Days,
 			},
 			finite: true,
 			want:   archivedAt.UTC().Add(14 * 24 * time.Hour),
@@ -27,7 +27,7 @@ func TestRetentionDueAtChoices(t *testing.T) {
 		{
 			name: "thirty days",
 			policy: archive.RetentionPolicy{
-				Days: archive.Retention30Days, Action: archive.ExpiryFull,
+				Days: archive.Retention30Days,
 			},
 			finite: true,
 			want:   archivedAt.UTC().Add(30 * 24 * time.Hour),
@@ -35,7 +35,7 @@ func TestRetentionDueAtChoices(t *testing.T) {
 		{
 			name: "unlimited",
 			policy: archive.RetentionPolicy{
-				Days: archive.RetentionUnlimited, Action: archive.ExpiryRecordOnly,
+				Days: archive.RetentionUnlimited,
 			},
 		},
 	}
@@ -78,7 +78,7 @@ func TestIdleDueAtChoices(t *testing.T) {
 }
 
 func TestPolicyRejectsValuesOutsideClosedChoices(t *testing.T) {
-	invalidRetention := archive.RetentionPolicy{Days: 7, Action: archive.ExpiryFull}
+	invalidRetention := archive.RetentionPolicy{Days: 7}
 	if err := invalidRetention.Validate(); err == nil {
 		t.Fatal("seven-day retention unexpectedly accepted")
 	}
@@ -93,15 +93,13 @@ func TestPolicyFromDomainPreferences(t *testing.T) {
 		SessionView:          domain.ViewHostFirst,
 		IdleArchiveHours:     12,
 		ArchiveRetentionDays: 30,
-		ArchiveExpiryAction:  domain.ArchiveRemoveAll,
 	}
 	policy := archive.PolicyFromPreferences(preferences)
 	if err := policy.Validate(); err != nil {
 		t.Fatalf("converted policy: %v", err)
 	}
 	if policy.Idle.Hours != archive.Idle12Hours ||
-		policy.Retention.Days != archive.Retention30Days ||
-		policy.Retention.Action != archive.ExpiryFull {
+		policy.Retention.Days != archive.Retention30Days {
 		t.Fatalf("converted policy = %#v", policy)
 	}
 }

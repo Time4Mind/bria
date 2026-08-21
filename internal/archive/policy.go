@@ -24,23 +24,14 @@ const (
 	Idle24Hours   IdleHours = 24
 )
 
-const (
-	ExpiryRecordOnly = domain.ArchiveRemoveRecord
-	ExpiryFull       = domain.ArchiveRemoveAll
-)
-
 type RetentionPolicy struct {
-	Days   RetentionDays              `json:"days"`
-	Action domain.ArchiveExpiryAction `json:"action"`
+	Days RetentionDays `json:"days"`
 }
 
 func (p RetentionPolicy) Validate() error {
 	if p.Days != RetentionUnlimited && p.Days != Retention14Days &&
 		p.Days != Retention30Days {
 		return fmt.Errorf("archive retention must be 0, 14, or 30 days")
-	}
-	if p.Action != ExpiryRecordOnly && p.Action != ExpiryFull {
-		return fmt.Errorf("unsupported archive expiry action: %q", p.Action)
 	}
 	return nil
 }
@@ -100,8 +91,7 @@ func (p Policy) Validate() error {
 func PolicyFromPreferences(preferences domain.UserPreferences) Policy {
 	return Policy{
 		Retention: RetentionPolicy{
-			Days:   RetentionDays(preferences.ArchiveRetentionDays),
-			Action: preferences.ArchiveExpiryAction,
+			Days: RetentionDays(preferences.ArchiveRetentionDays),
 		},
 		Idle: IdlePolicy{Hours: IdleHours(preferences.IdleArchiveHours)},
 	}

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -15,10 +16,11 @@ import (
 )
 
 const (
-	EnvNodeID      = "BRIA_BINDING_NODE_ID"
-	EnvSessionID   = "BRIA_BINDING_SESSION_ID"
-	EnvTmuxSession = "BRIA_BINDING_TMUX_SESSION"
-	EnvTmuxWindow  = "BRIA_BINDING_TMUX_WINDOW"
+	EnvNodeID            = "BRIA_BINDING_NODE_ID"
+	EnvSessionID         = "BRIA_BINDING_SESSION_ID"
+	EnvRuntimeGeneration = "BRIA_BINDING_RUNTIME_GENERATION"
+	EnvTmuxSession       = "BRIA_BINDING_TMUX_SESSION"
+	EnvTmuxWindow        = "BRIA_BINDING_TMUX_WINDOW"
 )
 
 type Record struct {
@@ -28,7 +30,27 @@ type Record struct {
 	Workdir           string    `json:"workdir"`
 	TmuxSession       string    `json:"tmux_session"`
 	TmuxWindow        string    `json:"tmux_window"`
+	RuntimeGeneration uint64    `json:"runtime_generation"`
 	UpdatedAt         time.Time `json:"updated_at"`
+}
+
+const maxStoreBytes = 1 << 20
+
+// SweepInput is a caller-owned lifecycle snapshot. KeepRefs must contain all
+// live, starting, degraded, and resume-pending sessions. Archived entries are
+// removable only when the caller has already confirmed their target is gone.
+// A non-zero MissingBefore permits cleanup of records absent from that
+// snapshot, but only when their last binding update predates the cutoff.
+type SweepInput struct {
+	KeepRefs      []domain.SessionRef
+	Archived      []SweepArchived
+	MissingBefore time.Time
+}
+
+type SweepArchived struct {
+	Ref               domain.SessionRef
+	RuntimeGeneration uint64
+	TargetAbsent      bool
 }
 
 type Store struct{ path string }
@@ -63,6 +85,41 @@ func (s *Store) LookupRef(ref domain.SessionRef) (Record, bool, error) {
 	return record, true, nil
 }
 
+// Snapshot returns a validated value copy of every stored binding. The file
+// lock covers the read so reconciliation can inspect exact refs and
+// generations without racing a Put/Delete/Sweep transaction.
+func (s *Store) Snapshot() ([]Record, error) {
+	if err := os.MkdirAll(filepath.Dir(s.path), 0700); err != nil {
+		return nil, fmt.Errorf("create provider binding directory: %w", err)
+	}
+	lock, err := acquireFileLock(s.path + ".lock")
+	if err != nil {
+		return nil, fmt.Errorf("open provider binding lock: %w", err)
+	}
+	defer lock.Close() //nolint:errcheck
+	records, err := s.read()
+	if err != nil {
+		return nil, err
+	}
+	result := make([]Record, 0, len(records))
+	for key, record := range records {
+		if err := validateRecord(record); err != nil {
+			return nil, fmt.Errorf("invalid provider binding %q: %w", key, err)
+		}
+		if key != bindingKey(record.NodeID, record.SessionID) {
+			return nil, fmt.Errorf("provider binding key %q does not match record", key)
+		}
+		result = append(result, record)
+	}
+	sort.Slice(result, func(i, j int) bool {
+		return bindingKey(result[i].NodeID, result[i].SessionID) < bindingKey(result[j].NodeID, result[j].SessionID)
+	})
+	return result, nil
+}
+
+// List is an alias for Snapshot for reconciliation callers.
+func (s *Store) List() ([]Record, error) { return s.Snapshot() }
+
 func (s *Store) Put(record Record) error {
 	if err := validateRecord(record); err != nil {
 		return err
@@ -79,13 +136,117 @@ func (s *Store) Put(record Record) error {
 	if err != nil {
 		return err
 	}
-	records[bindingKey(record.NodeID, record.SessionID)] = record
+	key := bindingKey(record.NodeID, record.SessionID)
+	if existing, ok := records[key]; ok && existing.RuntimeGeneration > record.RuntimeGeneration {
+		// A hook from an older provider process must not resurrect or replace a
+		// newer binding. Equal generations remain valid because /new and /clear
+		// happen inside the same provider process whose environment is unchanged.
+		return nil
+	}
+	records[key] = record
+	return writeAtomic(s.path, records)
+}
+
+// Delete removes the binding identified by ref. Missing bindings are a
+// successful no-op so cleanup can safely be retried.
+func (s *Store) Delete(ref domain.SessionRef) error {
+	return s.deleteIf(ref, 0, false)
+}
+
+// DeleteIfGeneration removes ref when the stored process generation is at
+// most the finalized generation. A missing binding or newer generation is a
+// successful no-op, making late cleanup unable to remove a newer binding.
+func (s *Store) DeleteIfGeneration(ref domain.SessionRef, generation uint64) error {
+	return s.deleteIf(ref, generation, true)
+}
+
+func (s *Store) deleteIf(ref domain.SessionRef, generation uint64, conditional bool) error {
+	if err := ref.Validate(); err != nil {
+		return fmt.Errorf("invalid provider binding reference: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(s.path), 0700); err != nil {
+		return fmt.Errorf("create provider binding directory: %w", err)
+	}
+	lock, err := acquireFileLock(s.path + ".lock")
+	if err != nil {
+		return fmt.Errorf("open provider binding lock: %w", err)
+	}
+	defer lock.Close() //nolint:errcheck
+	records, err := s.read()
+	if err != nil {
+		return err
+	}
+	key := bindingKey(string(ref.NodeID), string(ref.SessionID))
+	record, ok := records[key]
+	if !ok || (conditional && record.RuntimeGeneration > generation) {
+		return nil
+	}
+	delete(records, key)
+	return writeAtomic(s.path, records)
+}
+
+// Sweep applies one caller-confirmed lifecycle snapshot atomically. It never
+// infers liveness from omitted refs unless MissingBefore is supplied.
+func (s *Store) Sweep(input SweepInput) error {
+	keep := make(map[string]struct{}, len(input.KeepRefs))
+	for _, ref := range input.KeepRefs {
+		if err := ref.Validate(); err != nil {
+			return fmt.Errorf("invalid provider binding keep reference: %w", err)
+		}
+		keep[bindingKey(string(ref.NodeID), string(ref.SessionID))] = struct{}{}
+	}
+	archived := make(map[string]SweepArchived, len(input.Archived))
+	for _, candidate := range input.Archived {
+		if err := candidate.Ref.Validate(); err != nil {
+			return fmt.Errorf("invalid provider binding archived reference: %w", err)
+		}
+		archived[bindingKey(string(candidate.Ref.NodeID), string(candidate.Ref.SessionID))] = candidate
+	}
+	if err := os.MkdirAll(filepath.Dir(s.path), 0700); err != nil {
+		return fmt.Errorf("create provider binding directory: %w", err)
+	}
+	lock, err := acquireFileLock(s.path + ".lock")
+	if err != nil {
+		return fmt.Errorf("open provider binding lock: %w", err)
+	}
+	defer lock.Close() //nolint:errcheck
+	records, err := s.read()
+	if err != nil {
+		return err
+	}
+	changed := false
+	for key, record := range records {
+		if _, ok := keep[key]; ok {
+			continue
+		}
+		if candidate, ok := archived[key]; ok {
+			if candidate.TargetAbsent && record.RuntimeGeneration <= candidate.RuntimeGeneration {
+				delete(records, key)
+				changed = true
+			}
+			continue
+		}
+		if !input.MissingBefore.IsZero() && record.UpdatedAt.Before(input.MissingBefore) {
+			delete(records, key)
+			changed = true
+		}
+	}
+	if !changed {
+		return nil
+	}
+	return writeAtomic(s.path, records)
+}
+
+func writeAtomic(path string, records map[string]Record) error {
 	encoded, err := json.MarshalIndent(records, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode provider bindings: %w", err)
 	}
 	encoded = append(encoded, '\n')
-	temporary, err := os.CreateTemp(filepath.Dir(s.path), ".provider-bindings-*")
+	if len(encoded) > maxStoreBytes {
+		return errors.New("provider bindings are too large")
+	}
+	temporary, err := os.CreateTemp(filepath.Dir(path), ".provider-bindings-*")
 	if err != nil {
 		return fmt.Errorf("create provider binding update: %w", err)
 	}
@@ -106,7 +267,7 @@ func (s *Store) Put(record Record) error {
 	if err := temporary.Close(); err != nil {
 		return err
 	}
-	if err := os.Rename(temporaryPath, s.path); err != nil {
+	if err := os.Rename(temporaryPath, path); err != nil {
 		return fmt.Errorf("install provider bindings: %w", err)
 	}
 	return nil
@@ -127,7 +288,7 @@ func (s *Store) read() (map[string]Record, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read provider bindings: %w", err)
 	}
-	if len(data) > 1<<20 {
+	if len(data) > maxStoreBytes {
 		return nil, errors.New("provider bindings are too large")
 	}
 	records := make(map[string]Record)

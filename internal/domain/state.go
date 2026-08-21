@@ -34,6 +34,7 @@ type State struct {
 	EnrollmentInvites       map[string]EnrollmentInvite               `json:"enrollment_invites,omitempty"`
 	EnrollmentRequests      map[string]EnrollmentRequest              `json:"enrollment_requests,omitempty"`
 	NodeTombstones          map[NodeID]NodeTombstone                  `json:"node_tombstones,omitempty"`
+	SessionTombstones       map[string]SessionTombstone               `json:"session_tombstones,omitempty"`
 	DeferredInputs          map[string][]DeferredSessionInput         `json:"deferred_inputs,omitempty"`
 	ClusterUpdate           *ClusterUpdate                            `json:"cluster_update,omitempty"`
 }
@@ -53,6 +54,7 @@ func NewState() *State {
 		EnrollmentInvites:      make(map[string]EnrollmentInvite),
 		EnrollmentRequests:     make(map[string]EnrollmentRequest),
 		NodeTombstones:         make(map[NodeID]NodeTombstone),
+		SessionTombstones:      make(map[string]SessionTombstone),
 		DeferredInputs:         make(map[string][]DeferredSessionInput),
 		Navigation: Navigation{
 			ActiveNodeByUser:        make(map[UserID]NodeID),
@@ -143,6 +145,9 @@ func (s *State) AddSession(session Session) error {
 	if _, exists := s.Sessions[key]; exists {
 		return ErrAlreadyExists
 	}
+	if _, purged := s.SessionTombstones[key]; purged {
+		return fmt.Errorf("%w: session identity was purged", ErrInvalidState)
+	}
 	// Format version zero is a persisted legacy name. It remains readable and
 	// is migrated from the first prompt by sessioncontrol; every new committed
 	// name must explicitly carry and satisfy the current contract.
@@ -199,6 +204,7 @@ func (s *State) SetPreferences(userID UserID, preferences UserPreferences) error
 	if _, ok := s.Users[userID]; !ok {
 		return ErrNotFound
 	}
+	preferences.normalize()
 	if err := preferences.Validate(); err != nil {
 		return err
 	}
@@ -221,16 +227,7 @@ func (s *State) Clone() *State {
 	clone.SchemaVersion = s.SchemaVersion
 	clone.TelegramBotID = s.TelegramBotID
 	clone.TelegramNextUpdateID = s.TelegramNextUpdateID
-	for userID, card := range s.TelegramResponseCards {
-		clone.TelegramResponseCards[userID] = card
-	}
-	for userID, views := range s.TelegramSessionViews {
-		copyViews := make(map[string]TelegramSessionView, len(views))
-		for key, view := range views {
-			copyViews[key] = view
-		}
-		clone.TelegramSessionViews[userID] = copyViews
-	}
+	s.cloneTelegramPresentation(clone)
 	for key, snapshot := range s.Quotas {
 		clone.Quotas[key] = cloneQuota(snapshot)
 	}
@@ -275,7 +272,9 @@ func (s *State) Clone() *State {
 	for key, grant := range s.Grants {
 		clone.Grants[key] = grant
 	}
+	s.cloneSessionTombstones(clone)
 	for userID, preferences := range s.Preferences {
+		preferences.normalize()
 		clone.Preferences[userID] = preferences.clone()
 	}
 	for userID, nodeID := range s.Navigation.ActiveNodeByUser {

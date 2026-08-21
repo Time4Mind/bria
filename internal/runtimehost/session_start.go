@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/Time4Mind/bria/internal/domain"
@@ -95,6 +96,7 @@ func providerEnvironment(
 	binding := []string{
 		"-e", providerbinding.EnvNodeID + "=" + string(session.NodeID),
 		"-e", providerbinding.EnvSessionID + "=" + string(session.ID),
+		"-e", providerbinding.EnvRuntimeGeneration + "=" + strconv.FormatUint(session.RuntimeGeneration, 10),
 		"-e", providerbinding.EnvTmuxSession + "=" + tmuxSession,
 		"-e", providerbinding.EnvTmuxWindow + "=" + window,
 	}

@@ -80,7 +80,7 @@ func (m *Machine) Apply(command Command) Result {
 }
 
 func validateCommand(command Command) error {
-	if command.Version != CommandVersion {
+	if command.Version < 1 || command.Version > CommandVersion {
 		return fmt.Errorf("unsupported command version: %d", command.Version)
 	}
 	if strings.TrimSpace(command.OperationID) == "" || len(command.OperationID) > 128 {
@@ -288,7 +288,8 @@ func apply(state *domain.State, command Command) (json.RawMessage, error) {
 	case CommandClearSession, CommandRenameSession, CommandCloseSession,
 		CommandDiscardSession, CommandCompleteSessionDiscard,
 		CommandReattachSessionRuntime,
-		CommandCompleteSessionArchive, CommandRestoreSession, CommandArchiveSession:
+		CommandCompleteSessionArchive, CommandRestoreSession, CommandArchiveSession,
+		CommandPurgeSession:
 		return applySessionLifecycle(state, command)
 	default:
 		return nil, fmt.Errorf("unsupported command kind: %q", command.Kind)

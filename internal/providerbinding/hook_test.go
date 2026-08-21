@@ -34,7 +34,7 @@ func TestCaptureBindsOnlyExactBriaTmuxWindow(t *testing.T) {
 		"transcript_path":%q,"future_field":true
 	}`, providerID, workdir, transcriptPath)
 	environment := map[string]string{
-		EnvNodeID: "mac", EnvSessionID: "bria-session",
+		EnvNodeID: "mac", EnvSessionID: "bria-session", EnvRuntimeGeneration: "1",
 		EnvTmuxSession: "bria-standalone", EnvTmuxWindow: "bria-window", "TMUX_PANE": "%9",
 	}
 	getenv := func(key string) string { return environment[key] }
@@ -55,7 +55,7 @@ func TestCaptureBindsOnlyExactBriaTmuxWindow(t *testing.T) {
 		t.Fatal(err)
 	}
 	record, found, err := store.Lookup(domain.SessionRef{NodeID: "mac", SessionID: "bria-session"}, workdir)
-	if err != nil || !found || record.ProviderSessionID != providerID || record.UpdatedAt != now {
+	if err != nil || !found || record.ProviderSessionID != providerID || record.RuntimeGeneration != 1 || record.UpdatedAt != now {
 		t.Fatalf("record=%#v found=%v err=%v", record, found, err)
 	}
 }
@@ -156,7 +156,7 @@ func TestCaptureStopReturnsOneFinalWakeSignal(t *testing.T) {
 		"transcript_path":%q
 	}`, providerID, workdir, transcriptPath)
 	environment := map[string]string{
-		EnvNodeID: "mac", EnvSessionID: "bria-session",
+		EnvNodeID: "mac", EnvSessionID: "bria-session", EnvRuntimeGeneration: "1",
 		EnvTmuxSession: "bria", EnvTmuxWindow: "window", "TMUX_PANE": "%1",
 	}
 	result, err := CaptureEvent(
@@ -171,6 +171,97 @@ func TestCaptureStopReturnsOneFinalWakeSignal(t *testing.T) {
 	if !result.WakeFinal || result.NodeID != "mac" || result.SessionID != "bria-session" ||
 		result.ProviderSessionID != providerID {
 		t.Fatalf("hook result=%#v", result)
+	}
+}
+
+func TestCaptureLegacyProcessSurvivesGenerationEnvRollout(t *testing.T) {
+	directory := t.TempDir()
+	store, err := NewStore(filepath.Join(directory, "bindings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	workdir := filepath.Join(directory, "workspace")
+	if err := os.Mkdir(workdir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	providerID := "019fffe8-02ee-7aa1-b6cf-eed13a005482"
+	transcriptPath := filepath.Join(directory, "rollout.jsonl")
+	meta := fmt.Sprintf(`{"type":"session_meta","payload":{"id":%q,"cwd":%q}}`+"\n", providerID, workdir)
+	if err := os.WriteFile(transcriptPath, []byte(meta), 0600); err != nil {
+		t.Fatal(err)
+	}
+	payload := fmt.Sprintf(`{"session_id":%q,"cwd":%q,"hook_event_name":"SessionStart","transcript_path":%q}`, providerID, workdir, transcriptPath)
+	environment := map[string]string{
+		EnvNodeID: "mac", EnvSessionID: "bria-session",
+		EnvTmuxSession: "bria", EnvTmuxWindow: "window", "TMUX_PANE": "%1",
+	}
+	if err := Capture(context.Background(), store, strings.NewReader(payload), func(key string) string { return environment[key] },
+		func(context.Context, string) (string, error) { return "bria\t\twindow", nil }, time.Now); err != nil {
+		t.Fatal(err)
+	}
+	ref := domain.SessionRef{NodeID: "mac", SessionID: "bria-session"}
+	legacy, found, err := store.LookupRef(ref)
+	if err != nil || !found || legacy.RuntimeGeneration != 0 {
+		t.Fatalf("legacy binding=%#v found=%v err=%v", legacy, found, err)
+	}
+	newer := legacy
+	newer.RuntimeGeneration = 1
+	newer.ProviderSessionID = "019fffe8-02ee-7aa1-b6cf-eed13a005483"
+	if err := store.Put(newer); err != nil {
+		t.Fatal(err)
+	}
+	if err := Capture(context.Background(), store, strings.NewReader(payload), func(key string) string { return environment[key] },
+		func(context.Context, string) (string, error) { return "bria\t\twindow", nil }, time.Now); err != nil {
+		t.Fatal(err)
+	}
+	current, found, err := store.LookupRef(ref)
+	if err != nil || !found || current.RuntimeGeneration != 1 {
+		t.Fatalf("legacy hook overwrote newer binding: binding=%#v found=%v err=%v", current, found, err)
+	}
+}
+
+func TestCapturePostClearSameProcessCanBindNextProviderSession(t *testing.T) {
+	directory := t.TempDir()
+	store, err := NewStore(filepath.Join(directory, "bindings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	workdir := filepath.Join(directory, "workspace")
+	if err := os.Mkdir(workdir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	ref := domain.SessionRef{NodeID: "mac", SessionID: "bria-session"}
+	oldID := "019fffe8-02ee-7aa1-b6cf-eed13a005482"
+	newID := "019fffe8-02ee-7aa1-b6cf-eed13a005483"
+	if err := store.Put(Record{
+		NodeID: string(ref.NodeID), SessionID: string(ref.SessionID), ProviderSessionID: oldID,
+		Workdir: workdir, TmuxSession: "bria", TmuxWindow: "window", RuntimeGeneration: 1,
+		UpdatedAt: time.Unix(1, 0).UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.DeleteIfGeneration(ref, 1); err != nil {
+		t.Fatal(err)
+	}
+	environment := map[string]string{
+		EnvNodeID: "mac", EnvSessionID: "bria-session", EnvRuntimeGeneration: "1",
+		EnvTmuxSession: "bria", EnvTmuxWindow: "window", "TMUX_PANE": "%1",
+	}
+	for _, event := range []string{"SessionStart", "UserPromptSubmit"} {
+		transcriptPath := filepath.Join(directory, event+".jsonl")
+		meta := fmt.Sprintf(`{"type":"session_meta","payload":{"id":%q,"cwd":%q}}`+"\n", newID, workdir)
+		if err := os.WriteFile(transcriptPath, []byte(meta), 0600); err != nil {
+			t.Fatal(err)
+		}
+		payload := fmt.Sprintf(`{"session_id":%q,"cwd":%q,"hook_event_name":%q,"transcript_path":%q}`, newID, workdir, event, transcriptPath)
+		if err := Capture(context.Background(), store, strings.NewReader(payload), func(key string) string { return environment[key] },
+			func(context.Context, string) (string, error) { return "bria\t\twindow", nil }, time.Now); err != nil {
+			t.Fatalf("%s hook: %v", event, err)
+		}
+	}
+	current, found, err := store.LookupRef(ref)
+	if err != nil || !found || current.ProviderSessionID != newID || current.RuntimeGeneration != 1 {
+		t.Fatalf("post-clear binding=%#v found=%v err=%v", current, found, err)
 	}
 }
 
