@@ -37,7 +37,7 @@ func TestDarwinBootIDProviderUsesFixedSysctlArgv(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Current(): %v", err)
 	}
-	if got != "darwin:1712345678:000042" {
+	if got != "darwin:1712345678" {
 		t.Fatalf("Current() = %q", got)
 	}
 	if runner.name != "sysctl" || !reflect.DeepEqual(runner.args, []string{"-n", "kern.boottime"}) {

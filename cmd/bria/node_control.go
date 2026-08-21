@@ -68,7 +68,7 @@ func startNodeRuntimeControl(
 		return closeFailedRuntime(executor, store, fmt.Errorf("read host boot id: %w", err))
 	}
 	knownBootID := state.Nodes[domain.NodeID(nodeConfig.NodeID)].BootID
-	bootChanged := knownBootID != "" && knownBootID != currentBootID
+	bootChanged := hostBootChanged(knownBootID, currentBootID)
 	missing := make([]domain.SessionRef, 0)
 	for _, session := range state.Sessions {
 		if string(session.NodeID) != nodeConfig.NodeID || !session.IsLive() {
@@ -282,4 +282,8 @@ func startNodeRuntimeControl(
 		_ = server.Shutdown(shutdownCtx)
 	}()
 	return control, nil
+}
+
+func hostBootChanged(knownBootID, currentBootID string) bool {
+	return knownBootID != "" && !domain.SameBootIdentity(knownBootID, currentBootID)
 }

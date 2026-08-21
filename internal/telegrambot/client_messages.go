@@ -70,13 +70,25 @@ func (c *Client) DeleteMessage(ctx context.Context, message Message) error {
 }
 
 func (c *Client) ClearKeyboard(ctx context.Context, message Message) error {
+	return c.ReplaceKeyboard(ctx, message, nil)
+}
+
+func (c *Client) ReplaceKeyboard(
+	ctx context.Context,
+	message Message,
+	grid telegramui.Grid,
+) error {
 	if message.ChatID <= 0 || message.MessageID <= 0 {
 		return errors.New("invalid message keyboard target")
 	}
+	keyboard, err := convertGrid(grid)
+	if err != nil {
+		return err
+	}
 	var result json.RawMessage
-	err := c.call(ctx, "editMessageReplyMarkup", editReplyMarkupPayload{
+	err = c.call(ctx, "editMessageReplyMarkup", editReplyMarkupPayload{
 		ChatID: message.ChatID, MessageID: message.MessageID,
-		ReplyMarkup: inlineKeyboardMarkup{InlineKeyboard: [][]inlineKeyboardButton{}},
+		ReplyMarkup: keyboard,
 	}, &result, c.requestTimeout)
 	if isUnchangedMessageError(err) {
 		return nil

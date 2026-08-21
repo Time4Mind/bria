@@ -117,6 +117,11 @@ func TestFinalFreezesHistoricalCardAndPostsLatestResponseOnce(t *testing.T) {
 	if !containsMessageID(fixture.messenger.cleared, 82) {
 		t.Fatalf("historical keyboard was not cleared: %#v", fixture.messenger.cleared)
 	}
+	if len(fixture.messenger.replaced) != 1 ||
+		len(fixture.messenger.replaced[0]) != 1 || len(fixture.messenger.replaced[0][0]) != 1 ||
+		fixture.messenger.replaced[0][0][0].Callback.Action != telegramui.ActionSelectSession {
+		t.Fatalf("historical reopen keyboard=%#v", fixture.messenger.replaced)
+	}
 
 	runBackgroundForTest(handler, 40*time.Millisecond)
 	if len(fixture.messenger.sent) != 1 {

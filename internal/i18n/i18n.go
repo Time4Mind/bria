@@ -31,6 +31,7 @@ const (
 	ButtonConfirm                Key = "button.confirm"
 	ButtonCancel                 Key = "button.cancel"
 	ButtonLater                  Key = "button.later"
+	ButtonOpenCurrent            Key = "button.open_current"
 	ConfirmClose                 Key = "confirm.close"
 	ConfirmClear                 Key = "confirm.clear"
 	ToastQueued                  Key = "toast.queued"

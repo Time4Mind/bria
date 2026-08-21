@@ -61,7 +61,7 @@ func (h *Handler) rememberResponseCardLocked(
 		_ = h.messenger.DeleteMessage(ctx, previousMessage)
 		return
 	}
-	_ = h.messenger.ClearKeyboard(ctx, previousMessage)
+	h.freezeHistoricalCard(ctx, actor, previousMessage, previous.Session)
 }
 
 func (h *Handler) recordResponseCard(

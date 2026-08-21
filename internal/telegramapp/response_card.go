@@ -141,7 +141,7 @@ func (h *Handler) repostFinalResponseCard(
 	// Keep the exact page the user was reading as a frozen history item. Only
 	// the newly posted final carrier remains interactive, so stale callbacks
 	// cannot compete with it and the previous message is never destroyed.
-	_ = h.messenger.ClearKeyboard(ctx, previous)
+	h.freezeHistoricalCard(ctx, actor, previous, ref)
 	h.rememberResolvedCardPage(actor.UserID, ref, screen)
 	return replacement, nil
 }

@@ -216,6 +216,29 @@ func (m *activityMessenger) ClearKeyboard(
 	return err
 }
 
+func (m *activityMessenger) ReplaceKeyboard(
+	ctx context.Context,
+	message telegrambot.Message,
+	grid telegramui.Grid,
+) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if err := m.localFloodWaitLocked("replaceKeyboard", message.ChatID); err != nil {
+		return err
+	}
+	replacer, ok := m.inner.(interface {
+		ReplaceKeyboard(context.Context, telegrambot.Message, telegramui.Grid) error
+	})
+	var err error
+	if ok {
+		err = replacer.ReplaceKeyboard(ctx, message, grid)
+	} else {
+		err = m.inner.ClearKeyboard(ctx, message)
+	}
+	m.rememberFloodWaitLocked(message.ChatID, err)
+	return err
+}
+
 func (m *activityMessenger) observeIncoming(chatID, messageID int64) {
 	if chatID <= 0 || messageID <= 0 {
 		return

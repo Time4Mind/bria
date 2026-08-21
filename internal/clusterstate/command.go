@@ -46,6 +46,7 @@ const (
 	CommandCloseSession           CommandKind = "close_session"
 	CommandDiscardSession         CommandKind = "discard_session"
 	CommandCompleteSessionDiscard CommandKind = "complete_session_discard"
+	CommandReattachSessionRuntime CommandKind = "reattach_session_runtime"
 	CommandCompleteSessionArchive CommandKind = "complete_session_archive"
 	CommandRestoreSession         CommandKind = "restore_session"
 	CommandArchiveSession         CommandKind = "archive_session"

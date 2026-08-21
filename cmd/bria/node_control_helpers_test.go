@@ -24,3 +24,12 @@ func TestLocalControlAddressUsesLoopbackForWildcardBind(t *testing.T) {
 		}
 	}
 }
+
+func TestHostBootChangedAcceptsLegacyDarwinIdentity(t *testing.T) {
+	if hostBootChanged("darwin:1787239247:256083", "darwin:1787239247") {
+		t.Fatal("legacy Darwin boot ID was treated as a reboot")
+	}
+	if !hostBootChanged("darwin:1787239247:256083", "darwin:1787239248") {
+		t.Fatal("different Darwin boot second was not treated as a reboot")
+	}
+}

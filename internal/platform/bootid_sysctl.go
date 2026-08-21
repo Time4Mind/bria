@@ -57,5 +57,8 @@ func (p *DarwinBootIDProvider) Current(ctx context.Context) (string, error) {
 	if err != nil || microseconds >= 1_000_000 {
 		return "", fmt.Errorf("parse darwin boot microseconds")
 	}
-	return fmt.Sprintf("darwin:%d:%06d", seconds, microseconds), nil
+	// kern.boottime's microsecond component is not stable across macOS daemon
+	// restarts. The second is stable for the host boot and avoids turning a
+	// routine Bria update into a false reboot recovery.
+	return fmt.Sprintf("darwin:%d", seconds), nil
 }

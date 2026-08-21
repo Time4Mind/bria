@@ -51,6 +51,7 @@ type messengerStub struct {
 	editedMessages                                    []telegrambot.Message
 	deleted                                           []telegrambot.Message
 	cleared                                           []telegrambot.Message
+	replaced                                          []telegramui.Grid
 	typing                                            int
 	editErr                                           error
 	sendErr                                           error
@@ -126,6 +127,19 @@ func (m *messengerStub) ClearKeyboard(_ context.Context, message telegrambot.Mes
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.cleared = append(m.cleared, message)
+	notifyTest(m.clearNotify)
+	return nil
+}
+
+func (m *messengerStub) ReplaceKeyboard(
+	_ context.Context,
+	message telegrambot.Message,
+	grid telegramui.Grid,
+) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.cleared = append(m.cleared, message)
+	m.replaced = append(m.replaced, grid)
 	notifyTest(m.clearNotify)
 	return nil
 }

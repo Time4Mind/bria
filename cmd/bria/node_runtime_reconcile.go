@@ -71,6 +71,12 @@ func (r *runtimeMissingReconciler) Reconcile(ctx context.Context) error {
 	}
 	live := make(map[string]bool)
 	for _, session := range state.Sessions {
+		if r.canReattach(session) {
+			if err := r.reattach(ctx, session); err != nil {
+				return err
+			}
+			continue
+		}
 		if session.NodeID == domain.NodeID(r.nodeID) &&
 			session.State == domain.SessionDiscarding {
 			if err := r.discard(ctx, session); err != nil {
@@ -114,6 +120,57 @@ func (r *runtimeMissingReconciler) Reconcile(ctx context.Context) error {
 		if !live[key] {
 			delete(r.misses, key)
 		}
+	}
+	return nil
+}
+
+func (r *runtimeMissingReconciler) canReattach(session domain.Session) bool {
+	return session.NodeID == domain.NodeID(r.nodeID) &&
+		session.State == domain.SessionArchived &&
+		session.ArchiveReason == domain.ArchiveResumeFailed &&
+		session.ArchiveID == "" && !session.ArchiveReady &&
+		session.RuntimeGeneration > 0 && session.Revision > 0
+}
+
+func (r *runtimeMissingReconciler) reattach(
+	ctx context.Context,
+	session domain.Session,
+) error {
+	target := runtimehost.TmuxTarget(r.tmuxSession, r.nodeID, string(session.ID))
+	exists, err := r.exists.TargetExists(ctx, target)
+	if err != nil || !exists {
+		// A resume_failed archive is legitimate when its provider really exited.
+		// Only positive evidence for the exact deterministic target may reverse it.
+		return nil
+	}
+	operationID, err := r.newID()
+	if err != nil {
+		return err
+	}
+	command, err := clusterstate.NewCommand(
+		operationID, clusterstate.CommandReattachSessionRuntime, r.now(),
+		clusterstate.ReattachSessionRuntime{
+			Session: session.Ref(), ExpectedGeneration: session.RuntimeGeneration,
+			ExpectedRevision: session.Revision,
+		},
+	)
+	if err != nil {
+		return err
+	}
+	result, err := r.apply.Apply(ctx, command)
+	if err != nil {
+		return fmt.Errorf("reattach existing runtime %s: %w", session.Ref().Key(), err)
+	}
+	if err := result.Err(); err != nil {
+		return fmt.Errorf("reattach existing runtime %s: %w", session.Ref().Key(), err)
+	}
+	binding := runtimehost.RuntimeBinding{
+		NodeID: r.nodeID, SessionID: string(session.ID),
+		Generation: session.RuntimeGeneration, TmuxTarget: target,
+		Backend: session.Backend, Workdir: session.Workdir,
+	}
+	if err := r.runtimes.Register(binding); err != nil && err != runtimehost.ErrStaleRuntime {
+		return fmt.Errorf("register reattached runtime %s: %w", session.Ref().Key(), err)
 	}
 	return nil
 }

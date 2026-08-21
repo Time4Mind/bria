@@ -13,10 +13,11 @@ import (
 type RecoveryOutcome string
 
 const (
-	RecoveryComplete  RecoveryOutcome = "complete"
-	RecoveryFailed    RecoveryOutcome = "failed"
-	RecoveryMissing   RecoveryOutcome = "missing"
-	RecoveryDiscarded RecoveryOutcome = "discarded"
+	RecoveryComplete   RecoveryOutcome = "complete"
+	RecoveryFailed     RecoveryOutcome = "failed"
+	RecoveryMissing    RecoveryOutcome = "missing"
+	RecoveryDiscarded  RecoveryOutcome = "discarded"
+	RecoveryReattached RecoveryOutcome = "reattached"
 )
 
 type RecoveryReport struct {
@@ -68,6 +69,15 @@ func (c *ConsensusHeartbeatCommitter) CommitRecovery(
 			ActorID: report.ActorID, Session: report.Session,
 			ExpectedRevision: report.ExpectedRevision,
 		}
+	} else if report.Outcome == RecoveryReattached {
+		if report.ExpectedGeneration == 0 || report.ExpectedRevision == 0 {
+			return errors.New("reattach recovery identity is invalid")
+		}
+		kind = clusterstate.CommandReattachSessionRuntime
+		payload = clusterstate.ReattachSessionRuntime{
+			Session: report.Session, ExpectedGeneration: report.ExpectedGeneration,
+			ExpectedRevision: report.ExpectedRevision,
+		}
 	} else if report.Outcome != RecoveryComplete {
 		return errors.New("recovery outcome is invalid")
 	}
@@ -115,7 +125,8 @@ func (a *RemoteRecoveryApplier) Apply(
 	if command.Kind != clusterstate.CommandCompleteBootRecovery &&
 		command.Kind != clusterstate.CommandFailBootRecovery &&
 		command.Kind != clusterstate.CommandMarkMissing &&
-		command.Kind != clusterstate.CommandCompleteSessionDiscard {
+		command.Kind != clusterstate.CommandCompleteSessionDiscard &&
+		command.Kind != clusterstate.CommandReattachSessionRuntime {
 		return clusterstate.Result{}, errors.New("only local runtime recovery results may use the recovery API")
 	}
 	var payload clusterstate.MarkMissing
@@ -128,6 +139,14 @@ func (a *RemoteRecoveryApplier) Apply(
 		payload.Session = discard.Session
 		payload.ExpectedRevision = discard.ExpectedRevision
 		actorID = discard.ActorID
+	} else if command.Kind == clusterstate.CommandReattachSessionRuntime {
+		var reattach clusterstate.ReattachSessionRuntime
+		if err := json.Unmarshal(command.Payload, &reattach); err != nil {
+			return clusterstate.Result{}, fmt.Errorf("decode reattach transition: %w", err)
+		}
+		payload.Session = reattach.Session
+		payload.ExpectedGeneration = reattach.ExpectedGeneration
+		payload.ExpectedRevision = reattach.ExpectedRevision
 	} else if err := json.Unmarshal(command.Payload, &payload); err != nil {
 		return clusterstate.Result{}, fmt.Errorf("decode recovery transition: %w", err)
 	}
@@ -145,6 +164,8 @@ func (a *RemoteRecoveryApplier) Apply(
 		outcome = RecoveryMissing
 	} else if command.Kind == clusterstate.CommandCompleteSessionDiscard {
 		outcome = RecoveryDiscarded
+	} else if command.Kind == clusterstate.CommandReattachSessionRuntime {
+		outcome = RecoveryReattached
 	}
 	err := a.reporter.ReportRecovery(ctx, leaderID, RecoveryReport{
 		ReportID: command.OperationID, NodeID: a.nodeID,

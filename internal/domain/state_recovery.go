@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -30,7 +31,7 @@ func (s *State) ObserveNodeBoot(nodeID NodeID, bootID string, at time.Time) (Boo
 	if previous == "" {
 		return BootRecoveryPlan{}, nil
 	}
-	if previous == bootID {
+	if SameBootIdentity(previous, bootID) {
 		plan := BootRecoveryPlan{}
 		for _, session := range s.Sessions {
 			if session.NodeID == nodeID && session.IsLive() && session.ResumePending {
@@ -97,6 +98,36 @@ func (s *State) ObserveNodeBoot(nodeID NodeID, bootID string, at time.Time) (Boo
 		s.repairNavigationAfterUnavailable(ref)
 	}
 	return plan, nil
+}
+
+// SameBootIdentity accepts the stable Darwin format and the historical format
+// that included kern.boottime microseconds. macOS may change that fractional
+// component without rebooting, so only the boot second identifies the boot.
+func SameBootIdentity(previous, current string) bool {
+	if previous == current {
+		return true
+	}
+	previousSecond, previousDarwin := darwinBootSecond(previous)
+	currentSecond, currentDarwin := darwinBootSecond(current)
+	return previousDarwin && currentDarwin && previousSecond == currentSecond
+}
+
+func darwinBootSecond(value string) (uint64, bool) {
+	parts := strings.Split(value, ":")
+	if len(parts) != 2 && len(parts) != 3 || parts[0] != "darwin" {
+		return 0, false
+	}
+	seconds, err := strconv.ParseUint(parts[1], 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	if len(parts) == 3 {
+		microseconds, err := strconv.ParseUint(parts[2], 10, 32)
+		if err != nil || microseconds >= 1_000_000 {
+			return 0, false
+		}
+	}
+	return seconds, true
 }
 
 func sortSessionRefs(refs []SessionRef) {

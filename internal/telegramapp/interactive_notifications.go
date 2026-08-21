@@ -121,7 +121,7 @@ func (h *Handler) repostInteractiveResponseCard(
 	if exists {
 		// Preserve the exact screen the user was reading as history, but remove
 		// stale controls so only the new waiting-input carrier can drive the CLI.
-		_ = h.messenger.ClearKeyboard(ctx, telegramMessage(current))
+		h.freezeHistoricalCard(ctx, actor, telegramMessage(current), ref)
 	}
 	return true
 }

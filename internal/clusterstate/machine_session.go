@@ -47,6 +47,14 @@ func applySessionLifecycle(state *domain.State, command Command) (json.RawMessag
 				payload.ActorID, payload.Session, payload.ExpectedRevision,
 			)
 		})
+	case CommandReattachSessionRuntime:
+		var payload ReattachSessionRuntime
+		return nil, decodeAnd(command.Payload, command.StrictPayload, &payload, func() error {
+			return state.ReattachSessionRuntime(
+				payload.Session, payload.ExpectedGeneration, payload.ExpectedRevision,
+				command.IssuedAt,
+			)
+		})
 	case CommandCompleteSessionArchive:
 		var payload SessionRevision
 		return nil, decodeAnd(command.Payload, command.StrictPayload, &payload, func() error {
