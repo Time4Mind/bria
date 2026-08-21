@@ -104,7 +104,7 @@ func CaptureEvent(
 		return HookResult{}, fmt.Errorf("inspect provider tmux pane: %w", err)
 	}
 	parts := strings.Split(strings.TrimSpace(displayed), "\t")
-	if len(parts) != 3 {
+	if len(parts) != 3 && len(parts) != 5 {
 		return HookResult{}, errors.New("invalid provider tmux identity")
 	}
 	actualSession := parts[1]
@@ -114,6 +114,13 @@ func CaptureEvent(
 	if actualSession != tmuxSession || parts[2] != tmuxWindow {
 		return HookResult{}, errors.New("provider tmux identity does not match Bria launch")
 	}
+	windowID := ""
+	if len(parts) == 5 {
+		windowID = parts[3]
+		if windowID == "" || parts[4] != pane {
+			return HookResult{}, errors.New("provider tmux instance does not match Bria launch")
+		}
+	}
 	workdir := filepath.Clean(payload.CWD)
 	ref := domain.SessionRef{NodeID: domain.NodeID(nodeID), SessionID: domain.SessionID(sessionID)}
 	if wakeFinalEvent(payload.Event) {
@@ -121,7 +128,8 @@ func CaptureEvent(
 			return HookResult{}, lookupErr
 		} else if found {
 			if existing.ProviderSessionID != payload.SessionID ||
-				existing.TmuxSession != tmuxSession || existing.TmuxWindow != tmuxWindow {
+				existing.TmuxSession != tmuxSession || existing.TmuxWindow != tmuxWindow ||
+				(existing.TmuxPane != "" && existing.TmuxPane != pane) {
 				return HookResult{}, errors.New("provider stop does not match stored binding")
 			}
 			workdir = existing.Workdir
@@ -135,7 +143,8 @@ func CaptureEvent(
 	if err := store.Put(Record{
 		NodeID: nodeID, SessionID: sessionID, ProviderSessionID: payload.SessionID,
 		Workdir: workdir, TmuxSession: tmuxSession,
-		TmuxWindow: tmuxWindow, RuntimeGeneration: runtimeGeneration, UpdatedAt: now().UTC(),
+		TmuxWindow: tmuxWindow, TmuxWindowID: windowID, TmuxPane: pane,
+		RuntimeGeneration: runtimeGeneration, UpdatedAt: now().UTC(),
 	}); err != nil {
 		return HookResult{}, err
 	}
@@ -167,7 +176,7 @@ func validateProviderTranscript(backend, path, providerID, workdir string) error
 
 func DisplayTmux(ctx context.Context, pane string) (string, error) {
 	command := exec.CommandContext(ctx, "tmux", "display-message", "-t", pane, "-p",
-		"#{session_name}\t#{session_group}\t#{window_name}")
+		"#{session_name}\t#{session_group}\t#{window_name}\t#{window_id}\t#{pane_id}")
 	output, err := command.Output()
 	return string(output), err
 }

@@ -9,6 +9,7 @@ package transcript
 import (
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 )
 
@@ -55,6 +56,7 @@ type Request struct {
 type Config struct {
 	ClaudeProjectsRoot string
 	CodexSessionsRoot  string
+	CodexCatalogPath   string
 	MaxEvents          int
 	MaxReadBytes       int64
 	MaxLineBytes       int
@@ -80,6 +82,9 @@ var (
 func (c Config) normalized() (Config, error) {
 	if strings.TrimSpace(c.ClaudeProjectsRoot) == "" || strings.TrimSpace(c.CodexSessionsRoot) == "" {
 		return Config{}, fmt.Errorf("%w: both transcript roots are required", ErrInvalidRequest)
+	}
+	if c.CodexCatalogPath != "" && !filepath.IsAbs(c.CodexCatalogPath) {
+		return Config{}, fmt.Errorf("%w: Codex catalog path must be absolute", ErrInvalidRequest)
 	}
 	if c.MaxEvents == 0 {
 		c.MaxEvents = defaultMaxEvents

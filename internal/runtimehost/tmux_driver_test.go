@@ -36,7 +36,7 @@ func (r *recordingInputRunner) Run(
 }
 
 func TestTmuxDriverChecksExactRuntimeTarget(t *testing.T) {
-	runner := &recordingInputRunner{}
+	runner := &recordingInputRunner{stdout: []byte("other\nwindow\n")}
 	driver, err := NewTmuxDriver(runner, time.Second, 0, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -45,13 +45,27 @@ func TestTmuxDriverChecksExactRuntimeTarget(t *testing.T) {
 	if err != nil || !exists {
 		t.Fatalf("existing target=%v err=%v", exists, err)
 	}
-	runner.exitCode = 1
+	runner.stdout = []byte("other\n")
 	exists, err = driver.TargetExists(context.Background(), "bria:missing")
 	if err != nil || exists {
 		t.Fatalf("missing target=%v err=%v", exists, err)
 	}
-	if got := runner.calls[1].args; !reflect.DeepEqual(got, []string{"has-session", "-t", "bria:missing"}) {
+	if got := runner.calls[1].args; !reflect.DeepEqual(got, []string{
+		"list-windows", "-t", "bria", "-F", "#{window_name}",
+	}) {
 		t.Fatalf("target probe args=%v", got)
+	}
+}
+
+func TestTmuxDriverRejectsDuplicateExactRuntimeTarget(t *testing.T) {
+	runner := &recordingInputRunner{stdout: []byte("window\nother\nwindow\n")}
+	driver, err := NewTmuxDriver(runner, time.Second, 0, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	exists, err := driver.TargetExists(context.Background(), "bria:window")
+	if err == nil || exists {
+		t.Fatalf("duplicate target=%v err=%v", exists, err)
 	}
 }
 

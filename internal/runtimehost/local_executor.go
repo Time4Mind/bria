@@ -227,6 +227,18 @@ func (e *LocalExecutor) Submit(ctx context.Context, request Request) (Receipt, e
 		}, nil
 	}
 	e.active[request.OperationID] = struct{}{}
+	if request.Action == ActionCapture {
+		// Pane capture is read-only and must not wait behind a provider input or
+		// archive operation. Execute it on a bounded independent lane; identity is
+		// revalidated by executeOnce immediately before tmux is touched.
+		binding := session.snapshot()
+		e.workers.Add(1)
+		go e.runReadOnlyCapture(request, binding)
+		return Receipt{
+			OperationID: request.OperationID, Accepted: true,
+			Detail: "read-only capture accepted",
+		}, nil
+	}
 	if !session.enqueue(request) {
 		result := Result{Accepted: true, Detail: "runtime target became unavailable"}
 		completionErr := e.store.Complete(request.OperationID, fingerprint, result, ErrRuntimeUnavailable)

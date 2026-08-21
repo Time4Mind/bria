@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Time4Mind/bria/internal/domain"
@@ -31,6 +33,7 @@ type TmuxRecoveryRuntime struct {
 	tmuxSession string
 	backends    map[string]BackendCommand
 	timeout     time.Duration
+	startLocks  [32]sync.Mutex
 }
 
 func NewTmuxRecoveryRuntime(
@@ -102,6 +105,8 @@ func (r *TmuxRecoveryRuntime) Resume(
 
 	windowName := TmuxWindowName(string(session.NodeID), string(session.ID))
 	target := r.tmuxSession + ":" + windowName
+	unlock := r.lockTarget(target)
+	defer unlock()
 	runCtx, cancel := context.WithTimeout(ctx, r.timeout)
 	defer cancel()
 	if exists, err := r.windowExists(runCtx, tmuxPath, target); err != nil {
@@ -136,6 +141,14 @@ func (r *TmuxRecoveryRuntime) Resume(
 		return err
 	}
 	return r.awaitProviderStartup(runCtx, tmuxPath, target)
+}
+
+func (r *TmuxRecoveryRuntime) lockTarget(target string) func() {
+	digest := fnv.New32a()
+	_, _ = digest.Write([]byte(target))
+	lock := &r.startLocks[digest.Sum32()%uint32(len(r.startLocks))]
+	lock.Lock()
+	return lock.Unlock
 }
 
 func (r *TmuxRecoveryRuntime) resizeProviderWindow(

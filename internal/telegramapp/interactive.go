@@ -40,12 +40,10 @@ func (h *Handler) renderInteractiveSessionCard(
 	if err != nil || session.InteractivePrompt == nil || h.controls == nil {
 		return telegramui.Screen{}, false, err
 	}
-	captureCtx, cancel := context.WithTimeout(ctx, paneCaptureLimit)
+	captureCtx, cancel := context.WithTimeout(ctx, paneForegroundWait)
 	defer cancel()
-	pane, err := h.controls.CapturePane(
-		captureCtx, actor,
-		fmt.Sprintf("interactive-%d-%d", actor.UserID, time.Now().UnixNano()), ref,
-	)
+	pane, err := h.capturePaneCoalesced(captureCtx, actor, ref,
+		fmt.Sprintf("interactive-%d-%d", actor.UserID, time.Now().UnixNano()))
 	if err != nil {
 		return telegramui.Screen{}, false, nil
 	}

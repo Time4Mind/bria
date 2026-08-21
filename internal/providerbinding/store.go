@@ -30,6 +30,8 @@ type Record struct {
 	Workdir           string    `json:"workdir"`
 	TmuxSession       string    `json:"tmux_session"`
 	TmuxWindow        string    `json:"tmux_window"`
+	TmuxWindowID      string    `json:"tmux_window_id,omitempty"`
+	TmuxPane          string    `json:"tmux_pane,omitempty"`
 	RuntimeGeneration uint64    `json:"runtime_generation"`
 	UpdatedAt         time.Time `json:"updated_at"`
 }
@@ -142,6 +144,10 @@ func (s *Store) Put(record Record) error {
 		// newer binding. Equal generations remain valid because /new and /clear
 		// happen inside the same provider process whose environment is unchanged.
 		return nil
+	}
+	if existing, ok := records[key]; ok && existing.RuntimeGeneration == record.RuntimeGeneration &&
+		existing.TmuxPane != "" && record.TmuxPane != "" && existing.TmuxPane != record.TmuxPane {
+		return errors.New("provider binding generation is already owned by another tmux pane")
 	}
 	records[key] = record
 	return writeAtomic(s.path, records)
@@ -310,6 +316,14 @@ func validateRecord(record Record) error {
 	}
 	if !filepath.IsAbs(record.Workdir) || record.UpdatedAt.IsZero() {
 		return errors.New("invalid provider binding workdir or timestamp")
+	}
+	if record.TmuxWindowID != "" && (!strings.HasPrefix(record.TmuxWindowID, "@") ||
+		strings.ContainsAny(record.TmuxWindowID, "\x00\r\n\t")) {
+		return errors.New("invalid provider binding tmux window id")
+	}
+	if record.TmuxPane != "" && (!strings.HasPrefix(record.TmuxPane, "%") ||
+		strings.ContainsAny(record.TmuxPane, "\x00\r\n\t")) {
+		return errors.New("invalid provider binding tmux pane")
 	}
 	return nil
 }

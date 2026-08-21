@@ -34,9 +34,11 @@ func (r *archiveTmuxRunner) Run(
 	arguments ...string,
 ) (runtimehost.CommandResult, error) {
 	r.calls = append(r.calls, append([]string(nil), arguments...))
-	if len(arguments) > 0 && arguments[0] == "has-session" {
+	if len(arguments) > 0 && arguments[0] == "list-windows" {
 		if r.exists {
-			return runtimehost.CommandResult{}, nil
+			return runtimehost.CommandResult{Stdout: []byte(
+				runtimehost.TmuxWindowName("node", "session") + "\n",
+			)}, nil
 		}
 		return runtimehost.CommandResult{ExitCode: 1}, nil
 	}

@@ -204,6 +204,49 @@ func TestTmuxSessionRuntimeFreshAndResumeArgv(t *testing.T) {
 	}
 }
 
+func TestTmuxSessionRuntimeSerializesConcurrentDeterministicStarts(t *testing.T) {
+	runner := &scriptedRunner{
+		paths: map[string]string{"tmux": "/tmux", "codex": "/codex"},
+		results: []CommandResult{
+			{ExitCode: 1}, {ExitCode: 0}, {ExitCode: 0}, {ExitCode: 0}, {ExitCode: 0},
+			{ExitCode: 0}, {ExitCode: 0},
+		},
+	}
+	runtime, err := NewTmuxRecoveryRuntime(runner, "bria", map[string]BackendCommand{
+		"codex": {Executable: "codex"},
+	}, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session := domain.Session{
+		ID: "s", NodeID: "n", Backend: "codex", Workdir: t.TempDir(), RuntimeGeneration: 1,
+	}
+	start := make(chan struct{})
+	errorsFound := make(chan error, 2)
+	for range 2 {
+		go func() {
+			<-start
+			_, startErr := runtime.Start(context.Background(), session)
+			errorsFound <- startErr
+		}()
+	}
+	close(start)
+	for range 2 {
+		if err := <-errorsFound; err != nil {
+			t.Fatal(err)
+		}
+	}
+	created := 0
+	for _, call := range runner.calls {
+		if len(call.args) > 0 && call.args[0] == "new-window" {
+			created++
+		}
+	}
+	if created != 1 {
+		t.Fatalf("new-window calls=%d, want one", created)
+	}
+}
+
 func TestTmuxSessionRuntimeRejectsProviderThatExitsDuringStartup(t *testing.T) {
 	runner := &scriptedRunner{
 		paths: map[string]string{"tmux": "/tmux", "claude": "/claude"},

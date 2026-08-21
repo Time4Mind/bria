@@ -66,6 +66,8 @@ type Handler struct {
 	viewMu              sync.Mutex
 	visibleCardViews    map[domain.UserID]visibleCardView
 	cardEditMu          sync.Mutex
+	cardTransports      map[string]telegrambot.Message
+	cardTransportOrder  []string
 	activity            *activityMessenger
 	clusterEventMu      sync.Mutex
 	clusterEventLogs    map[int64]clusterEventLog
@@ -107,6 +109,7 @@ func NewHandler(
 		speechWatchStarted: time.Now(),
 		sessionPages:       make(map[sessionPageKey]cardPageState),
 		visibleCardViews:   make(map[domain.UserID]visibleCardView),
+		cardTransports:     make(map[string]telegrambot.Message),
 		clusterEventLogs:   make(map[int64]clusterEventLog),
 		clusterUpdateWatch: make(map[domain.UserID]uint64),
 		clusterUpdateJobs:  make(map[domain.UserID]string),

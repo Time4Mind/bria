@@ -50,13 +50,37 @@ func TestCaptureBindsOnlyExactBriaTmuxWindow(t *testing.T) {
 	}
 	if err := Capture(context.Background(), store, strings.NewReader(payload), getenv,
 		func(context.Context, string) (string, error) {
-			return "bria-standalone\t\tbria-window", nil
+			return "bria-standalone\t\tbria-window\t@9\t%9", nil
 		}, func() time.Time { return now }); err != nil {
 		t.Fatal(err)
 	}
 	record, found, err := store.Lookup(domain.SessionRef{NodeID: "mac", SessionID: "bria-session"}, workdir)
-	if err != nil || !found || record.ProviderSessionID != providerID || record.RuntimeGeneration != 1 || record.UpdatedAt != now {
+	if err != nil || !found || record.ProviderSessionID != providerID ||
+		record.RuntimeGeneration != 1 || record.UpdatedAt != now ||
+		record.TmuxWindowID != "@9" || record.TmuxPane != "%9" {
 		t.Fatalf("record=%#v found=%v err=%v", record, found, err)
+	}
+}
+
+func TestStoreRejectsSameGenerationFromAnotherTmuxPane(t *testing.T) {
+	store, err := NewStore(filepath.Join(t.TempDir(), "bindings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	record := Record{
+		NodeID: "mac", SessionID: "session", ProviderSessionID: "provider-session-0001",
+		Workdir: t.TempDir(), TmuxSession: "bria", TmuxWindow: "window",
+		TmuxWindowID: "@1", TmuxPane: "%1", RuntimeGeneration: 2,
+		UpdatedAt: time.Now().UTC(),
+	}
+	if err := store.Put(record); err != nil {
+		t.Fatal(err)
+	}
+	record.ProviderSessionID = "provider-session-0002"
+	record.TmuxWindowID = "@2"
+	record.TmuxPane = "%2"
+	if err := store.Put(record); err == nil {
+		t.Fatal("another pane replaced the same runtime generation")
 	}
 }
 

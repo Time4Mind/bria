@@ -10,9 +10,14 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/Time4Mind/bria/internal/processlog"
 )
 
-const codexIndexTTL = 5 * time.Second
+const (
+	codexIndexTTL             = 5 * time.Minute
+	codexIndexRefreshInterval = 5 * time.Minute
+)
 
 type codexIndexedCandidate struct {
 	path              string
@@ -51,6 +56,11 @@ func (r *Reader) loadCodexIndex(
 		return snapshot, true, nil
 	}
 	if flight := r.codexFlight; flight != nil {
+		if !force && r.codexIndex != nil {
+			snapshot := r.codexIndex
+			r.codexIndexMu.Unlock()
+			return snapshot, true, nil
+		}
 		r.codexIndexMu.Unlock()
 		select {
 		case <-ctx.Done():
@@ -61,19 +71,43 @@ func (r *Reader) loadCodexIndex(
 	}
 	flight := &codexIndexFlight{done: make(chan struct{})}
 	r.codexFlight = flight
+	ownerCtx := r.indexCtx
+	if ownerCtx == nil {
+		ownerCtx = context.Background()
+	}
+	stale := r.codexIndex
 	r.codexIndexMu.Unlock()
 
+	go r.runCodexIndexFlight(ownerCtx, flight)
+	if !force && stale != nil {
+		return stale, true, nil
+	}
+	select {
+	case <-ctx.Done():
+		return nil, false, ctx.Err()
+	case <-flight.done:
+		return flight.snapshot, false, flight.err
+	}
+}
+
+func (r *Reader) runCodexIndexFlight(ctx context.Context, flight *codexIndexFlight) {
 	snapshot, err := r.scanCodex(ctx)
+	if err == nil && r.config.CodexCatalogPath != "" {
+		if persistErr := r.saveCodexCatalog(snapshot); persistErr != nil {
+			processlog.Servicef("bria transcript: catalog_persist outcome=error error=%v", persistErr)
+		}
+	}
 	r.codexIndexMu.Lock()
 	if err == nil {
 		r.codexIndex = snapshot
 	}
 	flight.snapshot = snapshot
 	flight.err = err
-	r.codexFlight = nil
+	if r.codexFlight == flight {
+		r.codexFlight = nil
+	}
 	close(flight.done)
 	r.codexIndexMu.Unlock()
-	return snapshot, false, err
 }
 
 func (r *Reader) buildCodexIndex(ctx context.Context) (*codexIndexSnapshot, error) {

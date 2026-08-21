@@ -134,12 +134,15 @@ func startNodeRuntimeControl(
 	transcriptReader, err := transcript.NewReader(transcript.Config{
 		ClaudeProjectsRoot: filepath.Join(home, ".claude", "projects"),
 		CodexSessionsRoot:  filepath.Join(home, ".codex", "sessions"),
+		CodexCatalogPath:   filepath.Join(nodeConfig.DataDir, "codex-transcript-catalog.json"),
 		MaxReadBytes:       32 << 20,
 		MaxBodyBytes:       64 << 10,
 	})
 	if err != nil {
 		return closeFailedRuntime(executor, store, err)
 	}
+	transcriptReader.StartCodexIndex(ctx)
+	transcriptReader.Warm(ctx, localTranscriptWarmRequests(state, nodeConfig.NodeID), 3)
 	bindingStore, err := providerbinding.NewStore(
 		filepath.Join(nodeConfig.DataDir, "provider-bindings.json"),
 	)

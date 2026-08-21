@@ -28,6 +28,8 @@ type Reader struct {
 	codexIndex   *codexIndexSnapshot
 	codexFlight  *codexIndexFlight
 	scanCodex    func(context.Context) (*codexIndexSnapshot, error)
+	indexCtx     context.Context
+	indexStarted bool
 	readMu       sync.Mutex
 	readCache    map[string]readCacheEntry
 	readOrder    []string
@@ -69,7 +71,71 @@ func NewReader(config Config) (*Reader, error) {
 		readFlights:  make(map[string]chan struct{}),
 	}
 	reader.scanCodex = reader.buildCodexIndex
+	if normalized.CodexCatalogPath != "" {
+		if snapshot, loadErr := reader.loadCodexCatalog(); loadErr == nil {
+			reader.codexIndex = snapshot
+		}
+	}
 	return reader, nil
+}
+
+// StartCodexIndex gives index refreshes a lifecycle independent of Telegram
+// request deadlines. It is idempotent; callers continue using a validated
+// persisted snapshot while the complete inventory refreshes in the background.
+func (r *Reader) StartCodexIndex(ctx context.Context) {
+	if ctx == nil {
+		return
+	}
+	r.codexIndexMu.Lock()
+	if r.indexStarted {
+		r.codexIndexMu.Unlock()
+		return
+	}
+	r.indexStarted = true
+	r.indexCtx = ctx
+	r.codexIndexMu.Unlock()
+	go func() {
+		for {
+			_, _, _ = r.loadCodexIndex(ctx, true)
+			timer := time.NewTimer(codexIndexRefreshInterval)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return
+			case <-timer.C:
+			}
+		}
+	}()
+}
+
+// Warm primes bounded transcript tails for priority sessions without delaying
+// node startup. Requests keep their input order; a small worker pool prevents
+// large JSONL files from monopolizing disk and CPU during recovery.
+func (r *Reader) Warm(ctx context.Context, requests []Request, concurrency int) {
+	if ctx == nil || len(requests) == 0 {
+		return
+	}
+	if concurrency < 1 {
+		concurrency = 1
+	}
+	queue := make(chan Request)
+	go func() {
+		defer close(queue)
+		for _, request := range requests {
+			select {
+			case <-ctx.Done():
+				return
+			case queue <- request:
+			}
+		}
+	}()
+	for range min(concurrency, len(requests)) {
+		go func() {
+			for request := range queue {
+				_, _ = r.Read(ctx, request)
+			}
+		}()
+	}
 }
 
 func (r *Reader) Read(ctx context.Context, request Request) ([]Event, error) {

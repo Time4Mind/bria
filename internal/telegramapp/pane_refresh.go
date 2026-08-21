@@ -19,7 +19,9 @@ const (
 	paneResponseRefreshDelay = 1500 * time.Millisecond
 	paneLiveCaptureInterval  = 5 * time.Second
 	paneRefreshLimit         = 1500
-	paneCaptureLimit         = time.Second
+	paneBackgroundWait       = 1200 * time.Millisecond
+	paneForegroundWait       = 350 * time.Millisecond
+	paneCaptureExecution     = 3 * time.Second
 	typingRefreshDelay       = 4 * time.Second
 )
 

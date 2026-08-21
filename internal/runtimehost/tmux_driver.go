@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -140,13 +141,31 @@ func (d *TmuxDriver) TargetExists(ctx context.Context, target string) (bool, err
 	if target == "" {
 		return false, errors.New("tmux target is required")
 	}
+	session, window, ok := strings.Cut(target, ":")
+	if !ok || strings.TrimSpace(session) == "" || strings.TrimSpace(window) == "" {
+		return false, errors.New("exact tmux session and window target is required")
+	}
 	runCtx, cancel := context.WithTimeout(ctx, d.timeout)
 	defer cancel()
-	result, err := d.runner.Run(runCtx, d.tmuxPath, "has-session", "-t", target)
+	result, err := d.runner.Run(
+		runCtx, d.tmuxPath, "list-windows", "-t", session, "-F", "#{window_name}",
+	)
 	if err != nil {
 		return false, fmt.Errorf("inspect tmux runtime: %w", err)
 	}
-	return result.ExitCode == 0, nil
+	if result.ExitCode != 0 {
+		return false, nil
+	}
+	matches := 0
+	for _, name := range strings.Split(strings.TrimSpace(string(result.Stdout)), "\n") {
+		if name == window {
+			matches++
+		}
+	}
+	if matches > 1 {
+		return false, fmt.Errorf("tmux target %q is ambiguous: %d exact windows", target, matches)
+	}
+	return matches == 1, nil
 }
 
 // ResizeViewport applies the provider viewport to an already attached runtime.

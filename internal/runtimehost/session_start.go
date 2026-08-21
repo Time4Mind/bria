@@ -41,6 +41,10 @@ func (r *TmuxRecoveryRuntime) Start(ctx context.Context, session domain.Session)
 	}
 	window := TmuxWindowName(string(session.NodeID), string(session.ID))
 	target := r.tmuxSession + ":" + window
+	// Start and recovery share a bounded keyed lock. Same-target check/create is
+	// atomic inside this process while unrelated session starts stay parallel.
+	unlock := r.lockTarget(target)
+	defer unlock()
 	if exists, checkErr := r.windowExists(ctx, tmuxPath, target); checkErr != nil {
 		return "", checkErr
 	} else if exists {

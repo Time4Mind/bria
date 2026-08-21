@@ -62,7 +62,7 @@ func (h *Handler) editResponseCard(
 		}
 		return replacement, nil
 	}
-	edited, err := h.messenger.EditScreen(ctx, message, screen)
+	edited, err := h.editCardTransportLocked(ctx, message, screen)
 	if err == nil {
 		h.rememberResponseCardLocked(ctx, actor, edited, screen)
 		if activeErr == nil {

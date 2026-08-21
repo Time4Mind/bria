@@ -21,5 +21,5 @@ func (h *Handler) editExplicitSessionScreen(
 	h.cancelPaneRefresh(actor.UserID)
 	h.cardEditMu.Lock()
 	defer h.cardEditMu.Unlock()
-	return h.messenger.EditScreen(ctx, origin, screen)
+	return h.editCardTransportLocked(ctx, origin, screen)
 }

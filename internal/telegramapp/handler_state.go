@@ -23,6 +23,13 @@ type paneRefreshState struct {
 	paneCancels    map[domain.UserID]context.CancelFunc
 	paneImages     map[string]paneCacheEntry
 	paneImageOrder []string
+	paneCaptures   map[string]*paneCaptureFlight
+}
+
+type paneCaptureFlight struct {
+	done chan struct{}
+	pane []byte
+	err  error
 }
 
 func newPaneRefreshState() paneRefreshState {
@@ -31,6 +38,7 @@ func newPaneRefreshState() paneRefreshState {
 		paneWorkers:    make(map[domain.UserID]uint64),
 		paneCancels:    make(map[domain.UserID]context.CancelFunc),
 		paneImages:     make(map[string]paneCacheEntry),
+		paneCaptures:   make(map[string]*paneCaptureFlight),
 	}
 }
 

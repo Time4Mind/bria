@@ -2,6 +2,7 @@ package telegramapp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 	"unicode/utf8"
@@ -9,6 +10,7 @@ import (
 	"github.com/Time4Mind/bria/internal/application"
 	"github.com/Time4Mind/bria/internal/domain"
 	"github.com/Time4Mind/bria/internal/processlog"
+	"github.com/Time4Mind/bria/internal/runtimehost"
 	"github.com/Time4Mind/bria/internal/telegrambot"
 	"github.com/Time4Mind/bria/internal/telegramui"
 	"github.com/Time4Mind/bria/internal/terminalimage"
@@ -33,7 +35,7 @@ func (h *Handler) editPaneScreen(
 	if err != nil || !ok || card.Session != ref {
 		return message, nil
 	}
-	edited, err := h.messenger.EditScreen(ctx, message, screen)
+	edited, err := h.editCardTransportLocked(ctx, message, screen)
 	if err == nil {
 		if screen.Pane != nil {
 			h.rememberPaneFileID(ref, screen.Pane.Hash, edited.RichMediaFileID)
@@ -110,15 +112,18 @@ func (h *Handler) attachPane(
 			)
 		}
 	}()
-	captureCtx, cancel := context.WithTimeout(ctx, paneCaptureLimit)
+	captureCtx, cancel := context.WithTimeout(ctx, paneBackgroundWait)
 	defer cancel()
 	startedAt := time.Now()
-	pane, err := h.controls.CapturePane(
-		captureCtx, actor,
-		fmt.Sprintf("pane-%d-%d-%d", message.MessageID, generation, attempt), ref,
-	)
+	pane, err := h.capturePaneCoalesced(captureCtx, actor, ref,
+		fmt.Sprintf("pane-%d-%d-%d", message.MessageID, generation, attempt))
 	timing.capture = time.Since(startedAt)
 	if err != nil {
+		if cached, ok := h.cachedPaneImage(ref, 0); ok {
+			cached.AnchorOffset = paneAnchorOffset(*screen)
+			screen.Pane = &cached
+			timing.outcome = "stale_cache"
+		}
 		return
 	}
 	timing.outcome = "render_error"
@@ -160,13 +165,18 @@ func (h *Handler) attachImmediatePane(
 		return timing
 	}
 	timing.cache = time.Since(startedAt)
-	captureCtx, cancel := context.WithTimeout(ctx, paneCaptureLimit)
+	captureCtx, cancel := context.WithTimeout(ctx, paneForegroundWait)
 	defer cancel()
 	startedAt = time.Now()
-	pane, err := h.controls.CapturePane(captureCtx, actor,
-		fmt.Sprintf("pane-open-%d", time.Now().UnixNano()), ref)
+	pane, err := h.capturePaneCoalesced(captureCtx, actor, ref,
+		fmt.Sprintf("pane-open-%d", time.Now().UnixNano()))
 	timing.capture = time.Since(startedAt)
 	if err != nil {
+		if hasCached {
+			cached.AnchorOffset = paneAnchorOffset(*screen)
+			screen.Pane = &cached
+			timing.outcome = "stale_cache"
+		}
 		return timing
 	}
 	timing.outcome = "render_error"
@@ -194,6 +204,73 @@ func (h *Handler) attachImmediatePane(
 	}
 	return timing
 }
+
+func (h *Handler) capturePaneCoalesced(
+	ctx context.Context,
+	actor application.Principal,
+	ref domain.SessionRef,
+	operationID string,
+) ([]byte, error) {
+	key := ref.Key()
+	h.paneMu.Lock()
+	if h.paneCaptures == nil {
+		h.paneCaptures = make(map[string]*paneCaptureFlight)
+	}
+	flight := h.paneCaptures[key]
+	if flight == nil {
+		flight = &paneCaptureFlight{done: make(chan struct{})}
+		h.paneCaptures[key] = flight
+		go h.runPaneCapture(actor, ref, operationID, flight)
+	}
+	h.paneMu.Unlock()
+	select {
+	case <-ctx.Done():
+		processlog.Detailf(
+			"bria telegram: pane_capture_phase ref=%q outcome=foreground_timeout error=%v",
+			ref.Key(), ctx.Err(),
+		)
+		return nil, ctx.Err()
+	case <-flight.done:
+		return append([]byte(nil), flight.pane...), flight.err
+	}
+}
+
+func (h *Handler) runPaneCapture(
+	actor application.Principal,
+	ref domain.SessionRef,
+	operationID string,
+	flight *paneCaptureFlight,
+) {
+	captureCtx, cancel := context.WithTimeout(context.Background(), paneCaptureExecution)
+	defer cancel()
+	startedAt := time.Now()
+	flight.pane, flight.err = h.controls.CapturePane(captureCtx, actor, operationID, ref)
+	outcome := "ok"
+	if flight.err != nil {
+		switch {
+		case errors.Is(flight.err, context.DeadlineExceeded):
+			outcome = "tmux_timeout"
+		case errors.Is(flight.err, runtimehost.ErrStaleRuntime):
+			outcome = "stale_generation"
+		case errors.Is(flight.err, runtimehost.ErrRuntimeUnavailable):
+			outcome = "target_missing"
+		default:
+			outcome = "error"
+		}
+	}
+	processlog.Detailf(
+		"bria telegram: pane_capture_phase ref=%q execution_ms=%d outcome=%s error=%v",
+		ref.Key(), time.Since(startedAt).Milliseconds(), outcome, flight.err,
+	)
+	h.paneMu.Lock()
+	if h.paneCaptures[keyForPaneCapture(ref)] == flight {
+		delete(h.paneCaptures, keyForPaneCapture(ref))
+	}
+	close(flight.done)
+	h.paneMu.Unlock()
+}
+
+func keyForPaneCapture(ref domain.SessionRef) string { return ref.Key() }
 
 func (h *Handler) attachCachedPaneFileID(
 	ref domain.SessionRef,
