@@ -35,7 +35,7 @@ func (m *activityMessenger) AnswerCallbackQuery(
 ) error {
 	startedAt := time.Now()
 	err := m.inner.AnswerCallbackQuery(ctx, callbackID, text)
-	logSlowTelegramOperation("answer_callback", startedAt, err)
+	logSlowTelegramOperation("answer_callback", 0, startedAt, err)
 	return err
 }
 
@@ -72,13 +72,15 @@ func (m *activityMessenger) SendScreen(
 	queuedAt := time.Now()
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	logSlowTelegramOperation("send_screen_queue", queuedAt, nil)
+	logSlowTelegramOperation("send_screen_queue", 0, queuedAt, nil)
 	if err := m.localFloodWaitLocked("sendScreen", chatID); err != nil {
 		return telegrambot.Message{}, err
 	}
 	startedAt := time.Now()
 	message, err := m.inner.SendScreen(ctx, chatID, screen)
-	logSlowTelegramOperation(screenOperation("send_screen", screen), startedAt, err)
+	logSlowTelegramOperation(
+		screenOperation("send_screen", screen), message.MessageID, startedAt, err,
+	)
 	m.rememberFloodWaitLocked(chatID, err)
 	if err == nil {
 		m.observeLocked(message.ChatID, message.MessageID)
@@ -92,13 +94,15 @@ func (m *activityMessenger) EditScreen(
 	queuedAt := time.Now()
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	logSlowTelegramOperation("edit_screen_queue", queuedAt, nil)
+	logSlowTelegramOperation("edit_screen_queue", message.MessageID, queuedAt, nil)
 	if err := m.localFloodWaitLocked("editScreen", message.ChatID); err != nil {
 		return telegrambot.Message{}, err
 	}
 	startedAt := time.Now()
 	edited, err := m.inner.EditScreen(ctx, message, screen)
-	logSlowTelegramOperation(screenOperation("edit_screen", screen), startedAt, err)
+	logSlowTelegramOperation(
+		screenOperation("edit_screen", screen), message.MessageID, startedAt, err,
+	)
 	m.rememberFloodWaitLocked(message.ChatID, err)
 	return edited, err
 }
@@ -154,7 +158,12 @@ func screenOperation(base string, screen telegramui.Screen) string {
 	return base + "_pane"
 }
 
-func logSlowTelegramOperation(operation string, startedAt time.Time, err error) {
+func logSlowTelegramOperation(
+	operation string,
+	messageID int64,
+	startedAt time.Time,
+	err error,
+) {
 	duration := time.Since(startedAt)
 	if duration < tracedTelegramOperation {
 		return
@@ -163,13 +172,17 @@ func logSlowTelegramOperation(operation string, startedAt time.Time, err error) 
 	if err != nil {
 		outcome = "failed"
 	}
-	processlog.Detailf("bria telegram: outbound_timing operation=%s duration_ms=%d outcome=%s",
-		operation, duration.Milliseconds(), outcome)
+	processlog.Detailf(
+		"bria telegram: outbound_timing operation=%s message_id=%d duration_ms=%d outcome=%s",
+		operation, messageID, duration.Milliseconds(), outcome,
+	)
 	if duration < slowTelegramOperation {
 		return
 	}
-	processlog.Servicef("bria telegram: slow_outbound operation=%s duration_ms=%d outcome=%s",
-		operation, duration.Milliseconds(), outcome)
+	processlog.Servicef(
+		"bria telegram: slow_outbound operation=%s message_id=%d duration_ms=%d outcome=%s",
+		operation, messageID, duration.Milliseconds(), outcome,
+	)
 }
 
 func (m *activityMessenger) DeleteMessage(

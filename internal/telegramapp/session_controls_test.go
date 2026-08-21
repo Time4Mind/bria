@@ -25,6 +25,7 @@ type blockingControls struct {
 	keyHash         string
 	text            string
 	transcriptCalls int
+	paneCalls       int
 }
 
 type closingControls struct {
@@ -99,6 +100,9 @@ func (c *blockingControls) OpenTerminal(context.Context, application.Principal, 
 }
 
 func (c *blockingControls) CapturePane(context.Context, application.Principal, string, domain.SessionRef) ([]byte, error) {
+	c.mu.Lock()
+	c.paneCalls++
+	c.mu.Unlock()
 	return append([]byte(nil), c.pane...), nil
 }
 

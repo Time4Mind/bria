@@ -44,7 +44,20 @@ func (h *Handler) renderSessionCardForSelection(
 	if screen, ok, err := h.renderInteractiveSessionCard(ctx, actor, ref); ok || err != nil {
 		return screen, err
 	}
-	snapshot, err := h.renderSessionCardSnapshot(ctx, actor, ref, page)
+	var snapshot sessionCardSnapshot
+	var err error
+	if acknowledgeFinal {
+		// Session selection is latency-sensitive. Transcript projection is local
+		// and cheap; terminal capture + PNG rendering is not. Reuse only a
+		// Telegram-verified pane here and let the live worker refresh it after the
+		// callback has completed.
+		snapshot, err = h.renderSessionCardSnapshotWithoutPane(ctx, actor, ref, page)
+		if err == nil {
+			h.attachCachedPaneFileID(ref, &snapshot.screen)
+		}
+	} else {
+		snapshot, err = h.renderSessionCardSnapshot(ctx, actor, ref, page)
+	}
 	if err == nil && acknowledgeFinal && snapshot.screen.Checkpoint != nil {
 		if finalAt, final := finalTranscriptAt(snapshot.events); final {
 			// Explicitly selecting a completed session renders its existing card,

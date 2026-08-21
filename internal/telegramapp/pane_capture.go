@@ -195,6 +195,34 @@ func (h *Handler) attachImmediatePane(
 	return timing
 }
 
+func (h *Handler) attachCachedPaneFileID(
+	ref domain.SessionRef,
+	screen *telegramui.Screen,
+) bool {
+	cached, ok := h.cachedPaneImage(ref, 0)
+	if !ok || cached.FileID == "" {
+		return false
+	}
+	cached.PNG = nil
+	cached.AnchorOffset = paneAnchorOffset(*screen)
+	screen.Pane = &cached
+	return true
+}
+
+func reuseMessagePaneFileID(
+	message telegrambot.Message,
+	screen *telegramui.Screen,
+) bool {
+	if message.RichMediaFileID == "" {
+		return false
+	}
+	screen.Pane = &telegramui.PaneImage{
+		FileID: message.RichMediaFileID,
+		Hash:   message.PaneHash, AnchorOffset: paneAnchorOffset(*screen),
+	}
+	return true
+}
+
 func paneCacheMaySkipCapture(session domain.Session) bool {
 	return session.State == domain.SessionArchived || session.RuntimePhase == domain.RuntimeIdle
 }

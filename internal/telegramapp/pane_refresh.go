@@ -2,6 +2,8 @@ package telegramapp
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"time"
 
 	"github.com/Time4Mind/bria/internal/application"
@@ -15,6 +17,7 @@ const (
 	paneInitialDelay         = 1500 * time.Millisecond
 	paneWorkingRefreshDelay  = 2500 * time.Millisecond
 	paneResponseRefreshDelay = 1500 * time.Millisecond
+	paneLiveCaptureInterval  = 5 * time.Second
 	paneRefreshLimit         = 1500
 	paneCaptureLimit         = time.Second
 	typingRefreshDelay       = 4 * time.Second
@@ -87,6 +90,9 @@ func (h *Handler) runPaneRefresh(
 	delay := paneInitialDelay
 	responseRefresh := false
 	lastTyping := time.Time{}
+	lastTranscript := [sha256.Size]byte{}
+	transcriptSeen := false
+	lastPaneCapture := time.Now()
 	for attempt := 0; attempt < paneRefreshLimit; attempt++ {
 		if !waitPaneRefresh(ctx, delay) || !h.canRefresh() ||
 			!h.currentPaneGeneration(actor.UserID, generation) {
@@ -184,6 +190,8 @@ func (h *Handler) runPaneRefresh(
 			_ = h.messenger.SendTyping(ctx, message.ChatID)
 			lastTyping = time.Now()
 		}
+		transcriptFingerprint := paneTranscriptFingerprint(snapshot.events)
+		contentChanged := !transcriptSeen || transcriptFingerprint != lastTranscript
 		preferences, preferencesErr := h.service.Preferences(actor)
 		panePhase := session.RuntimePhase
 		if settled {
@@ -193,7 +201,18 @@ func (h *Handler) runPaneRefresh(
 			}
 		}
 		if preferencesErr == nil && shouldAttachPane(preferences, panePhase) {
-			h.attachPane(ctx, actor, ref, message, generation, attempt, &snapshot.screen)
+			paneKnown := message.PaneHash != "" || message.RichMediaFileID != ""
+			if contentChanged && paneKnown {
+				// Transcript delivery must not wait for terminal capture/render/upload.
+				// Reuse the already displayed Telegram photo when possible. A later
+				// stable iteration refreshes the pane at a bounded cadence.
+				reuseMessagePaneFileID(message, &snapshot.screen)
+			} else if !paneKnown || time.Since(lastPaneCapture) >= paneLiveCaptureInterval {
+				h.attachPane(ctx, actor, ref, message, generation, attempt, &snapshot.screen)
+				lastPaneCapture = time.Now()
+			} else {
+				reuseMessagePaneFileID(message, &snapshot.screen)
+			}
 		}
 		if settled {
 			message, err = h.repostFinalResponseCard(ctx, actor, message, ref, snapshot.screen)
@@ -210,6 +229,8 @@ func (h *Handler) runPaneRefresh(
 		if err != nil {
 			return
 		}
+		lastTranscript = transcriptFingerprint
+		transcriptSeen = true
 		if settled {
 			return
 		}
@@ -224,6 +245,11 @@ func (h *Handler) runPaneRefresh(
 		responseRefresh = responseStarted
 		delay = nextDelay
 	}
+}
+
+func paneTranscriptFingerprint(events []transcript.Event) [sha256.Size]byte {
+	encoded, _ := json.Marshal(events)
+	return sha256.Sum256(encoded)
 }
 
 const currentTurnUserTimestampSkew = 5 * time.Second
