@@ -105,6 +105,15 @@ func TestSessionSelectionDefersChangingPaneCapture(t *testing.T) {
 		t.Fatal(err)
 	}
 	ref := domain.SessionRef{NodeID: "allowed", SessionID: "live"}
+	session, err := fixture.service.Session(actor, ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.service.PublishSessionRuntime(
+		context.Background(), session, domain.RuntimeRunning, nil,
+	); err != nil {
+		t.Fatal(err)
+	}
 	controls := &blockingControls{
 		ref: ref, pane: []byte("changing terminal"),
 		events: []transcript.Event{{Kind: transcript.EventAssistantText, Text: "current"}},

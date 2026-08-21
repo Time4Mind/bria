@@ -88,6 +88,14 @@ func (h *Handler) markVoicePending(
 	h.voiceMu.Unlock()
 }
 
+func (h *Handler) hasPendingVoice(actor application.Principal, ref domain.SessionRef) bool {
+	key := voicePendingKey{userID: actor.UserID, ref: ref}
+	h.voiceMu.Lock()
+	pending := len(h.pendingVoices[key]) > 0
+	h.voiceMu.Unlock()
+	return pending
+}
+
 func (h *Handler) withPendingVoiceRows(
 	actor application.Principal,
 	ref domain.SessionRef,

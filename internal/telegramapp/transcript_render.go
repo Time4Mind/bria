@@ -51,9 +51,13 @@ func (h *Handler) renderSessionCardForSelection(
 		// and cheap; node transcript reads and terminal PNG rendering are not.
 		// Prefer the snapshot that produced a recent card and let the live worker
 		// reconcile it after the callback has completed.
+		var cacheEligible bool
+		cacheEligible, err = h.sessionSelectionMayUseCache(actor, ref)
 		var cached bool
-		snapshot, cached, err = h.renderCachedSessionCardSnapshot(actor, ref, page)
-		if err == nil && !cached {
+		if err == nil && cacheEligible {
+			snapshot, cached, err = h.renderCachedSessionCardSnapshot(actor, ref, page)
+		}
+		if err == nil && (!cacheEligible || !cached) {
 			snapshot, err = h.renderSessionCardSnapshotWithoutPane(ctx, actor, ref, page)
 		}
 		if err == nil {
@@ -73,6 +77,31 @@ func (h *Handler) renderSessionCardForSelection(
 		}
 	}
 	return snapshot.screen, err
+}
+
+// sessionSelectionMayUseCache keeps the callback fast only while the provider
+// is actively changing the transcript and the live worker is responsible for
+// reconciliation. Idle/completed cards are read synchronously so explicit
+// selection preserves the established immediate-freshness contract. Pending
+// voice input also forces a live read so the placeholder can be retired as
+// soon as its transcript event appears.
+func (h *Handler) sessionSelectionMayUseCache(
+	actor application.Principal,
+	ref domain.SessionRef,
+) (bool, error) {
+	session, err := h.service.Session(actor, ref)
+	if err != nil {
+		return false, err
+	}
+	if h.hasPendingVoice(actor, ref) {
+		return false, nil
+	}
+	switch session.RuntimePhase {
+	case domain.RuntimeRunning, domain.RuntimeWaitingInput, domain.RuntimeStopping:
+		return true, nil
+	default:
+		return false, nil
+	}
 }
 
 func (h *Handler) renderRegularSessionCard(
