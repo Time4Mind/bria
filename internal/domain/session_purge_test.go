@@ -216,6 +216,32 @@ func TestPurgeArchivedSessionPreservesRestoreBeforeRetention(t *testing.T) {
 	}
 }
 
+func TestPurgeArchivedSessionRemovesLegacyUnreadyRecordWithoutBundle(t *testing.T) {
+	state := fixtureState(t)
+	ref := addSession(t, state, "legacy-empty", "alpha", 1, time.Unix(10, 0).UTC())
+	session := state.Sessions[ref.Key()]
+	session.State = domain.SessionArchived
+	session.RuntimePhase = domain.RuntimeIdle
+	session.ArchivedAt = time.Unix(20, 0).UTC()
+	session.ArchiveReason = domain.ArchiveResumeFailed
+	session.LastEventAt = session.ArchivedAt
+	session.Revision++
+	state.Sessions[ref.Key()] = session
+
+	if err := state.PurgeArchivedSession(
+		ref, "", session.Revision, time.Unix(30, 0).UTC(),
+	); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := state.Sessions[ref.Key()]; ok {
+		t.Fatal("legacy empty archive remained")
+	}
+	tombstone, ok := state.SessionTombstones[ref.Key()]
+	if !ok || tombstone.ArchiveID != "" || tombstone.Session != ref {
+		t.Fatalf("legacy tombstone=%#v", tombstone)
+	}
+}
+
 func TestPurgeArchivedSessionRejectsDuplicateArchiveIdentity(t *testing.T) {
 	state := fixtureState(t)
 	ref := addSession(t, state, "first", "alpha", 1, time.Unix(10, 0).UTC())

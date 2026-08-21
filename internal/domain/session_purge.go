@@ -36,8 +36,11 @@ func (s *State) PurgeArchivedSession(
 	if err := ref.Validate(); err != nil {
 		return err
 	}
-	if err := validateSessionArchiveID(archiveID); err != nil {
-		return err
+	legacyUnready := archiveID == ""
+	if !legacyUnready {
+		if err := validateSessionArchiveID(archiveID); err != nil {
+			return err
+		}
 	}
 	if at.IsZero() {
 		return fmt.Errorf("%w: purge timestamp is required", ErrInvalidState)
@@ -53,14 +56,18 @@ func (s *State) PurgeArchivedSession(
 	if !ok {
 		return ErrNotFound
 	}
-	if session.Ref() != ref || session.State != SessionArchived || !session.ArchiveReady {
+	if session.Ref() != ref || session.State != SessionArchived {
 		return ErrInvalidState
 	}
-	if session.ArchiveID != archiveID {
+	if legacyUnready {
+		if session.ArchiveReady || session.ArchiveID != "" {
+			return ErrInvalidState
+		}
+	} else if !session.ArchiveReady || session.ArchiveID != archiveID {
 		return ErrInvalidState
 	}
 	for otherKey, other := range s.Sessions {
-		if otherKey != key && other.ArchiveID == archiveID {
+		if archiveID != "" && otherKey != key && other.ArchiveID == archiveID {
 			return fmt.Errorf("%w: archive id belongs to multiple sessions", ErrInvalidState)
 		}
 	}

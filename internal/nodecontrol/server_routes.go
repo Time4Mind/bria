@@ -29,4 +29,5 @@ func (s *Server) registerHandlers(mux *http.ServeMux) {
 	mux.HandleFunc(backupPath, s.handleBackup)
 	mux.HandleFunc(membershipAdminPath, s.handleMembershipAdmin)
 	mux.HandleFunc(membershipMovePath, s.handleMembershipRelocation)
+	mux.HandleFunc(archivePurgePath, s.handleArchivePurge)
 }

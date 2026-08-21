@@ -35,6 +35,14 @@ func (c *Client) ApplyMembershipCommand(
 	return c.postMembership(ctx, nodeID, membershipAdminPath, command)
 }
 
+func (c *Client) ApplyArchivePurgeCommand(
+	ctx context.Context,
+	nodeID string,
+	command clusterstate.Command,
+) error {
+	return c.postMembership(ctx, nodeID, archivePurgePath, command)
+}
+
 func (c *Client) postMembership(ctx context.Context, nodeID, path string, payload any) error {
 	address, ok := c.resolver.ControlAddress(nodeID)
 	if !ok {

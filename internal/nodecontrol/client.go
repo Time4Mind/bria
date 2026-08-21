@@ -17,6 +17,7 @@ const (
 	lookupPath          = "/v1/session/results"
 	membershipAdminPath = "/v1/cluster/membership"
 	membershipMovePath  = "/v1/cluster/membership/relocate"
+	archivePurgePath    = "/v1/cluster/archive/purge"
 	maxControlPayload   = 64 << 10
 )
 

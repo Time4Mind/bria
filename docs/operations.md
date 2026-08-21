@@ -180,6 +180,27 @@ idempotent Raft command and renames the pending file to
 after the restored leader is ready. Native session archives and transcripts
 remain origin-local and must be restored separately if those files were lost.
 
+## Exact archived-session purge
+
+Use this command only after a signed logical backup and the node-local archive
+have both confirmed that the target session is disposable. Purge is replicated
+first; the owning node then removes the provider binding and archive bundle.
+The exact session revision and archive ID prevent a stale inspection from
+deleting a subsequently changed or restored session:
+
+```bash
+bria cluster purge-archive \
+  --config /var/lib/bria/config.json \
+  --session SESSION_ID \
+  --archive ARCHIVE_ID \
+  --revision REVISION \
+  --confirm NODE_ID/SESSION_ID
+```
+
+For a legacy archived record which never produced a bundle, omit `--archive`.
+The command is accepted only by the current local leader using its own node
+certificate, and it cannot target a session owned by another node.
+
 ## Rolling binary update
 
 The normal path is **Settings → Cluster → Update cluster** in Telegram. Bria

@@ -168,9 +168,11 @@ func (r *localArchivePurgeReconciler) Reconcile(ctx context.Context) error {
 			joined = errors.Join(joined, fmt.Errorf("delete provider binding %s: %w", key, err))
 			continue
 		}
-		if err := r.archives.DeleteArchive(ctx, tombstone.ArchiveID); err != nil {
-			joined = errors.Join(joined, fmt.Errorf("delete archive bundle %s: %w", tombstone.ArchiveID, err))
-			continue
+		if tombstone.ArchiveID != "" {
+			if err := r.archives.DeleteArchive(ctx, tombstone.ArchiveID); err != nil {
+				joined = errors.Join(joined, fmt.Errorf("delete archive bundle %s: %w", tombstone.ArchiveID, err))
+				continue
+			}
 		}
 		r.cleaned[key+"\x00"+tombstone.ArchiveID] = true
 		deletedArchives[tombstone.ArchiveID] = true

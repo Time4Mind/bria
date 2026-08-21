@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"slices"
 	"testing"
 	"time"
 
@@ -111,10 +112,14 @@ func (s *purgeBindingStub) DeleteIfGeneration(ref domain.SessionRef, _ uint64) e
 
 func TestLocalArchivePurgeDeletesTombstoneAndOrphanButPreservesRacingArchive(t *testing.T) {
 	tombstoneRef := domain.SessionRef{NodeID: "node", SessionID: "old"}
+	legacyRef := domain.SessionRef{NodeID: "node", SessionID: "legacy-empty"}
 	first := domain.NewState()
 	first.SessionTombstones[tombstoneRef.Key()] = domain.SessionTombstone{
 		Session: tombstoneRef, ArchiveID: "old-bundle", RuntimeGeneration: 2,
 		PurgedAt: time.Unix(100, 0).UTC(),
+	}
+	first.SessionTombstones[legacyRef.Key()] = domain.SessionTombstone{
+		Session: legacyRef, RuntimeGeneration: 3, PurgedAt: time.Unix(101, 0).UTC(),
 	}
 	second := first.Clone()
 	racing := archivedRetentionSession("racing", time.Unix(200, 0).UTC(), true)
@@ -128,7 +133,8 @@ func TestLocalArchivePurgeDeletesTombstoneAndOrphanButPreservesRacingArchive(t *
 	if err := reconciler.Reconcile(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if len(bindings.deleted) != 1 || bindings.deleted[0] != tombstoneRef {
+	if len(bindings.deleted) != 2 || !slices.Contains(bindings.deleted, tombstoneRef) ||
+		!slices.Contains(bindings.deleted, legacyRef) {
 		t.Fatalf("deleted bindings=%v", bindings.deleted)
 	}
 	for _, deleted := range archives.deleted {
