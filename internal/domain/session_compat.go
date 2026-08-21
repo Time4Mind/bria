@@ -15,6 +15,8 @@ func normalizeNewSession(session *Session) error {
 		return fmt.Errorf("%w: resumed session requires a provider id", ErrInvalidState)
 	}
 	session.ProviderSessionID = providerID
+	session.ArchiveDescription = nil
+	session.DescriptionVersion = 0
 	switch session.State {
 	case "", SessionLive:
 		session.State = SessionLive
@@ -95,6 +97,18 @@ func (s *State) normalizeSessions() {
 		}
 		if session.RuntimePhase == "" {
 			session.RuntimePhase = RuntimeIdle
+		}
+		if session.State == SessionArchived &&
+			session.DescriptionVersion == ArchiveDescriptionVersion {
+			if description, err := NormalizeArchiveDescription(session.ArchiveDescription); err == nil {
+				session.ArchiveDescription = description
+			} else {
+				session.ArchiveDescription = nil
+				session.DescriptionVersion = 0
+			}
+		} else {
+			session.ArchiveDescription = nil
+			session.DescriptionVersion = 0
 		}
 		if session.RuntimeGeneration == 0 {
 			session.RuntimeGeneration = 1

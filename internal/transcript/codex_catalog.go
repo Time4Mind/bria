@@ -23,6 +23,7 @@ type codexCatalogEntry struct {
 	Workdir           string `json:"workdir"`
 	Modified          int64  `json:"modified"`
 	Size              int64  `json:"size"`
+	CreatedAt         int64  `json:"created_at,omitempty"`
 }
 
 func (r *Reader) loadCodexCatalog() (*codexIndexSnapshot, error) {
@@ -61,6 +62,9 @@ func (r *Reader) loadCodexCatalog() (*codexIndexSnapshot, error) {
 			workdir: filepath.Clean(entry.Workdir), modified: entry.Modified, size: entry.Size,
 			updatedAt: time.Unix(0, entry.Modified).UTC(),
 		}
+		if entry.CreatedAt > 0 {
+			candidate.createdAt = time.Unix(0, entry.CreatedAt).UTC()
+		}
 		if _, duplicate := snapshot.byPath[candidate.path]; duplicate {
 			continue
 		}
@@ -84,10 +88,14 @@ func (r *Reader) saveCodexCatalog(snapshot *codexIndexSnapshot) error {
 	}
 	catalog := codexCatalog{Version: 1, Entries: make([]codexCatalogEntry, 0, len(snapshot.byPath))}
 	for _, candidate := range snapshot.byPath {
-		catalog.Entries = append(catalog.Entries, codexCatalogEntry{
+		entry := codexCatalogEntry{
 			Path: candidate.path, ProviderSessionID: candidate.providerSessionID,
 			Workdir: candidate.workdir, Modified: candidate.modified, Size: candidate.size,
-		})
+		}
+		if !candidate.createdAt.IsZero() {
+			entry.CreatedAt = candidate.createdAt.UnixNano()
+		}
+		catalog.Entries = append(catalog.Entries, entry)
 	}
 	encoded, err := json.Marshal(catalog)
 	if err != nil {

@@ -8,10 +8,11 @@ import (
 )
 
 type ArchiveItem struct {
-	Token    OpaqueToken
-	Name     string
-	NodeName string
-	Index    int
+	Token       OpaqueToken
+	Name        string
+	NodeName    string
+	Description []string
+	Index       int
 }
 
 type ArchiveListInput struct {
@@ -20,7 +21,6 @@ type ArchiveListInput struct {
 	Items         []ArchiveItem
 	Page          int
 	Pages         int
-	Total         int
 	PreviousToken OpaqueToken
 	NextToken     OpaqueToken
 }
@@ -50,9 +50,8 @@ func RenderArchiveNodes(copy i18n.Localizer, items []ArchiveNodeItem) Screen {
 func RenderArchives(input ArchiveListInput) Screen {
 	page, pages := normalizedPages(input.Page, input.Pages)
 	rows := make(Grid, 0, (len(input.Items)+1)/2+2)
-	lines := make([]string, 0, len(input.Items)+2)
-	lines = append(lines, input.Title,
-		input.Copy.Format(i18n.ArchivePageLine, page, pages, input.Total))
+	lines := make([]string, 0, 2+len(input.Items)*5)
+	lines = append(lines, input.Title, "")
 	for index, item := range input.Items {
 		if index%2 == 0 {
 			rows = append(rows, Row{})
@@ -64,6 +63,19 @@ func RenderArchives(input ArchiveListInput) Screen {
 		rows[len(rows)-1] = append(rows[len(rows)-1],
 			button(label, ActionSelectArchive, item.Token))
 		lines = append(lines, label)
+		for _, description := range item.Description {
+			if description = strings.TrimSpace(description); description != "" {
+				lines = append(lines, "· "+description)
+			}
+		}
+		lines = append(lines, "─────")
+		if index+1 < len(input.Items) {
+			lines = append(lines, "")
+		} else {
+			// Telegram trims trailing whitespace. A Braille blank preserves exactly
+			// one visual line between the final separator and the inline keyboard.
+			lines = append(lines, "⠀")
+		}
 	}
 	if len(input.Items) == 0 {
 		rows = append(rows, Row{button(input.Copy.Text(i18n.NoArchivedSessions), ActionNoop, "")})
@@ -78,7 +90,7 @@ func RenderArchives(input ArchiveListInput) Screen {
 	}
 	rows = append(rows, navigation,
 		Row{button(input.Copy.Text(i18n.ButtonBack), ActionMenu, "")})
-	return Screen{Name: ScreenArchives, Text: strings.Join(lines, "\n"), Grid: rows}
+	return Screen{Name: ScreenArchives, Text: strings.TrimRight(strings.Join(lines, "\n"), "\n"), Grid: rows}
 }
 
 type ArchiveInspectInput struct {

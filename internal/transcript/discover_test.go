@@ -10,6 +10,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestDiscoverClaudeSessionsForExactWorkdir(t *testing.T) {
@@ -78,7 +79,7 @@ func TestDiscoverCodexUsesSessionMetadataWorkdir(t *testing.T) {
 	if err := os.MkdirAll(directory, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	content := `{"type":"session_meta","payload":{"id":"codex-id","cwd":` + quoteJSON(workdir) + `}}` + "\n" +
+	content := `{"type":"session_meta","payload":{"id":"codex-id","cwd":` + quoteJSON(workdir) + `,"timestamp":"2026-01-02T03:04:05.600Z"}}` + "\n" +
 		`{"type":"event_msg","timestamp":"2026-01-02T00:00:00Z","payload":{"type":"user_message","message":"Build the parser"}}` + "\n"
 	if err := os.WriteFile(filepath.Join(directory, "rollout-test.jsonl"), []byte(content), 0o600); err != nil {
 		t.Fatal(err)
@@ -92,7 +93,9 @@ func TestDiscoverCodexUsesSessionMetadataWorkdir(t *testing.T) {
 		t.Fatal(err)
 	}
 	items := discovery.Candidates
-	if discovery.Total != 1 || len(items) != 1 || items[0].ProviderSessionID != "codex-id" || items[0].Summary != "Build the parser" {
+	if discovery.Total != 1 || len(items) != 1 || items[0].ProviderSessionID != "codex-id" ||
+		items[0].Summary != "Build the parser" ||
+		!items[0].CreatedAt.Equal(time.Date(2026, 1, 2, 3, 4, 5, 600_000_000, time.UTC)) {
 		t.Fatalf("discovery=%#v", discovery)
 	}
 }

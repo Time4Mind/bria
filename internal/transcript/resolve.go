@@ -238,8 +238,9 @@ func (r *Reader) codexCandidates(ctx context.Context) ([]codexCandidate, error) 
 }
 
 type codexMeta struct {
-	ID      string
-	Workdir string
+	ID        string
+	Workdir   string
+	CreatedAt time.Time
 }
 
 func readCodexMeta(path string, maxLineBytes int) (codexMeta, bool) {
@@ -258,6 +259,7 @@ func parseCodexMeta(lines [][]byte) (codexMeta, bool) {
 				ID        string `json:"id"`
 				SessionID string `json:"session_id"`
 				CWD       string `json:"cwd"`
+				Timestamp string `json:"timestamp"`
 			} `json:"payload"`
 		}
 		if json.Unmarshal(line, &row) != nil || row.Type != "session_meta" {
@@ -268,7 +270,8 @@ func parseCodexMeta(lines [][]byte) (codexMeta, bool) {
 			id = row.Payload.SessionID
 		}
 		if id != "" {
-			return codexMeta{ID: id, Workdir: row.Payload.CWD}, true
+			createdAt, _ := time.Parse(time.RFC3339Nano, row.Payload.Timestamp)
+			return codexMeta{ID: id, Workdir: row.Payload.CWD, CreatedAt: createdAt}, true
 		}
 	}
 	return codexMeta{}, false

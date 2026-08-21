@@ -31,6 +31,14 @@ func applySessionLifecycle(state *domain.State, command Command) (json.RawMessag
 				payload.Name, payload.NameFormatVersion, command.IssuedAt,
 			)
 		})
+	case CommandSetArchiveDescription:
+		var payload SetArchiveDescription
+		return nil, decodeAnd(command.Payload, command.StrictPayload, &payload, func() error {
+			return state.SetArchiveDescription(
+				payload.Session, payload.ExpectedRevision, payload.ArchiveID,
+				payload.Lines, payload.Version,
+			)
+		})
 	case CommandCloseSession:
 		var payload SessionRevision
 		return nil, decodeAnd(command.Payload, command.StrictPayload, &payload, func() error {

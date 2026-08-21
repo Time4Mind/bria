@@ -76,7 +76,10 @@ Archives follow the same view preference. In `all_hosts`, Menu → Archive opens
 one ACL-filtered, newest-first list across the cluster and labels each item with
 its origin node. In `host_first`, it opens only the selected node's archives.
 Both modes show six archives per page and two buttons per row. `Lost` sessions
-never enter either archive list. Inspect renders only the final card page;
+never enter either archive list. Every page uses the same continuous numbering
+and text layout: name, two concise description sentences, and one separator per
+session. Page position is shown only by the inline keyboard; the message does
+not repeat a page label or total count. Inspect renders only the final card page;
 History is a separate Older/Newer surface backed by the immutable native Bria
 archive on the origin node. Archive transcript bodies do not enter Raft state.
 

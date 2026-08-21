@@ -13,6 +13,9 @@ func (c *nodeRuntimeControl) Close() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	c.client.CloseIdleConnections()
+	if c.descriptionClient != nil {
+		c.descriptionClient.CloseIdleConnections()
+	}
 	var authErr error
 	if c.localProviderAuth != nil {
 		authErr = c.localProviderAuth.Close()

@@ -43,6 +43,7 @@ const (
 	CommandRecordSessionActivity  CommandKind = "record_session_activity"
 	CommandClearSession           CommandKind = "clear_session"
 	CommandRenameSession          CommandKind = "rename_session"
+	CommandSetArchiveDescription  CommandKind = "set_archive_description"
 	CommandCloseSession           CommandKind = "close_session"
 	CommandDiscardSession         CommandKind = "discard_session"
 	CommandCompleteSessionDiscard CommandKind = "complete_session_discard"
@@ -244,6 +245,14 @@ type RenameSession struct {
 	ExpectedRevision  uint64            `json:"expected_revision"`
 	Name              string            `json:"name"`
 	NameFormatVersion int               `json:"name_format_version,omitempty"`
+}
+
+type SetArchiveDescription struct {
+	Session          domain.SessionRef `json:"session"`
+	ExpectedRevision uint64            `json:"expected_revision"`
+	ArchiveID        string            `json:"archive_id"`
+	Lines            []string          `json:"lines"`
+	Version          int               `json:"version"`
 }
 
 type ArchiveSession struct {

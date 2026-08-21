@@ -46,7 +46,6 @@ const (
 	LastCard                     Key = "sessions.last_card"
 	ArchiveSelectTitle           Key = "archive.select_title"
 	ArchiveAllTitle              Key = "archive.all_title"
-	ArchivePageLine              Key = "archive.page_line"
 	ArchiveOlderPages            Key = "archive.older_pages"
 	NodeArchiveTitle             Key = "archive.node_title"
 	NoArchivedSessions           Key = "archive.empty"

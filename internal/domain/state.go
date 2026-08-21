@@ -248,6 +248,7 @@ func (s *State) Clone() *State {
 		clone.Nodes[id] = node
 	}
 	for key, session := range s.Sessions {
+		session.ArchiveDescription = append([]string(nil), session.ArchiveDescription...)
 		if session.InteractivePrompt != nil {
 			prompt := *session.InteractivePrompt
 			session.InteractivePrompt = &prompt

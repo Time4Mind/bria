@@ -84,6 +84,8 @@ type Session struct {
 	OwnerID              UserID                  `json:"owner_id"`
 	Name                 string                  `json:"name"`
 	NameFormatVersion    int                     `json:"name_format_version,omitempty"`
+	ArchiveDescription   []string                `json:"archive_description,omitempty"`
+	DescriptionVersion   int                     `json:"description_version,omitempty"`
 	Workdir              string                  `json:"workdir"`
 	Backend              string                  `json:"backend"`
 	ProviderSessionID    string                  `json:"provider_session_id,omitempty"`

@@ -125,6 +125,34 @@ func TestFirstUserTextReadsBeforeRecentWindow(t *testing.T) {
 	}
 }
 
+func TestFirstUserTextsReturnFirstThreeFromTranscriptStart(t *testing.T) {
+	layout := newTestLayout(t)
+	workdir := "/safe"
+	sessionID := "session-three"
+	path := filepath.Join(layout.claude, encodeClaudeWorkdir(workdir), sessionID+".jsonl")
+	writeTestFile(t, path, `{"type":"user","message":{"content":"first"}}
+{"type":"assistant","message":{"content":"skip"}}
+{"type":"user","message":{"content":"second"}}
+{"type":"user","message":{"content":"third"}}
+{"type":"user","message":{"content":"fourth"}}
+`)
+	reader := newTestReader(t, layout, nil)
+	texts, err := reader.ReadFirstUserTexts(context.Background(), Request{
+		Backend: BackendClaude, ProviderSessionID: sessionID, Workdir: workdir,
+	}, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(texts, ","); got != "first,second,third" {
+		t.Fatalf("first user texts=%q", texts)
+	}
+	if _, err := reader.ReadFirstUserTexts(context.Background(), Request{
+		Backend: BackendClaude, ProviderSessionID: sessionID, Workdir: workdir,
+	}, 4); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("limit error=%v", err)
+	}
+}
+
 func TestBodiesAreBoundedWithoutBrokenUTF8(t *testing.T) {
 	layout := newTestLayout(t)
 	workdir := "/safe"
