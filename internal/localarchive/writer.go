@@ -33,12 +33,13 @@ type Writer struct {
 }
 
 type Artifact struct {
-	Version           int                `json:"version"`
-	Name              string             `json:"name"`
-	Workdir           string             `json:"workdir"`
-	Backend           string             `json:"backend"`
-	ProviderSessionID string             `json:"provider_session_id"`
-	Events            []transcript.Event `json:"events"`
+	Version            int                `json:"version"`
+	Name               string             `json:"name"`
+	Workdir            string             `json:"workdir"`
+	Backend            string             `json:"backend"`
+	ProviderSessionID  string             `json:"provider_session_id"`
+	InitialUserPrompts []string           `json:"initial_user_prompts,omitempty"`
+	Events             []transcript.Event `json:"events"`
 }
 
 func NewWriter(store *archive.FileStore, source TranscriptSource) (*Writer, error) {
@@ -55,20 +56,21 @@ func (w *Writer) Commit(ctx context.Context, request runtimehost.Request) error 
 	}
 	var events []transcript.Event
 	if payload.ProviderSessionID != "" {
+		transcriptRequest := transcript.Request{
+			Backend: transcript.Backend(request.Backend), ProviderSessionID: payload.ProviderSessionID,
+			Workdir: payload.Workdir,
+		}
 		var err error
-		events, err = w.source.Read(ctx, transcript.Request{
-			Backend:           transcript.Backend(request.Backend),
-			ProviderSessionID: payload.ProviderSessionID,
-			Workdir:           payload.Workdir,
-		})
+		events, err = w.source.Read(ctx, transcriptRequest)
 		if err != nil && !errors.Is(err, transcript.ErrTranscriptNotFound) {
 			return fmt.Errorf("read archive transcript: %w", err)
 		}
 	}
+	initialPrompts := firstArchivedUserPrompts(events, 3)
 	artifact := Artifact{
 		Version: artifactVersionV2, Name: payload.Name, Workdir: payload.Workdir,
 		Backend: request.Backend, ProviderSessionID: payload.ProviderSessionID,
-		Events: events,
+		InitialUserPrompts: initialPrompts, Events: events,
 	}
 	reason := domain.ArchiveReason(payload.Reason)
 	if reason == "" {
@@ -92,6 +94,31 @@ func (w *Writer) Commit(ctx context.Context, request runtimehost.Request) error 
 		},
 	}
 	return w.store.Commit(ctx, manifest, bytes.NewReader(content))
+}
+
+func firstArchivedUserPrompts(events []transcript.Event, limit int) []string {
+	result := make([]string, 0, limit)
+	for _, event := range events {
+		if event.Kind != transcript.EventUserText || strings.TrimSpace(event.Text) == "" {
+			continue
+		}
+		result = append(result, event.Text)
+		if len(result) == limit {
+			break
+		}
+	}
+	return result
+}
+
+func (w *Writer) ReadArchivedInitialUserPrompts(
+	ctx context.Context,
+	session domain.Session,
+) ([]string, error) {
+	artifact, err := w.readArchivedArtifact(ctx, session)
+	if err != nil {
+		return nil, err
+	}
+	return append([]string(nil), artifact.InitialUserPrompts...), nil
 }
 
 func (w *Writer) Verify(ctx context.Context, session domain.Session) error {
@@ -124,22 +151,33 @@ func (w *Writer) ReadArchivedTranscript(
 	ctx context.Context,
 	session domain.Session,
 ) ([]transcript.Event, error) {
-	if session.ArchiveID == "" {
-		return nil, transcript.ErrTranscriptNotFound
-	}
-	manifest, content, err := w.store.Load(ctx, archive.ArchiveID(session.ArchiveID))
-	if err != nil {
-		return nil, fmt.Errorf("load native archive transcript: %w", err)
-	}
-	if manifest.Session != session.Ref() || manifest.OwnerID != session.OwnerID ||
-		!strings.EqualFold(manifest.Backend, session.Backend) {
-		return nil, errors.New("native archive transcript identity does not match session")
-	}
-	artifact, _, err := decodeArtifact(manifest, content)
+	artifact, err := w.readArchivedArtifact(ctx, session)
 	if err != nil {
 		return nil, err
 	}
 	return append([]transcript.Event(nil), artifact.Events...), nil
+}
+
+func (w *Writer) readArchivedArtifact(
+	ctx context.Context,
+	session domain.Session,
+) (Artifact, error) {
+	if session.ArchiveID == "" {
+		return Artifact{}, transcript.ErrTranscriptNotFound
+	}
+	manifest, content, err := w.store.Load(ctx, archive.ArchiveID(session.ArchiveID))
+	if err != nil {
+		return Artifact{}, fmt.Errorf("load native archive transcript: %w", err)
+	}
+	if manifest.Session != session.Ref() || manifest.OwnerID != session.OwnerID ||
+		!strings.EqualFold(manifest.Backend, session.Backend) {
+		return Artifact{}, errors.New("native archive transcript identity does not match session")
+	}
+	artifact, _, err := decodeArtifact(manifest, content)
+	if err != nil {
+		return Artifact{}, err
+	}
+	return artifact, nil
 }
 
 func decodeArtifact(manifest archive.Manifest, content []byte) (Artifact, []inboxFile, error) {

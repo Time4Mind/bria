@@ -14,6 +14,7 @@ import (
 type Candidate struct {
 	ProviderSessionID string    `json:"provider_session_id"`
 	Summary           string    `json:"summary,omitempty"`
+	CreatedAt         time.Time `json:"created_at,omitempty"`
 	UpdatedAt         time.Time `json:"updated_at"`
 }
 
@@ -177,7 +178,7 @@ func (r *Reader) discoverCodexPage(
 		}
 		result = append(result, Candidate{
 			ProviderSessionID: candidate.providerSessionID,
-			Summary:           summary, UpdatedAt: candidate.updatedAt,
+			Summary:           summary, CreatedAt: candidate.createdAt, UpdatedAt: candidate.updatedAt,
 		})
 	}
 	return Discovery{Candidates: result, Total: total}, cacheHit, index.inventory, nil

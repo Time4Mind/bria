@@ -145,7 +145,11 @@ func (p *TelegramProjector) archiveList(
 		if err != nil {
 			return telegramui.Screen{}, err
 		}
-		item := telegramui.ArchiveItem{Token: token, Name: session.Name, Index: start + index + 1}
+		item := telegramui.ArchiveItem{
+			Token: token, Name: session.Name,
+			Description: append([]string(nil), session.ArchiveDescription...),
+			Index:       start + index + 1,
+		}
 		if nodeID == "" {
 			item.NodeName = state.Nodes[session.NodeID].Name
 		}
@@ -161,7 +165,7 @@ func (p *TelegramProjector) archiveList(
 		title = copy.Format(i18n.NodeArchiveTitle, state.Nodes[nodeID].Name)
 	}
 	return telegramui.RenderArchives(telegramui.ArchiveListInput{
-		Copy: copy, Title: title, Items: items, Page: page, Pages: pages, Total: total,
+		Copy: copy, Title: title, Items: items, Page: page, Pages: pages,
 		PreviousToken: previous, NextToken: next,
 	}), nil
 }

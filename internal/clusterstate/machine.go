@@ -285,7 +285,8 @@ func apply(state *domain.State, command Command) (json.RawMessage, error) {
 				payload.Session, payload.OperationID, payload.Failed, payload.Detail, command.IssuedAt,
 			)
 		})
-	case CommandClearSession, CommandRenameSession, CommandCloseSession,
+	case CommandClearSession, CommandRenameSession, CommandSetArchiveDescription,
+		CommandCloseSession,
 		CommandDiscardSession, CommandCompleteSessionDiscard,
 		CommandReattachSessionRuntime,
 		CommandCompleteSessionArchive, CommandRestoreSession, CommandArchiveSession,

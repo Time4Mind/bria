@@ -1,6 +1,7 @@
 package telegramui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -56,11 +57,46 @@ func TestNodeSessionAndArchiveSurfacesGolden(t *testing.T) {
 	assertGoldenGrid(t, sessions, `[api ⏳ -> session@one] | [✓ web · 42% -> session@two]
 [Servers -> sessions@servers] | [≡ Menu -> menu]`)
 	archives := RenderArchives(ArchiveListInput{
-		Copy: englishCopy, Title: "Build · archive", Page: 1, Pages: 1, Total: 1,
+		Copy: englishCopy, Title: "Build · archive", Page: 1, Pages: 1,
 		Items: []ArchiveItem{{Token: "old", Name: "release", Index: 1}},
 	})
 	assertGoldenGrid(t, archives, `[1. release -> archive_item@old]
 [1/1 -> noop]
+[← Back -> menu]`)
+}
+
+func TestArchivePagesUseSameSixItemVisualAndKeepFinalGap(t *testing.T) {
+	items := make([]ArchiveItem, 0, 6)
+	for index := 7; index <= 12; index++ {
+		items = append(items, ArchiveItem{
+			Token: OpaqueToken(fmt.Sprintf("s%d", index)), Name: fmt.Sprintf("session-%d", index),
+			Description: []string{"Контекст сессии.", "Нужный результат."}, Index: index,
+		})
+	}
+	screen := RenderArchives(ArchiveListInput{
+		Copy: englishCopy, Title: "🗄 Archive · Mac", Items: items,
+		Page: 2, Pages: 3, PreviousToken: "previous", NextToken: "next",
+	})
+	if strings.Contains(screen.Text, "2 of 3") || strings.Contains(screen.Text, "sessions") {
+		t.Fatalf("archive text contains page or count metadata: %q", screen.Text)
+	}
+	want := "🗄 Archive · Mac\n\n" +
+		"7. session-7\n· Контекст сессии.\n· Нужный результат.\n─────\n\n" +
+		"8. session-8\n· Контекст сессии.\n· Нужный результат.\n─────\n\n" +
+		"9. session-9\n· Контекст сессии.\n· Нужный результат.\n─────\n\n" +
+		"10. session-10\n· Контекст сессии.\n· Нужный результат.\n─────\n\n" +
+		"11. session-11\n· Контекст сессии.\n· Нужный результат.\n─────\n\n" +
+		"12. session-12\n· Контекст сессии.\n· Нужный результат.\n─────\n⠀"
+	if screen.Text != want {
+		t.Fatalf("archive text mismatch\n--- got ---\n%s\n--- want ---\n%s", screen.Text, want)
+	}
+	if got := strings.Count(screen.Text, "─────"); got != 6 {
+		t.Fatalf("separators=%d, want 6", got)
+	}
+	assertGoldenGrid(t, screen, `[7. session-7 -> archive_item@s7] | [8. session-8 -> archive_item@s8]
+[9. session-9 -> archive_item@s9] | [10. session-10 -> archive_item@s10]
+[11. session-11 -> archive_item@s11] | [12. session-12 -> archive_item@s12]
+[◀ -> archive_prev@previous] | [2/3 -> noop] | [▶ -> archive_next@next]
 [← Back -> menu]`)
 }
 

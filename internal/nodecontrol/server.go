@@ -13,6 +13,7 @@ import (
 	"github.com/Time4Mind/bria/internal/clusterupdate"
 	"github.com/Time4Mind/bria/internal/providerauth"
 	"github.com/Time4Mind/bria/internal/providerstop"
+	"github.com/Time4Mind/bria/internal/sessiondescription"
 	"github.com/Time4Mind/bria/internal/sessionstart"
 	"github.com/Time4Mind/bria/internal/speechsetup"
 )
@@ -31,6 +32,7 @@ type ServerConfig struct {
 	Heartbeats    HeartbeatCommitter
 	Recovery      RecoveryCommitter
 	Transcripts   TranscriptReader
+	Descriptions  sessiondescription.Service
 	SessionFiles  SessionFileReader
 	Starts        sessionstart.Service
 	ProviderAuth  providerauth.Service
@@ -57,6 +59,7 @@ type Server struct {
 	heartbeats         HeartbeatCommitter
 	recovery           RecoveryCommitter
 	transcripts        TranscriptReader
+	descriptions       sessiondescription.Service
 	sessionFiles       SessionFileReader
 	starts             sessionstart.Service
 	providerAuth       providerauth.Service
@@ -88,7 +91,8 @@ func NewServer(config ServerConfig) (*Server, error) {
 		health: config.Health, backups: config.Backups, admin: config.Admin,
 		backupCertificate: config.Certificate,
 		heartbeats:        config.Heartbeats, recovery: config.Recovery,
-		transcripts: config.Transcripts, sessionFiles: config.SessionFiles, starts: config.Starts,
+		transcripts: config.Transcripts, descriptions: config.Descriptions,
+		sessionFiles: config.SessionFiles, starts: config.Starts,
 		providerAuth: config.ProviderAuth, providerStops: config.ProviderStops,
 		backendSetup: config.BackendSetup, tlsConfig: tlsConfig,
 		speechSetup: config.SpeechSetup,

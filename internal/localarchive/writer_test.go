@@ -15,7 +15,9 @@ import (
 	"github.com/Time4Mind/bria/internal/transcript"
 )
 
-type transcriptStub struct{ events []transcript.Event }
+type transcriptStub struct {
+	events []transcript.Event
+}
 
 func (s transcriptStub) Read(context.Context, transcript.Request) ([]transcript.Event, error) {
 	return append([]transcript.Event(nil), s.events...), nil
@@ -26,9 +28,14 @@ func TestWriterCommitsAndVerifiesNativeArtifact(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	writer, err := NewWriter(store, transcriptStub{events: []transcript.Event{{
-		Kind: transcript.EventAssistantFinal, Text: "done",
-	}}})
+	writer, err := NewWriter(store, transcriptStub{
+		events: []transcript.Event{
+			{Kind: transcript.EventUserText, Text: "first"},
+			{Kind: transcript.EventUserText, Text: "second"},
+			{Kind: transcript.EventUserText, Text: "third"},
+			{Kind: transcript.EventAssistantFinal, Text: "done"},
+		},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,8 +100,12 @@ func TestWriterCommitsAndVerifiesNativeArtifact(t *testing.T) {
 		ArchiveID: "archive-close",
 	}
 	events, err := writer.ReadArchivedTranscript(context.Background(), archived)
-	if err != nil || len(events) != 1 || events[0].Text != "done" {
+	if err != nil || len(events) != 4 || events[3].Text != "done" {
 		t.Fatalf("archived events=%#v err=%v", events, err)
+	}
+	prompts, err := writer.ReadArchivedInitialUserPrompts(context.Background(), archived)
+	if err != nil || len(prompts) != 3 || prompts[0] != "first" {
+		t.Fatalf("archived prompts=%#v err=%v", prompts, err)
 	}
 	if err := writer.DeleteArchive(context.Background(), "archive-close"); err != nil {
 		t.Fatal(err)

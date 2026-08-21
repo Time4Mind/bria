@@ -74,6 +74,8 @@ func (s *State) ClearSession(
 	}
 	session.Name = ""
 	session.NameFormatVersion = 0
+	session.ArchiveDescription = nil
+	session.DescriptionVersion = 0
 	session.ProviderSessionID = ""
 	session.ProviderResume = false
 	session.ProviderBindingSince = at
@@ -253,6 +255,8 @@ func (s *State) RestoreSession(
 	session.State = SessionLive
 	session.RuntimePhase = RuntimeDegraded
 	session.InteractivePrompt = nil
+	session.ArchiveDescription = nil
+	session.DescriptionVersion = 0
 	session.RuntimeGeneration++
 	session.ResumePending = true
 	session.LiveSinceAt = at

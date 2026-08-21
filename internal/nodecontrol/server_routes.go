@@ -8,6 +8,7 @@ func (s *Server) registerHandlers(mux *http.ServeMux) {
 	mux.HandleFunc(heartbeatPath, s.handleHeartbeat)
 	mux.HandleFunc(recoveryPath, s.handleRecovery)
 	mux.HandleFunc(transcriptPath, s.handleTranscript)
+	mux.HandleFunc(archiveDescriptionPath, s.handleArchiveDescription)
 	mux.HandleFunc(sessionFilePath, s.handleSessionFile)
 	mux.HandleFunc(startBrowsePath, s.handleStartBrowse)
 	mux.HandleFunc(startDiscoverPath, s.handleStartDiscover)

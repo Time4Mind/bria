@@ -23,6 +23,7 @@ type nodeRuntimeControl struct {
 	executor          *runtimehost.LocalExecutor
 	store             *runtimehost.BoltOperationStore
 	client            *nodecontrol.Client
+	descriptionClient *nodecontrol.Client
 	server            *nodecontrol.Server
 	enrollment        *enrollmentRuntime
 	listener          net.Listener

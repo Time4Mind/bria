@@ -24,6 +24,7 @@ type codexIndexedCandidate struct {
 	providerSessionID string
 	workdir           string
 	summary           string
+	createdAt         time.Time
 	updatedAt         time.Time
 	modified          int64
 	size              int64
@@ -134,7 +135,8 @@ func (r *Reader) buildCodexIndex(ctx context.Context) (*codexIndexSnapshot, erro
 		candidate, found := codexIndexedCandidate{}, false
 		if previous != nil {
 			candidate, found = previous.byPath[file.path]
-			found = found && candidate.modified == file.modified && candidate.size == file.size
+			found = found && candidate.modified == file.modified && candidate.size == file.size &&
+				!candidate.createdAt.IsZero()
 		}
 		if !found {
 			meta, summary, ok := r.readCodexPreview(file.path)
@@ -144,7 +146,7 @@ func (r *Reader) buildCodexIndex(ctx context.Context) (*codexIndexSnapshot, erro
 			}
 			candidate = codexIndexedCandidate{
 				path: file.path, providerSessionID: meta.ID,
-				workdir: filepath.Clean(meta.Workdir), summary: summary,
+				workdir: filepath.Clean(meta.Workdir), summary: summary, createdAt: meta.CreatedAt,
 			}
 		}
 		candidate.modified = file.modified

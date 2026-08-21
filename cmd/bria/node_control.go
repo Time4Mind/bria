@@ -19,6 +19,7 @@ import (
 	"github.com/Time4Mind/bria/internal/providerbinding"
 	"github.com/Time4Mind/bria/internal/providerstop"
 	"github.com/Time4Mind/bria/internal/runtimehost"
+	"github.com/Time4Mind/bria/internal/sessiondescription"
 	"github.com/Time4Mind/bria/internal/sessionname"
 	"github.com/Time4Mind/bria/internal/transcript"
 )
@@ -165,6 +166,36 @@ func startNodeRuntimeControl(
 		return closeFailedRuntime(executor, store, err)
 	}
 	executor.SetArchiveWriter(archiveWriter)
+	descriptionGenerator, err := sessiondescription.NewGenerator(
+		backendRuntime.nameRunner, map[string]sessionname.Command{
+			"claude": {Executable: nodeConfig.ClaudeCommand, Model: nodeConfig.ClaudeNamingModel},
+			"codex":  {Executable: nodeConfig.CodexCommand, Model: nodeConfig.CodexNamingModel},
+		}, 20*time.Second,
+	)
+	if err != nil {
+		return closeFailedRuntime(executor, store, err)
+	}
+	localDescriptions, err := sessiondescription.NewLocalService(
+		domain.NodeID(nodeConfig.NodeID), node.State(), transcriptReader,
+		archiveWriter, descriptionGenerator,
+	)
+	if err != nil {
+		return closeFailedRuntime(executor, store, err)
+	}
+	descriptionClient, err := nodecontrol.NewClient(nodecontrol.ClientConfig{
+		Certificate: certificate, Roots: roots, ClusterID: nodeConfig.ClusterID,
+		Resolver: resolver, Timeout: 25 * time.Second,
+	})
+	if err != nil {
+		return closeFailedRuntime(executor, store, err)
+	}
+	descriptionRouter, err := sessiondescription.NewRouter(
+		domain.NodeID(nodeConfig.NodeID), localDescriptions, descriptionClient,
+	)
+	if err != nil {
+		descriptionClient.CloseIdleConnections()
+		return closeFailedRuntime(executor, store, err)
+	}
 	if err := reconcileLocalArchives(
 		ctx, node.State().State(), nodeConfig, driver, archiveWriter,
 	); err != nil {
@@ -231,6 +262,7 @@ func startNodeRuntimeControl(
 		Transcripts: localTranscripts, SessionFiles: localSessionFiles, Starts: localStarts,
 		ProviderAuth:  localProviderAuth,
 		ProviderStops: providerStopRouter,
+		Descriptions:  localDescriptions,
 		BackendSetup:  setups.localBackends,
 		SpeechSetup:   setups.localSpeech,
 		Updates:       updates.local,
@@ -256,7 +288,8 @@ func startNodeRuntimeControl(
 		speechSetup:   setups.speech,
 		updates:       updates,
 		executor:      executor, store: store, client: client,
-		server: server, listener: listener, errors: make(chan error, 1),
+		descriptionClient: descriptionClient,
+		server:            server, listener: listener, errors: make(chan error, 1),
 	}
 	control.enrollment, err = startEnrollmentRuntime(
 		ctx, node, nodeConfig, certificate, client, enrollments,
@@ -290,6 +323,7 @@ func startNodeRuntimeControl(
 		ctx, nodeConfig, node.State(), bindingStore, driver,
 	)
 	go runArchiveRetentionReconciler(ctx, node)
+	go runArchiveDescriptionReconciler(ctx, node, descriptionRouter)
 	go runLocalArchivePurgeReconciler(
 		ctx, domain.NodeID(nodeConfig.NodeID), node.State(), archiveWriter, bindingStore,
 	)

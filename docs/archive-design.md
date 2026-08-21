@@ -22,7 +22,12 @@ on every item. Records are sorted newest first by
 `archived_at or last_event_at or created_at`, with the session ID as a stable
 tie-breaker.
 
-There is deliberately no sorting preference or placeholder for one.
+The archive navigation description is derived once from the first one to three
+user prompts using the configured inexpensive metadata model. The raw prompts
+remain on the origin node; only two bounded sentences and their format version
+enter replicated state. Restoring a session clears that description so a later
+archive cycle can derive a fresh one. There is deliberately no sorting
+preference or placeholder for one.
 
 ## Runtime boundary and failures
 

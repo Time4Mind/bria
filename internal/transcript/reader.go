@@ -248,26 +248,58 @@ func shouldLogTranscriptRead(cacheHit bool, duration time.Duration, err error) b
 // naming must use the actual first prompt even when a transcript exceeds the
 // card reader's bounded suffix.
 func (r *Reader) ReadFirstUserText(ctx context.Context, request Request) (string, error) {
-	if err := validateRequest(request); err != nil {
+	texts, err := r.ReadFirstUserTexts(ctx, request, 1)
+	if err != nil || len(texts) == 0 {
 		return "", err
+	}
+	return texts[0], nil
+}
+
+// ReadFirstUserTexts scans forward from the start of the provider transcript.
+// It is used for small derived metadata only; callers must never replicate the
+// returned source prompts.
+func (r *Reader) ReadFirstUserTexts(
+	ctx context.Context,
+	request Request,
+	limit int,
+) ([]string, error) {
+	if err := validateRequest(request); err != nil {
+		return nil, err
+	}
+	if limit < 1 || limit > 3 {
+		return nil, ErrInvalidRequest
 	}
 	path, err := r.resolveTranscriptPath(ctx, request)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	return r.readFirstUserTextPath(ctx, request.Backend, path)
+	return r.readFirstUserTextsPath(ctx, request.Backend, path, limit)
 }
 
 func (r *Reader) readFirstUserTextPath(ctx context.Context, backend Backend, path string) (string, error) {
+	texts, err := r.readFirstUserTextsPath(ctx, backend, path, 1)
+	if err != nil || len(texts) == 0 {
+		return "", err
+	}
+	return texts[0], nil
+}
+
+func (r *Reader) readFirstUserTextsPath(
+	ctx context.Context,
+	backend Backend,
+	path string,
+	limit int,
+) ([]string, error) {
 	file, err := os.Open(path)
 	if err != nil {
-		return "", fmt.Errorf("open transcript: %w", err)
+		return nil, fmt.Errorf("open transcript: %w", err)
 	}
 	defer file.Close()
+	texts := make([]string, 0, limit)
 	reader := bufio.NewReaderSize(file, min(r.config.MaxLineBytes, 64<<10))
 	for {
 		if err := ctx.Err(); err != nil {
-			return "", err
+			return nil, err
 		}
 		line, oversized, readErr := readBoundedLine(reader, r.config.MaxLineBytes)
 		if !oversized {
@@ -282,16 +314,19 @@ func (r *Reader) readFirstUserTextPath(ctx context.Context, backend Backend, pat
 				}
 				for _, event := range events {
 					if event.Kind == EventUserText && strings.TrimSpace(event.Text) != "" {
-						return event.Text, nil
+						texts = append(texts, event.Text)
+						if len(texts) == limit {
+							return texts, nil
+						}
 					}
 				}
 			}
 		}
 		if readErr != nil {
 			if readErr == io.EOF {
-				return "", nil
+				return texts, nil
 			}
-			return "", fmt.Errorf("read transcript: %w", readErr)
+			return nil, fmt.Errorf("read transcript: %w", readErr)
 		}
 	}
 }

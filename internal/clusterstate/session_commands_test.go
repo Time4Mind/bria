@@ -77,6 +77,37 @@ func TestCloseAndAutomaticArchiveCommandsUseDifferentAuthority(t *testing.T) {
 	}
 }
 
+func TestArchiveDescriptionCommandPersistsBoundedDerivedMetadata(t *testing.T) {
+	machine, ref := sessionMachine(t)
+	initial := machine.State().Sessions[ref.Key()]
+	closeCommand := command(t, "description-close", clusterstate.CommandCloseSession,
+		clusterstate.SessionRevision{
+			ActorID: 1, Session: ref, ExpectedRevision: initial.Revision,
+			ArchiveCommitID: "archive-description",
+		})
+	if result := machine.Apply(closeCommand); result.Err() != nil {
+		t.Fatal(result.Err())
+	}
+	closed := machine.State().Sessions[ref.Key()]
+	describe := command(t, "description-set", clusterstate.CommandSetArchiveDescription,
+		clusterstate.SetArchiveDescription{
+			Session: ref, ExpectedRevision: closed.Revision, ArchiveID: closed.ArchiveID,
+			Lines:   []string{"Контекст.", "Результат."},
+			Version: domain.ArchiveDescriptionVersion,
+		})
+	if result := machine.Apply(describe); result.Err() != nil {
+		t.Fatal(result.Err())
+	}
+	if result := machine.Apply(describe); result.Err() != nil {
+		t.Fatalf("duplicate description command=%v", result.Err())
+	}
+	got := machine.State().Sessions[ref.Key()]
+	if got.DescriptionVersion != domain.ArchiveDescriptionVersion ||
+		len(got.ArchiveDescription) != 2 {
+		t.Fatalf("description=%#v", got)
+	}
+}
+
 func TestPurgeSessionCommandIsStateFirstAndIdempotent(t *testing.T) {
 	machine, ref := sessionMachine(t)
 	initial := machine.State().Sessions[ref.Key()]
