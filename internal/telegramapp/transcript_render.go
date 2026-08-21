@@ -48,10 +48,14 @@ func (h *Handler) renderSessionCardForSelection(
 	var err error
 	if acknowledgeFinal {
 		// Session selection is latency-sensitive. Transcript projection is local
-		// and cheap; terminal capture + PNG rendering is not. Reuse only a
-		// Telegram-verified pane here and let the live worker refresh it after the
-		// callback has completed.
-		snapshot, err = h.renderSessionCardSnapshotWithoutPane(ctx, actor, ref, page)
+		// and cheap; node transcript reads and terminal PNG rendering are not.
+		// Prefer the snapshot that produced a recent card and let the live worker
+		// reconcile it after the callback has completed.
+		var cached bool
+		snapshot, cached, err = h.renderCachedSessionCardSnapshot(actor, ref, page)
+		if err == nil && !cached {
+			snapshot, err = h.renderSessionCardSnapshotWithoutPane(ctx, actor, ref, page)
+		}
 		if err == nil {
 			h.attachCachedPaneFileID(ref, &snapshot.screen)
 		}
@@ -89,13 +93,22 @@ func (h *Handler) renderCachedSessionCard(
 	ref domain.SessionRef,
 	page int,
 ) (telegramui.Screen, bool, error) {
+	snapshot, ok, err := h.renderCachedSessionCardSnapshot(actor, ref, page)
+	return snapshot.screen, ok, err
+}
+
+func (h *Handler) renderCachedSessionCardSnapshot(
+	actor application.Principal,
+	ref domain.SessionRef,
+	page int,
+) (sessionCardSnapshot, bool, error) {
 	session, err := h.service.Session(actor, ref)
 	if err != nil {
-		return telegramui.Screen{}, false, err
+		return sessionCardSnapshot{}, false, err
 	}
 	events, ok := h.cachedCardTranscript(ref)
 	if !ok {
-		return telegramui.Screen{}, false, nil
+		return sessionCardSnapshot{}, false, nil
 	}
 	renderedEvents := h.withPendingVoiceRows(actor, ref, session, events)
 	screen, err := h.projector.SessionCardViewWithContext(
@@ -108,7 +121,7 @@ func (h *Handler) renderCachedSessionCard(
 			screen.Checkpoint.RenderedFinalAt = finalAt
 		}
 	}
-	return screen, true, err
+	return sessionCardSnapshot{screen: screen, events: events}, true, err
 }
 
 func (h *Handler) renderSessionCardSnapshot(

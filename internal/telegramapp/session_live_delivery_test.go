@@ -135,13 +135,27 @@ func TestSessionSelectionDefersChangingPaneCapture(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	controls.mu.Lock()
+	controls.transcriptCalls = 0
+	controls.mu.Unlock()
+	if err := handler.HandleTelegramUpdate(ctx, telegrambot.IncomingUpdate{
+		UpdateID: 503, Kind: telegrambot.IncomingCallback,
+		ChatID: 7, UserID: 7, CallbackID: "select-cached", CallbackData: data,
+		CallbackOrigin: telegrambot.Message{ChatID: 7, MessageID: 9, Rich: true},
+	}); err != nil {
+		t.Fatal(err)
+	}
 	if time.Since(started) > time.Second {
 		t.Fatal("selection callback unexpectedly blocked")
 	}
 	controls.mu.RLock()
 	paneCalls := controls.paneCalls
+	transcriptCalls := controls.transcriptCalls
 	controls.mu.RUnlock()
 	if paneCalls != 0 {
 		t.Fatalf("selection performed %d synchronous pane captures", paneCalls)
+	}
+	if transcriptCalls != 0 {
+		t.Fatalf("cached selection performed %d synchronous transcript reads", transcriptCalls)
 	}
 }
