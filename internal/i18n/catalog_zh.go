@@ -37,6 +37,7 @@ var chineseCatalog = map[Key]string{
 	NewSelectDirectory: "选择目录 · %s", NewSelectResume: "恢复会话 · %s",
 	NewUseDirectory: "选择", NewStartFresh: "+ 新建会话",
 	NewParentDirectory: "↑ 上级目录", NewNoDirectories: "没有子目录",
+	NewInputBlocked:    "请先完成或取消会话创建。消息未发送。",
 	NewUntitledSession: "未命名会话",
 	NewAgeNow:          "刚刚",
 	StatusTitle:        "状态", StatusLine: "%s %s · %s · %s",

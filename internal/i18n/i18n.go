@@ -73,6 +73,7 @@ const (
 	NewStartFresh                Key = "new.start_fresh"
 	NewParentDirectory           Key = "new.parent_directory"
 	NewNoDirectories             Key = "new.no_directories"
+	NewInputBlocked              Key = "new.input_blocked"
 	NewUntitledSession           Key = "new.untitled_session"
 	NewAgeNow                    Key = "new.age_now"
 	StatusTitle                  Key = "status.title"

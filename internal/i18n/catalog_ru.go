@@ -37,6 +37,7 @@ var russianCatalog = map[Key]string{
 	NewSelectDirectory: "Выберите директорию · %s", NewSelectResume: "Возобновить сессию · %s",
 	NewUseDirectory: "Выбрать", NewStartFresh: "+ Начать новую",
 	NewParentDirectory: "↑ Выше", NewNoDirectories: "Нет поддиректорий",
+	NewInputBlocked:    "Сначала завершите или отмените создание сессии. Сообщение не отправлено.",
 	NewUntitledSession: "Сессия без имени",
 	NewAgeNow:          "сейчас",
 	StatusTitle:        "Статус", StatusLine: "%s %s · %s · %s",

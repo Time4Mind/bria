@@ -102,6 +102,10 @@ func (h *Handler) selectSession(
 	if err := h.service.SelectSession(ctx, actor, ref); err != nil {
 		return telegramui.Screen{}, err
 	}
+	// Selecting an existing session is a terminal exit from session creation.
+	// Without this, a stale create flow can silently intercept the next text,
+	// file, or voice message even though Telegram already shows this session.
+	h.clearCreateFlow(actor.UserID)
 	page := h.rememberedCardPage(actor.UserID, ref)
 	return h.renderSelectedSessionCard(ctx, actor, ref, page)
 }

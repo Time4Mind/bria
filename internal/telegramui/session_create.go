@@ -118,6 +118,14 @@ func RenderCreateResume(copy i18n.Localizer, workdir string, items []CreateChoic
 	return RenderCreateResumePage(copy, workdir, items, 0, 1, 1)
 }
 
+func RenderCreateInputBlocked(copy i18n.Localizer) Screen {
+	return Screen{
+		Name: ScreenSessions,
+		Text: copy.Text(i18n.NewInputBlocked),
+		Grid: Grid{Row{button(copy.Text(i18n.ButtonCancel), ActionSessions, "")}},
+	}
+}
+
 func RenderCreateResumePage(
 	copy i18n.Localizer,
 	workdir string,

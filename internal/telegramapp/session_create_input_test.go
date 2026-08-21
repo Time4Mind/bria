@@ -6,6 +6,7 @@ import (
 
 	"github.com/Time4Mind/bria/internal/application"
 	"github.com/Time4Mind/bria/internal/domain"
+	"github.com/Time4Mind/bria/internal/runtimehost"
 	"github.com/Time4Mind/bria/internal/sessioncontrol"
 	"github.com/Time4Mind/bria/internal/sessionstart"
 	"github.com/Time4Mind/bria/internal/telegramapp"
@@ -138,6 +139,53 @@ func TestTextDuringIncompleteCreateFlowNeverFallsThroughToOldSession(t *testing.
 	defer controls.mu.RUnlock()
 	if controls.text != "" {
 		t.Fatalf("incomplete create input leaked to old session: %q", controls.text)
+	}
+	if len(fixture.messenger.sent) != 1 ||
+		fixture.messenger.sent[0].Text != "Finish or cancel session creation first. The message was not sent." {
+		t.Fatalf("incomplete create input response=%#v", fixture.messenger.sent)
+	}
+}
+
+func TestSelectingExistingSessionClearsCreateFlowBeforeVoiceInput(t *testing.T) {
+	fixture := newFixture(t)
+	enableCreateBackend(t, fixture)
+	actor := application.Principal{UserID: 7}
+	preferences, err := fixture.service.Preferences(actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	preferences.VoiceBackend = domain.VoiceAuto
+	if err := fixture.service.SetPreferences(context.Background(), actor, preferences); err != nil {
+		t.Fatal(err)
+	}
+	ref := domain.SessionRef{NodeID: "allowed", SessionID: "live"}
+	controls := &blockingControls{ref: ref}
+	handler, err := telegramapp.NewHandlerWithControls(
+		fixture.service, fixture.projector, fixture.codec, fixture.messenger, controls,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := handler.SetSessionStarter(inputRoutingStarter{service: fixture.service}); err != nil {
+		t.Fatal(err)
+	}
+	origin := telegrambot.Message{ChatID: 7, MessageID: 10}
+	invokeCreateCallback(t, handler, 909, origin, telegramui.ActionNewSession, "")
+	token, err := fixture.codec.Session(7, telegramui.ActionSelectSession, ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	invokeCreateCallback(t, handler, 910, origin, telegramui.ActionSelectSession, token)
+	if err := handler.HandleTelegramUpdate(context.Background(), telegrambot.IncomingUpdate{
+		UpdateID: 911, Kind: telegrambot.IncomingMessage, ChatID: 7, UserID: 7,
+		Content: telegrambot.ContentDescriptor{
+			Kind: telegrambot.IncomingVoice, FileID: "voice-id", FileUniqueID: "voice-unique",
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if controls.external == nil || controls.external.Kind != runtimehost.InputVoice {
+		t.Fatalf("voice input was not routed after session selection: %#v", controls.external)
 	}
 }
 

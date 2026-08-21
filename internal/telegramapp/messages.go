@@ -9,6 +9,7 @@ import (
 	"github.com/Time4Mind/bria/internal/application"
 	"github.com/Time4Mind/bria/internal/domain"
 	"github.com/Time4Mind/bria/internal/i18n"
+	"github.com/Time4Mind/bria/internal/processlog"
 	"github.com/Time4Mind/bria/internal/runtimehost"
 	"github.com/Time4Mind/bria/internal/sessioncontrol"
 	"github.com/Time4Mind/bria/internal/telegrambot"
@@ -53,7 +54,13 @@ func (h *Handler) handleMessage(
 		return err
 	}
 	if createActive && !createReady {
-		return nil
+		processlog.Detailf(
+			"bria telegram: input_blocked update_id=%d content_kind=%q reason=create_flow_incomplete",
+			update.UpdateID, update.Content.Kind,
+		)
+		return h.sendProjected(
+			ctx, update.ChatID, telegramui.RenderCreateInputBlocked(h.copy(actor)), nil,
+		)
 	}
 	voiceBaseline := voicePendingBaseline{}
 	inputBaseline := inputPendingBaseline{}

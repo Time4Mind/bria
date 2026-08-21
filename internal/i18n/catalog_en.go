@@ -37,6 +37,7 @@ var englishCatalog = map[Key]string{
 	NewSelectDirectory: "Select directory · %s", NewSelectResume: "Resume a session · %s",
 	NewUseDirectory: "Select", NewStartFresh: "+ Start fresh",
 	NewParentDirectory: "↑ Parent", NewNoDirectories: "No subdirectories",
+	NewInputBlocked:    "Finish or cancel session creation first. The message was not sent.",
 	NewUntitledSession: "Untitled session",
 	NewAgeNow:          "now",
 	StatusTitle:        "Status", StatusLine: "%s %s · %s · %s",
