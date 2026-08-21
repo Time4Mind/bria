@@ -14,14 +14,23 @@ import (
 )
 
 type runtimeExistenceStub struct {
-	exists bool
-	err    error
-	calls  int
+	exists     bool
+	err        error
+	calls      int
+	closeCalls int
 }
 
 func (s *runtimeExistenceStub) TargetExists(context.Context, string) (bool, error) {
 	s.calls++
 	return s.exists, s.err
+}
+
+func (s *runtimeExistenceStub) Close(context.Context, string) error {
+	s.closeCalls++
+	if s.err == nil {
+		s.exists = false
+	}
+	return s.err
 }
 
 type runtimeRegistryStub struct {
@@ -212,6 +221,69 @@ func TestRuntimeReconcilerRegistersExistingSessionWindow(t *testing.T) {
 		runtimes.binding.TmuxTarget != runtimehost.TmuxTarget("bria", "node", "session") ||
 		runtimes.binding.Backend != "codex" || runtimes.binding.Workdir != "/workspace" {
 		t.Fatalf("binding=%#v", runtimes.binding)
+	}
+}
+
+func TestRuntimeReconcilerCompletesDiscardAfterClosingExactTarget(t *testing.T) {
+	machine := runtimeReconcileMachine(t, domain.RuntimeIdle)
+	state := machine.State()
+	session := state.Sessions["node/session"]
+	closedAt := time.Unix(180, 0).UTC()
+	if err := state.DiscardSession(7, session.Ref(), session.Revision, closedAt); err != nil {
+		t.Fatal(err)
+	}
+	machine = clusterstate.NewMachine(state)
+	existence := &runtimeExistenceStub{exists: true}
+	runtimes := &runtimeRegistryStub{}
+	reconciler, err := newRuntimeMissingReconciler(config.Config{
+		NodeID: "node", TmuxSession: "bria",
+	}, machine, existence, machineApplier{machine}, runtimes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reconciler.now = func() time.Time { return time.Unix(200, 0).UTC() }
+	reconciler.newID = func() (string, error) { return "discard-complete", nil }
+	if err := reconciler.Reconcile(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if existence.closeCalls != 1 || runtimes.unregisterCalls != 1 {
+		t.Fatalf("discard cleanup existence=%#v runtimes=%#v", existence, runtimes)
+	}
+	if _, ok := machine.State().Sessions[session.Ref().Key()]; ok {
+		t.Fatal("discarded session remained after runtime close")
+	}
+}
+
+func TestRuntimeReconcilerKeepsRecentDiscardUntilLateStartSettles(t *testing.T) {
+	machine := runtimeReconcileMachine(t, domain.RuntimeStarting)
+	state := machine.State()
+	session := state.Sessions["node/session"]
+	closedAt := time.Unix(195, 0).UTC()
+	if err := state.DiscardSession(7, session.Ref(), session.Revision, closedAt); err != nil {
+		t.Fatal(err)
+	}
+	machine = clusterstate.NewMachine(state)
+	reconciler, err := newRuntimeMissingReconciler(config.Config{
+		NodeID: "node", TmuxSession: "bria",
+	}, machine, &runtimeExistenceStub{}, machineApplier{machine}, &runtimeRegistryStub{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Unix(200, 0).UTC()
+	reconciler.now = func() time.Time { return now }
+	reconciler.newID = func() (string, error) { return "discard-late", nil }
+	if err := reconciler.Reconcile(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := machine.State().Sessions[session.Ref().Key()]; !ok {
+		t.Fatal("recent discard was removed before a late start could settle")
+	}
+	now = closedAt.Add(runtimeDiscardGrace + time.Second)
+	if err := reconciler.Reconcile(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := machine.State().Sessions[session.Ref().Key()]; ok {
+		t.Fatal("settled target-less discard remained")
 	}
 }
 

@@ -24,6 +24,7 @@ const (
 	ActionStop         Action = "stop"
 	ActionClear        Action = "clear"
 	ActionClose        Action = "close"
+	ActionDiscard      Action = "discard"
 	ActionOpenTerminal Action = "open_terminal"
 	ActionCapture      Action = "capture"
 	ActionSendKey      Action = "send_key"
@@ -138,7 +139,7 @@ func (r Request) validate() error {
 		if r.ArchiveCommitID != "" || r.Archive != nil {
 			return fmt.Errorf("%s does not accept archive metadata", r.Action)
 		}
-	case ActionStop, ActionClear, ActionOpenTerminal, ActionCapture:
+	case ActionStop, ActionClear, ActionDiscard, ActionOpenTerminal, ActionCapture:
 		if r.Text != "" || r.Input != nil || r.ArchiveCommitID != "" || r.Archive != nil {
 			return fmt.Errorf("%s does not accept a payload", r.Action)
 		}

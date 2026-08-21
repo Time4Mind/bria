@@ -17,10 +17,12 @@ import (
 const (
 	runtimeReconcileInterval = 5 * time.Second
 	runtimeMissingThreshold  = 2
+	runtimeDiscardGrace      = 10 * time.Second
 )
 
 type runtimeExistence interface {
 	TargetExists(context.Context, string) (bool, error)
+	Close(context.Context, string) error
 }
 
 type runtimeMissingApplier interface {
@@ -69,6 +71,13 @@ func (r *runtimeMissingReconciler) Reconcile(ctx context.Context) error {
 	}
 	live := make(map[string]bool)
 	for _, session := range state.Sessions {
+		if session.NodeID == domain.NodeID(r.nodeID) &&
+			session.State == domain.SessionDiscarding {
+			if err := r.discard(ctx, session); err != nil {
+				return err
+			}
+			continue
+		}
 		if session.NodeID != domain.NodeID(r.nodeID) || !session.IsLive() ||
 			session.RuntimePhase == domain.RuntimeStarting || session.ResumePending {
 			continue
@@ -105,6 +114,56 @@ func (r *runtimeMissingReconciler) Reconcile(ctx context.Context) error {
 		if !live[key] {
 			delete(r.misses, key)
 		}
+	}
+	return nil
+}
+
+func (r *runtimeMissingReconciler) discard(
+	ctx context.Context,
+	session domain.Session,
+) error {
+	target := runtimehost.TmuxTarget(r.tmuxSession, r.nodeID, string(session.ID))
+	exists, err := r.exists.TargetExists(ctx, target)
+	if err != nil {
+		return fmt.Errorf("inspect discarded runtime %s: %w", session.Ref().Key(), err)
+	}
+	if exists {
+		if err := r.exists.Close(ctx, target); err != nil {
+			stillExists, inspectErr := r.exists.TargetExists(ctx, target)
+			if inspectErr != nil || stillExists {
+				return fmt.Errorf("deactivate discarded runtime %s: %w", session.Ref().Key(), err)
+			}
+		}
+	} else if session.DiscardedAt.IsZero() ||
+		r.now().Sub(session.DiscardedAt) < runtimeDiscardGrace {
+		// A bounded start request may still be materializing its target. Keep the
+		// durable discard intent until that race has settled, then remove it.
+		return nil
+	}
+	if err := r.runtimes.Unregister(
+		r.nodeID, string(session.ID), session.RuntimeGeneration,
+	); err != nil && err != runtimehost.ErrRuntimeUnavailable {
+		return fmt.Errorf("unregister discarded runtime %s: %w", session.Ref().Key(), err)
+	}
+	operationID, err := r.newID()
+	if err != nil {
+		return err
+	}
+	command, err := clusterstate.NewCommand(
+		operationID, clusterstate.CommandCompleteSessionDiscard, r.now(),
+		clusterstate.SessionRevision{
+			ActorID: session.OwnerID, Session: session.Ref(), ExpectedRevision: session.Revision,
+		},
+	)
+	if err != nil {
+		return err
+	}
+	result, err := r.apply.Apply(ctx, command)
+	if err != nil {
+		return fmt.Errorf("complete discarded runtime %s: %w", session.Ref().Key(), err)
+	}
+	if err := result.Err(); err != nil {
+		return fmt.Errorf("complete discarded runtime %s: %w", session.Ref().Key(), err)
 	}
 	return nil
 }

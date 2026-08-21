@@ -33,6 +33,20 @@ func applySessionLifecycle(state *domain.State, command Command) (json.RawMessag
 				payload.ArchiveCommitID, command.IssuedAt,
 			)
 		})
+	case CommandDiscardSession:
+		var payload SessionRevision
+		return nil, decodeAnd(command.Payload, command.StrictPayload, &payload, func() error {
+			return state.DiscardSession(
+				payload.ActorID, payload.Session, payload.ExpectedRevision, command.IssuedAt,
+			)
+		})
+	case CommandCompleteSessionDiscard:
+		var payload SessionRevision
+		return nil, decodeAnd(command.Payload, command.StrictPayload, &payload, func() error {
+			return state.CompleteSessionDiscard(
+				payload.ActorID, payload.Session, payload.ExpectedRevision,
+			)
+		})
 	case CommandCompleteSessionArchive:
 		var payload SessionRevision
 		return nil, decodeAnd(command.Payload, command.StrictPayload, &payload, func() error {

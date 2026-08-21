@@ -73,6 +73,9 @@ func TestSendInputPinsActiveSessionAndPublishesRunning(t *testing.T) {
 		session.LastOperation.Status != domain.OperationQueued {
 		t.Fatalf("replicated session=%#v", session)
 	}
+	if !session.UserRequestTracked || !session.UserRequestSeen {
+		t.Fatalf("accepted request was not durably tracked: %#v", session)
+	}
 }
 
 func TestExternalInputPinsDescriptorWithoutMediaBytes(t *testing.T) {

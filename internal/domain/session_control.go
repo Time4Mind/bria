@@ -89,6 +89,8 @@ func (s *State) ClearSession(
 		Status:      OperationSucceeded,
 		At:          at,
 	}
+	session.UserRequestSeen = false
+	session.UserRequestTracked = true
 	s.Sessions[ref.Key()] = session
 	s.clearDeferredInputs(ref)
 	s.clearBackgroundSession(ref)

@@ -39,3 +39,22 @@ func TestSuccessfulCloseRetiresLocalRuntimeWorker(t *testing.T) {
 		t.Fatalf("operation after close error=%v", err)
 	}
 }
+
+func TestSuccessfulDiscardClosesWithoutArchiveAndRetiresRuntime(t *testing.T) {
+	driver := &fakeRuntimeDriver{}
+	executor := newTestExecutor(t, driver)
+	result := waitSubmittedResult(t, executor, testRequest("discard-empty", ActionDiscard))
+	if !result.Delivered || result.ArchiveCommitted {
+		t.Fatalf("discard result=%+v", result)
+	}
+	calls := driver.snapshot()
+	if len(calls) != 1 || calls[0].action != "close" {
+		t.Fatalf("discard calls=%#v", calls)
+	}
+	executor.mu.RLock()
+	_, exists := executor.sessions[runtimeKey("node-a", "session-a")]
+	executor.mu.RUnlock()
+	if exists {
+		t.Fatal("discarded runtime remained registered")
+	}
+}

@@ -41,6 +41,9 @@ func TestCreateSessionCommitsStartingIntentAndSelection(t *testing.T) {
 	if created.RuntimePhase != domain.RuntimeStarting || created.ProviderSessionID == "" || created.ProviderResume {
 		t.Fatalf("created=%#v", created)
 	}
+	if !created.UserRequestTracked || created.UserRequestSeen {
+		t.Fatalf("fresh request tracking=%#v", created)
+	}
 	state := machine.State()
 	if got := state.Navigation.ActiveSessionByUserNode[7]["alpha"]; got != created.ID {
 		t.Fatalf("active session=%q", got)
@@ -62,6 +65,9 @@ func TestCreateCodexResumeAndProviderBinding(t *testing.T) {
 	}
 	if !created.ProviderResume || created.ProviderSessionID != "resume-id" {
 		t.Fatalf("resume metadata=%#v", created)
+	}
+	if created.UserRequestTracked || created.UserRequestSeen {
+		t.Fatalf("resumed request tracking=%#v", created)
 	}
 	fresh, err := service.CreateSession(context.Background(), actor, application.CreateSessionRequest{
 		NodeID: "alpha", Backend: "codex", Workdir: t.TempDir(),

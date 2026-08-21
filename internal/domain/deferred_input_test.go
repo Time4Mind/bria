@@ -26,6 +26,10 @@ func TestDeferredInputQueueIsBoundedDeduplicatedAndFIFO(t *testing.T) {
 			t.Fatalf("queued_at=%s, want %s", got, queuedAt)
 		}
 	}
+	tracked := state.Sessions[ref.Key()]
+	if !tracked.UserRequestTracked || !tracked.UserRequestSeen {
+		t.Fatalf("deferred request was not tracked: %#v", tracked)
+	}
 	duplicate := deferredText(ref, "input-1", "ignored duplicate")
 	if err := state.QueueDeferredSessionInput(duplicate, time.Unix(30, 0).UTC()); err != nil {
 		t.Fatalf("idempotent duplicate: %v", err)

@@ -70,6 +70,10 @@ func TestSelectNodeChoosesItsMostRecentlyActiveLiveSession(t *testing.T) {
 	if err := state.RecordSessionActivity(1, older, started.Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
+	tracked := state.Sessions[older.Key()]
+	if !tracked.UserRequestTracked || !tracked.UserRequestSeen {
+		t.Fatalf("sent request was not tracked: %#v", tracked)
+	}
 	if got := state.Navigation.ActiveSessionByUserNode[1]["beta"]; got != "" {
 		t.Fatalf("beta session selected before entering node: %q", got)
 	}

@@ -44,6 +44,8 @@ const (
 	CommandClearSession           CommandKind = "clear_session"
 	CommandRenameSession          CommandKind = "rename_session"
 	CommandCloseSession           CommandKind = "close_session"
+	CommandDiscardSession         CommandKind = "discard_session"
+	CommandCompleteSessionDiscard CommandKind = "complete_session_discard"
 	CommandCompleteSessionArchive CommandKind = "complete_session_archive"
 	CommandRestoreSession         CommandKind = "restore_session"
 	CommandArchiveSession         CommandKind = "archive_session"

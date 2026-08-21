@@ -13,9 +13,10 @@ import (
 type RecoveryOutcome string
 
 const (
-	RecoveryComplete RecoveryOutcome = "complete"
-	RecoveryFailed   RecoveryOutcome = "failed"
-	RecoveryMissing  RecoveryOutcome = "missing"
+	RecoveryComplete  RecoveryOutcome = "complete"
+	RecoveryFailed    RecoveryOutcome = "failed"
+	RecoveryMissing   RecoveryOutcome = "missing"
+	RecoveryDiscarded RecoveryOutcome = "discarded"
 )
 
 type RecoveryReport struct {
@@ -27,6 +28,7 @@ type RecoveryReport struct {
 	ExpectedGeneration uint64            `json:"expected_generation,omitempty"`
 	ExpectedRevision   uint64            `json:"expected_revision,omitempty"`
 	CheckVersion       bool              `json:"check_version,omitempty"`
+	ActorID            domain.UserID     `json:"actor_id,omitempty"`
 }
 
 type RecoveryCommitter interface {
@@ -56,6 +58,15 @@ func (c *ConsensusHeartbeatCommitter) CommitRecovery(
 			Session: report.Session, ArchiveID: report.ArchiveID,
 			ExpectedGeneration: report.ExpectedGeneration,
 			ExpectedRevision:   report.ExpectedRevision, CheckVersion: report.CheckVersion,
+		}
+	} else if report.Outcome == RecoveryDiscarded {
+		if report.ActorID <= 0 || report.ExpectedRevision == 0 {
+			return errors.New("discard recovery identity is invalid")
+		}
+		kind = clusterstate.CommandCompleteSessionDiscard
+		payload = clusterstate.SessionRevision{
+			ActorID: report.ActorID, Session: report.Session,
+			ExpectedRevision: report.ExpectedRevision,
 		}
 	} else if report.Outcome != RecoveryComplete {
 		return errors.New("recovery outcome is invalid")
@@ -103,11 +114,21 @@ func (a *RemoteRecoveryApplier) Apply(
 ) (clusterstate.Result, error) {
 	if command.Kind != clusterstate.CommandCompleteBootRecovery &&
 		command.Kind != clusterstate.CommandFailBootRecovery &&
-		command.Kind != clusterstate.CommandMarkMissing {
+		command.Kind != clusterstate.CommandMarkMissing &&
+		command.Kind != clusterstate.CommandCompleteSessionDiscard {
 		return clusterstate.Result{}, errors.New("only local runtime recovery results may use the recovery API")
 	}
 	var payload clusterstate.MarkMissing
-	if err := json.Unmarshal(command.Payload, &payload); err != nil {
+	actorID := domain.UserID(0)
+	if command.Kind == clusterstate.CommandCompleteSessionDiscard {
+		var discard clusterstate.SessionRevision
+		if err := json.Unmarshal(command.Payload, &discard); err != nil {
+			return clusterstate.Result{}, fmt.Errorf("decode discard transition: %w", err)
+		}
+		payload.Session = discard.Session
+		payload.ExpectedRevision = discard.ExpectedRevision
+		actorID = discard.ActorID
+	} else if err := json.Unmarshal(command.Payload, &payload); err != nil {
 		return clusterstate.Result{}, fmt.Errorf("decode recovery transition: %w", err)
 	}
 	if payload.Session.NodeID != domain.NodeID(a.nodeID) {
@@ -122,12 +143,15 @@ func (a *RemoteRecoveryApplier) Apply(
 		outcome = RecoveryFailed
 	} else if command.Kind == clusterstate.CommandMarkMissing {
 		outcome = RecoveryMissing
+	} else if command.Kind == clusterstate.CommandCompleteSessionDiscard {
+		outcome = RecoveryDiscarded
 	}
 	err := a.reporter.ReportRecovery(ctx, leaderID, RecoveryReport{
 		ReportID: command.OperationID, NodeID: a.nodeID,
 		Session: payload.Session, Outcome: outcome, ArchiveID: payload.ArchiveID,
 		ExpectedGeneration: payload.ExpectedGeneration,
 		ExpectedRevision:   payload.ExpectedRevision, CheckVersion: payload.CheckVersion,
+		ActorID: actorID,
 	})
 	if err != nil {
 		return clusterstate.Result{}, err

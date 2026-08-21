@@ -81,6 +81,11 @@ func (g *StateGuard) AuthorizeRuntime(
 			session.ArchiveID == "" || session.ArchiveID != request.ArchiveCommitID {
 			return domain.ErrAccessDenied
 		}
+	} else if request.Action == runtimehost.ActionDiscard {
+		if session.State != domain.SessionDiscarding || request.ArchiveCommitID != "" ||
+			request.Archive != nil {
+			return domain.ErrAccessDenied
+		}
 	} else if !session.IsLive() {
 		return domain.ErrNotFound
 	}
@@ -134,7 +139,7 @@ func domainAction(action runtimehost.Action) (domain.SessionAction, bool) {
 		return domain.ActionCapture, false
 	case runtimehost.ActionClear:
 		return domain.ActionClear, true
-	case runtimehost.ActionClose:
+	case runtimehost.ActionClose, runtimehost.ActionDiscard:
 		return domain.ActionClose, true
 	case runtimehost.ActionOpenTerminal:
 		return domain.ActionOpenTerminal, true

@@ -286,6 +286,7 @@ func apply(state *domain.State, command Command) (json.RawMessage, error) {
 			)
 		})
 	case CommandClearSession, CommandRenameSession, CommandCloseSession,
+		CommandDiscardSession, CommandCompleteSessionDiscard,
 		CommandCompleteSessionArchive, CommandRestoreSession, CommandArchiveSession:
 		return applySessionLifecycle(state, command)
 	default:

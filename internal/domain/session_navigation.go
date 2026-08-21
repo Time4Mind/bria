@@ -90,6 +90,15 @@ func (s *State) RecordSessionActivity(userID UserID, ref SessionRef, at time.Tim
 	if !ok || node.Status != NodeOnline || !session.IsLive() {
 		return ErrInvalidState
 	}
+	if !session.UserRequestSeen {
+		if session.Revision == ^uint64(0) {
+			return ErrInvalidState
+		}
+		session.UserRequestSeen = true
+		session.UserRequestTracked = true
+		session.Revision++
+		s.Sessions[ref.Key()] = session
+	}
 	if s.Navigation.SessionActivityByUser == nil {
 		s.Navigation.SessionActivityByUser = make(map[UserID]map[string]time.Time)
 	}

@@ -50,3 +50,43 @@ func TestHeartbeatRuntimeReportRepairsRecoveredOpenTurnWithExistingCommand(t *te
 		t.Fatalf("reconciled session=%#v", session)
 	}
 }
+
+func TestRecoveryCommitterCompletesDiscardedSession(t *testing.T) {
+	state := domain.NewState()
+	created := time.Unix(10, 0).UTC()
+	if err := state.AddNode(domain.Node{
+		ID: "node", Name: "Node", Status: domain.NodeOnline, CreatedAt: created,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.SetSoleOwner(7); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.AddSession(domain.Session{
+		ID: "empty", NodeID: "node", OwnerID: 7, Name: "Empty", Workdir: "/work",
+		Backend: "codex", State: domain.SessionLive, RuntimePhase: domain.RuntimeIdle,
+		RuntimeGeneration: 2, CreatedAt: created, LiveSinceAt: created,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	ref := domain.SessionRef{NodeID: "node", SessionID: "empty"}
+	session := state.Sessions[ref.Key()]
+	if err := state.DiscardSession(7, ref, session.Revision, time.Unix(20, 0).UTC()); err != nil {
+		t.Fatal(err)
+	}
+	discarding := state.Sessions[ref.Key()]
+	machine := clusterstate.NewMachine(state)
+	committer, err := NewConsensusHeartbeatCommitter(machineApplier{machine}, machine)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := committer.CommitRecovery(context.Background(), RecoveryReport{
+		ReportID: "discard-result", NodeID: "node", Session: ref,
+		Outcome: RecoveryDiscarded, ActorID: 7, ExpectedRevision: discarding.Revision,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := machine.State().Sessions[ref.Key()]; ok {
+		t.Fatal("recovery commit left discarded session record")
+	}
+}

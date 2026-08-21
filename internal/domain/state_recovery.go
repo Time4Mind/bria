@@ -10,8 +10,9 @@ import (
 )
 
 type BootRecoveryPlan struct {
-	Recover  []SessionRef `json:"recover"`
-	Archived []SessionRef `json:"archived"`
+	Recover   []SessionRef `json:"recover"`
+	Archived  []SessionRef `json:"archived"`
+	Discarded []SessionRef `json:"discarded,omitempty"`
 }
 
 func (s *State) ObserveNodeBoot(nodeID NodeID, bootID string, at time.Time) (BootRecoveryPlan, error) {
@@ -45,6 +46,14 @@ func (s *State) ObserveNodeBoot(nodeID NodeID, bootID string, at time.Time) (Boo
 		if session.NodeID != nodeID || !session.IsLive() {
 			continue
 		}
+		if session.UserRequestTracked && !session.UserRequestSeen {
+			if err := discardSession(&session, at); err != nil {
+				return BootRecoveryPlan{}, err
+			}
+			plan.Discarded = append(plan.Discarded, session.Ref())
+			s.Sessions[key] = session
+			continue
+		}
 		if session.RuntimePhase == RuntimeStarting {
 			// A committed creation intent is replayable even if the host rebooted
 			// before the provider process appeared. The leader reconciler will
@@ -76,7 +85,13 @@ func (s *State) ObserveNodeBoot(nodeID NodeID, bootID string, at time.Time) (Boo
 	}
 	sortSessionRefs(plan.Recover)
 	sortSessionRefs(plan.Archived)
+	sortSessionRefs(plan.Discarded)
 	for _, ref := range plan.Archived {
+		s.clearDeferredInputs(ref)
+		s.clearBackgroundSession(ref)
+		s.repairNavigationAfterUnavailable(ref)
+	}
+	for _, ref := range plan.Discarded {
 		s.clearDeferredInputs(ref)
 		s.clearBackgroundSession(ref)
 		s.repairNavigationAfterUnavailable(ref)

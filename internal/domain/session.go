@@ -13,6 +13,10 @@ type SessionState string
 const (
 	SessionLive     SessionState = "active"
 	SessionArchived SessionState = "archived"
+	// SessionDiscarding is a durable close intent for a session that has no
+	// user requests. It is intentionally invisible to both live and archive
+	// projections while the origin node retires the runtime.
+	SessionDiscarding SessionState = "discarding"
 
 	// SessionActive is retained as a source-compatible name for schema-v1
 	// callers. New code should use SessionLive.
@@ -92,9 +96,12 @@ type Session struct {
 	ResumePending        bool                    `json:"resume_pending,omitempty"`
 	InteractivePrompt    *InteractivePrompt      `json:"interactive_prompt,omitempty"`
 	LastOperation        *SessionOperationResult `json:"last_operation,omitempty"`
+	UserRequestSeen      bool                    `json:"user_request_seen,omitempty"`
+	UserRequestTracked   bool                    `json:"user_request_tracked,omitempty"`
 	CreatedAt            time.Time               `json:"created_at"`
 	LiveSinceAt          time.Time               `json:"live_since_at"`
 	LastEventAt          time.Time               `json:"last_event_at"`
+	DiscardedAt          time.Time               `json:"discarded_at,omitempty"`
 	ArchivedAt           time.Time               `json:"archived_at,omitempty"`
 	ArchiveID            string                  `json:"archive_id,omitempty"`
 	ArchiveReady         bool                    `json:"archive_ready,omitempty"`

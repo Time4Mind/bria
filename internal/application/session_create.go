@@ -88,7 +88,8 @@ func (s *Service) CreateSession(
 		ProviderBindingSince: now,
 		State:                domain.SessionLive, RuntimePhase: domain.RuntimeStarting,
 		RuntimeGeneration: 1, Revision: 1,
-		CreatedAt: now, LiveSinceAt: now, LastEventAt: now,
+		UserRequestTracked: !resume,
+		CreatedAt:          now, LiveSinceAt: now, LastEventAt: now,
 	}
 	if err := s.apply(ctx, clusterstate.CommandAddSession, session); err != nil {
 		return domain.Session{}, err

@@ -112,6 +112,8 @@ func (s *State) QueueDeferredSessionInput(input DeferredSessionInput, at time.Ti
 	}
 	s.DeferredInputs[input.Session.Key()] = append(queue, input)
 	session.LastEventAt = at
+	session.UserRequestSeen = true
+	session.UserRequestTracked = true
 	session.LastOperation = &SessionOperationResult{
 		OperationID: input.OperationID, Action: ActionSendInput, Status: OperationQueued,
 		Detail: "waiting for node recovery", At: at,

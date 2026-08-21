@@ -61,6 +61,8 @@ func (e *LocalExecutor) executeOnce(
 		if err == nil {
 			err = archiver.Finalize(ctx, request)
 		}
+	case ActionDiscard:
+		err = e.driver.Close(ctx, binding.TmuxTarget)
 	case ActionOpenTerminal:
 		err = e.driver.OpenTerminal(ctx, binding.TmuxTarget)
 	case ActionCapture:
@@ -83,7 +85,7 @@ func (e *LocalExecutor) executeOnce(
 	}
 	result.Delivered = true
 	result.Detail = "runtime operation delivered"
-	if request.Action == ActionClose {
+	if request.Action == ActionClose || request.Action == ActionDiscard {
 		e.retireClosedRuntime(binding)
 	}
 	return result, nil

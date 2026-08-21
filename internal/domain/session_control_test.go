@@ -85,6 +85,9 @@ func TestClearResetsNamingAndRejectsOldRuntimeGeneration(t *testing.T) {
 	if after.RuntimeGeneration != before.RuntimeGeneration+1 || after.RuntimePhase != domain.RuntimeIdle {
 		t.Fatalf("clear generation=%#v", after)
 	}
+	if !after.UserRequestTracked || after.UserRequestSeen {
+		t.Fatalf("clear request tracking=%#v", after)
+	}
 	if err := state.PublishSessionRuntime(
 		ref, before.RuntimeGeneration, domain.RuntimeRunning, nil, time.Unix(21, 0).UTC(),
 	); !errors.Is(err, domain.ErrStaleOperation) {

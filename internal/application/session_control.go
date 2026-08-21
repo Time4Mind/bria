@@ -202,6 +202,26 @@ func (s *Service) CloseSession(
 	})
 }
 
+func (s *Service) DiscardSession(
+	ctx context.Context,
+	actor Principal,
+	session domain.Session,
+) error {
+	return s.apply(ctx, clusterstate.CommandDiscardSession, clusterstate.SessionRevision{
+		ActorID: actor.UserID, Session: session.Ref(), ExpectedRevision: session.Revision,
+	})
+}
+
+func (s *Service) CompleteSessionDiscard(
+	ctx context.Context,
+	actor Principal,
+	session domain.Session,
+) error {
+	return s.apply(ctx, clusterstate.CommandCompleteSessionDiscard, clusterstate.SessionRevision{
+		ActorID: actor.UserID, Session: session.Ref(), ExpectedRevision: session.Revision,
+	})
+}
+
 func (s *Service) CompleteSessionArchive(
 	ctx context.Context,
 	actor Principal,

@@ -131,6 +131,9 @@ func (c *Controller) Close(
 		session.RuntimePhase != domain.RuntimeWaitingInput {
 		return Accepted{}, domain.ErrInvalidState
 	}
+	if !c.sessionHasUserRequest(ctx, actor, session) {
+		return c.discardEmptySession(ctx, actor, operationID, session)
+	}
 	archiveCommitID := "archive-" + operationID
 	closeCtx := application.WithOperationScope(ctx, operationID+"-archive-commit")
 	if err := c.service.CloseSession(closeCtx, actor, session, archiveCommitID); err != nil {
@@ -214,6 +217,15 @@ func (c *Controller) submit(
 	if err := requireRuntimePhase(session, action); err != nil {
 		return Accepted{}, err
 	}
+	if action == runtimehost.ActionSendInput {
+		// Persist the user's request before exposing it to the runtime. A crash
+		// between these steps must never let boot recovery classify the session
+		// as empty and delete accepted user work.
+		activityCtx := application.WithOperationScope(ctx, operationID+"-activity")
+		if err := c.service.RecordSessionActivity(activityCtx, actor, session.Ref()); err != nil {
+			return Accepted{}, err
+		}
+	}
 	request := runtimehost.Request{
 		OperationID: operationID, ActorID: int64(actor.UserID),
 		NodeID: string(session.NodeID), SessionID: string(session.ID),
@@ -230,12 +242,6 @@ func (c *Controller) submit(
 		OperationID: operationID, Action: domainAction, Status: domain.OperationQueued,
 	}
 	stateCtx := application.WithOperationScope(ctx, operationID+"-queued")
-	if action == runtimehost.ActionSendInput {
-		activityCtx := application.WithOperationScope(ctx, operationID+"-activity")
-		if err := c.service.RecordSessionActivity(activityCtx, actor, session.Ref()); err != nil {
-			return Accepted{}, err
-		}
-	}
 	if err := c.service.PublishSessionRuntime(stateCtx, session, phase, result); err != nil {
 		return Accepted{}, err
 	}
