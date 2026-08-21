@@ -26,6 +26,11 @@ type policy struct {
 	bucket    time.Duration
 }
 
+type Identity struct {
+	Version string
+	Commit  string
+}
+
 var policies = []policy{
 	{level: Detail, retention: 6 * time.Hour, bucket: 30 * time.Minute},
 	{level: Service, retention: 24 * time.Hour, bucket: time.Hour},
@@ -50,20 +55,27 @@ type writerSet struct {
 	detail   io.Writer
 	service  io.Writer
 	critical io.Writer
+	identity Identity
 }
 
 var routing = struct {
 	sync.RWMutex
 	writers writerSet
-}{writers: writerSet{detail: os.Stderr, service: os.Stderr, critical: os.Stderr}}
+}{writers: writerSet{
+	detail: os.Stderr, service: os.Stderr, critical: os.Stderr,
+	identity: Identity{Version: "unknown", Commit: "unknown"},
+}}
 
 // Start activates bucketed logging and adopts the supervisor's current raw
 // node.log as a critical fallback bucket. Application logs are then routed by
 // explicit level; no line-oriented file rewrite is required for retention.
-func Start(root string) (*Manager, error) {
+func Start(root string, identity Identity) (*Manager, error) {
 	root = filepath.Clean(root)
 	if !filepath.IsAbs(root) {
 		return nil, errors.New("process log root must be absolute")
+	}
+	if err := identity.validate(); err != nil {
+		return nil, err
 	}
 	if err := os.MkdirAll(root, 0o700); err != nil {
 		return nil, fmt.Errorf("create process log root: %w", err)
@@ -87,7 +99,7 @@ func Start(root string) (*Manager, error) {
 	manager.previous = routing.writers
 	routing.writers = writerSet{
 		detail: manager.streams[Detail], service: manager.streams[Service],
-		critical: manager.streams[Critical],
+		critical: manager.streams[Critical], identity: identity,
 	}
 	routing.Unlock()
 	log.SetOutput(Writer(Service))
@@ -165,7 +177,8 @@ func Servicef(format string, args ...any)  { writef(Service, format, args...) }
 func Criticalf(format string, args ...any) { writef(Critical, format, args...) }
 
 func writef(level Level, format string, args ...any) {
-	_, _ = fmt.Fprintf(Writer(level), format+"\n", args...)
+	message := fmt.Sprintf(format, args...)
+	_, _ = writeStructured(level, classifyFailure(level, message), message)
 }
 
 type routedWriter struct{ level Level }
@@ -181,4 +194,22 @@ func (writer routedWriter) Write(data []byte) (int, error) {
 	}
 	routing.RUnlock()
 	return target.Write(data)
+}
+
+func writeStructured(level Level, class FailureClass, message string) (int, error) {
+	routing.RLock()
+	target := routing.writers.service
+	identity := routing.writers.identity
+	switch level {
+	case Detail:
+		target = routing.writers.detail
+	case Critical:
+		target = routing.writers.critical
+	}
+	routing.RUnlock()
+	record := formatStructuredRecord(
+		time.Now().UTC(), os.Getpid(), identity, level,
+		normalizeFailureClass(class), message,
+	)
+	return target.Write(record)
 }

@@ -46,7 +46,7 @@ func (h *Handler) scheduleProviderStop(ctx context.Context, signal providerstop.
 	startedAt := time.Now()
 	_, session, ok := h.providerStopSession(signal)
 	if !ok {
-		processlog.Detailf(
+		processlog.Outcomef(processlog.Detail, "ignored",
 			"bria telegram: provider_stop ref=%q generation=%d outcome=ignored reason=stale_or_replaced attempts=0 duration_ms=%d",
 			signal.NodeID+"/"+signal.SessionID, signal.RuntimeGeneration,
 			time.Since(startedAt).Milliseconds(),
@@ -96,10 +96,10 @@ func (h *Handler) handleProviderStopWithRetry(
 		time.Since(startedAt).Milliseconds(),
 	}
 	if result.outcome == "watchdog_handoff" {
-		processlog.Servicef(format, arguments...)
+		processlog.Outcomef(processlog.Service, result.outcome, format, arguments...)
 		return
 	}
-	processlog.Detailf(format, arguments...)
+	processlog.Outcomef(processlog.Detail, result.outcome, format, arguments...)
 }
 
 func (h *Handler) handleProviderStop(

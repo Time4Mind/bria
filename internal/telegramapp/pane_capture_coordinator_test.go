@@ -8,14 +8,16 @@ import (
 
 	"github.com/Time4Mind/bria/internal/application"
 	"github.com/Time4Mind/bria/internal/domain"
+	"github.com/Time4Mind/bria/internal/interaction"
 )
 
 type coalescingCaptureControls struct {
 	SessionControls
-	mu      sync.Mutex
-	calls   int
-	started chan struct{}
-	release chan struct{}
+	mu       sync.Mutex
+	calls    int
+	started  chan struct{}
+	release  chan struct{}
+	contexts chan context.Context
 }
 
 type joinedCaptureContext struct {
@@ -41,11 +43,42 @@ func (c *coalescingCaptureControls) CapturePane(
 		close(c.started)
 	}
 	c.mu.Unlock()
+	if c.contexts != nil {
+		c.contexts <- ctx
+	}
 	select {
 	case <-c.release:
 		return []byte("pane"), nil
 	case <-ctx.Done():
 		return nil, ctx.Err()
+	}
+}
+
+func TestPaneCaptureRetainsIngressAfterForegroundCancellation(t *testing.T) {
+	release := make(chan struct{})
+	close(release)
+	controls := &coalescingCaptureControls{
+		started: make(chan struct{}), release: release, contexts: make(chan context.Context, 1),
+	}
+	handler := &Handler{controls: controls, paneRefreshState: newPaneRefreshState()}
+	ingress, err := interaction.NewIngress("test-ui", "event-42", "callback")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(interaction.WithIngress(context.Background(), ingress))
+	cancel()
+	_, _ = handler.capturePaneCoalesced(
+		ctx, application.Principal{UserID: 7},
+		domain.SessionRef{NodeID: "node", SessionID: "session"}, "capture-42",
+	)
+	select {
+	case captureCtx := <-controls.contexts:
+		captured, ok := interaction.IngressFromContext(captureCtx)
+		if !ok || captured.ID() != ingress.ID() {
+			t.Fatalf("capture ingress=%+v ok=%t", captured, ok)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("detached pane capture did not run")
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -151,11 +152,27 @@ func (r *Reader) Read(ctx context.Context, request Request) (_ []Event, resultEr
 		if !shouldLogTranscriptRead(cacheHit, duration, resultErr) {
 			return
 		}
-		processlog.Detailf(
+		outcome := "ok"
+		failureClass := processlog.FailureNone
+		if resultErr != nil {
+			outcome = "error"
+			switch {
+			case errors.Is(resultErr, context.DeadlineExceeded):
+				failureClass = processlog.FailureTimeout
+			case errors.Is(resultErr, context.Canceled):
+				failureClass = processlog.FailureCancelled
+			case errors.Is(resultErr, os.ErrNotExist):
+				failureClass = processlog.FailureNotFound
+			default:
+				failureClass = processlog.FailureIO
+			}
+		}
+		processlog.Failuref(
+			processlog.Detail, failureClass,
 			"bria transcript: read_timing backend=%s total_ms=%d cache=%t "+
-				"mode=%s lines=%d parsed_lines=%d events=%d",
+				"mode=%s lines=%d parsed_lines=%d events=%d outcome=%s",
 			request.Backend, duration.Milliseconds(), cacheHit,
-			readMode, lineCount, parsedLineCount, eventCount,
+			readMode, lineCount, parsedLineCount, eventCount, outcome,
 		)
 	}()
 	if err := validateRequest(request); err != nil {

@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Time4Mind/bria/internal/buildinfo"
 	"github.com/Time4Mind/bria/internal/clusterstate"
 	"github.com/Time4Mind/bria/internal/config"
 	"github.com/Time4Mind/bria/internal/consensus"
@@ -66,7 +67,10 @@ func runNode(arguments []string) error {
 	if err != nil {
 		return err
 	}
-	processLogs, logErr := processlog.Start(filepath.Join(nodeConfig.DataDir, "logs"))
+	processLogs, logErr := processlog.Start(
+		filepath.Join(nodeConfig.DataDir, "logs"),
+		processlog.Identity{Version: buildinfo.Version, Commit: buildinfo.Commit},
+	)
 	if logErr != nil {
 		fmt.Fprintf(os.Stderr, "bria process logging: %v\n", logErr)
 	} else {
@@ -129,6 +133,8 @@ func runNode(arguments []string) error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	resourceMonitor := startNodeResourceMonitor(ctx)
+	defer resourceMonitor.Close()
 	leaderCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	err = node.WaitForLeader(leaderCtx)
 	cancel()
@@ -179,7 +185,10 @@ func runNode(arguments []string) error {
 				if recoveryErr := executor.Run(ctx, plan.Recover); recoveryErr != nil {
 					// Every failed provider resume has already been committed as an
 					// archive transition. Keep the healthy node online.
-					processlog.Criticalf("bria reboot recovery: %v", recoveryErr)
+					processlog.Failuref(
+						processlog.Critical, processlog.FailureAvailability,
+						"bria reboot recovery: outcome=failed",
+					)
 				}
 			}
 		}

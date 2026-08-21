@@ -27,6 +27,10 @@ func (c *Controller) queueDeferredInput(
 	if err != nil {
 		return Accepted{}, err
 	}
+	logInteractionOperation(
+		ctx, session.Ref(), deferred.ExpectedGeneration, deferred.OperationID,
+		string(runtimehost.ActionSendInput),
+	)
 	queueCtx := application.WithOperationScope(ctx, operationID+"-offline-queue")
 	if err := c.service.QueueDeferredInput(queueCtx, deferred); err != nil {
 		return Accepted{Session: session.Ref()}, err

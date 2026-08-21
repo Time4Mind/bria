@@ -18,7 +18,10 @@ func confirmRunningUpdate(nodeConfig config.Config, manager *clusterupdate.Manag
 		return
 	}
 	if err := manager.ConfirmInstalled(localBuildVersion()); err != nil {
-		processlog.Criticalf("bria update confirmation: %v", err)
+		processlog.Failuref(
+			processlog.Critical, processlog.FailureConsistency,
+			"bria update confirmation: outcome=failed",
+		)
 	}
 }
 

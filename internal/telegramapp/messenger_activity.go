@@ -2,6 +2,7 @@ package telegramapp
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"sync"
 	"time"
@@ -145,8 +146,11 @@ func (m *activityMessenger) rememberFloodWaitLocked(chatID int64, err error) {
 		return
 	}
 	m.outboundBlockedAt[chatID] = blockedAt
-	processlog.Servicef("bria telegram: outbound_flood_wait retry_after_ms=%d error=%v",
-		retryAfter.Milliseconds(), err)
+	processlog.Failuref(
+		processlog.Service, processlog.FailureRateLimited,
+		"bria telegram: outbound_flood_wait retry_after_ms=%d outcome=rate_limited",
+		retryAfter.Milliseconds(),
+	)
 }
 
 func screenOperation(base string, screen telegramui.Screen) string {
@@ -193,17 +197,34 @@ func logSlowTelegramOperationContext(
 		restoreFields = " restore_ref=" + strconv.Quote(tag.ref.Key()) + " restore_generation=" +
 			strconv.FormatUint(tag.generation, 10) + " restore_stage=" + tag.stage
 	}
-	processlog.Detailf(
+	processlog.Failuref(
+		processlog.Detail, outboundFailureClass(err),
 		"bria telegram: outbound_timing operation=%s message_id=%d duration_ms=%d outcome=%s%s",
 		operation, messageID, duration.Milliseconds(), outcome, restoreFields,
 	)
 	if duration < slowTelegramOperation {
 		return
 	}
-	processlog.Servicef(
+	processlog.Failuref(
+		processlog.Service, outboundFailureClass(err),
 		"bria telegram: slow_outbound operation=%s message_id=%d duration_ms=%d outcome=%s%s",
 		operation, messageID, duration.Milliseconds(), outcome, restoreFields,
 	)
+}
+
+func outboundFailureClass(err error) processlog.FailureClass {
+	switch {
+	case err == nil:
+		return processlog.FailureNone
+	case errors.Is(err, context.DeadlineExceeded):
+		return processlog.FailureTimeout
+	case errors.Is(err, context.Canceled):
+		return processlog.FailureCancelled
+	}
+	if _, limited := telegrambot.FloodWait(err); limited {
+		return processlog.FailureRateLimited
+	}
+	return processlog.FailureTransport
 }
 
 func (m *activityMessenger) DeleteMessage(

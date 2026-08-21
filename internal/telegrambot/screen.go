@@ -3,8 +3,8 @@ package telegrambot
 import (
 	"context"
 	"fmt"
-	"log"
 
+	"github.com/Time4Mind/bria/internal/processlog"
 	"github.com/Time4Mind/bria/internal/telegramui"
 )
 
@@ -27,7 +27,10 @@ func (c *Client) SendScreen(
 		if _, limited := FloodWait(richErr); limited {
 			return Message{}, richErr
 		}
-		log.Printf("bria telegram: rich send failed; using expandable fallback: %v", richErr)
+		processlog.Failuref(
+			processlog.Service, processlog.FailureTransport,
+			"bria telegram: rich_send outcome=expandable_fallback",
+		)
 		fallbackText := richFallbackMarkdownV2(screen)
 		fallback, fallbackErr := c.SendMessage(ctx, MessageRequest{
 			ChatID: chatID, Text: fallbackText, ParseMode: telegramui.ParseModeMarkdownV2,

@@ -47,7 +47,11 @@ func (timing sessionCardTiming) log(ctx context.Context, ref domain.SessionRef, 
 		restoreFields = " restore_stage=" + restoreTag.stage +
 			" restore_generation=" + strconv.FormatUint(restoreTag.generation, 10)
 	}
-	processlog.Detailf(
+	failureClass := processlog.FailureClassForOutcome(timing.outcome)
+	if failureClass == processlog.FailureNone && strings.Contains(timing.pane.outcome, "error") {
+		failureClass = processlog.FailureClassForOutcome(timing.pane.outcome)
+	}
+	processlog.Failuref(processlog.Detail, failureClass,
 		"bria telegram: card_timing ref=%q page=%d total_ms=%d session_ms=%d "+
 			"transcript_ms=%d cache_ms=%d pending_ms=%d projection_ms=%d "+
 			"preferences_ms=%d pane_ms=%d pane_cache_ms=%d pane_capture_ms=%d pane_render_ms=%d "+

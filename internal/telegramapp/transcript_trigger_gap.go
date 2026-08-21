@@ -351,7 +351,8 @@ func (h *Handler) observeTranscriptWatchdog(
 
 func (h *Handler) flushTranscriptTriggerGaps(now time.Time) {
 	for _, gap := range h.transcriptTriggers.flushDue(now) {
-		processlog.Servicef(
+		processlog.Failuref(
+			processlog.Service, processlog.FailureConsistency,
 			"bria telegram: transcript_trigger_gap ref=%q generation=%d source=%s "+
 				"missing_events=%d event_kinds=%q first_at=%q last_at=%q "+
 				"discovery_ms=%d delta_complete=%t",

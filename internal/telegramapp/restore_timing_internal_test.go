@@ -14,7 +14,7 @@ import (
 
 func TestRestoreTimingLogsCorrelatedBoundedStages(t *testing.T) {
 	root := t.TempDir()
-	manager, err := processlog.Start(root)
+	manager, err := processlog.Start(root, processlog.Identity{Version: "test", Commit: "test"})
 	if err != nil {
 		t.Fatal(err)
 	}

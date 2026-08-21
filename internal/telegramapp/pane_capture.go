@@ -105,7 +105,7 @@ func (h *Handler) attachPane(
 	timing := paneAttachTiming{outcome: "capture_error"}
 	defer func() {
 		if timing.total() >= 25*time.Millisecond {
-			processlog.Detailf(
+			processlog.Outcomef(processlog.Detail, timing.outcome,
 				"bria telegram: pane_timing mode=refresh ref=%q total_ms=%d "+
 					"capture_ms=%d render_ms=%d outcome=%s",
 				ref.Key(), timing.total().Milliseconds(), timing.capture.Milliseconds(),
@@ -221,14 +221,15 @@ func (h *Handler) capturePaneCoalesced(
 	if flight == nil {
 		flight = &paneCaptureFlight{done: make(chan struct{})}
 		h.paneCaptures[key] = flight
-		go h.runPaneCapture(actor, ref, operationID, flight)
+		go h.runPaneCapture(detachedOperationContext(ctx), actor, ref, operationID, flight)
 	}
 	h.paneMu.Unlock()
 	select {
 	case <-ctx.Done():
-		processlog.Detailf(
-			"bria telegram: pane_capture_phase ref=%q outcome=foreground_timeout error=%v",
-			ref.Key(), ctx.Err(),
+		processlog.Failuref(
+			processlog.Detail, processlog.FailureTimeout,
+			"bria telegram: pane_capture_phase ref=%q outcome=foreground_timeout",
+			ref.Key(),
 		)
 		return nil, ctx.Err()
 	case <-flight.done:
@@ -237,12 +238,13 @@ func (h *Handler) capturePaneCoalesced(
 }
 
 func (h *Handler) runPaneCapture(
+	parent context.Context,
 	actor application.Principal,
 	ref domain.SessionRef,
 	operationID string,
 	flight *paneCaptureFlight,
 ) {
-	captureCtx, cancel := context.WithTimeout(context.Background(), paneCaptureExecution)
+	captureCtx, cancel := context.WithTimeout(parent, paneCaptureExecution)
 	defer cancel()
 	startedAt := time.Now()
 	flight.pane, flight.err = h.controls.CapturePane(captureCtx, actor, operationID, ref)
@@ -259,9 +261,10 @@ func (h *Handler) runPaneCapture(
 			outcome = "error"
 		}
 	}
-	processlog.Detailf(
-		"bria telegram: pane_capture_phase ref=%q execution_ms=%d outcome=%s error=%v",
-		ref.Key(), time.Since(startedAt).Milliseconds(), outcome, flight.err,
+	processlog.Outcomef(
+		processlog.Detail, outcome,
+		"bria telegram: pane_capture_phase ref=%q execution_ms=%d outcome=%s",
+		ref.Key(), time.Since(startedAt).Milliseconds(), outcome,
 	)
 	h.paneMu.Lock()
 	if h.paneCaptures[keyForPaneCapture(ref)] == flight {

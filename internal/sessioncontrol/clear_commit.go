@@ -28,9 +28,10 @@ func (c *Controller) retryClearCommit(
 		for {
 			current, err := c.service.Session(actor, ref)
 			if err != nil {
-				processlog.Criticalf(
-					"bria session clear: cannot reread ref=%q operation=%q: %v",
-					ref.Key(), request.OperationID, err,
+				processlog.Failuref(
+					processlog.Critical, processlog.FailureConsistency,
+					"bria session clear: cannot reread ref=%q operation=%q outcome=read_failed",
+					ref.Key(), request.OperationID,
 				)
 				return
 			}
@@ -77,9 +78,10 @@ func (c *Controller) retryClearCommit(
 		if err != nil {
 			lastErr = err
 		}
-		processlog.Criticalf(
-			"bria session clear: commit retry exhausted ref=%q operation=%q attempts=%d: %v",
-			ref.Key(), request.OperationID, clearCommitMaxAttempts, lastErr,
+		processlog.Failuref(
+			processlog.Critical, processlog.FailureConsistency,
+			"bria session clear: commit retry exhausted ref=%q operation=%q attempts=%d outcome=retry_exhausted",
+			ref.Key(), request.OperationID, clearCommitMaxAttempts,
 		)
 	}()
 }

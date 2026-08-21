@@ -114,9 +114,9 @@ func logInputDeliveryTiming(timing inputDeliveryTiming) {
 		durationMilliseconds(timing.transcribe), durationMilliseconds(timing.prepare),
 		durationMilliseconds(timing.tmuxSend), timing.total >= slowInputThreshold,
 	}
-	processlog.Detailf(format, args...)
+	processlog.Outcomef(processlog.Detail, timing.outcome, format, args...)
 	if timing.total >= slowInputThreshold || timing.outcome != "delivered" {
-		processlog.Servicef(format, args...)
+		processlog.Outcomef(processlog.Service, timing.outcome, format, args...)
 	}
 }
 

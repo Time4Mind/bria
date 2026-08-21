@@ -270,14 +270,20 @@ func runLocalRuntimeReconciler(
 ) {
 	remote, err := nodecontrol.NewRemoteRecoveryApplier(nodeConfig.NodeID, node, client)
 	if err != nil {
-		processlog.Criticalf("bria runtime reconcile: %v", err)
+		processlog.Failuref(
+			processlog.Critical, processlog.FailureInvalidState,
+			"bria runtime reconcile: outcome=remote_initialization_failed",
+		)
 		return
 	}
 	reconciler, err := newRuntimeMissingReconciler(
 		nodeConfig, node.State(), driver, remote, executor,
 	)
 	if err != nil {
-		processlog.Criticalf("bria runtime reconcile: %v", err)
+		processlog.Failuref(
+			processlog.Critical, processlog.FailureInvalidState,
+			"bria runtime reconcile: outcome=initialization_failed",
+		)
 		return
 	}
 	ticker := time.NewTicker(runtimeReconcileInterval)
@@ -288,7 +294,10 @@ func runLocalRuntimeReconciler(
 			return
 		case <-ticker.C:
 			if err := reconciler.Reconcile(ctx); err != nil && ctx.Err() == nil {
-				processlog.Criticalf("bria runtime reconcile: %v", err)
+				processlog.Failuref(
+					processlog.Critical, processlog.FailureDependency,
+					"bria runtime reconcile: outcome=reconcile_failed",
+				)
 			}
 		}
 	}

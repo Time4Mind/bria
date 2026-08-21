@@ -147,21 +147,34 @@ func newTelegramAdapter(
 		updateCtx context.Context,
 		update telegrambot.IncomingUpdate,
 	) error {
+		ingress, ingressErr := telegramInteractionIngress(update)
+		if ingressErr != nil {
+			return ingressErr
+		}
+		updateCtx = interaction.WithIngress(updateCtx, ingress)
 		startedAt := time.Now()
 		handleErr := handler.HandleTelegramUpdate(updateCtx, update)
 		finishedAt := time.Now()
+		if update.Kind == telegrambot.IncomingCallback {
+			return handleErr
+		}
 		outcome := "processed"
 		if handleErr != nil {
 			outcome = "failed"
 		}
 		writeEvent := processlog.Detailf
 		if handleErr != nil {
-			writeEvent = processlog.Criticalf
+			processlog.Failuref(
+				processlog.Service, telegramFailureClass(handleErr),
+				"bria interaction: adapter=telegram interaction=%q kind=%s outcome=%s%s",
+				ingress.ID(), update.Kind, outcome,
+				telegramTimingLogSuffix(update, startedAt, finishedAt),
+			)
+			return handleErr
 		}
-		writeEvent("bria telegram: update=%d kind=%s%s %s%s%s",
-			update.UpdateID, update.Kind, telegramCallbackLogSuffix(update), outcome,
-			telegramTimingLogSuffix(update, startedAt, finishedAt),
-			telegramErrorSuffix(handleErr, token))
+		writeEvent("bria interaction: adapter=telegram interaction=%q kind=%s outcome=%s%s",
+			ingress.ID(), update.Kind, outcome,
+			telegramTimingLogSuffix(update, startedAt, finishedAt))
 		return handleErr
 	})
 	cursor, err := application.NewReplicatedTelegramCursor(service)
@@ -175,18 +188,65 @@ func newTelegramAdapter(
 		OnLeaderActivated: func(activationCtx context.Context) error {
 			return activateTelegramLeader(activationCtx, client, service)
 		},
-		OnError: func(stage string, pollErr error) {
-			processlog.Criticalf(
-				"bria telegram: poller stage=%s%s",
-				stage, telegramErrorSuffix(pollErr, token),
+		OnCallbackProcessed: func(
+			update telegrambot.IncomingUpdate, attempts int, recovered bool, duration time.Duration,
+		) {
+			ingress, ingressErr := telegramInteractionIngress(update)
+			if ingressErr != nil {
+				return
+			}
+			writeEvent := processlog.Detailf
+			outcome := "processed"
+			if recovered {
+				writeEvent = processlog.Servicef
+				outcome = "recovered"
+			}
+			writeEvent(
+				"bria interaction: adapter=telegram interaction=%q kind=callback outcome=%s attempt=%d handle_ms=%d%s",
+				ingress.ID(), outcome, attempts, duration.Milliseconds(),
+				telegramCallbackLogSuffix(update),
 			)
 		},
-		OnCallbackDropped: func(update telegrambot.IncomingUpdate, dropErr error, attempts int) {
-			processlog.Criticalf(
-				"bria telegram: update=%d kind=%s%s dropped_after=%d%s",
-				update.UpdateID, update.Kind, telegramCallbackLogSuffix(update), attempts,
-				telegramErrorSuffix(dropErr, token),
+		OnCallbackRetry: func(
+			update telegrambot.IncomingUpdate, retryErr error, attempt, maximum int,
+			duration time.Duration,
+		) {
+			ingress, ingressErr := telegramInteractionIngress(update)
+			if ingressErr != nil {
+				return
+			}
+			level := processlog.Detail
+			if attempt == 1 {
+				level = processlog.Service
+			}
+			processlog.Failuref(
+				level, telegramFailureClass(retryErr),
+				"bria interaction: adapter=telegram interaction=%q kind=callback outcome=retry_scheduled attempt=%d max_attempts=%d handle_ms=%d%s",
+				ingress.ID(), attempt, maximum, duration.Milliseconds(),
+				telegramCallbackLogSuffix(update),
 			)
+		},
+		OnError: func(stage string, pollErr error) {
+			processlog.Failuref(
+				processlog.Critical, telegramFailureClass(pollErr),
+				"bria telegram: poller stage=%s outcome=failed",
+				stage,
+			)
+		},
+		OnCallbackDropped: func(
+			update telegrambot.IncomingUpdate, dropErr error, attempts int, duration time.Duration,
+		) {
+			ingress, ingressErr := telegramInteractionIngress(update)
+			if ingressErr == nil {
+				processlog.Failuref(
+					processlog.Critical, telegramFailureClass(dropErr),
+					"bria interaction: adapter=telegram interaction=%q kind=callback outcome=dropped attempts=%d terminal=true handle_ms=%d%s",
+					ingress.ID(), attempts, duration.Milliseconds(), telegramCallbackLogSuffix(update),
+				)
+			}
+			// The error is deliberately not logged here: the stable failure class
+			// above is enough for diagnostics and cannot expose adapter payloads.
+			_ = dropErr
 			noticeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			language := domain.LanguageFromTelegram(update.LanguageCode)
@@ -198,9 +258,10 @@ func newTelegramAdapter(
 			if answerErr := client.AnswerCallbackQuery(
 				noticeCtx, update.CallbackID, failureNotice,
 			); answerErr != nil {
-				processlog.Criticalf(
-					"bria telegram: update=%d callback_drop_notice_failed%s",
-					update.UpdateID, telegramErrorSuffix(answerErr, token),
+				processlog.Failuref(
+					processlog.Critical, telegramFailureClass(answerErr),
+					"bria interaction: adapter=telegram interaction=%q kind=callback outcome=drop_notice_failed terminal=true",
+					ingress.ID(),
 				)
 			}
 			if _, limited := telegrambot.FloodWait(dropErr); limited {
@@ -215,9 +276,10 @@ func newTelegramAdapter(
 			if _, noticeErr := client.SendMessage(noticeCtx, telegrambot.MessageRequest{
 				ChatID: update.ChatID, Text: failureNotice,
 			}); noticeErr != nil {
-				processlog.Criticalf(
-					"bria telegram: update=%d callback_drop_message_failed%s",
-					update.UpdateID, telegramErrorSuffix(noticeErr, token),
+				processlog.Failuref(
+					processlog.Critical, telegramFailureClass(noticeErr),
+					"bria interaction: adapter=telegram interaction=%q kind=callback outcome=drop_message_failed terminal=true",
+					ingress.ID(),
 				)
 			}
 		},
@@ -237,6 +299,44 @@ func clusterAgentWorkdir(nodeConfig config.Config) string {
 	return nodeConfig.EffectiveUpdateInstallRoot()
 }
 
+func telegramInteractionIngress(update telegrambot.IncomingUpdate) (interaction.Ingress, error) {
+	return interaction.NewIngress(
+		"telegram", fmt.Sprintf("update:%d", update.UpdateID), string(update.Kind),
+	)
+}
+
+func telegramFailureClass(err error) processlog.FailureClass {
+	if err == nil {
+		return processlog.FailureNone
+	}
+	if _, limited := telegrambot.FloodWait(err); limited {
+		return processlog.FailureRateLimited
+	}
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		return processlog.FailureTimeout
+	case errors.Is(err, context.Canceled):
+		return processlog.FailureCancelled
+	case errors.Is(err, domain.ErrAccessDenied):
+		return processlog.FailurePermission
+	case errors.Is(err, domain.ErrNotFound):
+		return processlog.FailureNotFound
+	case errors.Is(err, domain.ErrInvalidState):
+		return processlog.FailureInvalidState
+	case errors.Is(err, domain.ErrStaleOperation):
+		return processlog.FailureStaleState
+	}
+	var apiErr *telegrambot.APIError
+	if errors.As(err, &apiErr) {
+		return processlog.FailureTransport
+	}
+	var transportErr *telegrambot.TransportError
+	if errors.As(err, &transportErr) {
+		return processlog.FailureTransport
+	}
+	return processlog.FailureInternal
+}
+
 func telegramTimingLogSuffix(
 	update telegrambot.IncomingUpdate,
 	startedAt time.Time,
@@ -245,7 +345,7 @@ func telegramTimingLogSuffix(
 	if finishedAt.Before(startedAt) {
 		finishedAt = startedAt
 	}
-	suffix := fmt.Sprintf(" at=%s handle_ms=%d",
+	suffix := fmt.Sprintf(" finished_at=%s handle_ms=%d",
 		finishedAt.UTC().Format(time.RFC3339Nano), finishedAt.Sub(startedAt).Milliseconds())
 	if update.Kind == telegrambot.IncomingMessage && update.MessageDate > 0 {
 		messageAt := time.Unix(update.MessageDate, 0)
@@ -268,19 +368,6 @@ func telegramCallbackLogSuffix(update telegrambot.IncomingUpdate) string {
 		return fmt.Sprintf(" action=invalid card=%d", update.CallbackOrigin.MessageID)
 	}
 	return fmt.Sprintf(" action=%s card=%d", callback.Action, update.CallbackOrigin.MessageID)
-}
-
-func telegramErrorSuffix(err error, token string) string {
-	if err == nil {
-		return ""
-	}
-	value := strings.ReplaceAll(err.Error(), token, "[redacted]")
-	value = strings.NewReplacer("\r", " ", "\n", " ", "\t", " ").Replace(value)
-	value = strings.Join(strings.Fields(value), " ")
-	if len(value) > 240 {
-		value = value[:240]
-	}
-	return fmt.Sprintf(" error=%T:%s", err, value)
 }
 
 func loadOptionalTelegramToken(path string) (string, bool, error) {

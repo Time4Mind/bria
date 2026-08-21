@@ -132,9 +132,9 @@ func logRestoreRecoveryTiming(
 		ref.Key(), generation, outcome, total.Milliseconds(), runtime.Milliseconds(),
 		commit.Milliseconds(), total > time.Second,
 	}
-	processlog.Detailf(format, arguments...)
+	processlog.Outcomef(processlog.Detail, outcome, format, arguments...)
 	if total > time.Second {
-		processlog.Servicef(format, arguments...)
+		processlog.Outcomef(processlog.Service, outcome, format, arguments...)
 	}
 }
 

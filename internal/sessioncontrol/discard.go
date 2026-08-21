@@ -55,6 +55,9 @@ func (c *Controller) discardEmptySession(
 	operationID string,
 	session domain.Session,
 ) (Accepted, error) {
+	logInteractionOperation(
+		ctx, session.Ref(), session.RuntimeGeneration, operationID, string(runtimehost.ActionDiscard),
+	)
 	discardCtx := application.WithOperationScope(ctx, operationID+"-discard")
 	if err := c.service.DiscardSession(discardCtx, actor, session); err != nil {
 		return Accepted{}, err

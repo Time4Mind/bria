@@ -82,7 +82,8 @@ func (c *Controller) CapturePane(
 	queueDuration := time.Duration(0)
 	outcome := "queue_error"
 	defer func() {
-		processlog.Detailf(
+		processlog.Outcomef(
+			processlog.Detail, outcome,
 			"bria sessioncontrol: capture_phase ref=%q queue_ms=%d execution_ms=%d outcome=%s",
 			ref.Key(), queueDuration.Milliseconds(),
 			time.Since(startedAt).Milliseconds()-queueDuration.Milliseconds(), outcome,
@@ -101,6 +102,9 @@ func (c *Controller) CapturePane(
 		ExpectedGeneration: session.RuntimeGeneration,
 		Action:             runtimehost.ActionCapture, Backend: session.Backend,
 	}
+	logInteractionOperation(
+		ctx, ref, request.ExpectedGeneration, request.OperationID, string(request.Action),
+	)
 	if _, err := c.runtime.Submit(ctx, request); err != nil {
 		queueDuration = time.Since(startedAt)
 		outcome = captureOutcome(err, true)
@@ -170,6 +174,9 @@ func (c *Controller) Close(
 		return c.discardEmptySession(ctx, actor, operationID, session)
 	}
 	archiveCommitID := "archive-" + operationID
+	logInteractionOperation(
+		ctx, ref, session.RuntimeGeneration, operationID, string(runtimehost.ActionClose),
+	)
 	closeCtx := application.WithOperationScope(ctx, operationID+"-archive-commit")
 	if err := c.service.CloseSession(closeCtx, actor, session, archiveCommitID); err != nil {
 		return Accepted{}, err
@@ -234,6 +241,7 @@ func (c *Controller) Restore(
 	}
 	validateDuration = time.Since(phaseStartedAt)
 	generation = session.RuntimeGeneration + 1
+	logInteractionOperation(ctx, ref, generation, operationID, "restore")
 	restoreCtx := application.WithOperationScope(ctx, operationID+"-restore")
 	phaseStartedAt = time.Now()
 	if err := c.service.RestoreSession(restoreCtx, actor, session); err != nil {
@@ -273,9 +281,9 @@ func logRestoreControlTiming(
 		validate.Milliseconds(), restoreApply.Milliseconds(), selectApply.Milliseconds(),
 		total > time.Second,
 	}
-	processlog.Detailf(format, arguments...)
+	processlog.Outcomef(processlog.Detail, outcome, format, arguments...)
 	if total > time.Second {
-		processlog.Servicef(format, arguments...)
+		processlog.Outcomef(processlog.Service, outcome, format, arguments...)
 	}
 }
 
@@ -292,6 +300,12 @@ func (c *Controller) submit(
 	if err != nil {
 		return Accepted{}, err
 	}
+	request := runtimehost.Request{
+		OperationID: operationID, ActorID: int64(actor.UserID),
+		NodeID: string(session.NodeID), SessionID: string(session.ID),
+		ExpectedGeneration: session.RuntimeGeneration, Action: action,
+		Text: text, Input: input, Backend: session.Backend,
+	}
 	if action == runtimehost.ActionSendInput {
 		queue, queueErr := c.service.ShouldQueueInput(actor, session.Ref())
 		if queueErr == nil && queue {
@@ -304,6 +318,9 @@ func (c *Controller) submit(
 	if err := requireRuntimePhase(session, action); err != nil {
 		return Accepted{}, err
 	}
+	logInteractionOperation(
+		ctx, session.Ref(), request.ExpectedGeneration, request.OperationID, string(request.Action),
+	)
 	if action == runtimehost.ActionSendInput {
 		// Persist the user's request before exposing it to the runtime. A crash
 		// between these steps must never let boot recovery classify the session
@@ -312,12 +329,6 @@ func (c *Controller) submit(
 		if err := c.service.RecordSessionActivity(activityCtx, actor, session.Ref()); err != nil {
 			return Accepted{}, err
 		}
-	}
-	request := runtimehost.Request{
-		OperationID: operationID, ActorID: int64(actor.UserID),
-		NodeID: string(session.NodeID), SessionID: string(session.ID),
-		ExpectedGeneration: session.RuntimeGeneration, Action: action,
-		Text: text, Input: input, Backend: session.Backend,
 	}
 	receipt, err := c.runtime.Submit(ctx, request)
 	if err != nil {

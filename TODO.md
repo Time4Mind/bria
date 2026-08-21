@@ -38,10 +38,16 @@
 - [x] P10. Stale create-flow закрыт постоянными regression probes для текста и
   голоса: после выбора существующей сессии input ровно один раз поступает в
   exact active ref и обязательно создаёт видимый ответ, а не завершается молча.
-- [ ] P11. Улучшить диагностический контракт логов: timestamp, PID, version и
-  commit в каждой структурной записи; failure class; связь ingress с operation;
-  корректный severity для повторённого callback; метрики RSS, goroutine, FD и
-  дочерних процессов.
+- [x] P11. Структурные записи получили единый bounded envelope с UTC timestamp,
+  PID, version, commit, severity и явным failure class; raw Raft/subprocess
+  streams оставлены отдельным совместимым каналом. Введена независимая от
+  мессенджера корреляция `interaction ingress -> operation`, при этом внешний
+  ingress ID хешируется и содержимое запросов не логируется. Повтор callback
+  имеет Service/Detail severity, а terminal Critical и уведомление возникают
+  только после durable cursor commit. Раз в 5 минут один последовательный
+  sampler пишет current RSS, goroutine, FD и прямых дочерних процессов с cap,
+  cancellation и partial availability; процессы внутри tmux не выдаются за
+  прямых потомков Bria.
 - [ ] P12. Сохранить provenance развертываний. Startup должен печатать точные
   version/commit и уникальный binary identity; история не должна зависеть от
   перезаписываемого `current`-пути. В аудите промежуточный commit работал 97 с,

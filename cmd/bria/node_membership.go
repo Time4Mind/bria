@@ -42,11 +42,17 @@ func maintainConfiguredMembership(
 			continue
 		}
 		if err := registerConfiguredNodes(ctx, node, nodeConfig); err != nil {
-			processlog.Criticalf("Raft node registration: %v", err)
+			processlog.Failuref(
+				processlog.Critical, processlog.FailureConsistency,
+				"Raft node registration: outcome=failed",
+			)
 			continue
 		}
 		if err := reconcileConfiguredVoters(ctx, node, nodeConfig); err != nil {
-			processlog.Criticalf("Raft membership reconciliation: %v", err)
+			processlog.Failuref(
+				processlog.Critical, processlog.FailureConsistency,
+				"Raft membership reconciliation: outcome=failed",
+			)
 			continue
 		}
 		converged = true

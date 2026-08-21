@@ -53,7 +53,9 @@ func (h *Handler) handleMembershipLifecycle(
 		if err := h.service.CanDisableNode(actor, nodeID); err != nil {
 			return nil
 		}
-		go h.disableNode(actor, nodeID, input, update.CallbackOrigin)
+		go h.disableNode(
+			detachedOperationContext(ctx), actor, nodeID, input, update.CallbackOrigin,
+		)
 		return nil
 	case telegramui.ActionNodeEnable:
 		if err := h.service.SetNodeEnabled(ctx, actor, nodeID, true); err != nil {
@@ -155,10 +157,11 @@ func (h *Handler) membershipNodeInput(
 }
 
 func (h *Handler) disableNode(
+	parent context.Context,
 	actor application.Principal, nodeID domain.NodeID,
 	input telegramui.NodeMembershipInput, origin telegrambot.Message,
 ) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(parent, 2*time.Minute)
 	defer cancel()
 	if h.service.CanDisableNode(actor, nodeID) != nil {
 		_, _ = h.messenger.EditScreen(ctx, origin,
@@ -166,7 +169,7 @@ func (h *Handler) disableNode(
 		return
 	}
 	errorsFound := h.nodeDisableErrors(ctx, actor, nodeID, input.Node.Status)
-	disableCtx, disableCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	disableCtx, disableCancel := context.WithTimeout(ctx, 10*time.Second)
 	defer disableCancel()
 	if err := h.service.SetNodeEnabled(disableCtx, actor, nodeID, false); err != nil {
 		_, _ = h.messenger.EditScreen(disableCtx, origin,

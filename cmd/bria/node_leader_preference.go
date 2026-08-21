@@ -89,7 +89,10 @@ func reconcileTemporaryLeader(ctx context.Context, node *consensus.Node) {
 	}
 	if node.LeaderID() != string(preference.NodeID) {
 		if err := node.TransferLeadershipTo(string(preference.NodeID)); err != nil {
-			processlog.Criticalf("bria temporary leader: %v", err)
+			processlog.Failuref(
+				processlog.Critical, processlog.FailureConsistency,
+				"bria temporary leader: outcome=transfer_failed",
+			)
 		}
 	}
 }

@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -8,8 +10,37 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Time4Mind/bria/internal/processlog"
 	"github.com/Time4Mind/bria/internal/telegrambot"
 )
+
+func TestTelegramInteractionIngressIsOpaqueAndFailureClassesAreStable(t *testing.T) {
+	ingress, err := telegramInteractionIngress(telegrambot.IncomingUpdate{
+		UpdateID: 783526235, Kind: telegrambot.IncomingCallback,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ingress.Adapter() != "telegram" || ingress.Kind() != "callback" ||
+		strings.Contains(ingress.ID(), "783526235") {
+		t.Fatalf("unsafe ingress=%q/%q/%q", ingress.Adapter(), ingress.Kind(), ingress.ID())
+	}
+	tests := []struct {
+		err  error
+		want processlog.FailureClass
+	}{
+		{context.DeadlineExceeded, processlog.FailureTimeout},
+		{context.Canceled, processlog.FailureCancelled},
+		{&telegrambot.APIError{Code: 429, RetryAfter: time.Second}, processlog.FailureRateLimited},
+		{&telegrambot.TransportError{Method: "getUpdates", Cause: errors.New("offline")}, processlog.FailureTransport},
+		{errors.New("adapter-specific detail"), processlog.FailureInternal},
+	}
+	for _, item := range tests {
+		if got := telegramFailureClass(item.err); got != item.want {
+			t.Errorf("error=%T class=%q want=%q", item.err, got, item.want)
+		}
+	}
+}
 
 func TestTelegramTimingLogSuffixMeasuresHandlerAndMessageAge(t *testing.T) {
 	startedAt := time.Unix(102, 250_000_000)
@@ -19,7 +50,7 @@ func TestTelegramTimingLogSuffixMeasuresHandlerAndMessageAge(t *testing.T) {
 	}, startedAt, finishedAt)
 	if !strings.Contains(suffix, "handle_ms=450") ||
 		!strings.Contains(suffix, "telegram_age_ms=2700") ||
-		!strings.Contains(suffix, "at=1970-01-01T00:01:42.7Z") {
+		!strings.Contains(suffix, "finished_at=1970-01-01T00:01:42.7Z") {
 		t.Fatalf("timing suffix = %q", suffix)
 	}
 }

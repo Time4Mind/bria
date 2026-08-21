@@ -97,7 +97,10 @@ func runLocalArchiveReconciler(
 			if err := reconcileLocalArchives(
 				ctx, state.State(), nodeConfig, driver, archives,
 			); err != nil && ctx.Err() == nil {
-				processlog.Criticalf("bria archive reconcile: %v", err)
+				processlog.Failuref(
+					processlog.Critical, processlog.FailureConsistency,
+					"bria archive reconcile: outcome=failed",
+				)
 			}
 		}
 	}

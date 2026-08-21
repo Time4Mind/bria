@@ -95,7 +95,10 @@ func runLocalSessionStartReconciler(
 ) {
 	reconciler, err := newLocalSessionStartReconciler(nodeID, state, provisioner, runtimes)
 	if err != nil {
-		processlog.Criticalf("bria local session start: %v", err)
+		processlog.Failuref(
+			processlog.Critical, processlog.FailureInvalidState,
+			"bria local session start: outcome=initialization_failed",
+		)
 		return
 	}
 	ticker := time.NewTicker(localSessionStartInterval)
@@ -112,7 +115,10 @@ func runLocalSessionStartReconciler(
 				detail = err.Error()
 			}
 			if detail != "" && detail != lastError {
-				processlog.Criticalf("bria local session start: %s", detail)
+				processlog.Failuref(
+					processlog.Critical, processlog.FailureDependency,
+					"bria local session start: outcome=reconcile_failed",
+				)
 			}
 			lastError = detail
 		}

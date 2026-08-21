@@ -3,6 +3,7 @@ package processlog
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -14,7 +15,7 @@ func TestManagerRoutesLevelsAndAdoptsSupervisorLog(t *testing.T) {
 	if err := os.WriteFile(raw, []byte("startup\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	manager, err := Start(root)
+	manager, err := Start(root, Identity{Version: "test-version", Commit: "test-commit"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,6 +40,76 @@ func TestManagerRoutesLevelsAndAdoptsSupervisorLog(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertLogContains(t, root, "critical-raw-", "panic fallback")
+}
+
+func TestStructuredEnvelopeIsBoundedSingleLineAndCarriesIdentity(t *testing.T) {
+	identity := Identity{Version: "v1.2.3-test", Commit: "abc123"}
+	at := time.Date(2026, 8, 21, 12, 34, 56, 789, time.UTC)
+	record := string(formatStructuredRecord(
+		at, 42, identity, Service, FailureTimeout,
+		"failed\npath=/Users/artem/private/file\tbad\x00"+strings.Repeat("x", maxStructuredBodyBytes),
+	))
+	for _, expected := range []string{
+		"at=2026-08-21T12:34:56.000000789Z", "pid=42",
+		`version="v1.2.3-test"`, `commit="abc123"`, "severity=service",
+		"failure_class=timeout", "truncated=true", `failed\npath=[path]`, `\tbad\x00`,
+	} {
+		if !strings.Contains(record, expected) {
+			t.Fatalf("record missing %q: %q", expected, record)
+		}
+	}
+	if strings.Count(record, "\n") != 1 || strings.Contains(record, "/Users/") {
+		t.Fatalf("record is not a sanitized physical line: %q", record)
+	}
+	if len(record) > maxStructuredBodyBytes+512 {
+		t.Fatalf("record length=%d", len(record))
+	}
+}
+
+func TestStartRejectsUnsafeIdentityAndStructuredWriterLeavesRawStreamsRaw(t *testing.T) {
+	root := t.TempDir()
+	if _, err := Start(root, Identity{Version: "bad\nversion", Commit: "abc"}); err == nil {
+		t.Fatal("unsafe build identity was accepted")
+	}
+	manager, err := Start(root, Identity{Version: "test", Commit: "abc"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	Servicef("structured")
+	raw := "raft raw " + strconv.Itoa(os.Getpid()) + "\n"
+	if _, err := Writer(Service).Write([]byte(raw)); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Close(); err != nil {
+		t.Fatal(err)
+	}
+	data := readLogTier(t, root, "service-")
+	if !strings.Contains(data, "failure_class=none") || !strings.Contains(data, "structured") {
+		t.Fatalf("structured row=%q", data)
+	}
+	if !strings.Contains(data, "\n"+raw) {
+		t.Fatalf("raw writer was unexpectedly enveloped: %q", data)
+	}
+}
+
+func readLogTier(t *testing.T, root, prefix string) string {
+	t.Helper()
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result strings.Builder
+	for _, entry := range entries {
+		if !strings.HasPrefix(entry.Name(), prefix) {
+			continue
+		}
+		data, readErr := os.ReadFile(filepath.Join(root, entry.Name()))
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		result.Write(data)
+	}
+	return result.String()
 }
 
 func assertLogSize(t *testing.T, root, prefix string, expected int64) {

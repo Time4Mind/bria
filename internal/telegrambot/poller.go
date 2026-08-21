@@ -20,7 +20,9 @@ type PollerConfig struct {
 	RetryDelay              time.Duration
 	MaxCallbackAttempts     int
 	OnLeaderActivated       func(context.Context) error
-	OnCallbackDropped       func(IncomingUpdate, error, int)
+	OnCallbackProcessed     func(IncomingUpdate, int, bool, time.Duration)
+	OnCallbackRetry         func(IncomingUpdate, error, int, int, time.Duration)
+	OnCallbackDropped       func(IncomingUpdate, error, int, time.Duration)
 	OnError                 func(string, error)
 }
 
@@ -36,9 +38,12 @@ type Poller struct {
 	offset              int64
 	maxCallbackAttempts int
 	onLeaderActivated   func(context.Context) error
-	onCallbackDropped   func(IncomingUpdate, error, int)
+	onCallbackProcessed func(IncomingUpdate, int, bool, time.Duration)
+	onCallbackRetry     func(IncomingUpdate, error, int, int, time.Duration)
+	onCallbackDropped   func(IncomingUpdate, error, int, time.Duration)
 	onError             func(string, error)
 	callbackAttempts    map[int64]int
+	callbackDrops       map[int64]callbackDrop
 	lastFailure         string
 }
 
@@ -79,10 +84,13 @@ func NewPoller(config PollerConfig) (*Poller, error) {
 		longPollSecs: int(longPoll / time.Second), pollRequestTimeout: pollRequestTimeout,
 		leadershipTick: leadershipTick,
 		retryDelay:     retryDelay, maxCallbackAttempts: maxCallbackAttempts,
-		onLeaderActivated: config.OnLeaderActivated,
-		onCallbackDropped: config.OnCallbackDropped,
-		onError:           config.OnError,
-		callbackAttempts:  make(map[int64]int),
+		onLeaderActivated:   config.OnLeaderActivated,
+		onCallbackProcessed: config.OnCallbackProcessed,
+		onCallbackRetry:     config.OnCallbackRetry,
+		onCallbackDropped:   config.OnCallbackDropped,
+		onError:             config.OnError,
+		callbackAttempts:    make(map[int64]int),
+		callbackDrops:       make(map[int64]callbackDrop),
 	}, nil
 }
 
@@ -118,6 +126,7 @@ func (p *Poller) Run(ctx context.Context) error {
 			if offset < 0 {
 				return errors.New("Telegram update cursor cannot be negative")
 			}
+			p.pruneCallbackState(offset)
 			p.offset = offset
 			leaderActive = true
 		}
@@ -149,14 +158,36 @@ func (p *Poller) Run(ctx context.Context) error {
 				continue
 			}
 			incoming, parseErr := ParsePrivateDM(update)
-			if parseErr == nil {
+			callbackProcessed := false
+			callbackProcessedAttempts := 0
+			callbackDuration := time.Duration(0)
+			pendingDrop, dropPending := p.callbackDrops[update.UpdateID]
+			if dropPending {
+				incoming = pendingDrop.update
+				parseErr = nil
+			} else if parseErr == nil {
+				handleStartedAt := time.Now()
 				handleErr := p.handler.HandleTelegramUpdate(ctx, incoming)
-				if handleErr != nil && !p.dropFailedCallback(incoming, handleErr) {
-					leaderActive = false
-					if err := waitOrDone(ctx, p.retryDelay); err != nil {
-						return err
+				callbackDuration = time.Since(handleStartedAt)
+				if handleErr != nil {
+					drop, attempts := p.dropFailedCallback(incoming, handleErr, callbackDuration)
+					if !drop {
+						leaderActive = false
+						if err := waitOrDone(ctx, p.retryDelay); err != nil {
+							return err
+						}
+						break
 					}
-					break
+					pendingDrop = callbackDrop{
+						update: incoming, err: handleErr, attempts: attempts,
+						duration: callbackDuration,
+					}
+					p.callbackDrops[update.UpdateID] = pendingDrop
+					dropPending = true
+				}
+				if handleErr == nil && incoming.Kind == IncomingCallback {
+					callbackProcessed = true
+					callbackProcessedAttempts = p.callbackAttempts[incoming.UpdateID] + 1
 				}
 			}
 			nextOffset := update.UpdateID + 1
@@ -170,35 +201,68 @@ func (p *Poller) Run(ctx context.Context) error {
 				}
 				break
 			}
+			if callbackProcessed && p.onCallbackProcessed != nil {
+				p.onCallbackProcessed(
+					incoming, callbackProcessedAttempts, callbackProcessedAttempts > 1,
+					callbackDuration,
+				)
+			}
+			if dropPending && p.onCallbackDropped != nil {
+				p.onCallbackDropped(
+					pendingDrop.update, pendingDrop.err, pendingDrop.attempts, pendingDrop.duration,
+				)
+			}
 			delete(p.callbackAttempts, update.UpdateID)
+			delete(p.callbackDrops, update.UpdateID)
 			p.offset = nextOffset
 		}
 	}
 }
 
-func (p *Poller) dropFailedCallback(update IncomingUpdate, err error) bool {
+func (p *Poller) pruneCallbackState(offset int64) {
+	for updateID := range p.callbackAttempts {
+		if updateID < offset {
+			delete(p.callbackAttempts, updateID)
+		}
+	}
+	for updateID := range p.callbackDrops {
+		if updateID < offset {
+			delete(p.callbackDrops, updateID)
+		}
+	}
+}
+
+type callbackDrop struct {
+	update   IncomingUpdate
+	err      error
+	attempts int
+	duration time.Duration
+}
+
+func (p *Poller) dropFailedCallback(
+	update IncomingUpdate,
+	err error,
+	duration time.Duration,
+) (bool, int) {
 	if update.Kind != IncomingCallback {
-		return false
+		return false, 0
 	}
 	// Replaying a callback immediately cannot clear Telegram flood control and
 	// used to turn one rejected edit into five more requests. The handler has
 	// already attempted the send-based navigation fallback; consume the update
 	// now so newer user actions are not held behind it.
 	if _, limited := FloodWait(err); limited {
-		if p.onCallbackDropped != nil {
-			p.onCallbackDropped(update, err, 1)
-		}
-		return true
+		return true, 1
 	}
 	attempts := p.callbackAttempts[update.UpdateID] + 1
 	p.callbackAttempts[update.UpdateID] = attempts
 	if attempts < p.maxCallbackAttempts {
-		return false
+		if p.onCallbackRetry != nil {
+			p.onCallbackRetry(update, err, attempts, p.maxCallbackAttempts, duration)
+		}
+		return false, attempts
 	}
-	if attempts == p.maxCallbackAttempts && p.onCallbackDropped != nil {
-		p.onCallbackDropped(update, err, attempts)
-	}
-	return true
+	return true, attempts
 }
 
 func (p *Poller) getUpdatesWhileLeader(ctx context.Context) ([]Update, error) {

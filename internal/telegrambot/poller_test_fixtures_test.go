@@ -2,11 +2,24 @@ package telegrambot
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 )
+
+type failOnceCursor struct {
+	memoryCursor
+	failed atomic.Bool
+}
+
+func (c *failOnceCursor) Commit(ctx context.Context, next int64) error {
+	if !c.failed.Swap(true) {
+		return errors.New("temporary cursor commit failure")
+	}
+	return c.memoryCursor.Commit(ctx, next)
+}
 
 type testLeadership struct{ leader atomic.Bool }
 

@@ -47,7 +47,10 @@ func runNodeArtifactCleanup(
 	cleanup := func() {
 		removed, err := cleanupNodeArtifacts(dataDir, updates, time.Now().UTC())
 		if err != nil && ctx.Err() == nil {
-			processlog.Criticalf("bria artifact cleanup: %v", err)
+			processlog.Failuref(
+				processlog.Critical, processlog.FailureIO,
+				"bria artifact cleanup: outcome=failed",
+			)
 			return
 		}
 		if removed > 0 {

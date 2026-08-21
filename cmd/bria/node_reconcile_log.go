@@ -18,5 +18,8 @@ func logPeriodicReconcile(component string, err error, previous *string) {
 		return
 	}
 	*previous = current
-	processlog.Criticalf("bria %s: %v", component, err)
+	processlog.Failuref(
+		processlog.Critical, processlog.FailureDependency,
+		"bria %s: outcome=reconcile_failed", component,
+	)
 }

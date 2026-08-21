@@ -94,7 +94,10 @@ func (r *Reader) runCodexIndexFlight(ctx context.Context, flight *codexIndexFlig
 	snapshot, err := r.scanCodex(ctx)
 	if err == nil && r.config.CodexCatalogPath != "" {
 		if persistErr := r.saveCodexCatalog(snapshot); persistErr != nil {
-			processlog.Servicef("bria transcript: catalog_persist outcome=error error=%v", persistErr)
+			processlog.Failuref(
+				processlog.Service, processlog.FailureIO,
+				"bria transcript: catalog_persist outcome=error",
+			)
 		}
 	}
 	r.codexIndexMu.Lock()

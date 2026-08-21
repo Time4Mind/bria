@@ -37,6 +37,7 @@ func (c *Controller) SendKey(
 		ExpectedGeneration: session.RuntimeGeneration, Backend: session.Backend,
 		Action: runtimehost.ActionSendKey, Key: key, ExpectedPromptHash: promptHash,
 	}
+	logInteractionOperation(ctx, ref, request.ExpectedGeneration, request.OperationID, string(request.Action))
 	if _, err := c.runtime.Submit(ctx, request); err != nil {
 		return nil, err
 	}

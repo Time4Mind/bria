@@ -227,7 +227,7 @@ func (c *Controller) commitGeneratedName(
 		err = c.service.RenameSession(ctx, actor, session, candidate)
 		cancel()
 		if err == nil {
-			processlog.Servicef("bria session naming: renamed ref=%q name=%q", ref.Key(), candidate)
+			processlog.Servicef("bria session naming: renamed ref=%q", ref.Key())
 			return
 		}
 	}

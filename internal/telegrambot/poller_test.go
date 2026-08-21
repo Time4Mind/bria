@@ -3,6 +3,7 @@ package telegrambot
 import (
 	"context"
 	"errors"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -244,6 +245,7 @@ func TestPoisonCallbackIsDroppedAfterBoundedRetriesAndQueueContinues(t *testing.
 	callbackCalls := 0
 	messageHandled := make(chan struct{}, 1)
 	dropped := make(chan int, 1)
+	var retries []int
 	poller, err := NewPoller(PollerConfig{
 		API: api, Leadership: leader, Cursor: cursor,
 		Handler: UpdateHandlerFunc(func(_ context.Context, update IncomingUpdate) error {
@@ -256,7 +258,15 @@ func TestPoisonCallbackIsDroppedAfterBoundedRetriesAndQueueContinues(t *testing.
 		}),
 		LongPollTimeout: time.Second, LeadershipCheckInterval: 5 * time.Millisecond,
 		RetryDelay: time.Millisecond, MaxCallbackAttempts: 3,
-		OnCallbackDropped: func(_ IncomingUpdate, _ error, attempts int) { dropped <- attempts },
+		OnCallbackRetry: func(_ IncomingUpdate, _ error, attempt, maximum int, _ time.Duration) {
+			if maximum != 3 {
+				t.Errorf("retry maximum=%d", maximum)
+			}
+			retries = append(retries, attempt)
+		},
+		OnCallbackDropped: func(_ IncomingUpdate, _ error, attempts int, _ time.Duration) {
+			dropped <- attempts
+		},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -272,6 +282,9 @@ func TestPoisonCallbackIsDroppedAfterBoundedRetriesAndQueueContinues(t *testing.
 	}
 	if callbackCalls != 3 {
 		t.Fatalf("callback calls=%d want=3", callbackCalls)
+	}
+	if !reflect.DeepEqual(retries, []int{1, 2}) {
+		t.Fatalf("retry attempts=%v", retries)
 	}
 	select {
 	case attempts := <-dropped:
@@ -290,23 +303,162 @@ func TestPoisonCallbackIsDroppedAfterBoundedRetriesAndQueueContinues(t *testing.
 	}
 }
 
+func TestCallbackRecoveredAfterRetryIsReportedOnceAfterCursorCommit(t *testing.T) {
+	leader := &testLeadership{}
+	leader.leader.Store(true)
+	cursor := &memoryCursor{next: 20}
+	callbackCalls := 0
+	retries := make(chan int, 1)
+	processed := make(chan struct {
+		attempts  int
+		recovered bool
+	}, 1)
+	poller, err := NewPoller(PollerConfig{
+		API: &poisonCallbackAPI{}, Leadership: leader, Cursor: cursor,
+		Handler: UpdateHandlerFunc(func(_ context.Context, update IncomingUpdate) error {
+			if update.Kind != IncomingCallback {
+				return nil
+			}
+			callbackCalls++
+			if callbackCalls == 1 {
+				return errors.New("temporary callback failure")
+			}
+			return nil
+		}),
+		LongPollTimeout: time.Second, LeadershipCheckInterval: 5 * time.Millisecond,
+		RetryDelay: time.Millisecond, MaxCallbackAttempts: 3,
+		OnCallbackRetry: func(_ IncomingUpdate, _ error, attempt, _ int, _ time.Duration) {
+			retries <- attempt
+		},
+		OnCallbackProcessed: func(
+			_ IncomingUpdate, attempts int, recovered bool, _ time.Duration,
+		) {
+			processed <- struct {
+				attempts  int
+				recovered bool
+			}{attempts: attempts, recovered: recovered}
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- poller.Run(ctx) }()
+	if attempt := <-retries; attempt != 1 {
+		t.Fatalf("retry attempt=%d", attempt)
+	}
+	result := <-processed
+	if result.attempts != 2 || !result.recovered {
+		t.Fatalf("processed=%+v", result)
+	}
+	cursor.mu.Lock()
+	committed := cursor.next
+	cursor.mu.Unlock()
+	if committed < 21 {
+		t.Fatalf("processed hook ran before cursor commit: cursor=%d", committed)
+	}
+	cancel()
+	<-done
+}
+
 func TestRateLimitedCallbackIsDroppedWithoutImmediateRetries(t *testing.T) {
 	poller := &Poller{
 		maxCallbackAttempts: 5, callbackAttempts: make(map[int64]int),
 	}
 	dropped := 0
-	poller.onCallbackDropped = func(_ IncomingUpdate, _ error, attempts int) {
+	retries := 0
+	poller.onCallbackDropped = func(_ IncomingUpdate, _ error, attempts int, _ time.Duration) {
 		dropped = attempts
 	}
+	poller.onCallbackRetry = func(IncomingUpdate, error, int, int, time.Duration) { retries++ }
 	update := IncomingUpdate{UpdateID: 91, Kind: IncomingCallback}
 	err := &APIError{Method: "editMessageText", Code: 429, RetryAfter: time.Minute}
-	if !poller.dropFailedCallback(update, err) {
+	if drop, attempts := poller.dropFailedCallback(update, err, time.Millisecond); !drop || attempts != 1 {
 		t.Fatal("rate-limited callback was scheduled for immediate retry")
 	}
-	if dropped != 1 {
-		t.Fatalf("drop attempts=%d want=1", dropped)
+	if dropped != 0 {
+		t.Fatalf("terminal hook ran before cursor commit: attempts=%d", dropped)
 	}
 	if len(poller.callbackAttempts) != 0 {
 		t.Fatalf("rate-limited callback attempts=%#v", poller.callbackAttempts)
+	}
+	if retries != 0 {
+		t.Fatalf("rate-limited callback retries=%d", retries)
+	}
+}
+
+func TestTerminalCallbackDropWaitsForCursorCommitAndDoesNotRerunHandler(t *testing.T) {
+	leader := &testLeadership{}
+	leader.leader.Store(true)
+	cursor := &failOnceCursor{memoryCursor: memoryCursor{next: 20}}
+	callbackCalls := 0
+	dropped := make(chan int, 1)
+	poller, err := NewPoller(PollerConfig{
+		API: &poisonCallbackAPI{}, Leadership: leader, Cursor: cursor,
+		Handler: UpdateHandlerFunc(func(_ context.Context, update IncomingUpdate) error {
+			if update.Kind == IncomingCallback {
+				callbackCalls++
+				return errors.New("terminal callback failure")
+			}
+			return nil
+		}),
+		LongPollTimeout: time.Second, LeadershipCheckInterval: 5 * time.Millisecond,
+		RetryDelay: time.Millisecond, MaxCallbackAttempts: 1,
+		OnCallbackDropped: func(
+			_ IncomingUpdate, _ error, attempts int, _ time.Duration,
+		) {
+			dropped <- attempts
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- poller.Run(ctx) }()
+	select {
+	case attempts := <-dropped:
+		if attempts != 1 {
+			t.Fatalf("drop attempts=%d", attempts)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("terminal drop was not reported after cursor recovery")
+	}
+	cursor.mu.Lock()
+	committed := cursor.next
+	cursor.mu.Unlock()
+	if committed < 21 || callbackCalls != 1 {
+		t.Fatalf("cursor=%d callback_calls=%d", committed, callbackCalls)
+	}
+	cancel()
+	<-done
+}
+
+func TestLoadedCursorPrunesOnlyStaleCallbackRetryState(t *testing.T) {
+	poller := &Poller{
+		callbackAttempts: map[int64]int{9: 2, 10: 1, 11: 3},
+		callbackDrops: map[int64]callbackDrop{
+			9:  {update: IncomingUpdate{UpdateID: 9}},
+			10: {update: IncomingUpdate{UpdateID: 10}},
+			11: {update: IncomingUpdate{UpdateID: 11}},
+		},
+	}
+	poller.pruneCallbackState(10)
+	if _, ok := poller.callbackAttempts[9]; ok {
+		t.Fatal("stale callback attempt retained")
+	}
+	if _, ok := poller.callbackDrops[9]; ok {
+		t.Fatal("stale terminal drop retained")
+	}
+	for _, updateID := range []int64{10, 11} {
+		if _, ok := poller.callbackAttempts[updateID]; !ok {
+			t.Fatalf("current callback attempt %d was pruned", updateID)
+		}
+		if _, ok := poller.callbackDrops[updateID]; !ok {
+			t.Fatalf("current terminal drop %d was pruned", updateID)
+		}
 	}
 }

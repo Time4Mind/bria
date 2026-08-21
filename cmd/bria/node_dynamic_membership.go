@@ -30,13 +30,19 @@ func maintainDynamicMembership(
 		state := node.State().State()
 		configured, err := configuredMemberAddresses(node)
 		if err != nil {
-			processlog.Criticalf("Raft membership read: %v", err)
+			processlog.Failuref(
+				processlog.Critical, processlog.FailureConsistency,
+				"Raft membership: outcome=read_failed",
+			)
 		} else {
 			syncMembershipResolverIfReady(resolver, state, knownAddresses, configured)
 		}
 		if err == nil && node.IsLeader() {
 			if err := reconcileDesiredMembership(node, state); err != nil {
-				processlog.Criticalf("Raft dynamic membership: %v", err)
+				processlog.Failuref(
+					processlog.Critical, processlog.FailureConsistency,
+					"Raft dynamic membership: outcome=reconcile_failed",
+				)
 			}
 		}
 		select {

@@ -290,9 +290,9 @@ func logRestoreRuntimeTiming(
 		prepare.Milliseconds(), verify.Milliseconds(), tmuxResume.Milliseconds(),
 		register.Milliseconds(), total > time.Second,
 	}
-	processlog.Detailf(format, arguments...)
+	processlog.Outcomef(processlog.Detail, outcome, format, arguments...)
 	if total > time.Second {
-		processlog.Servicef(format, arguments...)
+		processlog.Outcomef(processlog.Service, outcome, format, arguments...)
 	}
 }
 
@@ -324,7 +324,10 @@ func logHeartbeatErrors(ctx context.Context, errorsIn <-chan error) {
 			return
 		case err := <-errorsIn:
 			if err != nil {
-				processlog.Criticalf("bria node heartbeat: %v", err)
+				processlog.Failuref(
+					processlog.Critical, processlog.FailureTransport,
+					"bria node heartbeat: outcome=failed",
+				)
 			}
 		}
 	}

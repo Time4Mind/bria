@@ -56,11 +56,12 @@ func (r *Reader) discover(
 	cacheHit := false
 	inventory := 0
 	defer func() {
-		processlog.Detailf(
+		outcome := discoverOutcome(resultErr)
+		processlog.Outcomef(processlog.Detail, outcome,
 			"bria transcript: discover_timing backend=%s total_ms=%d cache=%t "+
 				"inventory=%d matched=%d returned=%d offset=%d outcome=%s",
 			backend, time.Since(startedAt).Milliseconds(), cacheHit, inventory,
-			result.Total, len(result.Candidates), offset, discoverOutcome(resultErr),
+			result.Total, len(result.Candidates), offset, outcome,
 		)
 	}()
 	request := Request{Backend: backend, ProviderSessionID: "placeholder", Workdir: workdir}

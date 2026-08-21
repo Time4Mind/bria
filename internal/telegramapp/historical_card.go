@@ -25,7 +25,7 @@ func (h *Handler) freezeHistoricalCard(
 		return
 	}
 	if current.MessageID == message.MessageID {
-		processlog.Detailf(
+		processlog.Outcomef(processlog.Detail, "skipped_current",
 			"bria telegram: keyboard_freeze message_id=%d outcome=skipped_current",
 			message.MessageID,
 		)
@@ -58,7 +58,8 @@ func (h *Handler) freezeHistoricalCard(
 	if err != nil {
 		outcome = "failed"
 	}
-	processlog.Detailf(
+	processlog.Failuref(
+		processlog.Detail, outboundFailureClass(err),
 		"bria telegram: keyboard_freeze message_id=%d current_id=%d buttons=%d outcome=%s",
 		message.MessageID, current.MessageID, len(grid), outcome,
 	)

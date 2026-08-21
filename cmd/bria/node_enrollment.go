@@ -104,7 +104,10 @@ func startEnrollmentRuntime(
 	runtime := &enrollmentRuntime{server: server, listener: listener}
 	go func() {
 		if serveErr := server.Serve(listener); serveErr != nil && ctx.Err() == nil {
-			processlog.Criticalf("bria enrollment: %v", serveErr)
+			processlog.Failuref(
+				processlog.Critical, processlog.FailureTransport,
+				"bria enrollment: outcome=serve_failed",
+			)
 		}
 	}()
 	go func() {

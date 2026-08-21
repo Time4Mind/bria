@@ -79,9 +79,9 @@ func (timing *restoreCallbackTiming) log() {
 		timing.control.Milliseconds(), timing.render.Milliseconds(), timing.edit.Milliseconds(),
 		total > time.Second,
 	}
-	processlog.Detailf(format, arguments...)
+	processlog.Outcomef(processlog.Detail, timing.outcome, format, arguments...)
 	if total > time.Second {
-		processlog.Servicef(format, arguments...)
+		processlog.Outcomef(processlog.Service, timing.outcome, format, arguments...)
 	}
 }
 
@@ -108,8 +108,8 @@ func (timing *restoreReadyTiming) log() {
 		timing.wait.Milliseconds(), timing.render.Milliseconds(), timing.edit.Milliseconds(),
 		total > time.Second,
 	}
-	processlog.Detailf(format, arguments...)
+	processlog.Outcomef(processlog.Detail, timing.outcome, format, arguments...)
 	if total > time.Second {
-		processlog.Servicef(format, arguments...)
+		processlog.Outcomef(processlog.Service, timing.outcome, format, arguments...)
 	}
 }
