@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 )
 
 type InputKind string
@@ -65,4 +66,23 @@ func (p InputPayload) validate() error {
 
 type InputResolver interface {
 	ResolveInput(context.Context, string, InputPayload) (string, error)
+}
+
+// InputResolveTiming is optional diagnostic data produced by an origin-node
+// resolver. It contains durations only; input text, file identity, paths, and
+// provider credentials must never be copied into it.
+type InputResolveTiming struct {
+	Download   time.Duration
+	Transcribe time.Duration
+}
+
+// TimedInputResolver preserves the transport-neutral InputResolver contract
+// while allowing implementations to expose bounded phase timings. Executors
+// fall back to aggregate resolve timing when this interface is unavailable.
+type TimedInputResolver interface {
+	ResolveInputWithTiming(
+		context.Context,
+		string,
+		InputPayload,
+	) (string, InputResolveTiming, error)
 }

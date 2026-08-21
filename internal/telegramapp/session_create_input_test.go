@@ -55,7 +55,9 @@ func (s inputRoutingStarter) Create(
 
 type activeSessionControls struct {
 	*blockingControls
-	service *application.Service
+	service       *application.Service
+	inputCalls    int
+	externalCalls int
 }
 
 func (c *activeSessionControls) SendInput(
@@ -71,6 +73,25 @@ func (c *activeSessionControls) SendInput(
 	c.mu.Lock()
 	c.ref = session.Ref()
 	c.text = text
+	c.inputCalls++
+	c.mu.Unlock()
+	return sessioncontrol.Accepted{Session: session.Ref()}, nil
+}
+
+func (c *activeSessionControls) SendExternalInput(
+	_ context.Context,
+	actor application.Principal,
+	_ string,
+	input runtimehost.InputPayload,
+) (sessioncontrol.Accepted, error) {
+	session, err := c.service.ActiveSession(actor)
+	if err != nil {
+		return sessioncontrol.Accepted{}, err
+	}
+	c.mu.Lock()
+	c.ref = session.Ref()
+	c.external = &input
+	c.externalCalls++
 	c.mu.Unlock()
 	return sessioncontrol.Accepted{Session: session.Ref()}, nil
 }
@@ -159,7 +180,9 @@ func TestSelectingExistingSessionClearsCreateFlowBeforeVoiceInput(t *testing.T) 
 		t.Fatal(err)
 	}
 	ref := domain.SessionRef{NodeID: "allowed", SessionID: "live"}
-	controls := &blockingControls{ref: ref}
+	controls := &activeSessionControls{
+		blockingControls: &blockingControls{ref: ref}, service: fixture.service,
+	}
 	handler, err := telegramapp.NewHandlerWithControls(
 		fixture.service, fixture.projector, fixture.codec, fixture.messenger, controls,
 	)
@@ -176,6 +199,7 @@ func TestSelectingExistingSessionClearsCreateFlowBeforeVoiceInput(t *testing.T) 
 		t.Fatal(err)
 	}
 	invokeCreateCallback(t, handler, 910, origin, telegramui.ActionSelectSession, token)
+	beforeSent := len(fixture.messenger.sent)
 	if err := handler.HandleTelegramUpdate(context.Background(), telegrambot.IncomingUpdate{
 		UpdateID: 911, Kind: telegrambot.IncomingMessage, ChatID: 7, UserID: 7,
 		Content: telegrambot.ContentDescriptor{
@@ -184,8 +208,57 @@ func TestSelectingExistingSessionClearsCreateFlowBeforeVoiceInput(t *testing.T) 
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if controls.external == nil || controls.external.Kind != runtimehost.InputVoice {
-		t.Fatalf("voice input was not routed after session selection: %#v", controls.external)
+	controls.mu.RLock()
+	gotRef, gotExternal, gotCalls := controls.ref, controls.external, controls.externalCalls
+	gotTotalCalls := controls.inputCalls + controls.externalCalls
+	controls.mu.RUnlock()
+	if gotCalls != 1 || gotTotalCalls != 1 || gotRef != ref || gotExternal == nil || gotExternal.Kind != runtimehost.InputVoice {
+		t.Fatalf("voice routing calls=%d total=%d ref=%s input=%#v", gotCalls, gotTotalCalls, gotRef.Key(), gotExternal)
+	}
+	if len(fixture.messenger.sent) != beforeSent+1 {
+		t.Fatalf("voice input completed silently: sent before=%d after=%d", beforeSent, len(fixture.messenger.sent))
+	}
+}
+
+func TestSelectingExistingSessionClearsCreateFlowBeforeTextInput(t *testing.T) {
+	fixture := newFixture(t)
+	enableCreateBackend(t, fixture)
+	ref := domain.SessionRef{NodeID: "allowed", SessionID: "live"}
+	controls := &activeSessionControls{
+		blockingControls: &blockingControls{ref: ref}, service: fixture.service,
+	}
+	handler, err := telegramapp.NewHandlerWithControls(
+		fixture.service, fixture.projector, fixture.codec, fixture.messenger, controls,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := handler.SetSessionStarter(inputRoutingStarter{service: fixture.service}); err != nil {
+		t.Fatal(err)
+	}
+	origin := telegrambot.Message{ChatID: 7, MessageID: 10}
+	invokeCreateCallback(t, handler, 912, origin, telegramui.ActionNewSession, "")
+	token, err := fixture.codec.Session(7, telegramui.ActionSelectSession, ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	invokeCreateCallback(t, handler, 913, origin, telegramui.ActionSelectSession, token)
+	beforeSent := len(fixture.messenger.sent)
+	const input = "continue selected session"
+	if err := handler.HandleTelegramUpdate(context.Background(), telegrambot.IncomingUpdate{
+		UpdateID: 914, Kind: telegrambot.IncomingMessage, ChatID: 7, UserID: 7, Text: input,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	controls.mu.RLock()
+	gotRef, gotText, gotCalls := controls.ref, controls.text, controls.inputCalls
+	gotTotalCalls := controls.inputCalls + controls.externalCalls
+	controls.mu.RUnlock()
+	if gotCalls != 1 || gotTotalCalls != 1 || gotRef != ref || gotText != input {
+		t.Fatalf("text routing calls=%d total=%d ref=%s text=%q", gotCalls, gotTotalCalls, gotRef.Key(), gotText)
+	}
+	if len(fixture.messenger.sent) != beforeSent+1 {
+		t.Fatalf("text input completed silently: sent before=%d after=%d", beforeSent, len(fixture.messenger.sent))
 	}
 }
 

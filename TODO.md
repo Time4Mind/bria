@@ -30,12 +30,14 @@
   render/outbound строки помечаются restore stage; отдельно измеряется ожидание
   card-edit lock, transcript/pane, очередь и Telegram transport. Failed и
   superseded generation не маркируются как ready.
-- [ ] P9. Разобрать задержку доставки voice input 8,766 с. Запрос не потерян и
-  был доставлен один раз; нужно разнести speech recognition, host FIFO,
-  attachment wait и tmux send по отдельным метрикам.
-- [ ] P10. Оставить regression probe для stale create-flow. Исправлено в
-  `eafbfb0`, но нужен постоянный тест: голосовое или текст после устаревшего
-  flow обязаны перейти в активную сессию, а не завершиться молча.
+- [x] P9. Host lifecycle input получил единый `input_timing` по
+  `ref+generation+operation`: durable store/FIFO, индивидуальное ожидание
+  attachment, resolver/download/transcribe/prepare и tmux send. Duplicate
+  submit не дублирует метрику, abandoned input получает terminal outcome;
+  содержимое, file identity и пути не логируются.
+- [x] P10. Stale create-flow закрыт постоянными regression probes для текста и
+  голоса: после выбора существующей сессии input ровно один раз поступает в
+  exact active ref и обязательно создаёт видимый ответ, а не завершается молча.
 - [ ] P11. Улучшить диагностический контракт логов: timestamp, PID, version и
   commit в каждой структурной записи; failure class; связь ingress с operation;
   корректный severity для повторённого callback; метрики RSS, goroutine, FD и

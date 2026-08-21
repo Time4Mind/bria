@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"sync"
+	"time"
 )
 
 type LocalExecutor struct {
@@ -14,14 +15,16 @@ type LocalExecutor struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	mu       sync.RWMutex
-	submitMu sync.Mutex
-	sessions map[string]*localSession
-	active   map[string]struct{}
-	workers  sync.WaitGroup
-	namer    NameGenerator
-	archiver ArchiveWriter
-	inputs   InputResolver
+	mu          sync.RWMutex
+	submitMu    sync.Mutex
+	sessions    map[string]*localSession
+	active      map[string]struct{}
+	workers     sync.WaitGroup
+	namer       NameGenerator
+	archiver    ArchiveWriter
+	inputs      InputResolver
+	now         func() time.Time
+	inputTiming func(inputDeliveryTiming)
 }
 
 type NameGenerator interface {
@@ -48,6 +51,7 @@ func NewLocalExecutor(
 	return &LocalExecutor{
 		nodeID: nodeID, driver: driver, store: store, ctx: ctx, cancel: cancel,
 		sessions: make(map[string]*localSession), active: make(map[string]struct{}),
+		now: time.Now, inputTiming: logInputDeliveryTiming,
 	}, nil
 }
 
@@ -162,14 +166,32 @@ func (e *LocalExecutor) Unregister(nodeID, sessionID string, generation uint64) 
 	return nil
 }
 
-func (e *LocalExecutor) completeAbandoned(requests []Request, failure error) {
-	for _, request := range requests {
+func (e *LocalExecutor) completeAbandoned(requests []pendingRequest, failure error) {
+	for _, queued := range requests {
+		request := queued.request
 		fingerprint := requestFingerprint(request)
 		result := Result{Accepted: true, Detail: failure.Error()}
 		_ = e.store.Complete(request.OperationID, fingerprint, result, failure)
 		e.submitMu.Lock()
 		delete(e.active, request.OperationID)
 		e.submitMu.Unlock()
+		if request.Action == ActionSendInput {
+			completedAt := e.now()
+			queue := nonNegativeDuration(completedAt.Sub(queued.enqueuedAt))
+			attachmentWait := queued.attachmentWait
+			if attachmentWait > queue {
+				attachmentWait = queue
+			}
+			e.emitInputTiming(newInputDeliveryTiming(
+				request,
+				RuntimeBinding{NodeID: request.NodeID, SessionID: request.SessionID},
+				inputQueueTiming{
+					enqueuedAt: queued.enqueuedAt, queue: queue,
+					attachmentWait: attachmentWait, fifoWait: queue - attachmentWait,
+				},
+				inputExecutionTiming{}, result, failure, completedAt,
+			))
+		}
 	}
 }
 
@@ -196,6 +218,7 @@ func (e *LocalExecutor) Submit(ctx context.Context, request Request) (Receipt, e
 	if err := request.validate(); err != nil {
 		return Receipt{}, err
 	}
+	submittedAt := e.now()
 	fingerprint := requestFingerprint(request)
 	if receipt, existing, err := e.existingOperationReceipt(request.OperationID, fingerprint); err != nil || existing {
 		return receipt, err
@@ -239,10 +262,22 @@ func (e *LocalExecutor) Submit(ctx context.Context, request Request) (Receipt, e
 			Detail: "read-only capture accepted",
 		}, nil
 	}
-	if !session.enqueue(request) {
+	if !session.enqueue(request, submittedAt) {
 		result := Result{Accepted: true, Detail: "runtime target became unavailable"}
 		completionErr := e.store.Complete(request.OperationID, fingerprint, result, ErrRuntimeUnavailable)
 		delete(e.active, request.OperationID)
+		if request.Action == ActionSendInput {
+			completedAt := e.now()
+			e.emitInputTiming(newInputDeliveryTiming(
+				request, session.snapshot(),
+				inputQueueTiming{
+					enqueuedAt: submittedAt,
+					queue:      nonNegativeDuration(completedAt.Sub(submittedAt)),
+					fifoWait:   nonNegativeDuration(completedAt.Sub(submittedAt)),
+				},
+				inputExecutionTiming{}, result, ErrRuntimeUnavailable, completedAt,
+			))
+		}
 		if completionErr != nil {
 			return Receipt{}, errors.Join(ErrRuntimeUnavailable, completionErr)
 		}

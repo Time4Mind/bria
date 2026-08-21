@@ -79,3 +79,14 @@ func TestRuntimeInputResolverSelectsRequestedVoiceBackend(t *testing.T) {
 		t.Fatalf("disabled voice backend error=%v", err)
 	}
 }
+
+func TestRuntimeInputResolverKeepsMissingDownloaderAsConfigurationError(t *testing.T) {
+	resolver := runtimeInputResolver{temporary: t.TempDir(), maxDownloadSize: 1024}
+	_, _, err := resolver.ResolveInputWithTiming(context.Background(), t.TempDir(), runtimehost.InputPayload{
+		Kind: runtimehost.InputPhoto,
+		File: runtimehost.InputFile{Provider: "telegram", ID: "photo", UniqueID: "unique"},
+	})
+	if err == nil {
+		t.Fatal("missing downloader was accepted")
+	}
+}

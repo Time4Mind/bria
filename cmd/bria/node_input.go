@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/Time4Mind/bria/internal/config"
 	"github.com/Time4Mind/bria/internal/inbound"
@@ -46,6 +47,16 @@ func (r runtimeInputResolver) ResolveInput(
 	workdir string,
 	payload runtimehost.InputPayload,
 ) (string, error) {
+	text, _, err := r.ResolveInputWithTiming(ctx, workdir, payload)
+	return text, err
+}
+
+func (r runtimeInputResolver) ResolveInputWithTiming(
+	ctx context.Context,
+	workdir string,
+	payload runtimehost.InputPayload,
+) (string, runtimehost.InputResolveTiming, error) {
+	timing := runtimehost.InputResolveTiming{}
 	var transcriber inbound.Transcriber
 	if payload.Kind == runtimehost.InputVoice {
 		voiceBackend := strings.ToLower(strings.TrimSpace(payload.VoiceBackend))
@@ -53,19 +64,25 @@ func (r runtimeInputResolver) ResolveInput(
 			voiceBackend = r.defaultVoice
 		}
 		if voiceBackend == "off" {
-			return "", errors.New("voice recognition is disabled")
+			return "", timing, errors.New("voice recognition is disabled")
 		}
 		transcriber = r.transcribers[voiceBackend]
 		if transcriber == nil {
-			return "", errors.New("selected voice recognition backend is unavailable on this node")
+			return "", timing, errors.New("selected voice recognition backend is unavailable on this node")
 		}
+		transcriber = measuredTranscriber{inner: transcriber, elapsed: &timing.Transcribe}
+	}
+	downloader := r.downloader
+	if downloader != nil {
+		downloader = measuredDownloader{inner: downloader, elapsed: &timing.Download}
 	}
 	processor, err := inbound.NewProcessor(inbound.ProcessorConfig{
-		Downloader: r.downloader, Transcriber: transcriber,
+		Downloader:       downloader,
+		Transcriber:      transcriber,
 		MaxDownloadBytes: r.maxDownloadSize, TempDir: r.temporary,
 	})
 	if err != nil {
-		return "", err
+		return "", timing, err
 	}
 	result, err := processor.Process(ctx, workdir, inbound.Input{
 		Kind: inbound.Kind(payload.Kind), Text: payload.Caption,
@@ -74,13 +91,63 @@ func (r runtimeInputResolver) ResolveInput(
 		Language: payload.VoiceLanguage,
 	})
 	if err != nil {
-		return "", err
+		return "", timing, err
 	}
 	if result.Kind == inbound.KindVoice {
-		return joinInputParts(payload.Origin, payload.Caption, result.Text), nil
+		return joinInputParts(payload.Origin, payload.Caption, result.Text), timing, nil
 	}
 	path := filepath.ToSlash(result.RelativePath)
-	return joinInputParts(payload.Origin, result.Caption, path), nil
+	return joinInputParts(payload.Origin, result.Caption, path), timing, nil
+}
+
+type measuredDownloader struct {
+	inner   inbound.Downloader
+	elapsed *time.Duration
+}
+
+func (d measuredDownloader) Download(
+	ctx context.Context,
+	fileID string,
+	destination io.Writer,
+	maxBytes int64,
+) (int64, error) {
+	startedAt := time.Now()
+	written, err := d.inner.Download(ctx, fileID, destination, maxBytes)
+	*d.elapsed += time.Since(startedAt)
+	return written, err
+}
+
+type measuredTranscriber struct {
+	inner   inbound.Transcriber
+	elapsed *time.Duration
+}
+
+func (t measuredTranscriber) Transcribe(
+	ctx context.Context,
+	audioPath string,
+) (string, error) {
+	startedAt := time.Now()
+	text, err := t.inner.Transcribe(ctx, audioPath)
+	*t.elapsed += time.Since(startedAt)
+	return text, err
+}
+
+func (t measuredTranscriber) TranscribeLanguage(
+	ctx context.Context,
+	audioPath string,
+	language string,
+) (string, error) {
+	startedAt := time.Now()
+	transcriber, ok := t.inner.(inbound.LanguageTranscriber)
+	var text string
+	var err error
+	if ok {
+		text, err = transcriber.TranscribeLanguage(ctx, audioPath, language)
+	} else {
+		text, err = t.inner.Transcribe(ctx, audioPath)
+	}
+	*t.elapsed += time.Since(startedAt)
+	return text, err
 }
 
 func joinInputParts(parts ...string) string {

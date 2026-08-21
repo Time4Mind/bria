@@ -14,8 +14,18 @@ func (e *LocalExecutor) executeOnce(
 	request Request,
 	binding RuntimeBinding,
 ) (Result, error) {
+	result, _, err := e.executeOnceTimed(ctx, request, binding)
+	return result, err
+}
+
+func (e *LocalExecutor) executeOnceTimed(
+	ctx context.Context,
+	request Request,
+	binding RuntimeBinding,
+) (Result, inputExecutionTiming, error) {
+	timing := inputExecutionTiming{}
 	if current, err := e.resolveSession(request); err != nil || current.snapshot() != binding {
-		return Result{Accepted: true, Detail: "runtime target became stale"}, ErrStaleRuntime
+		return Result{Accepted: true, Detail: "runtime target became stale"}, timing, ErrStaleRuntime
 	}
 	result := Result{Accepted: true, Detail: "runtime operation accepted"}
 	var err error
@@ -28,15 +38,31 @@ func (e *LocalExecutor) executeOnce(
 			e.mu.RUnlock()
 			if resolver == nil {
 				err = ErrUnsupportedBackendAction
+				timing.failureStage = "resolve"
 				break
 			}
-			text, err = resolver.ResolveInput(ctx, binding.Workdir, *request.Input)
+			startedAt := e.now()
+			if timed, ok := resolver.(TimedInputResolver); ok {
+				var phase InputResolveTiming
+				text, phase, err = timed.ResolveInputWithTiming(ctx, binding.Workdir, *request.Input)
+				timing.download = phase.Download
+				timing.transcribe = phase.Transcribe
+			} else {
+				text, err = resolver.ResolveInput(ctx, binding.Workdir, *request.Input)
+			}
+			timing.resolve = nonNegativeDuration(e.now().Sub(startedAt))
 			if err != nil {
+				timing.failureStage = "resolve"
 				break
 			}
 			result.ResolvedText = text
 		}
+		startedAt := e.now()
 		err = e.driver.SendLiteral(ctx, binding.TmuxTarget, request.OperationID, text)
+		timing.tmuxSend = nonNegativeDuration(e.now().Sub(startedAt))
+		if err != nil {
+			timing.failureStage = "tmux_send"
+		}
 	case ActionStop:
 		err = e.driver.SendKey(ctx, binding.TmuxTarget, "Escape")
 	case ActionClear:
@@ -81,14 +107,14 @@ func (e *LocalExecutor) executeOnce(
 	}
 	if err != nil {
 		result.Detail = "runtime operation failed"
-		return result, err
+		return result, timing, err
 	}
 	result.Delivered = true
 	result.Detail = "runtime operation delivered"
 	if request.Action == ActionClose || request.Action == ActionDiscard {
 		e.retireClosedRuntime(binding)
 	}
-	return result, nil
+	return result, timing, nil
 }
 
 func (e *LocalExecutor) sendInteractiveKey(
