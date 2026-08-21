@@ -49,6 +49,9 @@ esac
         encoding="utf-8",
     )
     launchctl.chmod(0o755)
+    plutil = fake_bin / "plutil"
+    plutil.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    plutil.chmod(0o755)
     env = os.environ.copy()
     env.update(
         {
