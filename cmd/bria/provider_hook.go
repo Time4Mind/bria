@@ -63,6 +63,7 @@ func runProviderHook(arguments []string) error {
 		if err := notifyProviderStop(ctx, nodeConfig, providerstop.Signal{
 			NodeID: result.NodeID, SessionID: result.SessionID,
 			ProviderSessionID: result.ProviderSessionID,
+			RuntimeGeneration: result.RuntimeGeneration,
 		}); err != nil {
 			fmt.Fprintf(os.Stderr, "bria provider-hook: notify final: %v\n", err)
 		}

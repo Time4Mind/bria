@@ -40,6 +40,64 @@ type RunningSession struct {
 	Session domain.Session
 }
 
+// ProviderSession resolves a live provider binding without depending on
+// Telegram transport state. Provider Stop can arrive after the runtime was
+// already settled by a heartbeat, including when no response card is recorded.
+func (s *Service) ProviderSession(
+	ref domain.SessionRef,
+	providerSessionID string,
+	runtimeGeneration uint64,
+) (Principal, domain.Session, bool) {
+	state := s.reader.State()
+	if state == nil || ref.Validate() != nil || providerSessionID == "" {
+		return Principal{}, domain.Session{}, false
+	}
+	session, ok := state.Sessions[ref.Key()]
+	if !ok || !session.IsLive() || session.ProviderSessionID != providerSessionID ||
+		(runtimeGeneration != 0 && session.RuntimeGeneration != runtimeGeneration) {
+		return Principal{}, domain.Session{}, false
+	}
+	actorID := state.OwnerID()
+	if actorID == 0 {
+		actorID = session.OwnerID
+	}
+	if actorID <= 0 || !state.CanViewSession(actorID, ref) {
+		return Principal{}, domain.Session{}, false
+	}
+	return Principal{UserID: actorID}, session, true
+}
+
+// ActiveSessions returns actor-specific selected live sessions independently
+// of Telegram card registration. This lets recovery repair a missing card
+// after a restart without treating background sessions as visible.
+func (s *Service) ActiveSessions() []RunningSession {
+	state := s.reader.State()
+	if state == nil {
+		return nil
+	}
+	result := make([]RunningSession, 0, len(state.Users))
+	for userID := range state.Users {
+		ref := activeRef(state, userID)
+		session, ok := state.Sessions[ref.Key()]
+		if !ok || !session.IsLive() || !state.CanViewSession(userID, ref) {
+			continue
+		}
+		result = append(result, RunningSession{
+			Actor: Principal{UserID: userID}, Session: session,
+		})
+	}
+	slices.SortFunc(result, func(a, b RunningSession) int {
+		if order := cmp.Compare(a.Actor.UserID, b.Actor.UserID); order != 0 {
+			return order
+		}
+		return cmp.Compare(a.Session.Ref().Key(), b.Session.Ref().Key())
+	})
+	if len(result) > 512 {
+		result = result[:512]
+	}
+	return result
+}
+
 func (s *Service) BackgroundPanelUsers() []domain.UserID {
 	state := s.reader.State()
 	if state == nil {

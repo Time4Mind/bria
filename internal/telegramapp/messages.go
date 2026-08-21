@@ -130,7 +130,6 @@ func (h *Handler) handleMessage(
 		if accepted.NamingQueued {
 			h.scheduleNameRefresh(ctx, actor, accepted.Session, message)
 		}
-		h.rememberResponseCard(ctx, actor, message, screen)
 	}
 	return err
 }
@@ -213,9 +212,17 @@ func (h *Handler) sendProjectedMessage(
 	if err != nil {
 		return telegrambot.Message{}, err
 	}
+	userID := domain.UserID(chatID)
+	viewChange := h.beginVisibleScreen(userID, screen)
 	message, err := h.messenger.SendScreen(ctx, chatID, screen)
-	if err == nil {
-		h.beginVisibleScreen(domain.UserID(chatID), screen)
+	if err != nil {
+		h.rollbackVisibleScreen(viewChange)
+	} else {
+		// Every projected screen is the current interactive carrier, including
+		// menus and create/setup flows. Persisting non-session carriers makes the
+		// visibility gate survive a process or leader restart, so a delayed final
+		// cannot surface over a menu that is still visible in Telegram.
+		h.rememberResponseCard(ctx, application.Principal{UserID: userID}, message, screen)
 	}
 	return message, err
 }

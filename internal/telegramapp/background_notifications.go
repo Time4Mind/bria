@@ -13,6 +13,10 @@ import (
 
 const backgroundSettleWorkers = 8
 
+const activeFinalReconcileFallback = 5 * time.Second
+
+type activeFinalReconcileSchedule map[string]time.Time
+
 var backgroundTranscriptBudget = 3 * time.Second
 
 type settledCardCheck struct {
@@ -28,6 +32,7 @@ func (h *Handler) RunBackgroundNotifications(ctx context.Context, interval time.
 	}
 	panelFingerprints := make(map[domain.UserID]string)
 	settlementSchedule := make(backgroundSettlementSchedule)
+	finalReconcileSchedule := make(activeFinalReconcileSchedule)
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
@@ -37,7 +42,7 @@ func (h *Handler) RunBackgroundNotifications(ctx context.Context, interval time.
 			// allowing a routine panel edit to consume a just-finished turn before
 			// the completion carrier is reposted.
 			h.settleDueRunningSessions(ctx, time.Now(), interval, settlementSchedule)
-			h.reconcileActiveFinalCards(ctx)
+			h.reconcileActiveFinalCards(ctx, time.Now(), finalReconcileSchedule)
 			h.restoreActivePaneRefreshes(ctx)
 			h.restoreClusterUpdateRefreshes(ctx)
 			h.scanBackgroundNotifications(ctx, panelFingerprints)
@@ -56,44 +61,77 @@ func (h *Handler) RunBackgroundNotifications(ctx context.Context, interval time.
 // move the runtime to idle; that removes it from RunningSessions before the live
 // card worker has published the final answer. The replicated card revision makes
 // the repair durable across worker, leader, and process restarts.
-func (h *Handler) reconcileActiveFinalCards(ctx context.Context) {
+func (h *Handler) reconcileActiveFinalCards(
+	ctx context.Context,
+	now time.Time,
+	schedule activeFinalReconcileSchedule,
+) {
 	if h.controls == nil {
 		return
 	}
-	for _, userID := range h.service.BackgroundPanelUsers() {
-		actor := application.Principal{UserID: userID}
-		card, ok, err := h.service.TelegramResponseCard(actor)
-		if err != nil || !ok {
+	candidates := h.service.ActiveSessions()
+	current := make(map[string]bool, len(candidates))
+	for _, candidate := range candidates {
+		key := backgroundSettlementKey(candidate)
+		current[key] = true
+		if next := schedule[key]; !next.IsZero() && now.Before(next) {
 			continue
 		}
-		session, err := h.service.ActiveSession(actor)
-		if err != nil || session.RuntimePhase != domain.RuntimeIdle {
-			continue
+		startedAt := time.Now()
+		func() {
+			defer func() {
+				completedAt := now.Add(time.Since(startedAt))
+				schedule[key] = completedAt.Add(activeFinalReconcileFallback)
+			}()
+			actor := candidate.Actor
+			session := candidate.Session
+			if !runtimeCanDeliverFinal(session) {
+				return
+			}
+			card, ok, err := h.service.TelegramResponseCard(actor)
+			if err != nil {
+				return
+			}
+			if !finalMaySurfaceOverView(
+				h.visibleCardSnapshot(actor.UserID), card, ok, session.Ref(),
+			) {
+				return
+			}
+			if ok && card.Session == session.Ref() &&
+				h.validatedSettledCard(actor.UserID, card, session) {
+				return
+			}
+			snapshot, err := h.renderSessionCardSnapshot(
+				ctx, actor, session.Ref(), application.CardPageLatestResponseStart,
+			)
+			if err != nil {
+				return
+			}
+			h.observeTranscriptWatchdog(session, snapshot.events, "card_reconcile", time.Now())
+			finalAt, final := finalTranscriptAt(snapshot.events)
+			if !final || !transcriptFinalBelongsToCurrentTurn(session, finalAt, time.Now()) {
+				return
+			}
+			if ok && responseCardCoversFinal(card, session.Ref(), finalAt) {
+				h.rememberValidatedSettledCard(actor.UserID, card, session)
+				return
+			}
+			done, _ := h.deliverActiveFinalScreen(
+				ctx, actor, session, finalAt, snapshot.screen,
+			)
+			if !done {
+				return
+			}
+			card, ok, err = h.service.TelegramResponseCard(actor)
+			if err == nil && ok && responseCardCoversFinal(card, session.Ref(), finalAt) {
+				h.rememberValidatedSettledCard(actor.UserID, card, session)
+			}
+		}()
+	}
+	for key := range schedule {
+		if !current[key] {
+			delete(schedule, key)
 		}
-		if card.Session != session.Ref() {
-			continue
-		}
-		if h.validatedSettledCard(actor.UserID, card, session) {
-			continue
-		}
-		snapshot, err := h.renderSessionCardSnapshot(
-			ctx, actor, session.Ref(), application.CardPageLatestResponseStart,
-		)
-		if err != nil {
-			continue
-		}
-		h.observeTranscriptWatchdog(session, snapshot.events, "card_reconcile", time.Now())
-		finalAt, final := finalTranscriptAt(snapshot.events)
-		if !final || !transcriptFinalBelongsToCurrentTurn(session, finalAt, time.Now()) {
-			continue
-		}
-		if responseCardCoversFinal(card, session.Ref(), finalAt) {
-			h.rememberValidatedSettledCard(actor.UserID, card, session)
-			continue
-		}
-		_, _ = h.repostFinalResponseCard(
-			ctx, actor, telegramMessage(card), session.Ref(), snapshot.screen,
-		)
 	}
 }
 

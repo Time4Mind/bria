@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/Time4Mind/bria/internal/application"
-	"github.com/Time4Mind/bria/internal/domain"
 )
 
 const backgroundSettlementFallback = 5 * time.Second
@@ -99,7 +98,11 @@ func (h *Handler) settleDueRunningSessions(
 				if settled {
 					active, activeErr := h.service.ActiveSession(candidate.Actor)
 					if activeErr == nil && active.Ref() == candidate.Session.Ref() {
-						h.repostActiveFinal(ctx, candidate.Actor, candidate.Session.Ref())
+						if finalAt, final := finalTranscriptAt(events); final {
+							_, _ = h.deliverActiveFinal(
+								ctx, candidate.Actor, active, finalAt,
+							)
+						}
 					}
 				}
 			}
@@ -126,24 +129,6 @@ func nextBackgroundSettlement(
 		delay = retryInterval
 	}
 	return completed.Add(delay)
-}
-
-func (h *Handler) repostActiveFinal(
-	ctx context.Context,
-	actor application.Principal,
-	ref domain.SessionRef,
-) {
-	card, ok, err := h.service.TelegramResponseCard(actor)
-	if err != nil || !ok || card.Session != ref {
-		return
-	}
-	screen, err := h.renderSessionCard(
-		ctx, actor, ref, application.CardPageLatestResponseStart,
-	)
-	if err != nil {
-		return
-	}
-	_, _ = h.repostFinalResponseCard(ctx, actor, telegramMessage(card), ref, screen)
 }
 
 func (h *Handler) backgroundFingerprint(deliveries []application.BackgroundDelivery) string {

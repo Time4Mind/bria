@@ -18,6 +18,7 @@ type Signal struct {
 	NodeID            string `json:"node_id"`
 	SessionID         string `json:"session_id"`
 	ProviderSessionID string `json:"provider_session_id"`
+	RuntimeGeneration uint64 `json:"runtime_generation,omitempty"`
 }
 
 func (s Signal) Validate() error {

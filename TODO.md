@@ -12,9 +12,14 @@
   а `transcript_trigger_gap` фиксирует только завершения, найденные watchdog и
   не подтверждённые событийным trigger за grace-период. Быстрые неизменившиеся
   cache-hit/card timing больше не создают detail-строки.
-- [ ] P6. Определить и исправить политику `provider_stop=no_active_card`.
-  Зафиксированы два завершённых turn-а, у которых final попал в transcript и
-  runtime стал idle, но новая видимая карточка не была опубликована.
+- [x] P6. Разделена политика завершения без matching response-card. Фоновая
+  сессия получает `background_settled`: final остаётся в transcript и полная
+  карточка появляется только после явного выбора. Известный menu/create flow
+  не вытесняется (`not_visible`). Для действительно активной сессии потерянная
+  registry-карточка восстанавливается один раз с повторной проверкой active ref,
+  runtime generation, provider binding и visible epoch; stale replacement
+  удаляется. Runtime generation протянута в provider Stop как optional поле с
+  legacy-совместимостью.
 - [ ] P7. Ограничить retry `provider_stop`: один сигнал занял 5,566 с и три
   попытки, после чего был признан устаревшим (`outcome=ignored`). Нужны общий
   deadline, дедупликация по turn и явная причина остановки retry.

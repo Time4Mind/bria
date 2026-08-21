@@ -75,6 +75,27 @@ func (h *Handler) visibleSessionMatches(
 	return view.session == ref
 }
 
+func (h *Handler) visibleCardSnapshot(userID domain.UserID) visibleCardView {
+	h.viewMu.Lock()
+	defer h.viewMu.Unlock()
+	return h.visibleCardViews[userID]
+}
+
+func finalMaySurfaceOverView(
+	view visibleCardView,
+	card domain.TelegramResponseCard,
+	cardPresent bool,
+	ref domain.SessionRef,
+) bool {
+	if view.known {
+		return view.session == ref
+	}
+	// After restart the in-memory view is unknown. A durable foreign or
+	// non-session checkpoint proves that another flow is visible; an absent
+	// registry does not, so the selected active session may be recovered.
+	return !cardPresent || card.Session == ref
+}
+
 func (h *Handler) visibleEpochCurrent(userID domain.UserID, epoch uint64) bool {
 	h.viewMu.Lock()
 	defer h.viewMu.Unlock()

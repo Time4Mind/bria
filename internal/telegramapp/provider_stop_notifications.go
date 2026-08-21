@@ -112,23 +112,7 @@ func (h *Handler) handleProviderStop(
 		latest.RuntimePhase != domain.RuntimeDegraded) {
 		return false, "runtime_pending"
 	}
-	card, present, err := h.service.TelegramResponseCard(actor)
-	if err != nil || !present || card.Session != session.Ref() {
-		return true, "no_active_card"
-	}
-	if responseCardCoversFinal(card, session.Ref(), finalAt) {
-		return true, "already_delivered"
-	}
-	// Invalidate the sleeping periodic worker before promoting the completion.
-	// Its eventual wake-up then observes a newer generation and exits without an
-	// extra edit; the durable final watermark also protects restart races.
-	h.cancelPaneRefresh(actor.UserID)
-	h.repostActiveFinal(ctx, actor, session.Ref())
-	card, present, err = h.service.TelegramResponseCard(actor)
-	if err == nil && present && responseCardCoversFinal(card, session.Ref(), finalAt) {
-		return true, "delivered"
-	}
-	return false, "delivery_pending"
+	return h.deliverActiveFinal(ctx, actor, latest, finalAt)
 }
 
 func (h *Handler) providerStopSession(
@@ -140,22 +124,7 @@ func (h *Handler) providerStopSession(
 	ref := domain.SessionRef{
 		NodeID: domain.NodeID(signal.NodeID), SessionID: domain.SessionID(signal.SessionID),
 	}
-	for _, candidate := range h.service.RunningSessions() {
-		if candidate.Session.Ref() == ref &&
-			candidate.Session.ProviderSessionID == signal.ProviderSessionID {
-			return candidate.Actor, candidate.Session, true
-		}
-	}
-	// The node heartbeat can publish idle just before the Stop hint reaches the
-	// leader. Find only an actively displayed card so an old hook cannot surface
-	// an unrelated background session.
-	for _, userID := range h.service.BackgroundPanelUsers() {
-		actor := application.Principal{UserID: userID}
-		session, err := h.service.ActiveSession(actor)
-		if err == nil && session.Ref() == ref &&
-			session.ProviderSessionID == signal.ProviderSessionID {
-			return actor, session, true
-		}
-	}
-	return application.Principal{}, domain.Session{}, false
+	return h.service.ProviderSession(
+		ref, signal.ProviderSessionID, signal.RuntimeGeneration,
+	)
 }

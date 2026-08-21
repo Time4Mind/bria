@@ -39,6 +39,7 @@ func TestProviderStopRequiresMatchingMemberIdentity(t *testing.T) {
 	}
 	signal := providerstop.Signal{
 		NodeID: "target", SessionID: "s", ProviderSessionID: "provider",
+		RuntimeGeneration: 3,
 	}
 	body, _ := json.Marshal(signal)
 	request := httptest.NewRequest(http.MethodPost, providerStopPath, bytes.NewReader(body))

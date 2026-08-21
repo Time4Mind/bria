@@ -193,7 +193,7 @@ func TestCaptureStopReturnsOneFinalWakeSignal(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !result.WakeFinal || result.NodeID != "mac" || result.SessionID != "bria-session" ||
-		result.ProviderSessionID != providerID {
+		result.ProviderSessionID != providerID || result.RuntimeGeneration != 1 {
 		t.Fatalf("hook result=%#v", result)
 	}
 }

@@ -94,6 +94,16 @@ func (h *Handler) repostFinalResponseCard(
 		}
 		return previous, nil
 	}
+	if currentErr != nil {
+		return previous, currentErr
+	}
+	view := h.visibleCardSnapshot(actor.UserID)
+	if !finalMaySurfaceOverView(view, current, currentOK, ref) {
+		if currentErr == nil && currentOK {
+			return telegramMessage(current), nil
+		}
+		return previous, nil
+	}
 	if currentErr == nil && currentOK {
 		if current.Session != ref {
 			return telegramMessage(current), nil
@@ -117,7 +127,7 @@ func (h *Handler) repostFinalResponseCard(
 		return telegrambot.Message{}, err
 	}
 	if active, activeErr := h.service.ActiveSession(actor); activeErr != nil ||
-		active.Ref() != ref {
+		active.Ref() != ref || h.visibleCardSnapshot(actor.UserID) != view {
 		_ = h.messenger.DeleteMessage(ctx, replacement)
 		if currentErr == nil && currentOK {
 			return telegramMessage(current), nil

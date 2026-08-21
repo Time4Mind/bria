@@ -32,6 +32,7 @@ type HookResult struct {
 	NodeID            string
 	SessionID         string
 	ProviderSessionID string
+	RuntimeGeneration uint64
 }
 
 type codexMeta struct {
@@ -151,6 +152,7 @@ func CaptureEvent(
 	return HookResult{
 		WakeFinal: wakeFinalEvent(payload.Event), NodeID: nodeID,
 		SessionID: sessionID, ProviderSessionID: payload.SessionID,
+		RuntimeGeneration: runtimeGeneration,
 	}, nil
 }
 
