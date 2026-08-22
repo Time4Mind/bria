@@ -264,6 +264,18 @@ func (s *Service) RestoreSession(
 	})
 }
 
+func (s *Service) RecoverArchivedSession(
+	ctx context.Context,
+	actor Principal,
+	session domain.Session,
+	providerID string,
+) error {
+	return s.apply(ctx, clusterstate.CommandRecoverArchivedSession, clusterstate.RecoverArchivedSession{
+		ActorID: actor.UserID, Session: session.Ref(), ExpectedRevision: session.Revision,
+		ProviderID: providerID,
+	})
+}
+
 func (s *Service) ArchiveFailedStart(ctx context.Context, session domain.Session) error {
 	return s.apply(ctx, clusterstate.CommandArchiveSession, clusterstate.ArchiveSession{
 		Session: session.Ref(), ExpectedRevision: session.Revision,

@@ -134,9 +134,25 @@ func (w *Writer) Verify(ctx context.Context, session domain.Session) error {
 	if err != nil {
 		return err
 	}
-	if artifact.ProviderSessionID != session.ProviderSessionID ||
-		artifact.Workdir != session.Workdir || !strings.EqualFold(artifact.Backend, session.Backend) {
+	if artifact.Workdir != session.Workdir || !strings.EqualFold(artifact.Backend, session.Backend) {
 		return errors.New("native archive runtime metadata does not match session")
+	}
+	if artifact.ProviderSessionID != session.ProviderSessionID {
+		if artifact.ProviderSessionID != "" || session.ProviderSessionID == "" ||
+			len(artifact.Events) != 0 {
+			return errors.New("native archive runtime metadata does not match session")
+		}
+		// Legacy bundles created while the lifecycle hook was unavailable have
+		// neither a provider identity nor transcript events. Accept a repaired
+		// identity only when the origin provider still exposes that exact thread
+		// in the archived workdir.
+		if _, readErr := w.source.Read(ctx, transcript.Request{
+			Backend:           transcript.Backend(session.Backend),
+			ProviderSessionID: session.ProviderSessionID,
+			Workdir:           session.Workdir,
+		}); readErr != nil {
+			return fmt.Errorf("verify recovered provider transcript: %w", readErr)
+		}
 	}
 	if len(inbox) == 0 {
 		return nil

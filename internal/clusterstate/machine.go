@@ -125,6 +125,14 @@ func apply(state *domain.State, command Command) (json.RawMessage, error) {
 				payload.ProviderID, command.IssuedAt,
 			)
 		})
+	case CommandRecoverArchivedSession:
+		var payload RecoverArchivedSession
+		return nil, decodeAnd(command.Payload, command.StrictPayload, &payload, func() error {
+			return state.RecoverArchivedSession(
+				payload.ActorID, payload.Session, payload.ExpectedRevision,
+				payload.ProviderID, command.IssuedAt,
+			)
+		})
 	case CommandShareSession:
 		var payload ShareSession
 		return nil, decodeAnd(command.Payload, command.StrictPayload, &payload, func() error {

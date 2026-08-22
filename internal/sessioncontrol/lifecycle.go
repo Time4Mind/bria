@@ -72,6 +72,28 @@ func (c *Controller) Restore(
 	operationID string,
 	ref domain.SessionRef,
 ) (Accepted, error) {
+	return c.restore(ctx, actor, operationID, ref, "")
+}
+
+// RestoreWithProvider restores a legacy archive after the caller has resolved
+// its missing provider identity unambiguously on the origin node.
+func (c *Controller) RestoreWithProvider(
+	ctx context.Context,
+	actor application.Principal,
+	operationID string,
+	ref domain.SessionRef,
+	providerID string,
+) (Accepted, error) {
+	return c.restore(ctx, actor, operationID, ref, providerID)
+}
+
+func (c *Controller) restore(
+	ctx context.Context,
+	actor application.Principal,
+	operationID string,
+	ref domain.SessionRef,
+	providerID string,
+) (Accepted, error) {
 	startedAt := time.Now()
 	lookupDuration := time.Duration(0)
 	validateDuration := time.Duration(0)
@@ -102,7 +124,12 @@ func (c *Controller) Restore(
 	logInteractionOperation(ctx, ref, generation, operationID, "restore")
 	restoreCtx := application.WithOperationScope(ctx, operationID+"-restore")
 	phaseStartedAt = time.Now()
-	if err := c.service.RestoreSession(restoreCtx, actor, session); err != nil {
+	if providerID != "" {
+		err = c.service.RecoverArchivedSession(restoreCtx, actor, session, providerID)
+	} else {
+		err = c.service.RestoreSession(restoreCtx, actor, session)
+	}
+	if err != nil {
 		restoreDuration = time.Since(phaseStartedAt)
 		outcome = "restore_apply_failed"
 		return Accepted{}, err

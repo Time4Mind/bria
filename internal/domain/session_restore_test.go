@@ -71,6 +71,42 @@ func TestRestoreRequiresOwnerAndOnlineOrigin(t *testing.T) {
 	}
 }
 
+func TestRecoverArchivedSessionBindsLegacyProviderAtomically(t *testing.T) {
+	state := fixtureState(t)
+	ref := addSession(t, state, "legacy-restore", "alpha", 1, time.Unix(10, 0).UTC())
+	session := state.Sessions[ref.Key()]
+	session.ProviderSessionID = ""
+	state.Sessions[ref.Key()] = session
+	if err := state.CloseSession(
+		1, ref, session.Revision, "archive-legacy", time.Unix(20, 0).UTC(),
+	); err != nil {
+		t.Fatal(err)
+	}
+	closed := state.Sessions[ref.Key()]
+	if err := state.CompleteSessionArchive(
+		1, ref, closed.Revision, closed.ArchiveID, time.Unix(21, 0).UTC(),
+	); err != nil {
+		t.Fatal(err)
+	}
+	ready := state.Sessions[ref.Key()]
+	if err := state.RestoreSession(
+		1, ref, ready.Revision, time.Unix(22, 0).UTC(),
+	); !errors.Is(err, domain.ErrInvalidState) {
+		t.Fatalf("ordinary legacy restore error=%v", err)
+	}
+	if err := state.RecoverArchivedSession(
+		1, ref, ready.Revision, "provider-recovered", time.Unix(23, 0).UTC(),
+	); err != nil {
+		t.Fatal(err)
+	}
+	recovered := state.Sessions[ref.Key()]
+	if !recovered.IsLive() || !recovered.ResumePending ||
+		recovered.ProviderSessionID != "provider-recovered" ||
+		recovered.RuntimeGeneration != ready.RuntimeGeneration+1 {
+		t.Fatalf("recovered session=%#v", recovered)
+	}
+}
+
 func TestGeneratedRenameNeverOverwritesANewerName(t *testing.T) {
 	state := fixtureState(t)
 	ref := addSession(t, state, "rename", "alpha", 1, time.Unix(10, 0).UTC())

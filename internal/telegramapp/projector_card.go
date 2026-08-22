@@ -220,7 +220,7 @@ func (p *TelegramProjector) SessionCardViewWithContext(
 		CanRestore: session.State == domain.SessionArchived && session.ArchiveReady &&
 			state.CanPerformSessionAction(actor.UserID, session.Ref(), domain.ActionRestore) &&
 			node.Status == domain.NodeOnline &&
-			session.ProviderSessionID != "" && session.Workdir != "",
+			session.Workdir != "",
 		AcceptsQueuedInput: session.IsLive() && node.Enabled() &&
 			node.Status != domain.NodeOnline &&
 			state.CanPerformSessionAction(actor.UserID, session.Ref(), domain.ActionSendInput),

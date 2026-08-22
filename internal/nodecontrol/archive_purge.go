@@ -26,8 +26,26 @@ func (s *Server) handleArchivePurge(writer http.ResponseWriter, request *http.Re
 	decoder.DisallowUnknownFields()
 	var command clusterstate.Command
 	if err := decoder.Decode(&command); err != nil || decoder.Decode(&struct{}{}) != io.EOF ||
-		command.Kind != clusterstate.CommandPurgeSession {
+		(command.Kind != clusterstate.CommandPurgeSession &&
+			command.Kind != clusterstate.CommandRecoverArchivedSession) {
 		http.Error(writer, "invalid archive purge command", http.StatusBadRequest)
+		return
+	}
+	if command.Kind == clusterstate.CommandRecoverArchivedSession {
+		var payload clusterstate.RecoverArchivedSession
+		if err := json.Unmarshal(command.Payload, &payload); err != nil ||
+			payload.Session.NodeID != domain.NodeID(s.nodeID) || payload.ActorID <= 0 ||
+			payload.ExpectedRevision == 0 || payload.ProviderID == "" {
+			http.Error(writer, "invalid archive recovery target", http.StatusBadRequest)
+			return
+		}
+		result, err := s.admin.Apply(request.Context(), command)
+		if err != nil || result.Err() != nil {
+			http.Error(writer, "archive recovery rejected", http.StatusConflict)
+			return
+		}
+		writer.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(writer).Encode(result)
 		return
 	}
 	var payload clusterstate.PurgeSession

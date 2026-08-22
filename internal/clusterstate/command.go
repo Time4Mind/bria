@@ -10,7 +10,7 @@ import (
 	"github.com/Time4Mind/bria/internal/domain"
 )
 
-const CommandVersion = 3
+const CommandVersion = 4
 
 type CommandKind string
 
@@ -50,6 +50,7 @@ const (
 	CommandReattachSessionRuntime CommandKind = "reattach_session_runtime"
 	CommandCompleteSessionArchive CommandKind = "complete_session_archive"
 	CommandRestoreSession         CommandKind = "restore_session"
+	CommandRecoverArchivedSession CommandKind = "recover_archived_session"
 	CommandArchiveSession         CommandKind = "archive_session"
 	CommandPurgeSession           CommandKind = "purge_session"
 	CommandIssueEnrollmentInvite  CommandKind = "issue_enrollment_invite"
@@ -157,6 +158,13 @@ type SelectSession struct {
 }
 
 type BindProviderSession struct {
+	ActorID          domain.UserID     `json:"actor_id"`
+	Session          domain.SessionRef `json:"session"`
+	ExpectedRevision uint64            `json:"expected_revision"`
+	ProviderID       string            `json:"provider_id"`
+}
+
+type RecoverArchivedSession struct {
 	ActorID          domain.UserID     `json:"actor_id"`
 	Session          domain.SessionRef `json:"session"`
 	ExpectedRevision uint64            `json:"expected_revision"`

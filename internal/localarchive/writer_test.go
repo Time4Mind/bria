@@ -23,6 +23,19 @@ func (s transcriptStub) Read(context.Context, transcript.Request) ([]transcript.
 	return append([]transcript.Event(nil), s.events...), nil
 }
 
+type recordingTranscriptStub struct {
+	events   []transcript.Event
+	requests *[]transcript.Request
+}
+
+func (s recordingTranscriptStub) Read(
+	_ context.Context,
+	request transcript.Request,
+) ([]transcript.Event, error) {
+	*s.requests = append(*s.requests, request)
+	return append([]transcript.Event(nil), s.events...), nil
+}
+
 func TestWriterCommitsAndVerifiesNativeArtifact(t *testing.T) {
 	store, err := archive.NewFileStore(filepath.Join(t.TempDir(), "archives"))
 	if err != nil {
@@ -145,6 +158,45 @@ func TestWriterVerifiesLegacyV1Artifact(t *testing.T) {
 	}
 	if err := writer.Verify(context.Background(), session); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestWriterVerifiesRecoveredProviderForEmptyLegacyArtifact(t *testing.T) {
+	root := t.TempDir()
+	store, err := archive.NewFileStore(filepath.Join(root, "archives"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	requests := make([]transcript.Request, 0, 1)
+	writer, err := NewWriter(store, recordingTranscriptStub{
+		events:   []transcript.Event{{Kind: transcript.EventUserText, Text: "recover"}},
+		requests: &requests,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	workdir := filepath.Join(root, "work")
+	if err := os.Mkdir(workdir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	artifact := Artifact{Version: artifactVersionV1, Workdir: workdir, Backend: "codex"}
+	content, _ := json.Marshal(artifact)
+	session := domain.Session{
+		ID: "s", NodeID: "n", OwnerID: 1, Backend: "codex", Workdir: workdir,
+		ProviderSessionID: "provider-recovered", ArchiveID: "legacy-recovered",
+	}
+	manifest := testManifest(
+		session, "legacy-recovered", artifactFormatV1, artifactMediaV1, content,
+	)
+	if err := store.Commit(context.Background(), manifest, bytes.NewReader(content)); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Verify(context.Background(), session); err != nil {
+		t.Fatal(err)
+	}
+	if len(requests) != 1 || requests[0].ProviderSessionID != "provider-recovered" ||
+		requests[0].Workdir != workdir {
+		t.Fatalf("provider verification requests=%#v", requests)
 	}
 }
 

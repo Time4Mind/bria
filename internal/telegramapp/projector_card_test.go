@@ -27,6 +27,34 @@ func TestSessionCardUsesSingleLineHeader(t *testing.T) {
 	}
 }
 
+func TestLegacyArchiveCardOffersRestoreBeforeProviderRepair(t *testing.T) {
+	projector, state, _ := projectorFixture(t)
+	ref := domain.SessionRef{NodeID: "alpha", SessionID: "a-new"}
+	session := state.Sessions[ref.Key()]
+	session.State = domain.SessionArchived
+	session.ArchiveID = "archive-legacy"
+	session.ArchiveReady = true
+	session.ArchiveReason = domain.ArchiveManual
+	session.ProviderSessionID = ""
+	session.Workdir = "/workspace"
+	state.Sessions[ref.Key()] = session
+	screen, err := projector.SessionCard(application.Principal{UserID: 2}, ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, row := range screen.Grid {
+		for _, button := range row {
+			if button.Callback.Action == telegramui.ActionRestore {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("legacy archive has no restore action: %#v", screen.Grid)
+	}
+}
+
 func TestSessionCardSeparatesContextAndBackgroundLikeCCBot(t *testing.T) {
 	projector, state, _ := projectorFixture(t)
 	ref := domain.SessionRef{NodeID: "alpha", SessionID: "a-new"}

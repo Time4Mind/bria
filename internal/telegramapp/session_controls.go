@@ -32,6 +32,18 @@ type SessionControls interface {
 	OpenSessionFile(context.Context, application.Principal, domain.SessionRef, string) (nodecontrol.SessionFile, error)
 }
 
+type legacyArchiveRestorer interface {
+	RestoreWithProvider(
+		context.Context, application.Principal, string, domain.SessionRef, string,
+	) (sessioncontrol.Accepted, error)
+}
+
+const (
+	legacyRestoreDiscoveryPageSize = 32
+	legacyRestoreDiscoveryLimit    = 512
+	legacyRestoreCreatedTolerance  = 2 * time.Second
+)
+
 func isSessionControlAction(action telegramui.Action) bool {
 	switch action {
 	case telegramui.ActionStop, telegramui.ActionClose, telegramui.ActionClear,
@@ -130,10 +142,39 @@ func (h *Handler) handleSessionControlCallback(
 	case telegramui.ActionConfirmClear:
 		_, err = h.controls.Clear(ctx, actor, operationID, ref)
 	case telegramui.ActionConfirmClose:
-		_, err = h.controls.Close(ctx, actor, operationID, ref)
+		current, sessionErr := h.service.Session(actor, ref)
+		if sessionErr != nil {
+			err = sessionErr
+		} else if current.ProviderSessionID == "" && sessionNeedsProviderRecovery(current) {
+			var providerID string
+			providerID, err = h.discoverMissingProvider(ctx, actor, current)
+			if err == nil {
+				bindCtx := application.WithOperationScope(ctx, operationID+"-provider-recovery")
+				err = h.service.BindProviderSession(bindCtx, actor, current, providerID)
+			}
+		}
+		if err == nil {
+			_, err = h.controls.Close(ctx, actor, operationID, ref)
+		}
 	case telegramui.ActionRestore:
 		phaseStartedAt = time.Now()
-		_, err = h.controls.Restore(ctx, actor, operationID, ref)
+		current, sessionErr := h.service.Session(actor, ref)
+		if sessionErr != nil {
+			err = sessionErr
+		} else if current.ProviderSessionID != "" {
+			_, err = h.controls.Restore(ctx, actor, operationID, ref)
+		} else {
+			var providerID string
+			providerID, err = h.discoverMissingProvider(ctx, actor, current)
+			if err == nil {
+				restorer, ok := h.controls.(legacyArchiveRestorer)
+				if !ok {
+					err = sessioncontrol.ErrRuntimeUnavailable
+				} else {
+					_, err = restorer.RestoreWithProvider(ctx, actor, operationID, ref, providerID)
+				}
+			}
+		}
 		restoreTiming.control = time.Since(phaseStartedAt)
 	case telegramui.ActionTerminal:
 		_, err = h.controls.OpenTerminal(ctx, actor, operationID, ref)
@@ -220,6 +261,58 @@ func (h *Handler) handleSessionControlCallback(
 		)
 	}
 	return nil
+}
+
+func (h *Handler) discoverMissingProvider(
+	ctx context.Context,
+	actor application.Principal,
+	session domain.Session,
+) (string, error) {
+	if h.starter == nil || session.CreatedAt.IsZero() || session.Workdir == "" {
+		return "", domain.ErrInvalidState
+	}
+	matched := ""
+	for offset := 0; offset < legacyRestoreDiscoveryLimit; offset += legacyRestoreDiscoveryPageSize {
+		page, err := h.starter.Discover(
+			ctx, actor, session.NodeID, session.Backend, session.Workdir,
+			offset, legacyRestoreDiscoveryPageSize,
+		)
+		if err != nil {
+			return "", err
+		}
+		for _, candidate := range page.Items {
+			if candidate.CreatedAt.IsZero() ||
+				absRestoreDuration(candidate.CreatedAt.Sub(session.CreatedAt)) > legacyRestoreCreatedTolerance {
+				continue
+			}
+			if matched != "" && matched != candidate.ID {
+				return "", domain.ErrInvalidState
+			}
+			matched = candidate.ID
+		}
+		if offset+legacyRestoreDiscoveryPageSize >= page.Total {
+			break
+		}
+	}
+	if matched == "" {
+		return "", domain.ErrInvalidState
+	}
+	return matched, nil
+}
+
+func sessionNeedsProviderRecovery(session domain.Session) bool {
+	if session.UserRequestTracked {
+		return session.UserRequestSeen
+	}
+	return session.LastOperation != nil &&
+		session.LastOperation.Action == domain.ActionSendInput
+}
+
+func absRestoreDuration(value time.Duration) time.Duration {
+	if value < 0 {
+		return -value
+	}
+	return value
 }
 
 func (h *Handler) confirmation(

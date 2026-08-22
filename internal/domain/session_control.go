@@ -286,6 +286,34 @@ func (s *State) RestoreSession(
 	expectedRevision uint64,
 	at time.Time,
 ) error {
+	return s.restoreSession(actorID, ref, expectedRevision, "", at)
+}
+
+// RecoverArchivedSession repairs a legacy archive whose provider lifecycle
+// hook failed before Bria learned the provider-owned session identity. The
+// identity must already have been resolved unambiguously from the origin
+// node's transcript inventory by the caller.
+func (s *State) RecoverArchivedSession(
+	actorID UserID,
+	ref SessionRef,
+	expectedRevision uint64,
+	providerID string,
+	at time.Time,
+) error {
+	providerID = strings.TrimSpace(providerID)
+	if !providerIDPattern.MatchString(providerID) {
+		return fmt.Errorf("%w: provider session id is invalid", ErrInvalidState)
+	}
+	return s.restoreSession(actorID, ref, expectedRevision, providerID, at)
+}
+
+func (s *State) restoreSession(
+	actorID UserID,
+	ref SessionRef,
+	expectedRevision uint64,
+	recoveredProviderID string,
+	at time.Time,
+) error {
 	if !s.CanPerformSessionAction(actorID, ref, ActionRestore) {
 		return ErrAccessDenied
 	}
@@ -294,9 +322,13 @@ func (s *State) RestoreSession(
 		return ErrNotFound
 	}
 	node, nodeOK := s.Nodes[session.NodeID]
+	providerID := strings.TrimSpace(session.ProviderSessionID)
+	if providerID == "" {
+		providerID = strings.TrimSpace(recoveredProviderID)
+	}
 	if session.State != SessionArchived || !session.ArchiveReady ||
 		strings.TrimSpace(session.ArchiveID) == "" ||
-		strings.TrimSpace(session.ProviderSessionID) == "" ||
+		providerID == "" ||
 		strings.TrimSpace(session.Workdir) == "" || !nodeOK || node.Status != NodeOnline ||
 		!node.BackendExecutionAllowed() {
 		return ErrInvalidState
@@ -308,6 +340,7 @@ func (s *State) RestoreSession(
 		return fmt.Errorf("%w: session counter exhausted", ErrInvalidState)
 	}
 	session.State = SessionLive
+	session.ProviderSessionID = providerID
 	session.RuntimePhase = RuntimeDegraded
 	session.RuntimeIssue = ""
 	session.InteractivePrompt = nil

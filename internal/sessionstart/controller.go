@@ -68,7 +68,10 @@ func (c *Controller) Discover(
 	}
 	result := make([]ProviderCandidate, len(discovery.Candidates))
 	for index, item := range discovery.Candidates {
-		result[index] = ProviderCandidate{ID: item.ProviderSessionID, Summary: item.Summary, UpdatedAt: item.UpdatedAt}
+		result[index] = ProviderCandidate{
+			ID: item.ProviderSessionID, Summary: item.Summary,
+			CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt,
+		}
 	}
 	return ProviderPage{Items: result, Total: discovery.Total}, nil
 }
@@ -76,6 +79,7 @@ func (c *Controller) Discover(
 type ProviderCandidate struct {
 	ID        string
 	Summary   string
+	CreatedAt time.Time
 	UpdatedAt time.Time
 }
 
