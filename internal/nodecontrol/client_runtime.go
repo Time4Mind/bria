@@ -52,8 +52,8 @@ func (c *Client) Submit(
 	if len(responseBody) > maxControlPayload {
 		return runtimehost.Receipt{}, errors.New("runtime response exceeds control payload limit")
 	}
-	if response.StatusCode != http.StatusAccepted && response.StatusCode != http.StatusOK {
-		return runtimehost.Receipt{}, fmt.Errorf("runtime request rejected with status %d", response.StatusCode)
+	if err := runtimeSubmitResponseError(response); err != nil {
+		return runtimehost.Receipt{}, err
 	}
 	var receipt runtimehost.Receipt
 	if err := json.Unmarshal(responseBody, &receipt); err != nil {
@@ -63,6 +63,17 @@ func (c *Client) Submit(
 		return runtimehost.Receipt{}, errors.New("node returned an invalid runtime receipt")
 	}
 	return receipt, nil
+}
+
+func runtimeSubmitResponseError(response *http.Response) error {
+	if response.StatusCode == http.StatusAccepted || response.StatusCode == http.StatusOK {
+		return nil
+	}
+	if response.StatusCode == http.StatusTooManyRequests &&
+		response.Header.Get(runtimeErrorHeader) == runtimeQueueFull {
+		return runtimehost.ErrQueueFull
+	}
+	return fmt.Errorf("runtime request rejected with status %d", response.StatusCode)
 }
 
 func (c *Client) LookupResult(

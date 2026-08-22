@@ -121,6 +121,7 @@ func startNodeRuntimeControl(
 	if err != nil {
 		return closeFailedRuntime(executor, store, err)
 	}
+	executor.SetInputQueueLimitResolver(guard)
 	local, err := nodecontrol.NewService(nodeConfig.NodeID, guard, executor)
 	if err != nil {
 		return closeFailedRuntime(executor, store, err)

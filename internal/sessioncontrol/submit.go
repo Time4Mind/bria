@@ -2,6 +2,7 @@ package sessioncontrol
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -114,6 +115,12 @@ func (c *Controller) submit(
 	}
 	receipt, err := c.runtime.Submit(ctx, request)
 	if err != nil {
+		if errors.Is(err, runtimehost.ErrQueueFull) {
+			if action == runtimehost.ActionSendInput {
+				return Accepted{Session: session.Ref()}, domain.ErrQueueFull
+			}
+			return Accepted{Session: session.Ref()}, ErrRuntimeUnavailable
+		}
 		c.retrySubmit(actor, request, action == runtimehost.ActionSendInput)
 		receipt = retryReceipt(request)
 	}

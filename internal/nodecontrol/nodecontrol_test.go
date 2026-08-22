@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -22,6 +23,7 @@ func (s staticState) State() *domain.State { return s.state.Clone() }
 
 type fakeExecutor struct {
 	requests []runtimehost.Request
+	err      error
 }
 
 func (e *fakeExecutor) Submit(
@@ -29,6 +31,9 @@ func (e *fakeExecutor) Submit(
 	request runtimehost.Request,
 ) (runtimehost.Receipt, error) {
 	e.requests = append(e.requests, request)
+	if e.err != nil {
+		return runtimehost.Receipt{}, e.err
+	}
 	return runtimehost.Receipt{
 		OperationID: request.OperationID, Accepted: true, Detail: "operation queued",
 	}, nil
@@ -195,6 +200,47 @@ func TestServerAcceptsOnlyCurrentLeaderCertificate(t *testing.T) {
 	server.handleExecute(recorder, request)
 	if recorder.Code != http.StatusConflict || len(executor.requests) != 1 {
 		t.Fatalf("stale leader status=%d requests=%d", recorder.Code, len(executor.requests))
+	}
+
+	server.leadership = staticLeadership("leader")
+	executor.err = runtimehost.ErrQueueFull
+	request = httptest.NewRequest(http.MethodPost, executePath, bytes.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	request.TLS = &tls.ConnectionState{PeerCertificates: leader.LeafCertificate}
+	recorder = httptest.NewRecorder()
+	server.handleExecute(recorder, request)
+	if recorder.Code != http.StatusTooManyRequests ||
+		recorder.Header().Get(runtimeErrorHeader) != runtimeQueueFull {
+		t.Fatalf("queue-full status=%d header=%q", recorder.Code, recorder.Header().Get(runtimeErrorHeader))
+	}
+}
+
+func TestStateGuardResolvesReplicatedInputQueueLimit(t *testing.T) {
+	state := controlState(t)
+	preferences := state.Preferences[1]
+	preferences.OfflineInputQueueLimit = 20
+	state.Preferences[1] = preferences
+	guard, err := NewStateGuard(staticState{state})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := guard.InputQueueLimit(1); got != 20 {
+		t.Fatalf("owner limit=%d", got)
+	}
+	if got := guard.InputQueueLimit(999); got != 5 {
+		t.Fatalf("unknown actor limit=%d", got)
+	}
+}
+
+func TestRuntimeClientPreservesQueueBackpressureAcrossHTTP(t *testing.T) {
+	response := &http.Response{StatusCode: http.StatusTooManyRequests, Header: make(http.Header)}
+	response.Header.Set(runtimeErrorHeader, runtimeQueueFull)
+	if err := runtimeSubmitResponseError(response); !errors.Is(err, runtimehost.ErrQueueFull) {
+		t.Fatalf("queue-full response error=%v", err)
+	}
+	response.Header.Del(runtimeErrorHeader)
+	if err := runtimeSubmitResponseError(response); errors.Is(err, runtimehost.ErrQueueFull) {
+		t.Fatalf("untyped response became queue full: %v", err)
 	}
 }
 

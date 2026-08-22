@@ -44,6 +44,16 @@ func (c *Controller) retrySubmit(
 				if err == nil {
 					return
 				}
+				if errors.Is(err, runtimehost.ErrQueueFull) {
+					if reportFailure {
+						c.applyResult(
+							actor, request,
+							runtimehost.Result{Accepted: true, Detail: "runtime queue is full"},
+							err,
+						)
+					}
+					return
+				}
 			}
 		}
 	}()

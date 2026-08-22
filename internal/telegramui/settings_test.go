@@ -27,7 +27,7 @@ func TestSettingsCategoryShowsCurrentValuesGolden(t *testing.T) {
 	}
 	assertGoldenGrid(t, screen, `[Auto-archive: Unlimited -> setting@idle_archive]
 [Archive retention: Unlimited -> setting@retention]
-[Offline-node queue: 5 -> setting@offline_queue]
+[Request queue: 5 -> setting@offline_queue]
 [← Back -> settings]`)
 }
 

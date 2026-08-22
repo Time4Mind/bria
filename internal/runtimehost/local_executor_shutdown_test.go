@@ -196,7 +196,8 @@ func TestLocalExecutorSubmitShutdownRaceLeavesNoCreatedPendingOperation(t *testi
 			t.Fatal(err)
 		}
 		if submitErr != nil {
-			if !errors.Is(submitErr, ErrRuntimeShuttingDown) || found {
+			if (!errors.Is(submitErr, ErrRuntimeShuttingDown) &&
+				!errors.Is(submitErr, ErrQueueFull)) || found {
 				t.Fatalf("rejected %s found=%t submit_err=%v", operationID, found, submitErr)
 			}
 			continue

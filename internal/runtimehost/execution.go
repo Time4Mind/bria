@@ -14,6 +14,7 @@ var (
 	ErrStaleRuntime             = errors.New("local runtime generation is stale")
 	ErrOperationIDConflict      = errors.New("operation id was reused for another request")
 	ErrOperationOutcomeUnknown  = errors.New("operation outcome is unknown; refusing to repeat it")
+	ErrQueueFull                = errors.New("local runtime queue is full")
 	ErrTerminalUnavailable      = errors.New("local terminal is unavailable")
 	ErrUnsupportedBackendAction = errors.New("backend does not support this action")
 )

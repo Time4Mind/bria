@@ -37,6 +37,20 @@ func (g *StateGuard) IsMember(nodeID string) bool {
 	return ok && node.Enabled()
 }
 
+// InputQueueLimit exposes the same replicated preference to the owning
+// runtime node. Authorization is still performed separately for every request.
+func (g *StateGuard) InputQueueLimit(actorID int64) int {
+	state := g.reader.State()
+	if state == nil {
+		return domain.DefaultUserPreferences().EffectiveOfflineInputQueueLimit()
+	}
+	preferences, ok := state.Preferences[domain.UserID(actorID)]
+	if !ok {
+		preferences = domain.DefaultUserPreferences()
+	}
+	return preferences.EffectiveOfflineInputQueueLimit()
+}
+
 func (g *StateGuard) AuthorizeCertificate(nodeID string, certificate *x509.Certificate) bool {
 	state := g.reader.State()
 	if state == nil {
@@ -153,3 +167,4 @@ func domainAction(action runtimehost.Action) (domain.SessionAction, bool) {
 var _ Authorizer = (*StateGuard)(nil)
 var _ Membership = (*StateGuard)(nil)
 var _ CertificateMembership = (*StateGuard)(nil)
+var _ runtimehost.InputQueueLimitResolver = (*StateGuard)(nil)

@@ -19,6 +19,8 @@ const (
 	membershipMovePath  = "/v1/cluster/membership/relocate"
 	archivePurgePath    = "/v1/cluster/archive/purge"
 	maxControlPayload   = 64 << 10
+	runtimeErrorHeader  = "X-Bria-Runtime-Error"
+	runtimeQueueFull    = "queue_full"
 )
 
 type ClientConfig struct {

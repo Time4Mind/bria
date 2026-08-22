@@ -9,6 +9,13 @@ func (e *LocalExecutor) existingOperationReceipt(
 ) (Receipt, bool, error) {
 	e.submitMu.Lock()
 	defer e.submitMu.Unlock()
+	return e.existingOperationReceiptLocked(operationID, fingerprint)
+}
+
+func (e *LocalExecutor) existingOperationReceiptLocked(
+	operationID string,
+	fingerprint string,
+) (Receipt, bool, error) {
 	if !e.accepting {
 		return Receipt{}, true, ErrRuntimeShuttingDown
 	}

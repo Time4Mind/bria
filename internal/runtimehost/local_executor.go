@@ -31,6 +31,7 @@ type LocalExecutor struct {
 	inputs        InputResolver
 	now           func() time.Time
 	inputTiming   func(inputDeliveryTiming)
+	queueLimits   InputQueueLimitResolver
 }
 
 type NameGenerator interface {
@@ -59,6 +60,7 @@ func NewLocalExecutor(
 		sessions: make(map[string]*localSession), active: make(map[string]struct{}),
 		accepting: true, shutdownDone: make(chan struct{}),
 		now: time.Now, inputTiming: logInputDeliveryTiming,
+		queueLimits: defaultInputQueueLimitResolver{},
 	}, nil
 }
 
@@ -78,6 +80,15 @@ func (e *LocalExecutor) SetInputResolver(resolver InputResolver) {
 	e.mu.Lock()
 	e.inputs = resolver
 	e.mu.Unlock()
+}
+
+func (e *LocalExecutor) SetInputQueueLimitResolver(resolver InputQueueLimitResolver) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if resolver == nil {
+		resolver = defaultInputQueueLimitResolver{}
+	}
+	e.queueLimits = resolver
 }
 
 // PrepareRecovery replaces an older archived runtime incarnation with an
@@ -254,6 +265,26 @@ func (e *LocalExecutor) Submit(ctx context.Context, request Request) (Receipt, e
 	if !e.accepting {
 		return Receipt{}, ErrRuntimeShuttingDown
 	}
+	if receipt, existing, err := e.existingOperationReceiptLocked(
+		request.OperationID, fingerprint,
+	); err != nil || existing {
+		return receipt, err
+	}
+	if request.Action != ActionCapture {
+		admission, admitted := session.queueAdmission(
+			request.Action, e.inputQueueLimit(request.ActorID),
+		)
+		if !admitted {
+			if !admission.available {
+				return Receipt{}, ErrRuntimeUnavailable
+			}
+			if session.snapshot().Generation != request.ExpectedGeneration {
+				return Receipt{}, ErrStaleRuntime
+			}
+			logRuntimeQueueBackpressure(request, admission)
+			return Receipt{}, ErrQueueFull
+		}
+	}
 	record, created, err := e.store.CreatePending(request.OperationID, fingerprint, request.Action)
 	if err != nil {
 		return Receipt{}, err
@@ -311,6 +342,16 @@ func (e *LocalExecutor) Submit(ctx context.Context, request Request) (Receipt, e
 		OperationID: request.OperationID, Accepted: true,
 		Detail: "operation queued",
 	}, nil
+}
+
+func (e *LocalExecutor) inputQueueLimit(actorID int64) int {
+	e.mu.RLock()
+	resolver := e.queueLimits
+	e.mu.RUnlock()
+	if resolver == nil {
+		return 5
+	}
+	return normalizeInputQueueLimit(resolver.InputQueueLimit(actorID))
 }
 
 func (e *LocalExecutor) LookupResult(

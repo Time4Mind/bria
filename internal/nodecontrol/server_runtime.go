@@ -2,6 +2,7 @@ package nodecontrol
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 
@@ -115,6 +116,11 @@ func (s *Server) handleExecute(writer http.ResponseWriter, request *http.Request
 	}
 	receipt, err := s.service.Submit(request.Context(), command)
 	if err != nil {
+		if errors.Is(err, runtimehost.ErrQueueFull) {
+			writer.Header().Set(runtimeErrorHeader, runtimeQueueFull)
+			http.Error(writer, "runtime queue is full", http.StatusTooManyRequests)
+			return
+		}
 		http.Error(writer, "runtime command rejected", http.StatusConflict)
 		return
 	}

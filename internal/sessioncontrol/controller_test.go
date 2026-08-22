@@ -25,6 +25,7 @@ type runtimeStub struct {
 	requests []runtimehost.Request
 	results  map[string]runtimehost.Result
 	failures int
+	err      error
 }
 
 type clearCommitApplier struct {
@@ -77,6 +78,9 @@ func (r *runtimeStub) Submit(
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.requests = append(r.requests, request)
+	if r.err != nil {
+		return runtimehost.Receipt{}, r.err
+	}
 	if r.failures > 0 {
 		r.failures--
 		return runtimehost.Receipt{}, errors.New("node temporarily unavailable")
@@ -246,6 +250,29 @@ func TestSendInputTimeoutEntersBoundedRetryWithoutBlockingAcceptance(t *testing.
 		time.Sleep(time.Millisecond)
 	}
 	t.Fatal("runtime submission was not retried")
+}
+
+func TestSendInputReturnsQueueBackpressureWithoutRetrying(t *testing.T) {
+	controller, runtime, machine := controllerFixture(t)
+	runtime.mu.Lock()
+	runtime.err = runtimehost.ErrQueueFull
+	runtime.mu.Unlock()
+	accepted, err := controller.SendInput(
+		context.Background(), application.Principal{UserID: 7}, "full-input", "hello",
+	)
+	if !errors.Is(err, domain.ErrQueueFull) || accepted.Session.Key() != "node/session" {
+		t.Fatalf("accepted=%+v err=%v", accepted, err)
+	}
+	time.Sleep(5 * time.Millisecond)
+	runtime.mu.Lock()
+	attempts := len(runtime.requests)
+	runtime.mu.Unlock()
+	if attempts != 1 {
+		t.Fatalf("queue-full submit attempts=%d, want 1", attempts)
+	}
+	if got := machine.State().Sessions["node/session"].RuntimePhase; got != domain.RuntimeIdle {
+		t.Fatalf("phase after rejected input=%q", got)
+	}
 }
 
 func TestCapturePaneUsesReadOnlyRuntimeFIFO(t *testing.T) {
