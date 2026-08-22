@@ -235,7 +235,7 @@ func TestVoicePendingWithoutTranscriptStaysBeforeBackgroundPanel(t *testing.T) {
 	}
 }
 
-func TestDeliveredVoiceAcknowledgementsSurviveHandlerRestartUntilCanonicalTranscript(t *testing.T) {
+func TestDeliveredVoiceAcknowledgementsRetireAfterHandlerRestartWithoutDistinctTranscript(t *testing.T) {
 	fixture := newFixture(t)
 	actor := application.Principal{UserID: 7}
 	ref := domain.SessionRef{NodeID: "allowed", SessionID: "live"}
@@ -281,21 +281,9 @@ func TestDeliveredVoiceAcknowledgementsSurviveHandlerRestartUntilCanonicalTransc
 	}
 	selectSessionForVoiceTest(t, handler, fixture, ref, 501)
 	latest := latestVoiceTestScreen(t, fixture)
-	if count := strings.Count(latest, "recognized and sent"); count != 2 {
-		t.Fatalf("durable voice acknowledgements after restart=%d screen=%q", count, latest)
-	}
-	controls.appendTranscriptEvent(transcript.Event{
-		Kind: transcript.EventUserText, Text: "first recognized voice",
-	})
-	controls.appendTranscriptEvent(transcript.Event{
-		Kind: transcript.EventUserText, Text: "second recognized voice",
-	})
-	selectSessionForVoiceTest(t, handler, fixture, ref, 502)
-	latest = latestVoiceTestScreen(t, fixture)
 	if strings.Contains(latest, "recognized and sent") ||
-		!strings.Contains(latest, "first recognized voice") ||
-		!strings.Contains(latest, "second recognized voice") {
-		t.Fatalf("canonical transcript did not replace durable acknowledgements: %q", latest)
+		!strings.Contains(latest, baselineEvent.Text) {
+		t.Fatalf("delivered voice placeholders survived restart: %q", latest)
 	}
 }
 

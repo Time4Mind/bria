@@ -49,6 +49,11 @@ type voiceConfirmation struct {
 	at          time.Time
 }
 
+type voiceRetirement struct {
+	operationID string
+	reason      string
+}
+
 func (h *Handler) captureVoiceBaseline(
 	ctx context.Context,
 	actor application.Principal,
@@ -177,10 +182,11 @@ func (h *Handler) withPendingVoiceRows(
 		}
 	}
 	remaining := queue[:0]
-	confirmedOperations := make([]string, 0)
+	retiredOperations := make([]voiceRetirement, 0)
 	for _, pending := range queue {
-		resolved := false
-		if pending.baselineKnown {
+		resolved := pending.status == domain.OperationSucceeded
+		reason := "delivered"
+		if !resolved && pending.baselineKnown {
 			after := transcriptUserEventCount(events) - pending.baselineCount
 			found := after >= 0
 			if pending.baselineEvent != "" {
@@ -190,17 +196,29 @@ func (h *Handler) withPendingVoiceRows(
 			if !found {
 				resolved = transcriptUserEventsSince(events, pending.acceptedAt) >= pending.ordinal
 			}
+			if resolved {
+				reason = "transcript"
+			}
 		}
 		if !resolved && !pending.baselineKnown {
 			resolved = transcriptUserEventsSince(events, pending.acceptedAt) >= pending.ordinal
+			if resolved {
+				reason = "transcript"
+			}
 		}
-		if !pending.baselineKnown && !fallbackAt.IsZero() {
+		if !resolved && !pending.baselineKnown && !fallbackAt.IsZero() {
 			pending.ordinal = len(remaining) + 1
 			resolved = transcriptUserEventsSince(events, fallbackAt) >= pending.ordinal
+			if resolved {
+				reason = "transcript"
+			}
 		}
 		if resolved || now.Sub(pending.acceptedAt) >= voicePendingLifetime {
 			if resolved && h.rememberVoiceConfirmationLocked(key, pending.operationID, now) {
-				confirmedOperations = append(confirmedOperations, pending.operationID)
+				retiredOperations = append(retiredOperations, voiceRetirement{
+					operationID: pending.operationID,
+					reason:      reason,
+				})
 			}
 			continue
 		}
@@ -213,10 +231,10 @@ func (h *Handler) withPendingVoiceRows(
 	}
 	pendingRows := append([]voicePending(nil), remaining...)
 	h.voiceMu.Unlock()
-	for _, operationID := range confirmedOperations {
+	for _, retired := range retiredOperations {
 		processlog.Detailf(
-			"bria voice_input: stage=transcript ref=%q operation=%q outcome=confirmed",
-			ref.Key(), operationID,
+			"bria voice_input: stage=placeholder ref=%q operation=%q outcome=retired reason=%s",
+			ref.Key(), retired.operationID, retired.reason,
 		)
 	}
 
