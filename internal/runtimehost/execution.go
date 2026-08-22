@@ -10,6 +10,7 @@ import (
 
 var (
 	ErrRuntimeUnavailable       = errors.New("local runtime is unavailable")
+	ErrRuntimeShuttingDown      = errors.New("local runtime is shutting down")
 	ErrStaleRuntime             = errors.New("local runtime generation is stale")
 	ErrOperationIDConflict      = errors.New("operation id was reused for another request")
 	ErrOperationOutcomeUnknown  = errors.New("operation outcome is unknown; refusing to repeat it")

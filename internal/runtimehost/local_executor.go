@@ -15,16 +15,22 @@ type LocalExecutor struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	mu          sync.RWMutex
-	submitMu    sync.Mutex
-	sessions    map[string]*localSession
-	active      map[string]struct{}
-	workers     sync.WaitGroup
-	namer       NameGenerator
-	archiver    ArchiveWriter
-	inputs      InputResolver
-	now         func() time.Time
-	inputTiming func(inputDeliveryTiming)
+	mu            sync.RWMutex
+	submitMu      sync.Mutex
+	sessions      map[string]*localSession
+	active        map[string]struct{}
+	accepting     bool
+	workers       sync.WaitGroup
+	shutdownOnce  sync.Once
+	shutdownDone  chan struct{}
+	shutdownErr   error
+	completionMu  sync.Mutex
+	completionErr error
+	namer         NameGenerator
+	archiver      ArchiveWriter
+	inputs        InputResolver
+	now           func() time.Time
+	inputTiming   func(inputDeliveryTiming)
 }
 
 type NameGenerator interface {
@@ -51,6 +57,7 @@ func NewLocalExecutor(
 	return &LocalExecutor{
 		nodeID: nodeID, driver: driver, store: store, ctx: ctx, cancel: cancel,
 		sessions: make(map[string]*localSession), active: make(map[string]struct{}),
+		accepting: true, shutdownDone: make(chan struct{}),
 		now: time.Now, inputTiming: logInputDeliveryTiming,
 	}, nil
 }
@@ -83,6 +90,9 @@ func (e *LocalExecutor) PrepareRecovery(binding RuntimeBinding) error {
 	key := runtimeKey(binding.NodeID, binding.SessionID)
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	if e.ctx.Err() != nil {
+		return ErrRuntimeShuttingDown
+	}
 	current := e.sessions[key]
 	if current != nil {
 		currentBinding := current.snapshot()
@@ -110,6 +120,9 @@ func (e *LocalExecutor) Register(binding RuntimeBinding) error {
 	key := runtimeKey(binding.NodeID, binding.SessionID)
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	if e.ctx.Err() != nil {
+		return ErrRuntimeShuttingDown
+	}
 	current := e.sessions[key]
 	if current != nil {
 		if current.attach(binding) {
@@ -135,6 +148,9 @@ func (e *LocalExecutor) Prepare(binding RuntimeBinding) error {
 	key := runtimeKey(binding.NodeID, binding.SessionID)
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	if e.ctx.Err() != nil {
+		return ErrRuntimeShuttingDown
+	}
 	current := e.sessions[key]
 	if current != nil {
 		if current.matchesIdentity(binding) {
@@ -171,7 +187,9 @@ func (e *LocalExecutor) completeAbandoned(requests []pendingRequest, failure err
 		request := queued.request
 		fingerprint := requestFingerprint(request)
 		result := Result{Accepted: true, Detail: failure.Error()}
-		_ = e.store.Complete(request.OperationID, fingerprint, result, failure)
+		e.recordCompletionError(
+			e.store.Complete(request.OperationID, fingerprint, result, failure),
+		)
 		e.submitMu.Lock()
 		delete(e.active, request.OperationID)
 		e.submitMu.Unlock()
@@ -218,6 +236,9 @@ func (e *LocalExecutor) Submit(ctx context.Context, request Request) (Receipt, e
 	if err := request.validate(); err != nil {
 		return Receipt{}, err
 	}
+	if e.ctx.Err() != nil {
+		return Receipt{}, ErrRuntimeShuttingDown
+	}
 	submittedAt := e.now()
 	fingerprint := requestFingerprint(request)
 	if receipt, existing, err := e.existingOperationReceipt(request.OperationID, fingerprint); err != nil || existing {
@@ -230,6 +251,9 @@ func (e *LocalExecutor) Submit(ctx context.Context, request Request) (Receipt, e
 
 	e.submitMu.Lock()
 	defer e.submitMu.Unlock()
+	if !e.accepting {
+		return Receipt{}, ErrRuntimeShuttingDown
+	}
 	record, created, err := e.store.CreatePending(request.OperationID, fingerprint, request.Action)
 	if err != nil {
 		return Receipt{}, err
@@ -309,7 +333,7 @@ func (e *LocalExecutor) LookupResult(
 
 func storedOperationError(detail string) error {
 	for _, known := range []error{
-		ErrRuntimeUnavailable, ErrStaleRuntime, ErrOperationIDConflict,
+		ErrRuntimeUnavailable, ErrRuntimeShuttingDown, ErrStaleRuntime, ErrOperationIDConflict,
 		ErrOperationOutcomeUnknown, ErrTerminalUnavailable, ErrUnsupportedBackendAction,
 	} {
 		if detail == known.Error() {
@@ -319,31 +343,71 @@ func storedOperationError(detail string) error {
 	return errors.New(detail)
 }
 
+// BeginShutdown atomically closes admission and starts draining operations that
+// were durably accepted but never began execution. It returns immediately so
+// the control server can finish its own HTTP shutdown in parallel.
+func (e *LocalExecutor) BeginShutdown() {
+	e.shutdownOnce.Do(func() {
+		e.submitMu.Lock()
+		e.accepting = false
+		e.cancel()
+		e.submitMu.Unlock()
+
+		pending := make([]pendingRequest, 0)
+		e.mu.Lock()
+		for key, session := range e.sessions {
+			delete(e.sessions, key)
+			pending = append(pending, session.stopAndDrain()...)
+		}
+		e.mu.Unlock()
+
+		go func() {
+			e.completeAbandoned(pending, ErrRuntimeShuttingDown)
+			e.workers.Wait()
+			e.completionMu.Lock()
+			e.shutdownErr = e.completionErr
+			e.completionMu.Unlock()
+			close(e.shutdownDone)
+		}()
+	})
+}
+
 func (e *LocalExecutor) Shutdown(ctx context.Context) error {
-	e.cancel()
-	e.mu.RLock()
-	for _, session := range e.sessions {
-		session.mu.Lock()
-		session.wake.Broadcast()
-		session.mu.Unlock()
-	}
-	e.mu.RUnlock()
-	done := make(chan struct{})
-	go func() {
-		e.workers.Wait()
-		close(done)
-	}()
+	e.BeginShutdown()
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
-	case <-done:
-		return nil
+	case <-e.shutdownDone:
+		return e.shutdownErr
 	}
+}
+
+// ShutdownComplete reports whether all runtime workers and terminal queue
+// writes have finished. The Bolt store must not be closed before it returns
+// true.
+func (e *LocalExecutor) ShutdownComplete() bool {
+	select {
+	case <-e.shutdownDone:
+		return true
+	default:
+		return false
+	}
+}
+
+func (e *LocalExecutor) recordCompletionError(err error) {
+	if err == nil {
+		return
+	}
+	e.completionMu.Lock()
+	if e.completionErr == nil {
+		e.completionErr = err
+	}
+	e.completionMu.Unlock()
 }
 
 func (e *LocalExecutor) resolveSession(request Request) (*localSession, error) {
 	if e.ctx.Err() != nil {
-		return nil, ErrRuntimeUnavailable
+		return nil, ErrRuntimeShuttingDown
 	}
 	if request.NodeID != e.nodeID {
 		return nil, ErrRuntimeUnavailable

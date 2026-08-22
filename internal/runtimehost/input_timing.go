@@ -1,6 +1,7 @@
 package runtimehost
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"time"
@@ -90,6 +91,9 @@ func inputOutcome(result Result, executionErr error, failureStage string) string
 	}
 	if errors.Is(executionErr, ErrStaleRuntime) {
 		return "stale_generation"
+	}
+	if errors.Is(executionErr, ErrRuntimeShuttingDown) || errors.Is(executionErr, context.Canceled) {
+		return "cancelled"
 	}
 	if errors.Is(executionErr, ErrRuntimeUnavailable) {
 		return "runtime_unavailable"

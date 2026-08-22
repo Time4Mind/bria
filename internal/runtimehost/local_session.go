@@ -118,7 +118,9 @@ func (s *localSession) run() {
 			s.advanceGeneration(request.ExpectedGeneration)
 		}
 		fingerprint := requestFingerprint(request)
-		_ = s.executor.store.Complete(request.OperationID, fingerprint, result, executionErr)
+		s.executor.recordCompletionError(
+			s.executor.store.Complete(request.OperationID, fingerprint, result, executionErr),
+		)
 		s.executor.submitMu.Lock()
 		delete(s.executor.active, request.OperationID)
 		s.executor.submitMu.Unlock()

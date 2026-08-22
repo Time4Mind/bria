@@ -24,11 +24,15 @@ func (e *LocalExecutor) executeOnceTimed(
 	binding RuntimeBinding,
 ) (Result, inputExecutionTiming, error) {
 	timing := inputExecutionTiming{}
-	if current, err := e.resolveSession(request); err != nil || current.snapshot() != binding {
+	current, err := e.resolveSession(request)
+	if err != nil {
+		return Result{Accepted: true, Detail: "runtime operation unavailable"}, timing, err
+	}
+	if current.snapshot() != binding {
 		return Result{Accepted: true, Detail: "runtime target became stale"}, timing, ErrStaleRuntime
 	}
 	result := Result{Accepted: true, Detail: "runtime operation accepted"}
-	var err error
+	err = nil
 	switch request.Action {
 	case ActionSendInput:
 		text := request.Text

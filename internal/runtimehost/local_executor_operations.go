@@ -9,6 +9,9 @@ func (e *LocalExecutor) existingOperationReceipt(
 ) (Receipt, bool, error) {
 	e.submitMu.Lock()
 	defer e.submitMu.Unlock()
+	if !e.accepting {
+		return Receipt{}, true, ErrRuntimeShuttingDown
+	}
 	record, found, err := e.store.Lookup(operationID)
 	if err != nil || !found {
 		return Receipt{}, false, err

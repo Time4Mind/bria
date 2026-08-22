@@ -25,10 +25,11 @@ type fakeRuntimeDriver struct {
 	releaseClose chan struct{}
 	pane         []byte
 	err          error
+	ignoreCancel bool
 }
 
 func (d *fakeRuntimeDriver) SendLiteral(
-	_ context.Context,
+	ctx context.Context,
 	target string,
 	operationID string,
 	text string,
@@ -37,7 +38,15 @@ func (d *fakeRuntimeDriver) SendLiteral(
 	if d.firstInput != nil {
 		select {
 		case d.firstInput <- struct{}{}:
-			<-d.release
+			if d.ignoreCancel {
+				<-d.release
+			} else {
+				select {
+				case <-d.release:
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+			}
 		default:
 		}
 	}
