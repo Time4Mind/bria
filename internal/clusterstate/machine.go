@@ -260,11 +260,12 @@ func apply(state *domain.State, command Command) (json.RawMessage, error) {
 	case CommandPublishSessionRuntime:
 		var payload PublishSessionRuntime
 		return nil, decodeAnd(command.Payload, command.StrictPayload, &payload, func() error {
-			return state.PublishSessionRuntime(
+			return state.PublishSessionRuntimeWithIssue(
 				payload.Session,
 				payload.Generation,
 				payload.Phase,
 				payload.Result,
+				payload.Issue,
 				command.IssuedAt,
 			)
 		})

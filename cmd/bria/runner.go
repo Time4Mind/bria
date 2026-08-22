@@ -6,10 +6,13 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
+	"github.com/Time4Mind/bria/internal/providerbinding"
 	"github.com/Time4Mind/bria/internal/runnerhost"
 	"github.com/Time4Mind/bria/internal/runtimehost"
 )
@@ -21,13 +24,54 @@ func runRunner(arguments []string) error {
 	flags := flag.NewFlagSet("runner serve", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	socket := flags.String("socket", "", "Unix socket shared with the Bria control process")
+	bindingStorePath := flags.String("binding-store", "", "runner-owned provider binding store")
+	hookBinary := flags.String("hook-binary", "", "stable Bria binary used by provider hooks")
 	if err := flags.Parse(arguments[1:]); err != nil {
 		return err
 	}
-	if *socket == "" || flags.NArg() != 0 {
-		return errors.New("usage: bria runner serve --socket PATH")
+	if *socket == "" || flags.NArg() != 0 || (*bindingStorePath == "") != (*hookBinary == "") {
+		return errors.New("usage: bria runner serve --socket PATH [--binding-store PATH --hook-binary PATH]")
 	}
-	server, err := runnerhost.NewServer(runtimehost.ExecCommandRunner{})
+	// Releases before runner-owned bindings supplied only --socket. Derive the
+	// same stable paths so a binary-only cluster update can re-exec the existing
+	// service unit safely; the explicit flags remain the deployment contract for
+	// fresh installs.
+	if *bindingStorePath == "" {
+		home, homeErr := os.UserHomeDir()
+		if homeErr != nil {
+			return homeErr
+		}
+		activation, activationErr := resolveActivationPath()
+		if activationErr != nil {
+			return activationErr
+		}
+		*bindingStorePath = filepath.Join(home, ".bria", "provider-bindings.json")
+		*hookBinary = activation
+	}
+	var bindings *providerbinding.Store
+	var err error
+	if *bindingStorePath != "" {
+		bindings, err = providerbinding.NewStore(*bindingStorePath)
+		if err != nil {
+			return err
+		}
+		home, homeErr := os.UserHomeDir()
+		if homeErr != nil {
+			return homeErr
+		}
+		report, hookErr := providerbinding.ReconcileRunnerHooks(
+			*hookBinary, *bindingStorePath,
+			filepath.Join(home, ".codex", "hooks.json"),
+			filepath.Join(home, ".claude", "settings.json"),
+		)
+		if hookErr != nil {
+			return fmt.Errorf("reconcile isolated provider hooks: %w", hookErr)
+		}
+		if report.Changed {
+			fmt.Printf("bria runner provider hooks reconciled migrations=%d\n", report.Migrations)
+		}
+	}
+	server, err := runnerhost.NewServerWithBindings(runtimehost.ExecCommandRunner{}, bindings)
 	if err != nil {
 		return err
 	}

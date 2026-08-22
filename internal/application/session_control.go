@@ -87,6 +87,17 @@ func (s *Service) PublishSessionRuntime(
 	})
 }
 
+func (s *Service) PublishSessionRuntimeIssue(
+	ctx context.Context,
+	session domain.Session,
+	issue string,
+) error {
+	return s.apply(ctx, clusterstate.CommandPublishSessionRuntime, clusterstate.PublishSessionRuntime{
+		Session: session.Ref(), Generation: session.RuntimeGeneration,
+		Phase: domain.RuntimeDegraded, Issue: issue,
+	})
+}
+
 func (s *Service) RecordSessionActivity(
 	ctx context.Context,
 	actor Principal,

@@ -110,12 +110,17 @@ func (s *paneRefreshState) rememberPaneFileID(
 }
 
 type voicePendingState struct {
-	voiceMu       sync.Mutex
-	pendingVoices map[voicePendingKey][]voicePending
+	voiceMu             sync.Mutex
+	pendingVoices       map[voicePendingKey][]voicePending
+	confirmedVoices     map[voicePendingKey]map[string]time.Time
+	confirmedVoiceOrder []voiceConfirmation
 }
 
 func newVoicePendingState() voicePendingState {
-	return voicePendingState{pendingVoices: make(map[voicePendingKey][]voicePending)}
+	return voicePendingState{
+		pendingVoices:   make(map[voicePendingKey][]voicePending),
+		confirmedVoices: make(map[voicePendingKey]map[string]time.Time),
+	}
 }
 
 type cardRuntimeState struct {

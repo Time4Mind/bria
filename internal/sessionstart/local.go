@@ -16,12 +16,16 @@ import (
 
 type StateReader interface{ State() *domain.State }
 
+type BindingStore interface {
+	Lookup(domain.SessionRef, string) (providerbinding.Record, bool, error)
+}
+
 type Local struct {
 	nodeID      domain.NodeID
 	state       StateReader
 	browser     *workspace.Browser
 	transcripts *transcript.Reader
-	bindings    *providerbinding.Store
+	bindings    BindingStore
 	runtime     *runtimehost.TmuxRecoveryRuntime
 	executor    *runtimehost.LocalExecutor
 }
@@ -31,7 +35,7 @@ func NewLocal(
 	state StateReader,
 	browser *workspace.Browser,
 	transcripts *transcript.Reader,
-	bindings *providerbinding.Store,
+	bindings BindingStore,
 	runtime *runtimehost.TmuxRecoveryRuntime,
 	executor *runtimehost.LocalExecutor,
 ) (*Local, error) {

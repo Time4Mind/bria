@@ -154,6 +154,22 @@ func TestFailedStopKeepsStopInsteadOfShowingClose(t *testing.T) {
 	}
 }
 
+func TestProviderHookFailureIsVisibleOnSessionCard(t *testing.T) {
+	projector, state, _ := projectorFixture(t)
+	ref := domain.SessionRef{NodeID: "alpha", SessionID: "a-new"}
+	session := state.Sessions[ref.Key()]
+	session.RuntimePhase = domain.RuntimeDegraded
+	session.RuntimeIssue = domain.RuntimeIssueProviderHookUnavailable
+	state.Sessions[ref.Key()] = session
+	screen, err := projector.SessionCard(application.Principal{UserID: 2}, ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(screen.Text, "lifecycle hook is unavailable") {
+		t.Fatalf("provider integration failure is not visible: %q", screen.Text)
+	}
+}
+
 func TestFailedInputNoticeFollowsTranscriptOnLatestPage(t *testing.T) {
 	projector, state, _ := projectorFixture(t)
 	ref := domain.SessionRef{NodeID: "alpha", SessionID: "a-new"}

@@ -84,6 +84,7 @@ func runNode(arguments []string) error {
 		defer processLogs.Close()
 	}
 	logNodeBuildIdentity(build)
+	reconcileTrustedProviderHooks(nodeConfig, absoluteConfigPath)
 	bootstrapCtx, cancelBootstrap := context.WithTimeout(context.Background(), 10*time.Minute)
 	bootstrapBinary, err := bootstrapNodeCompatibility(
 		bootstrapCtx, nodeConfig, absoluteConfigPath,
@@ -93,7 +94,7 @@ func runNode(arguments []string) error {
 		return err
 	}
 	if bootstrapBinary != "" {
-		return &processReplacement{binary: bootstrapBinary}
+		return &processReplacement{binary: bootstrapBinary, activation: providerHookActivationPath()}
 	}
 	backendRuntime, err := openBackendRuntime(context.Background(), nodeConfig)
 	if err != nil {

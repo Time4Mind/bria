@@ -33,6 +33,7 @@ func (s *State) ReattachSessionRuntime(
 	}
 	session.State = SessionLive
 	session.RuntimePhase = RuntimeIdle
+	session.RuntimeIssue = ""
 	session.InteractivePrompt = nil
 	session.ResumePending = false
 	session.ArchiveDescription = nil

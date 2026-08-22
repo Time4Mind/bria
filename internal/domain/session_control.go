@@ -14,6 +14,17 @@ func (s *State) PublishSessionRuntime(
 	result *SessionOperationResult,
 	at time.Time,
 ) error {
+	return s.PublishSessionRuntimeWithIssue(ref, generation, phase, result, "", at)
+}
+
+func (s *State) PublishSessionRuntimeWithIssue(
+	ref SessionRef,
+	generation uint64,
+	phase RuntimePhase,
+	result *SessionOperationResult,
+	issue string,
+	at time.Time,
+) error {
 	session, err := s.mutableLiveSession(ref)
 	if err != nil {
 		return err
@@ -24,6 +35,9 @@ func (s *State) PublishSessionRuntime(
 	if !validRuntimePhase(phase) {
 		return fmt.Errorf("%w: unsupported runtime phase %q", ErrInvalidState, phase)
 	}
+	if issue != "" && (phase != RuntimeDegraded || issue != RuntimeIssueProviderHookUnavailable) {
+		return fmt.Errorf("%w: unsupported runtime issue", ErrInvalidState)
+	}
 	previousPhase := session.RuntimePhase
 	if result != nil {
 		if err := validateOperationResult(*result); err != nil {
@@ -32,11 +46,19 @@ func (s *State) PublishSessionRuntime(
 		copyResult := *result
 		copyResult.At = at
 		session.LastOperation = &copyResult
+		updateVoiceAcknowledgement(&session, copyResult, at)
 	}
 	if session.Revision == math.MaxUint64 {
 		return fmt.Errorf("%w: session revision exhausted", ErrInvalidState)
 	}
 	session.RuntimePhase = phase
+	// A regular runtime result must not accidentally hide a previously
+	// diagnosed lifecycle-integration failure. The issue is cleared only by a
+	// real phase transition (for example, the late provider binding moves the
+	// session back to idle) or replaced by an explicit issue report.
+	if issue != "" || phase != RuntimeDegraded || session.RuntimeIssue == "" {
+		session.RuntimeIssue = issue
+	}
 	if phase != RuntimeWaitingInput {
 		session.InteractivePrompt = nil
 	}
@@ -81,6 +103,7 @@ func (s *State) ClearSession(
 	session.ProviderBindingSince = at
 	session.RuntimeGeneration++
 	session.RuntimePhase = RuntimeIdle
+	session.RuntimeIssue = ""
 	session.InteractivePrompt = nil
 	session.ResumePending = false
 	session.LastEventAt = at
@@ -91,12 +114,44 @@ func (s *State) ClearSession(
 		Status:      OperationSucceeded,
 		At:          at,
 	}
+	session.VoiceAcknowledgements = nil
 	session.UserRequestSeen = false
 	session.UserRequestTracked = true
 	s.Sessions[ref.Key()] = session
 	s.clearDeferredInputs(ref)
 	s.clearBackgroundSession(ref)
 	return nil
+}
+
+const maxVoiceAcknowledgements = 16
+
+func updateVoiceAcknowledgement(session *Session, result SessionOperationResult, at time.Time) {
+	if result.InputKind != "voice" {
+		return
+	}
+	if result.TranscriptOrdinal == 0 {
+		result.TranscriptOrdinal = 1
+	}
+	for index := range session.VoiceAcknowledgements {
+		ack := &session.VoiceAcknowledgements[index]
+		if ack.OperationID != result.OperationID {
+			continue
+		}
+		ack.Status = result.Status
+		ack.UpdatedAt = at
+		return
+	}
+	session.VoiceAcknowledgements = append(session.VoiceAcknowledgements, VoiceAcknowledgement{
+		OperationID: result.OperationID, Status: result.Status, AcceptedAt: at, UpdatedAt: at,
+		BaselineCount: result.TranscriptBaselineCount,
+		BaselineKnown: result.TranscriptBaselineKnown, Ordinal: result.TranscriptOrdinal,
+	})
+	if len(session.VoiceAcknowledgements) > maxVoiceAcknowledgements {
+		session.VoiceAcknowledgements = append(
+			[]VoiceAcknowledgement(nil),
+			session.VoiceAcknowledgements[len(session.VoiceAcknowledgements)-maxVoiceAcknowledgements:]...,
+		)
+	}
 }
 
 func (s *State) RenameSession(
@@ -254,6 +309,7 @@ func (s *State) RestoreSession(
 	}
 	session.State = SessionLive
 	session.RuntimePhase = RuntimeDegraded
+	session.RuntimeIssue = ""
 	session.InteractivePrompt = nil
 	session.ArchiveDescription = nil
 	session.DescriptionVersion = 0

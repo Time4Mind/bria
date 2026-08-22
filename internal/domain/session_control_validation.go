@@ -49,6 +49,14 @@ func validateOperationResult(result SessionOperationResult) error {
 	if len(result.Detail) > 512 {
 		return fmt.Errorf("%w: operation detail is too long", ErrInvalidState)
 	}
+	if result.InputKind != "" && (result.Action != ActionSendInput || result.InputKind != "voice") {
+		return fmt.Errorf("%w: unsupported operation input kind", ErrInvalidState)
+	}
+	if result.InputKind == "voice" && (result.TranscriptOrdinal < 0 || result.TranscriptOrdinal > 16 ||
+		result.TranscriptBaselineCount < 0 || result.TranscriptBaselineCount > 400 ||
+		(!result.TranscriptBaselineKnown && result.TranscriptBaselineCount != 0)) {
+		return fmt.Errorf("%w: invalid voice transcript acknowledgement", ErrInvalidState)
+	}
 	return nil
 }
 

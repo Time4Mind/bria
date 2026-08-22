@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"fmt"
 	"net"
 	"path/filepath"
@@ -18,11 +19,19 @@ import (
 	"github.com/Time4Mind/bria/internal/platform"
 	"github.com/Time4Mind/bria/internal/providerbinding"
 	"github.com/Time4Mind/bria/internal/providerstop"
+	"github.com/Time4Mind/bria/internal/runnerhost"
 	"github.com/Time4Mind/bria/internal/runtimehost"
 	"github.com/Time4Mind/bria/internal/sessiondescription"
 	"github.com/Time4Mind/bria/internal/sessionname"
+	"github.com/Time4Mind/bria/internal/sessionstart"
 	"github.com/Time4Mind/bria/internal/transcript"
 )
+
+type localProviderBindingStore interface {
+	sessionstart.BindingStore
+	providerBindingStore
+	archiveBindingStore
+}
 
 func startNodeRuntimeControl(
 	ctx context.Context,
@@ -144,11 +153,24 @@ func startNodeRuntimeControl(
 	}
 	transcriptReader.StartCodexIndex(ctx)
 	transcriptReader.Warm(ctx, localTranscriptWarmRequests(state, nodeConfig.NodeID), 3)
-	bindingStore, err := providerbinding.NewStore(
-		filepath.Join(nodeConfig.DataDir, "provider-bindings.json"),
-	)
-	if err != nil {
-		return closeFailedRuntime(executor, store, err)
+	var bindingStore localProviderBindingStore
+	if nodeConfig.IsolatedRunner() {
+		remote, ok := backendRuntime.runner.(*runnerhost.Client)
+		if !ok {
+			return closeFailedRuntime(executor, store, errors.New("isolated provider binding client is unavailable"))
+		}
+		if _, bindingErr := remote.Snapshot(); bindingErr != nil {
+			return closeFailedRuntime(executor, store, errors.New("isolated provider binding service is unavailable"))
+		}
+		bindingStore = remote
+	} else {
+		localBindings, bindingErr := providerbinding.NewStore(
+			filepath.Join(nodeConfig.DataDir, "provider-bindings.json"),
+		)
+		if bindingErr != nil {
+			return closeFailedRuntime(executor, store, bindingErr)
+		}
+		bindingStore = localBindings
 	}
 	localStarts, startRouter, err := newLocalSessionStart(
 		node, nodeConfig, home, transcriptReader, bindingStore, executor, client,

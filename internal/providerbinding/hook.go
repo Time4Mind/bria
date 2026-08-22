@@ -45,9 +45,14 @@ type codexMeta struct {
 
 type DisplayFunc func(context.Context, string) (string, error)
 
+type HookStore interface {
+	LookupRef(domain.SessionRef) (Record, bool, error)
+	Put(Record) error
+}
+
 func Capture(
 	ctx context.Context,
-	store *Store,
+	store HookStore,
 	input io.Reader,
 	getenv func(string) string,
 	display DisplayFunc,
@@ -59,7 +64,7 @@ func Capture(
 
 func CaptureEvent(
 	ctx context.Context,
-	store *Store,
+	store HookStore,
 	input io.Reader,
 	getenv func(string) string,
 	display DisplayFunc,

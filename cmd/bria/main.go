@@ -74,7 +74,7 @@ func main() {
 		if err := runNode(os.Args[2:]); err != nil {
 			var replacement *processReplacement
 			if errors.As(err, &replacement) {
-				if replaceErr := replaceProcess(replacement.binary); replaceErr == nil {
+				if replaceErr := replaceProcess(replacement.binary, replacement.activation); replaceErr == nil {
 					return
 				} else {
 					err = fmt.Errorf("activate update: %w", replaceErr)
@@ -103,7 +103,10 @@ func main() {
 	}
 }
 
-type processReplacement struct{ binary string }
+type processReplacement struct {
+	binary     string
+	activation string
+}
 
 func (r *processReplacement) Error() string { return "restart into staged Bria release" }
 

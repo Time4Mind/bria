@@ -7,7 +7,6 @@ import (
 	"github.com/Time4Mind/bria/internal/consensus"
 	"github.com/Time4Mind/bria/internal/domain"
 	"github.com/Time4Mind/bria/internal/nodecontrol"
-	"github.com/Time4Mind/bria/internal/providerbinding"
 	"github.com/Time4Mind/bria/internal/runtimehost"
 	"github.com/Time4Mind/bria/internal/sessionstart"
 	"github.com/Time4Mind/bria/internal/transcript"
@@ -19,7 +18,7 @@ func newLocalSessionStart(
 	nodeConfig config.Config,
 	home string,
 	reader *transcript.Reader,
-	bindings *providerbinding.Store,
+	bindings sessionstart.BindingStore,
 	executor *runtimehost.LocalExecutor,
 	client *nodecontrol.Client,
 	runner runtimehost.CommandRunner,

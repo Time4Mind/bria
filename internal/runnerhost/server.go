@@ -13,20 +13,26 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Time4Mind/bria/internal/providerbinding"
 	"github.com/Time4Mind/bria/internal/runtimehost"
 )
 
 type Server struct {
-	runner runtimehost.JSONRPCCommandRunner
-	http   *http.Server
-	auth   *authStore
+	runner   runtimehost.JSONRPCCommandRunner
+	http     *http.Server
+	auth     *authStore
+	bindings *providerbinding.Store
 }
 
 func NewServer(runner runtimehost.JSONRPCCommandRunner) (*Server, error) {
+	return NewServerWithBindings(runner, nil)
+}
+
+func NewServerWithBindings(runner runtimehost.JSONRPCCommandRunner, bindings *providerbinding.Store) (*Server, error) {
 	if runner == nil {
 		return nil, errors.New("runner is required")
 	}
-	server := &Server{runner: runner, auth: newAuthStore()}
+	server := &Server{runner: runner, auth: newAuthStore(), bindings: bindings}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/inspect", server.inspect)
 	mux.HandleFunc("/v1/look-path", server.lookPath)
@@ -35,8 +41,83 @@ func NewServer(runner runtimehost.JSONRPCCommandRunner) (*Server, error) {
 	mux.HandleFunc("/v1/auth/submit", server.authSubmit)
 	mux.HandleFunc("/v1/auth/status", server.authStatus)
 	mux.HandleFunc("/v1/auth/cancel", server.authCancel)
+	mux.HandleFunc("/v1/provider-binding/lookup", server.bindingLookup)
+	mux.HandleFunc("/v1/provider-binding/snapshot", server.bindingSnapshot)
+	mux.HandleFunc("/v1/provider-binding/sweep", server.bindingSweep)
+	mux.HandleFunc("/v1/provider-binding/delete", server.bindingDelete)
 	server.http = &http.Server{Handler: mux, ReadHeaderTimeout: 3 * time.Second}
 	return server, nil
+}
+
+func (s *Server) bindingLookup(writer http.ResponseWriter, request *http.Request) {
+	var input bindingLookupRequest
+	if !decodeRequest(writer, request, &input) {
+		return
+	}
+	if s.bindings == nil {
+		http.Error(writer, "provider bindings unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	var record providerbinding.Record
+	var found bool
+	var err error
+	if input.Workdir == "" {
+		record, found, err = s.bindings.LookupRef(input.Ref)
+	} else {
+		record, found, err = s.bindings.Lookup(input.Ref, input.Workdir)
+	}
+	response := bindingLookupResponse{Record: record, Found: found}
+	if err != nil {
+		response.Error = err.Error()
+	}
+	writeJSON(writer, response)
+}
+
+func (s *Server) bindingSnapshot(writer http.ResponseWriter, request *http.Request) {
+	if request.Method != http.MethodGet {
+		http.Error(writer, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.bindings == nil {
+		http.Error(writer, "provider bindings unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	records, err := s.bindings.Snapshot()
+	response := bindingSnapshotResponse{Records: records}
+	if err != nil {
+		response.Error = err.Error()
+	}
+	writeJSON(writer, response)
+}
+
+func (s *Server) bindingSweep(writer http.ResponseWriter, request *http.Request) {
+	var input bindingSweepRequest
+	if !decodeRequest(writer, request, &input) {
+		return
+	}
+	s.bindingMutation(writer, func() error { return s.bindings.Sweep(input.Input) })
+}
+
+func (s *Server) bindingDelete(writer http.ResponseWriter, request *http.Request) {
+	var input bindingDeleteRequest
+	if !decodeRequest(writer, request, &input) {
+		return
+	}
+	s.bindingMutation(writer, func() error {
+		return s.bindings.DeleteIfGeneration(input.Ref, input.Generation)
+	})
+}
+
+func (s *Server) bindingMutation(writer http.ResponseWriter, mutate func() error) {
+	if s.bindings == nil {
+		http.Error(writer, "provider bindings unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	response := bindingMutationResponse{}
+	if err := mutate(); err != nil {
+		response.Error = err.Error()
+	}
+	writeJSON(writer, response)
 }
 
 func (s *Server) Serve(socket string) error {

@@ -11,7 +11,7 @@ Group=bria-runtime
 WorkingDirectory=/srv/bria-agent
 Environment=HOME=/srv/bria-agent
 EnvironmentFile=-/etc/bria/runner.env
-ExecStart=/opt/bria/current/bria runner serve --socket /run/bria-runner/runner.sock
+ExecStart=/opt/bria/current/bria runner serve --socket /run/bria-runner/runner.sock --binding-store /srv/bria-agent/.bria/provider-bindings.json --hook-binary /opt/bria/current/bria
 Restart=on-failure
 RestartSec=5s
 TimeoutStopSec=15s

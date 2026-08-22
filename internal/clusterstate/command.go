@@ -10,7 +10,7 @@ import (
 	"github.com/Time4Mind/bria/internal/domain"
 )
 
-const CommandVersion = 2
+const CommandVersion = 3
 
 type CommandKind string
 
@@ -225,6 +225,7 @@ type PublishSessionRuntime struct {
 	Generation uint64                         `json:"generation"`
 	Phase      domain.RuntimePhase            `json:"phase"`
 	Result     *domain.SessionOperationResult `json:"result,omitempty"`
+	Issue      string                         `json:"issue,omitempty"`
 }
 
 type RecordSessionActivity struct {

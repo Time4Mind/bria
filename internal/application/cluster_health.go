@@ -177,6 +177,20 @@ func clusterStateFindings(
 			Remedy:   "restore the affected node; queued inputs preserve FIFO order",
 		})
 	}
+	missingBindings := 0
+	for _, session := range state.Sessions {
+		if session.IsLive() && session.RuntimeIssue == domain.RuntimeIssueProviderHookUnavailable {
+			missingBindings++
+		}
+	}
+	if missingBindings > 0 {
+		result = append(result, ClusterHealthFinding{
+			Code: "sessions.provider_hook_unavailable", Severity: HealthCritical,
+			Title:    "Provider lifecycle integration is unavailable",
+			Evidence: fmt.Sprintf("live sessions without a provider binding: %d", missingBindings),
+			Remedy:   "repair the stable provider hook and restart the affected sessions",
+		})
+	}
 	return result
 }
 

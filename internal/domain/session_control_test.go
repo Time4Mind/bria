@@ -68,6 +68,72 @@ func TestDeliveredInputAcknowledgementPreservesPromptTimestamp(t *testing.T) {
 	}
 }
 
+func TestVoiceAcknowledgementsSurviveDeliveryWithoutSyntheticTranscript(t *testing.T) {
+	state := fixtureState(t)
+	ref := addSession(t, state, "voice", "alpha", 1, time.Unix(10, 0).UTC())
+	session := state.Sessions[ref.Key()]
+	queuedAt := time.Unix(20, 0).UTC()
+	queued := &domain.SessionOperationResult{
+		OperationID: "voice-1", Action: domain.ActionSendInput,
+		Status: domain.OperationQueued, InputKind: "voice",
+	}
+	if err := state.PublishSessionRuntime(
+		ref, session.RuntimeGeneration, domain.RuntimeRunning, queued, queuedAt,
+	); err != nil {
+		t.Fatal(err)
+	}
+	session = state.Sessions[ref.Key()]
+	deliveredAt := queuedAt.Add(time.Second)
+	delivered := &domain.SessionOperationResult{
+		OperationID: "voice-1", Action: domain.ActionSendInput,
+		Status: domain.OperationSucceeded, InputKind: "voice",
+	}
+	if err := state.PublishSessionRuntime(
+		ref, session.RuntimeGeneration, domain.RuntimeRunning, delivered, deliveredAt,
+	); err != nil {
+		t.Fatal(err)
+	}
+	got := state.Sessions[ref.Key()]
+	if len(got.VoiceAcknowledgements) != 1 ||
+		got.VoiceAcknowledgements[0].Status != domain.OperationSucceeded ||
+		got.VoiceAcknowledgements[0].AcceptedAt != queuedAt ||
+		got.VoiceAcknowledgements[0].UpdatedAt != deliveredAt {
+		t.Fatalf("voice acknowledgements=%#v", got.VoiceAcknowledgements)
+	}
+}
+
+func TestRuntimeResultDoesNotClearProviderHookIssue(t *testing.T) {
+	state := fixtureState(t)
+	ref := addSession(t, state, "hook-issue", "alpha", 1, time.Unix(10, 0).UTC())
+	session := state.Sessions[ref.Key()]
+	if err := state.PublishSessionRuntimeWithIssue(
+		ref, session.RuntimeGeneration, domain.RuntimeDegraded, nil,
+		domain.RuntimeIssueProviderHookUnavailable, time.Unix(200, 0).UTC(),
+	); err != nil {
+		t.Fatal(err)
+	}
+	result := &domain.SessionOperationResult{
+		OperationID: "voice-delivered", Action: domain.ActionSendInput,
+		Status: domain.OperationSucceeded, InputKind: "voice", TranscriptOrdinal: 1,
+	}
+	if err := state.PublishSessionRuntime(
+		ref, session.RuntimeGeneration, domain.RuntimeDegraded, result, time.Unix(201, 0).UTC(),
+	); err != nil {
+		t.Fatal(err)
+	}
+	if got := state.Sessions[ref.Key()].RuntimeIssue; got != domain.RuntimeIssueProviderHookUnavailable {
+		t.Fatalf("provider hook issue was cleared by an unrelated result: %q", got)
+	}
+	if err := state.PublishSessionRuntime(
+		ref, session.RuntimeGeneration, domain.RuntimeIdle, nil, time.Unix(202, 0).UTC(),
+	); err != nil {
+		t.Fatal(err)
+	}
+	if got := state.Sessions[ref.Key()].RuntimeIssue; got != "" {
+		t.Fatalf("provider hook issue survived binding recovery: %q", got)
+	}
+}
+
 func TestClearResetsNamingAndRejectsOldRuntimeGeneration(t *testing.T) {
 	state := fixtureState(t)
 	ref := addSession(t, state, "clear-me", "alpha", 1, time.Unix(10, 0).UTC())

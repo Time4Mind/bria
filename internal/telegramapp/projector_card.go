@@ -169,6 +169,9 @@ func (p *TelegramProjector) SessionCardViewWithContext(
 	if metadata != "" {
 		parts = append(parts, metadata)
 	}
+	if session.RuntimeIssue == domain.RuntimeIssueProviderHookUnavailable {
+		parts = append(parts, actorCopy(state, actor).Text(i18n.ProviderHookUnavailable))
+	}
 	richMarkdown := ""
 	if page <= len(pages.Pages) {
 		richMarkdown = pages.Pages[page-1].RichMarkdown

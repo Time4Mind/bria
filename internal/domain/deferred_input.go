@@ -28,17 +28,20 @@ type DeferredInputFile struct {
 // DeferredSessionInput contains only bounded text and external transport
 // identifiers. Media bytes and transport credentials never enter Raft state.
 type DeferredSessionInput struct {
-	OperationID        string            `json:"operation_id"`
-	ActorID            UserID            `json:"actor_id"`
-	Session            SessionRef        `json:"session"`
-	ExpectedGeneration uint64            `json:"expected_generation"`
-	Kind               DeferredInputKind `json:"kind"`
-	Text               string            `json:"text,omitempty"`
-	Caption            string            `json:"caption,omitempty"`
-	VoiceBackend       string            `json:"voice_backend,omitempty"`
-	VoiceLanguage      string            `json:"voice_language,omitempty"`
-	File               DeferredInputFile `json:"file,omitempty"`
-	QueuedAt           time.Time         `json:"queued_at"`
+	OperationID             string            `json:"operation_id"`
+	ActorID                 UserID            `json:"actor_id"`
+	Session                 SessionRef        `json:"session"`
+	ExpectedGeneration      uint64            `json:"expected_generation"`
+	Kind                    DeferredInputKind `json:"kind"`
+	Text                    string            `json:"text,omitempty"`
+	Caption                 string            `json:"caption,omitempty"`
+	VoiceBackend            string            `json:"voice_backend,omitempty"`
+	VoiceLanguage           string            `json:"voice_language,omitempty"`
+	TranscriptBaselineCount int               `json:"transcript_baseline_count,omitempty"`
+	TranscriptBaselineKnown bool              `json:"transcript_baseline_known,omitempty"`
+	TranscriptOrdinal       int               `json:"transcript_ordinal,omitempty"`
+	File                    DeferredInputFile `json:"file,omitempty"`
+	QueuedAt                time.Time         `json:"queued_at"`
 }
 
 func (input DeferredSessionInput) Validate() error {
@@ -73,6 +76,15 @@ func (input DeferredSessionInput) Validate() error {
 			input.VoiceLanguage != "auto" && input.VoiceLanguage != "ru" &&
 			input.VoiceLanguage != "en" && input.VoiceLanguage != "zh" {
 			return fmt.Errorf("%w: unsupported deferred voice language", ErrInvalidState)
+		}
+		if input.Kind != DeferredInputVoice && (input.TranscriptBaselineCount != 0 ||
+			input.TranscriptBaselineKnown || input.TranscriptOrdinal != 0) {
+			return fmt.Errorf("%w: transcript acknowledgement metadata is voice-only", ErrInvalidState)
+		}
+		if input.Kind == DeferredInputVoice && (input.TranscriptOrdinal < 0 || input.TranscriptOrdinal > 16 ||
+			input.TranscriptBaselineCount < 0 || input.TranscriptBaselineCount > 400 ||
+			(!input.TranscriptBaselineKnown && input.TranscriptBaselineCount != 0)) {
+			return fmt.Errorf("%w: voice transcript acknowledgement metadata is invalid", ErrInvalidState)
 		}
 	default:
 		return fmt.Errorf("%w: unsupported deferred input kind", ErrInvalidState)
@@ -114,10 +126,18 @@ func (s *State) QueueDeferredSessionInput(input DeferredSessionInput, at time.Ti
 	session.LastEventAt = at
 	session.UserRequestSeen = true
 	session.UserRequestTracked = true
-	session.LastOperation = &SessionOperationResult{
+	queued := SessionOperationResult{
 		OperationID: input.OperationID, Action: ActionSendInput, Status: OperationQueued,
 		Detail: "waiting for node recovery", At: at,
 	}
+	if input.Kind == DeferredInputVoice {
+		queued.InputKind = "voice"
+		queued.TranscriptBaselineCount = input.TranscriptBaselineCount
+		queued.TranscriptBaselineKnown = input.TranscriptBaselineKnown
+		queued.TranscriptOrdinal = input.TranscriptOrdinal
+	}
+	session.LastOperation = &queued
+	updateVoiceAcknowledgement(&session, queued, at)
 	session.Revision++
 	s.Sessions[input.Session.Key()] = session
 	if s.Navigation.SessionActivityByUser[input.ActorID] == nil {
@@ -146,10 +166,18 @@ func (s *State) ResolveDeferredSessionInput(ref SessionRef, operationID string, 
 		session, ok := s.Sessions[ref.Key()]
 		if ok && session.IsLive() && session.Revision < math.MaxUint64 {
 			session.LastEventAt = at
-			session.LastOperation = &SessionOperationResult{
+			failedResult := SessionOperationResult{
 				OperationID: operationID, Action: ActionSendInput, Status: OperationFailed,
 				Detail: detail, At: at,
 			}
+			for _, acknowledgement := range session.VoiceAcknowledgements {
+				if acknowledgement.OperationID == operationID {
+					failedResult.InputKind = "voice"
+					break
+				}
+			}
+			session.LastOperation = &failedResult
+			updateVoiceAcknowledgement(&session, failedResult, at)
 			session.Revision++
 			s.Sessions[ref.Key()] = session
 		}

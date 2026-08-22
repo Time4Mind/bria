@@ -71,45 +71,63 @@ const (
 // SessionOperationResult is intentionally small. Provider output and raw
 // transcripts are node-local and must not be replicated through Raft.
 type SessionOperationResult struct {
-	OperationID string          `json:"operation_id"`
-	Action      SessionAction   `json:"action"`
-	Status      OperationStatus `json:"status"`
-	Detail      string          `json:"detail,omitempty"`
-	At          time.Time       `json:"at"`
+	OperationID             string          `json:"operation_id"`
+	Action                  SessionAction   `json:"action"`
+	Status                  OperationStatus `json:"status"`
+	Detail                  string          `json:"detail,omitempty"`
+	InputKind               string          `json:"input_kind,omitempty"`
+	TranscriptBaselineCount int             `json:"transcript_baseline_count,omitempty"`
+	TranscriptBaselineKnown bool            `json:"transcript_baseline_known,omitempty"`
+	TranscriptOrdinal       int             `json:"transcript_ordinal,omitempty"`
+	At                      time.Time       `json:"at"`
+}
+
+type VoiceAcknowledgement struct {
+	OperationID   string          `json:"operation_id"`
+	Status        OperationStatus `json:"status"`
+	AcceptedAt    time.Time       `json:"accepted_at"`
+	UpdatedAt     time.Time       `json:"updated_at"`
+	BaselineCount int             `json:"baseline_count,omitempty"`
+	BaselineKnown bool            `json:"baseline_known,omitempty"`
+	Ordinal       int             `json:"ordinal"`
 }
 
 type Session struct {
-	ID                   SessionID               `json:"id"`
-	NodeID               NodeID                  `json:"node_id"`
-	OwnerID              UserID                  `json:"owner_id"`
-	Name                 string                  `json:"name"`
-	NameFormatVersion    int                     `json:"name_format_version,omitempty"`
-	ArchiveDescription   []string                `json:"archive_description,omitempty"`
-	DescriptionVersion   int                     `json:"description_version,omitempty"`
-	Workdir              string                  `json:"workdir"`
-	Backend              string                  `json:"backend"`
-	ProviderSessionID    string                  `json:"provider_session_id,omitempty"`
-	ProviderResume       bool                    `json:"provider_resume,omitempty"`
-	ProviderBindingSince time.Time               `json:"provider_binding_since,omitempty"`
-	State                SessionState            `json:"state"`
-	RuntimePhase         RuntimePhase            `json:"runtime_phase,omitempty"`
-	RuntimeGeneration    uint64                  `json:"runtime_generation,omitempty"`
-	Revision             uint64                  `json:"revision,omitempty"`
-	ResumePending        bool                    `json:"resume_pending,omitempty"`
-	InteractivePrompt    *InteractivePrompt      `json:"interactive_prompt,omitempty"`
-	LastOperation        *SessionOperationResult `json:"last_operation,omitempty"`
-	UserRequestSeen      bool                    `json:"user_request_seen,omitempty"`
-	UserRequestTracked   bool                    `json:"user_request_tracked,omitempty"`
-	CreatedAt            time.Time               `json:"created_at"`
-	LiveSinceAt          time.Time               `json:"live_since_at"`
-	LastEventAt          time.Time               `json:"last_event_at"`
-	DiscardedAt          time.Time               `json:"discarded_at,omitempty"`
-	ArchivedAt           time.Time               `json:"archived_at,omitempty"`
-	ArchiveID            string                  `json:"archive_id,omitempty"`
-	ArchiveReady         bool                    `json:"archive_ready,omitempty"`
-	RestoredAt           time.Time               `json:"restored_at,omitempty"`
-	ArchiveReason        ArchiveReason           `json:"archive_reason,omitempty"`
+	ID                    SessionID               `json:"id"`
+	NodeID                NodeID                  `json:"node_id"`
+	OwnerID               UserID                  `json:"owner_id"`
+	Name                  string                  `json:"name"`
+	NameFormatVersion     int                     `json:"name_format_version,omitempty"`
+	ArchiveDescription    []string                `json:"archive_description,omitempty"`
+	DescriptionVersion    int                     `json:"description_version,omitempty"`
+	Workdir               string                  `json:"workdir"`
+	Backend               string                  `json:"backend"`
+	ProviderSessionID     string                  `json:"provider_session_id,omitempty"`
+	ProviderResume        bool                    `json:"provider_resume,omitempty"`
+	ProviderBindingSince  time.Time               `json:"provider_binding_since,omitempty"`
+	State                 SessionState            `json:"state"`
+	RuntimePhase          RuntimePhase            `json:"runtime_phase,omitempty"`
+	RuntimeIssue          string                  `json:"runtime_issue,omitempty"`
+	RuntimeGeneration     uint64                  `json:"runtime_generation,omitempty"`
+	Revision              uint64                  `json:"revision,omitempty"`
+	ResumePending         bool                    `json:"resume_pending,omitempty"`
+	InteractivePrompt     *InteractivePrompt      `json:"interactive_prompt,omitempty"`
+	LastOperation         *SessionOperationResult `json:"last_operation,omitempty"`
+	VoiceAcknowledgements []VoiceAcknowledgement  `json:"voice_acknowledgements,omitempty"`
+	UserRequestSeen       bool                    `json:"user_request_seen,omitempty"`
+	UserRequestTracked    bool                    `json:"user_request_tracked,omitempty"`
+	CreatedAt             time.Time               `json:"created_at"`
+	LiveSinceAt           time.Time               `json:"live_since_at"`
+	LastEventAt           time.Time               `json:"last_event_at"`
+	DiscardedAt           time.Time               `json:"discarded_at,omitempty"`
+	ArchivedAt            time.Time               `json:"archived_at,omitempty"`
+	ArchiveID             string                  `json:"archive_id,omitempty"`
+	ArchiveReady          bool                    `json:"archive_ready,omitempty"`
+	RestoredAt            time.Time               `json:"restored_at,omitempty"`
+	ArchiveReason         ArchiveReason           `json:"archive_reason,omitempty"`
 }
+
+const RuntimeIssueProviderHookUnavailable = "provider_lifecycle_hook_unavailable"
 
 func (s Session) Ref() SessionRef {
 	return SessionRef{NodeID: s.NodeID, SessionID: s.ID}

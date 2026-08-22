@@ -37,6 +37,10 @@ func TestClusterHealthSurfacesOperationalEvidenceAndAgentTarget(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	current := state.Sessions[(domain.SessionRef{NodeID: "alpha", SessionID: "current"}).Key()]
+	current.RuntimePhase = domain.RuntimeDegraded
+	current.RuntimeIssue = domain.RuntimeIssueProviderHookUnavailable
+	state.Sessions[current.Ref().Key()] = current
 	port := &capturePort{state: state}
 	service, err := NewService(port, port)
 	if err != nil {
@@ -49,7 +53,10 @@ func TestClusterHealthSurfacesOperationalEvidenceAndAgentTarget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]bool{"node.offline": true, "node.version_drift": true, "raft.apply_lag": true}
+	want := map[string]bool{
+		"node.offline": true, "node.version_drift": true, "raft.apply_lag": true,
+		"sessions.provider_hook_unavailable": true,
+	}
 	for _, finding := range report.Findings {
 		delete(want, finding.Code)
 	}

@@ -17,6 +17,8 @@ func normalizeNewSession(session *Session) error {
 	session.ProviderSessionID = providerID
 	session.ArchiveDescription = nil
 	session.DescriptionVersion = 0
+	session.RuntimeIssue = ""
+	session.VoiceAcknowledgements = nil
 	switch session.State {
 	case "", SessionLive:
 		session.State = SessionLive
@@ -98,6 +100,11 @@ func (s *State) normalizeSessions() {
 		if session.RuntimePhase == "" {
 			session.RuntimePhase = RuntimeIdle
 		}
+		if session.RuntimeIssue != RuntimeIssueProviderHookUnavailable ||
+			session.RuntimePhase != RuntimeDegraded {
+			session.RuntimeIssue = ""
+		}
+		session.VoiceAcknowledgements = normalizeVoiceAcknowledgements(session.VoiceAcknowledgements)
 		if session.State == SessionArchived &&
 			session.DescriptionVersion == ArchiveDescriptionVersion {
 			if description, err := NormalizeArchiveDescription(session.ArchiveDescription); err == nil {
@@ -139,6 +146,30 @@ func (s *State) normalizeSessions() {
 	for _, ref := range archivedLegacy {
 		s.repairNavigationAfterUnavailable(ref)
 	}
+}
+
+func normalizeVoiceAcknowledgements(values []VoiceAcknowledgement) []VoiceAcknowledgement {
+	result := make([]VoiceAcknowledgement, 0, min(len(values), maxVoiceAcknowledgements))
+	seen := make(map[string]bool)
+	for _, value := range values {
+		if value.Ordinal == 0 {
+			value.Ordinal = 1
+		}
+		if value.OperationID == "" || len(value.OperationID) > 128 || seen[value.OperationID] ||
+			(value.Status != OperationQueued && value.Status != OperationSucceeded && value.Status != OperationFailed) ||
+			value.AcceptedAt.IsZero() || value.UpdatedAt.Before(value.AcceptedAt) ||
+			value.Ordinal < 1 || value.Ordinal > 16 ||
+			value.BaselineCount < 0 || value.BaselineCount > 400 ||
+			(!value.BaselineKnown && value.BaselineCount != 0) {
+			continue
+		}
+		seen[value.OperationID] = true
+		result = append(result, value)
+	}
+	if len(result) > maxVoiceAcknowledgements {
+		result = append([]VoiceAcknowledgement(nil), result[len(result)-maxVoiceAcknowledgements:]...)
+	}
+	return result
 }
 
 func legacyArchiveTime(session Session) time.Time {

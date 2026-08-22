@@ -10,6 +10,7 @@ import (
 
 	"github.com/Time4Mind/bria/internal/application"
 	"github.com/Time4Mind/bria/internal/domain"
+	"github.com/Time4Mind/bria/internal/processlog"
 )
 
 type Leadership interface{ IsLeader() bool }
@@ -128,7 +129,11 @@ func (c *Controller) reconcile(ctx context.Context) {
 		cancel()
 		age := time.Since(session.CreatedAt)
 		resumePending := errors.Is(err, errProviderResumePending) && age < 2*c.startTimeout
-		if err != nil && !errors.Is(err, errProviderBindingPending) &&
+		if errors.Is(err, errProviderBindingPending) && age >= c.startTimeout {
+			c.markBindingUnavailable(ctx, session, age)
+			continue
+		}
+		if err != nil &&
 			!resumePending && age >= c.startTimeout {
 			archiveScope := fmt.Sprintf("session-start-failed-%s-%d", session.Ref().Key(), session.Revision)
 			archiveCtx := application.WithOperationScope(ctx, archiveScope)
@@ -205,8 +210,42 @@ func (c *Controller) bindMissingProviders(ctx context.Context) {
 		if !session.IsLive() || !discoverableBackend(session.Backend) || session.ProviderSessionID != "" {
 			continue
 		}
-		_ = c.bindProvider(ctx, session)
+		if err := c.bindProvider(ctx, session); err != nil {
+			continue
+		}
+		latest := c.state.State().Sessions[session.Ref().Key()]
+		if latest.RuntimeIssue != domain.RuntimeIssueProviderHookUnavailable {
+			continue
+		}
+		healScope := fmt.Sprintf("session-binding-healed-%s-%d", latest.Ref().Key(), latest.Revision)
+		healCtx := application.WithOperationScope(ctx, healScope)
+		if err := c.application.PublishSessionRuntime(healCtx, latest, domain.RuntimeIdle, nil); err == nil {
+			processlog.Servicef(
+				"bria provider_binding: outcome=arrived ref=%q generation=%d transition=degraded_to_idle",
+				latest.Ref().Key(), latest.RuntimeGeneration,
+			)
+		}
 	}
+}
+
+func (c *Controller) markBindingUnavailable(ctx context.Context, session domain.Session, waited time.Duration) {
+	latest, ok := c.state.State().Sessions[session.Ref().Key()]
+	if !ok || !latest.IsLive() || latest.RuntimePhase != domain.RuntimeStarting ||
+		latest.RuntimeGeneration != session.RuntimeGeneration {
+		return
+	}
+	scope := fmt.Sprintf("session-binding-timeout-%s-%d", latest.Ref().Key(), latest.Revision)
+	issueCtx := application.WithOperationScope(ctx, scope)
+	if err := c.application.PublishSessionRuntimeIssue(
+		issueCtx, latest, domain.RuntimeIssueProviderHookUnavailable,
+	); err != nil {
+		return
+	}
+	processlog.Failuref(
+		processlog.Service, processlog.FailureAvailability,
+		"bria provider_binding: outcome=timeout ref=%q generation=%d wait_ms=%d reason=lifecycle_hook_unavailable",
+		latest.Ref().Key(), latest.RuntimeGeneration, waited.Milliseconds(),
+	)
 }
 
 func (c *Controller) bindProvider(ctx context.Context, session domain.Session) error {

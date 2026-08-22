@@ -2,7 +2,11 @@
 // control plane and an untrusted provider runtime.
 package runnerhost
 
-import "github.com/Time4Mind/bria/internal/runtimehost"
+import (
+	"github.com/Time4Mind/bria/internal/domain"
+	"github.com/Time4Mind/bria/internal/providerbinding"
+	"github.com/Time4Mind/bria/internal/runtimehost"
+)
 
 const (
 	ProtocolVersion  = 1
@@ -24,6 +28,35 @@ type Inspect struct {
 }
 
 func LocalInspect() Inspect { return localInspect() }
+
+type bindingLookupRequest struct {
+	Ref     domain.SessionRef `json:"ref"`
+	Workdir string            `json:"workdir,omitempty"`
+}
+
+type bindingLookupResponse struct {
+	Record providerbinding.Record `json:"record"`
+	Found  bool                   `json:"found"`
+	Error  string                 `json:"error,omitempty"`
+}
+
+type bindingSnapshotResponse struct {
+	Records []providerbinding.Record `json:"records"`
+	Error   string                   `json:"error,omitempty"`
+}
+
+type bindingSweepRequest struct {
+	Input providerbinding.SweepInput `json:"input"`
+}
+
+type bindingDeleteRequest struct {
+	Ref        domain.SessionRef `json:"ref"`
+	Generation uint64            `json:"generation"`
+}
+
+type bindingMutationResponse struct {
+	Error string `json:"error,omitempty"`
+}
 
 type commandRequest struct {
 	Kind       string   `json:"kind"`

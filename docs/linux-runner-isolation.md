@@ -75,6 +75,16 @@ starting the node, and enable **Require isolation** in that node's settings.
 The check rejects root runners, the same UID as control,
 containers mislabeled as native users, and an unavailable socket.
 
+The runner owns both provider credentials and lifecycle integration. Its
+service command supplies a runner-owned `--binding-store` and the stable
+`--hook-binary /opt/bria/current/bria`; at startup it reconciles Codex and
+Claude hooks inside `/srv/bria-agent` without exposing the control-plane config
+to that account. The control process accesses bindings only through the runner
+socket and never rewrites the runner user's home. Older service units that
+supplied only `--socket` remain upgradeable: the runner derives the same paths
+from `HOME` and its lexical activation command, then the next installer writes
+the explicit form.
+
 ## Docker
 
 `deploy/docker/compose.runner.yml` builds only the runner. Extend its image to

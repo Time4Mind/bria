@@ -27,12 +27,15 @@ type InputFile struct {
 }
 
 type InputPayload struct {
-	Kind          InputKind `json:"kind"`
-	Caption       string    `json:"caption,omitempty"`
-	Origin        string    `json:"origin,omitempty"`
-	VoiceBackend  string    `json:"voice_backend,omitempty"`
-	VoiceLanguage string    `json:"voice_language,omitempty"`
-	File          InputFile `json:"file"`
+	Kind                    InputKind `json:"kind"`
+	Caption                 string    `json:"caption,omitempty"`
+	Origin                  string    `json:"origin,omitempty"`
+	VoiceBackend            string    `json:"voice_backend,omitempty"`
+	VoiceLanguage           string    `json:"voice_language,omitempty"`
+	TranscriptBaselineCount int       `json:"transcript_baseline_count,omitempty"`
+	TranscriptBaselineKnown bool      `json:"transcript_baseline_known,omitempty"`
+	TranscriptOrdinal       int       `json:"transcript_ordinal,omitempty"`
+	File                    InputFile `json:"file"`
 }
 
 const maxInputCaptionBytes = 16 << 10
@@ -60,6 +63,17 @@ func (p InputPayload) validate() error {
 	if p.Kind == InputVoice && p.VoiceLanguage != "" && p.VoiceLanguage != "auto" &&
 		p.VoiceLanguage != "ru" && p.VoiceLanguage != "en" && p.VoiceLanguage != "zh" {
 		return errors.New("unsupported voice language")
+	}
+	if p.Kind != InputVoice && (p.TranscriptBaselineCount != 0 ||
+		p.TranscriptBaselineKnown || p.TranscriptOrdinal != 0) {
+		return errors.New("transcript acknowledgement metadata is valid only for voice input")
+	}
+	if p.Kind == InputVoice {
+		if p.TranscriptOrdinal < 0 || p.TranscriptOrdinal > 16 ||
+			p.TranscriptBaselineCount < 0 || p.TranscriptBaselineCount > 400 ||
+			(!p.TranscriptBaselineKnown && p.TranscriptBaselineCount != 0) {
+			return errors.New("voice transcript acknowledgement metadata is invalid")
+		}
 	}
 	return nil
 }

@@ -78,10 +78,11 @@ func (h *Handler) handleMessage(
 				telegramui.RenderVoiceInputEnableConfirmation(h.copy(actor), plans), nil)
 		}
 		voiceBaseline = h.captureVoiceBaseline(ctx, actor)
+		h.prepareVoiceBaseline(actor, &voiceBaseline)
 	} else if pendingInputText(update) != "" {
 		inputBaseline = h.captureInputBaseline(ctx, actor)
 	}
-	accepted, err := h.sendIncomingInput(ctx, actor, update)
+	accepted, err := h.sendIncomingInput(ctx, actor, update, voiceBaseline)
 	if errors.Is(err, domain.ErrQueueFull) {
 		screen, projectErr := h.projector.SessionCard(actor, accepted.Session)
 		if projectErr != nil {
@@ -120,6 +121,10 @@ func (h *Handler) handleMessage(
 	screen, err := h.projector.SessionCard(actor, accepted.Session)
 	if err == nil && update.Content.Kind == telegrambot.IncomingVoice && !accepted.Deferred {
 		h.markVoicePending(actor, accepted.Session, operationIDForInput(update.UpdateID), voiceBaseline)
+		processlog.Detailf(
+			"bria voice_input: stage=accepted ref=%q operation=%q outcome=transcribing",
+			accepted.Session.Key(), operationIDForInput(update.UpdateID),
+		)
 		screen, err = h.pendingVoiceCard(actor, accepted.Session, voiceBaseline)
 	} else if err == nil && pendingInputText(update) != "" {
 		screen, err = h.pendingInputCard(actor, accepted.Session, inputBaseline)
@@ -138,6 +143,7 @@ func (h *Handler) sendIncomingInput(
 	ctx context.Context,
 	actor application.Principal,
 	update telegrambot.IncomingUpdate,
+	voiceBaseline voicePendingBaseline,
 ) (sessioncontrol.Accepted, error) {
 	operationID := operationIDForInput(update.UpdateID)
 	if update.Content.Kind == "" || update.Content.Kind == telegrambot.IncomingText {
@@ -169,6 +175,9 @@ func (h *Handler) sendIncomingInput(
 			language = domain.LanguageFromTelegram(update.LanguageCode)
 		}
 		payload.VoiceLanguage = string(language)
+		payload.TranscriptBaselineCount = voiceBaseline.userEventCount
+		payload.TranscriptBaselineKnown = voiceBaseline.known
+		payload.TranscriptOrdinal = voiceBaseline.ordinal
 	}
 	return h.controls.SendExternalInput(ctx, actor, operationID, payload)
 }

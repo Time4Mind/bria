@@ -75,7 +75,7 @@ jobs:
       - name: Sign release manifest
         env:
           RELEASE_KEY: ${{ secrets.BRIA_RELEASE_SIGNING_KEY }}
-          MINIMUM_NODE_PROTOCOL: ${{ vars.BRIA_MINIMUM_NODE_PROTOCOL || '2' }}
+          MINIMUM_NODE_PROTOCOL: '3'
         run: |
           test -n "$RELEASE_KEY"
           umask 077

@@ -3,6 +3,7 @@ package telegramapp_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -232,4 +233,107 @@ func TestVoicePendingWithoutTranscriptStaysBeforeBackgroundPanel(t *testing.T) {
 	if pending < 0 || background < 0 || pending > background {
 		t.Fatalf("pending voice row is outside active content:\n%s", text)
 	}
+}
+
+func TestDeliveredVoiceAcknowledgementsSurviveHandlerRestartUntilCanonicalTranscript(t *testing.T) {
+	fixture := newFixture(t)
+	actor := application.Principal{UserID: 7}
+	ref := domain.SessionRef{NodeID: "allowed", SessionID: "live"}
+	acceptedAt := time.Now().UTC()
+	baselineEvent := transcript.Event{
+		Kind: transcript.EventUserText, Text: "before voices",
+		Timestamp: acceptedAt.Add(-time.Minute).Format(time.RFC3339Nano),
+	}
+	for index := 1; index <= 2; index++ {
+		session, err := fixture.service.Session(actor, ref)
+		if err != nil {
+			t.Fatal(err)
+		}
+		operationID := fmt.Sprintf("voice-restart-%d", index)
+		queued := &domain.SessionOperationResult{
+			OperationID: operationID, Action: domain.ActionSendInput,
+			Status: domain.OperationQueued, InputKind: "voice",
+			TranscriptBaselineKnown: true, TranscriptBaselineCount: 1,
+			TranscriptOrdinal: index,
+		}
+		if err := fixture.service.PublishSessionRuntime(
+			application.WithOperationScope(context.Background(), operationID+"-queued"),
+			session, domain.RuntimeRunning, queued,
+		); err != nil {
+			t.Fatal(err)
+		}
+		session, _ = fixture.service.Session(actor, ref)
+		delivered := *queued
+		delivered.Status = domain.OperationSucceeded
+		if err := fixture.service.PublishSessionRuntime(
+			application.WithOperationScope(context.Background(), operationID+"-delivered"),
+			session, domain.RuntimeRunning, &delivered,
+		); err != nil {
+			t.Fatal(err)
+		}
+	}
+	controls := &blockingControls{ref: ref, events: []transcript.Event{baselineEvent}}
+	handler, err := telegramapp.NewHandlerWithControls(
+		fixture.service, fixture.projector, fixture.codec, fixture.messenger, controls,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	selectSessionForVoiceTest(t, handler, fixture, ref, 501)
+	latest := latestVoiceTestScreen(t, fixture)
+	if count := strings.Count(latest, "recognized and sent"); count != 2 {
+		t.Fatalf("durable voice acknowledgements after restart=%d screen=%q", count, latest)
+	}
+	controls.appendTranscriptEvent(transcript.Event{
+		Kind: transcript.EventUserText, Text: "first recognized voice",
+	})
+	controls.appendTranscriptEvent(transcript.Event{
+		Kind: transcript.EventUserText, Text: "second recognized voice",
+	})
+	selectSessionForVoiceTest(t, handler, fixture, ref, 502)
+	latest = latestVoiceTestScreen(t, fixture)
+	if strings.Contains(latest, "recognized and sent") ||
+		!strings.Contains(latest, "first recognized voice") ||
+		!strings.Contains(latest, "second recognized voice") {
+		t.Fatalf("canonical transcript did not replace durable acknowledgements: %q", latest)
+	}
+}
+
+func selectSessionForVoiceTest(
+	t *testing.T,
+	handler *telegramapp.Handler,
+	fx fixture,
+	ref domain.SessionRef,
+	updateID int64,
+) {
+	t.Helper()
+	token, err := fx.codec.Session(7, telegramui.ActionSelectSession, ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	callbackData, err := (telegramui.Callback{
+		Action: telegramui.ActionSelectSession, Token: token,
+	}).Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := handler.HandleTelegramUpdate(context.Background(), telegrambot.IncomingUpdate{
+		UpdateID: updateID, Kind: telegrambot.IncomingCallback, ChatID: 7, UserID: 7,
+		CallbackID: fmt.Sprintf("voice-select-%d", updateID), CallbackData: callbackData,
+		CallbackOrigin: telegrambot.Message{ChatID: 7, MessageID: 1},
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func latestVoiceTestScreen(t *testing.T, fx fixture) string {
+	t.Helper()
+	if len(fx.messenger.edited) > 0 {
+		return fx.messenger.edited[len(fx.messenger.edited)-1].Text
+	}
+	if len(fx.messenger.sent) > 0 {
+		return fx.messenger.sent[len(fx.messenger.sent)-1].Text
+	}
+	t.Fatal("no voice test screen was rendered")
+	return ""
 }

@@ -25,6 +25,25 @@ func TestLocalReleaseCleanerExistsWithoutUpdateManifest(t *testing.T) {
 	}
 }
 
+func TestReplacementPreservesStableProviderHookActivation(t *testing.T) {
+	t.Setenv(expectedBinarySHA256Env, "stale")
+	t.Setenv(providerHookActivationEnv, "/old/current/bria")
+	environment := environmentWithBinaryIdentity("fresh", "/opt/bria/current/bria")
+	joined := "\n" + strings.Join(environment, "\n") + "\n"
+	if strings.Count(joined, "\n"+expectedBinarySHA256Env+"=") != 1 ||
+		!strings.Contains(joined, "\n"+expectedBinarySHA256Env+"=fresh\n") {
+		t.Fatalf("binary identity environment=%q", joined)
+	}
+	if strings.Count(joined, "\n"+providerHookActivationEnv+"=") != 1 ||
+		!strings.Contains(joined, "\n"+providerHookActivationEnv+"=/opt/bria/current/bria\n") {
+		t.Fatalf("provider activation environment=%q", joined)
+	}
+	t.Setenv(providerHookActivationEnv, "/stable/current/bria")
+	if got := providerHookActivationPath(); got != "/stable/current/bria" {
+		t.Fatalf("provider hook activation=%q", got)
+	}
+}
+
 func TestPreflightUpdateCandidateAcceptsCurrentConfig(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell fixture")

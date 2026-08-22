@@ -233,7 +233,7 @@ func TestReconcileArchivesCodexResumeAfterRetryWindow(t *testing.T) {
 	}
 }
 
-func TestReconcileKeepsProvisionedCodexWhileProviderIDIsPending(t *testing.T) {
+func TestReconcileDegradesProvisionedCodexWhenProviderBindingTimesOut(t *testing.T) {
 	controller, machine, router := newControllerFixture(t)
 	router.discoveries = nil
 	created := time.Now().Add(-5 * time.Minute).UTC()
@@ -251,8 +251,17 @@ func TestReconcileKeepsProvisionedCodexWhileProviderIDIsPending(t *testing.T) {
 	}
 	controller.reconcile(context.Background())
 	got := machine.State().Sessions[session.Ref().Key()]
-	if !got.IsLive() || got.RuntimePhase != domain.RuntimeStarting {
-		t.Fatalf("pending provider=%#v", got)
+	if !got.IsLive() || got.RuntimePhase != domain.RuntimeDegraded ||
+		got.RuntimeIssue != domain.RuntimeIssueProviderHookUnavailable {
+		t.Fatalf("missing provider binding=%#v", got)
+	}
+
+	router.discoveries = []transcript.Candidate{{ProviderSessionID: "provider-recovered"}}
+	controller.reconcile(context.Background())
+	healed := machine.State().Sessions[session.Ref().Key()]
+	if healed.RuntimePhase != domain.RuntimeIdle || healed.RuntimeIssue != "" ||
+		healed.ProviderSessionID != "provider-recovered" {
+		t.Fatalf("late provider binding did not heal session=%#v", healed)
 	}
 }
 

@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Time4Mind/bria/internal/domain"
+	"github.com/Time4Mind/bria/internal/providerbinding"
 	"github.com/Time4Mind/bria/internal/runtimehost"
 )
 
@@ -37,6 +39,61 @@ func NewClient(socket string) (*Client, error) {
 func (c *Client) Close() error {
 	if transport, ok := c.http.Transport.(*http.Transport); ok {
 		transport.CloseIdleConnections()
+	}
+	return nil
+}
+
+func (c *Client) Lookup(ref domain.SessionRef, workdir string) (providerbinding.Record, bool, error) {
+	return c.lookupBinding(bindingLookupRequest{Ref: ref, Workdir: workdir})
+}
+
+func (c *Client) LookupRef(ref domain.SessionRef) (providerbinding.Record, bool, error) {
+	return c.lookupBinding(bindingLookupRequest{Ref: ref})
+}
+
+func (c *Client) lookupBinding(input bindingLookupRequest) (providerbinding.Record, bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	var response bindingLookupResponse
+	if err := c.call(ctx, http.MethodPost, "/v1/provider-binding/lookup", input, &response); err != nil {
+		return providerbinding.Record{}, false, err
+	}
+	if response.Error != "" {
+		return providerbinding.Record{}, false, errors.New(response.Error)
+	}
+	return response.Record, response.Found, nil
+}
+
+func (c *Client) Snapshot() ([]providerbinding.Record, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	var response bindingSnapshotResponse
+	if err := c.call(ctx, http.MethodGet, "/v1/provider-binding/snapshot", nil, &response); err != nil {
+		return nil, err
+	}
+	if response.Error != "" {
+		return nil, errors.New(response.Error)
+	}
+	return response.Records, nil
+}
+
+func (c *Client) Sweep(input providerbinding.SweepInput) error {
+	return c.bindingMutation("/v1/provider-binding/sweep", bindingSweepRequest{Input: input})
+}
+
+func (c *Client) DeleteIfGeneration(ref domain.SessionRef, generation uint64) error {
+	return c.bindingMutation("/v1/provider-binding/delete", bindingDeleteRequest{Ref: ref, Generation: generation})
+}
+
+func (c *Client) bindingMutation(path string, input any) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	var response bindingMutationResponse
+	if err := c.call(ctx, http.MethodPost, path, input, &response); err != nil {
+		return err
+	}
+	if response.Error != "" {
+		return errors.New(response.Error)
 	}
 	return nil
 }

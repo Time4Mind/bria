@@ -1,11 +1,14 @@
 package providerbinding
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -102,12 +105,13 @@ func TestCaptureIgnoresProviderOutsideBria(t *testing.T) {
 func TestInstallHookPreservesExistingHooksAndIsIdempotent(t *testing.T) {
 	directory := t.TempDir()
 	path := filepath.Join(directory, "hooks.json")
+	binary := testHookBinary(t, directory)
 	existing := `{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"ccbot hook","timeout":5}]}]}}`
 	if err := os.WriteFile(path, []byte(existing), 0600); err != nil {
 		t.Fatal(err)
 	}
 	for range 2 {
-		if err := InstallHook("/opt/bria", "/var/bria config.json", path); err != nil {
+		if err := InstallHook(binary, "/var/bria config.json", path); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -124,7 +128,7 @@ func TestInstallHookPreservesExistingHooksAndIsIdempotent(t *testing.T) {
 func TestInstallHookReplacesStaleBriaAcrossEnvironments(t *testing.T) {
 	directory := t.TempDir()
 	path := filepath.Join(directory, "hooks.json")
-	current := "/opt/bria/current/bria"
+	current := testHookBinary(t, directory)
 	config := "/var/bria/config.json"
 	existing := fmt.Sprintf(`{"hooks":{"SessionStart":[{"hooks":[
 		{"type":"command","command":"ccbot hook","timeout":5},
@@ -291,6 +295,7 @@ func TestCapturePostClearSameProcessCanBindNextProviderSession(t *testing.T) {
 
 func TestInstallHooksAddsProviderSpecificCompletionEvents(t *testing.T) {
 	directory := t.TempDir()
+	binary := testHookBinary(t, directory)
 	codexPath := filepath.Join(directory, ".codex", "hooks.json")
 	claudePath := filepath.Join(directory, ".claude", "settings.json")
 	if err := os.MkdirAll(filepath.Dir(claudePath), 0700); err != nil {
@@ -299,7 +304,7 @@ func TestInstallHooksAddsProviderSpecificCompletionEvents(t *testing.T) {
 	if err := os.WriteFile(claudePath, []byte(`{"theme":"dark"}`), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := InstallHooks("/opt/bria", "/var/bria.json", codexPath, claudePath); err != nil {
+	if err := InstallHooks(binary, "/var/bria.json", codexPath, claudePath); err != nil {
 		t.Fatal(err)
 	}
 	for path, events := range map[string][]string{
@@ -326,4 +331,255 @@ func TestInstallHooksAddsProviderSpecificCompletionEvents(t *testing.T) {
 			t.Fatalf("Claude backend missing from hook command: %s", data)
 		}
 	}
+}
+
+func TestReconcileRunnerHooksUsesRunnerOwnedBindingStoreAndPreservesThirdParty(t *testing.T) {
+	directory := t.TempDir()
+	binary := testHookBinary(t, directory)
+	bindingStore := filepath.Join(directory, "runner", "provider-bindings.json")
+	codex := filepath.Join(directory, ".codex", "hooks.json")
+	claude := filepath.Join(directory, ".claude", "settings.json")
+	if err := os.MkdirAll(filepath.Dir(codex), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(codex, []byte(`{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"ccbot hook","timeout":5}]}]}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	report, err := ReconcileRunnerHooks(binary, bindingStore, codex, claude)
+	if err != nil || !report.Changed {
+		t.Fatalf("runner hook report=%#v err=%v", report, err)
+	}
+	data, err := os.ReadFile(codex)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded := string(data)
+	if !strings.Contains(encoded, " provider-hook --binding-store ") ||
+		!strings.Contains(encoded, bindingStore) || strings.Contains(encoded, " --config ") ||
+		strings.Count(encoded, "ccbot hook") != 1 {
+		t.Fatalf("runner hook ownership is invalid: %s", encoded)
+	}
+}
+
+func TestInstallHooksRejectsPrunableBinaryBeforeEitherProviderWrite(t *testing.T) {
+	directory := t.TempDir()
+	release := filepath.Join(directory, "releases", "release-a", "bria")
+	if err := os.MkdirAll(filepath.Dir(release), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(release, []byte("test"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	codex := filepath.Join(directory, ".codex", "hooks.json")
+	claude := filepath.Join(directory, ".claude", "settings.json")
+	for _, path := range []string{codex, claude} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(`{"marker":"unchanged"}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := ReconcileHooks(release, "/var/bria.json", codex, claude); err == nil {
+		t.Fatal("retention-managed release binary was accepted")
+	}
+	for _, path := range []string{codex, claude} {
+		data, err := os.ReadFile(path)
+		if err != nil || string(data) != `{"marker":"unchanged"}` {
+			t.Fatalf("provider document changed after target rejection: path=%s data=%q err=%v", path, data, err)
+		}
+	}
+}
+
+func TestInstallHooksPreflightsBothDocumentsAndPreservesMode(t *testing.T) {
+	directory := t.TempDir()
+	binary := testHookBinary(t, directory)
+	codex := filepath.Join(directory, ".codex", "hooks.json")
+	claude := filepath.Join(directory, ".claude", "settings.json")
+	if err := os.MkdirAll(filepath.Dir(codex), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	original := []byte(`{"hooks":{},"third_party":{"enabled":true}}`)
+	if err := os.WriteFile(codex, original, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(claude), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(claude, []byte(`{"hooks":`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReconcileHooks(binary, "/var/bria.json", codex, claude); err == nil {
+		t.Fatal("malformed second provider document was accepted")
+	}
+	data, err := os.ReadFile(codex)
+	if err != nil || !bytes.Equal(data, original) {
+		t.Fatalf("first provider was partially rewritten: data=%q err=%v", data, err)
+	}
+	if err := os.WriteFile(claude, []byte(`{"theme":"dark"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	report, err := ReconcileHooks(binary, "/var/bria.json", codex, claude)
+	if err != nil || !report.Changed {
+		t.Fatalf("reconcile report=%#v err=%v", report, err)
+	}
+	for _, path := range []string{codex, claude} {
+		info, statErr := os.Stat(path)
+		if statErr != nil || info.Mode().Perm() != 0o600 {
+			t.Fatalf("provider mode path=%s mode=%v err=%v", path, info.Mode().Perm(), statErr)
+		}
+	}
+	report, err = ReconcileHooks(binary, "/var/bria.json", codex, claude)
+	if err != nil || report.Changed {
+		t.Fatalf("idempotent reconcile report=%#v err=%v", report, err)
+	}
+}
+
+func TestHookCommandKeepsLexicalActivationAcrossReleaseSwitch(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink activation test is Unix-specific")
+	}
+	directory := t.TempDir()
+	releases := filepath.Join(directory, "immutable")
+	for _, name := range []string{"a", "b"} {
+		binary := filepath.Join(releases, name, "bria")
+		if err := os.MkdirAll(filepath.Dir(binary), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(binary, []byte(name), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	current := filepath.Join(directory, "current")
+	if err := os.Symlink(filepath.Join(releases, "a"), current); err != nil {
+		t.Fatal(err)
+	}
+	binary := filepath.Join(current, "bria")
+	codex := filepath.Join(directory, ".codex", "hooks.json")
+	claude := filepath.Join(directory, ".claude", "settings.json")
+	if _, err := ReconcileHooks(binary, "/var/bria.json", codex, claude); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(codex)
+	if err != nil || !bytes.Contains(before, []byte(binary)) || bytes.Contains(before, []byte(filepath.Join(releases, "a"))) {
+		t.Fatalf("hook did not retain lexical activation: %s err=%v", before, err)
+	}
+	if err := os.Remove(current); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(releases, "b"), current); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(filepath.Join(releases, "a")); err != nil {
+		t.Fatal(err)
+	}
+	report, err := ReconcileHooks(binary, "/var/bria.json", codex, claude)
+	if err != nil || report.Changed {
+		t.Fatalf("release switch rewrote stable hook: report=%#v err=%v", report, err)
+	}
+}
+
+func TestInstalledHookCommandsExecuteAcrossActivationSwitchAndRollback(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell hook execution test is Unix-specific")
+	}
+	directory := t.TempDir()
+	releases := filepath.Join(directory, "immutable")
+	writeRelease := func(name string) string {
+		t.Helper()
+		binary := filepath.Join(releases, name, "bria")
+		if err := os.MkdirAll(filepath.Dir(binary), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		script := "#!/bin/sh\nprintf '%s\\n' " + name + "\n"
+		if err := os.WriteFile(binary, []byte(script), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		return filepath.Dir(binary)
+	}
+	releaseA := writeRelease("release-a")
+	releaseB := writeRelease("release-b")
+	releaseC := writeRelease("release-c")
+	current := filepath.Join(directory, "current")
+	if err := os.Symlink(releaseA, current); err != nil {
+		t.Fatal(err)
+	}
+	binary := filepath.Join(current, "bria")
+	codex := filepath.Join(directory, ".codex", "hooks.json")
+	claude := filepath.Join(directory, ".claude", "settings.json")
+	if _, err := ReconcileHooks(binary, "/var/bria.json", codex, claude); err != nil {
+		t.Fatal(err)
+	}
+	commands := installedCommands(t, codex)
+	if len(commands) != len(codexHookEvents) {
+		t.Fatalf("installed command count=%d", len(commands))
+	}
+	assertCommands := func(want string) {
+		t.Helper()
+		for _, command := range commands {
+			output, err := exec.Command("/bin/sh", "-c", command).CombinedOutput()
+			if err != nil || strings.TrimSpace(string(output)) != want {
+				t.Fatalf("hook command=%q output=%q err=%v", command, output, err)
+			}
+		}
+	}
+	assertCommands("release-a")
+	if err := os.Remove(current); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(releaseB, current); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(releaseA); err != nil {
+		t.Fatal(err)
+	}
+	assertCommands("release-b")
+	if err := os.Remove(current); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(releaseC, current); err != nil {
+		t.Fatal(err)
+	}
+	assertCommands("release-c")
+}
+
+func installedCommands(t *testing.T, path string) []string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document struct {
+		Hooks map[string][]struct {
+			Hooks []struct {
+				Command string `json:"command"`
+			} `json:"hooks"`
+		} `json:"hooks"`
+	}
+	if err := json.Unmarshal(data, &document); err != nil {
+		t.Fatal(err)
+	}
+	result := make([]string, 0, len(codexHookEvents))
+	for _, event := range codexHookEvents {
+		for _, entry := range document.Hooks[event] {
+			for _, hook := range entry.Hooks {
+				if isBriaProviderCommand(hook.Command, "codex") {
+					result = append(result, hook.Command)
+				}
+			}
+		}
+	}
+	return result
+}
+
+func testHookBinary(t *testing.T, directory string) string {
+	t.Helper()
+	path := filepath.Join(directory, "bin", "bria")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("test"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }

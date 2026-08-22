@@ -171,6 +171,7 @@ func (s *State) CompleteBootRecovery(ref SessionRef, at time.Time) error {
 		return fmt.Errorf("%w: session revision exhausted", ErrInvalidState)
 	}
 	session.RuntimePhase = RuntimeIdle
+	session.RuntimeIssue = ""
 	session.InteractivePrompt = nil
 	session.ResumePending = false
 	session.Revision++
@@ -243,6 +244,8 @@ func archiveSession(session *Session, at time.Time, reason ArchiveReason) error 
 	}
 	session.State = SessionArchived
 	session.RuntimePhase = RuntimeIdle
+	session.RuntimeIssue = ""
+	session.VoiceAcknowledgements = nil
 	session.InteractivePrompt = nil
 	session.ResumePending = false
 	session.ArchivedAt = at

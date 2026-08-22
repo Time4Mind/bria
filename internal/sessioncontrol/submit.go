@@ -121,6 +121,12 @@ func (c *Controller) submit(
 	result := &domain.SessionOperationResult{
 		OperationID: operationID, Action: domainAction, Status: domain.OperationQueued,
 	}
+	if input != nil && input.Kind == runtimehost.InputVoice {
+		result.InputKind = "voice"
+		result.TranscriptBaselineCount = input.TranscriptBaselineCount
+		result.TranscriptBaselineKnown = input.TranscriptBaselineKnown
+		result.TranscriptOrdinal = input.TranscriptOrdinal
+	}
 	stateCtx := application.WithOperationScope(ctx, operationID+"-queued")
 	if err := c.service.PublishSessionRuntime(stateCtx, session, phase, result); err != nil {
 		return Accepted{}, err

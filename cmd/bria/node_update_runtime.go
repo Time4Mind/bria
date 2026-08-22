@@ -53,7 +53,7 @@ func waitForNodeRuntime(
 		case <-ctx.Done():
 			return nil
 		case binary := <-control.updates.restarts:
-			return &processReplacement{binary: binary}
+			return &processReplacement{binary: binary, activation: providerHookActivationPath()}
 		case err := <-control.errors:
 			if err == nil || errors.Is(err, context.Canceled) {
 				return nil

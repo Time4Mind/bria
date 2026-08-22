@@ -12,7 +12,6 @@ import (
 	"github.com/Time4Mind/bria/internal/clusterstate"
 	"github.com/Time4Mind/bria/internal/domain"
 	"github.com/Time4Mind/bria/internal/processlog"
-	"github.com/Time4Mind/bria/internal/providerbinding"
 )
 
 const archiveRetentionInterval = time.Hour
@@ -209,7 +208,7 @@ func runLocalArchivePurgeReconciler(
 	nodeID domain.NodeID,
 	state archiveStateReader,
 	archives archiveBundleStore,
-	bindings *providerbinding.Store,
+	bindings archiveBindingStore,
 ) {
 	reconciler := &localArchivePurgeReconciler{
 		nodeID: nodeID, state: state, archives: archives, bindings: bindings,

@@ -278,6 +278,21 @@ func (c *Controller) applyResult(
 		OperationID: request.OperationID, Action: domainAction,
 		Status: status, Detail: result.Detail,
 	}
+	if request.Input != nil && request.Input.Kind == runtimehost.InputVoice {
+		operation.InputKind = "voice"
+		operation.TranscriptBaselineCount = request.Input.TranscriptBaselineCount
+		operation.TranscriptBaselineKnown = request.Input.TranscriptBaselineKnown
+		operation.TranscriptOrdinal = request.Input.TranscriptOrdinal
+		outcome := "delivered"
+		if status == domain.OperationFailed {
+			outcome = "failed"
+		}
+		processlog.Outcomef(
+			processlog.Detail, outcome,
+			"bria voice_input: stage=delivery ref=%q generation=%d operation=%q outcome=%s",
+			ref.Key(), request.ExpectedGeneration, request.OperationID, outcome,
+		)
+	}
 	resultCtx := application.WithOperationScope(ctx, request.OperationID+"-result")
 	_ = c.service.PublishSessionRuntime(resultCtx, session, phase, operation)
 }

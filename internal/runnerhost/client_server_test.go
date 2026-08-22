@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Time4Mind/bria/internal/domain"
+	"github.com/Time4Mind/bria/internal/providerbinding"
 	"github.com/Time4Mind/bria/internal/runtimehost"
 )
 
@@ -21,7 +23,11 @@ func TestClientRunsOnlyInServerEnvironment(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(root) })
 	socket := filepath.Join(root, "r.sock")
-	server, err := NewServer(runtimehost.ExecCommandRunner{})
+	bindings, err := providerbinding.NewStore(filepath.Join(root, "bindings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	server, err := NewServerWithBindings(runtimehost.ExecCommandRunner{}, bindings)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,6 +57,29 @@ func TestClientRunsOnlyInServerEnvironment(t *testing.T) {
 	result, err := client.RunInput(ctx, []byte("payload"), "sh", "-c", "read value; printf '%s' \"$value\"")
 	if err != nil || result.ExitCode != 0 || string(result.Stdout) != "payload" {
 		t.Fatalf("result=%+v err=%v", result, err)
+	}
+	ref := domain.SessionRef{NodeID: "node", SessionID: "session"}
+	record := providerbinding.Record{
+		NodeID: "node", SessionID: "session", ProviderSessionID: "019fffe8-02ee-7aa1-b6cf-eed13a005482",
+		Workdir: root, TmuxSession: "bria", TmuxWindow: "window", RuntimeGeneration: 2,
+		UpdatedAt: time.Now().UTC(),
+	}
+	if err := bindings.Put(record); err != nil {
+		t.Fatal(err)
+	}
+	got, found, err := client.Lookup(ref, root)
+	if err != nil || !found || got.ProviderSessionID != record.ProviderSessionID {
+		t.Fatalf("remote binding=%#v found=%t err=%v", got, found, err)
+	}
+	snapshot, err := client.Snapshot()
+	if err != nil || len(snapshot) != 1 {
+		t.Fatalf("remote snapshot=%#v err=%v", snapshot, err)
+	}
+	if err := client.DeleteIfGeneration(ref, 2); err != nil {
+		t.Fatal(err)
+	}
+	if _, found, err := client.LookupRef(ref); err != nil || found {
+		t.Fatalf("remote binding survived delete: found=%t err=%v", found, err)
 	}
 }
 

@@ -44,7 +44,7 @@ chmod 0600 "$temporary"
 mv "$temporary" "$destination"
 trap - EXIT HUP INT TERM
 if [ "${BRIA_SKIP_PROVIDER_HOOKS:-0}" != 1 ]; then
-  BRIA_PROVIDER_HOOK_BINARY="$binary" "$binary" provider-hook --config "$config" --install
+  "$binary" provider-hook --config "$config" --install --binary "$binary"
 fi
 service="gui/$(id -u)/com.time4mind.bria"
 domain="gui/$(id -u)"

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/Time4Mind/bria/internal/config"
@@ -18,27 +19,31 @@ import (
 func runProviderHook(arguments []string) error {
 	flags := flag.NewFlagSet("provider-hook", flag.ContinueOnError)
 	configPath := flags.String("config", "", "absolute Bria config path")
+	bindingStorePath := flags.String("binding-store", "", "isolated runner provider binding store")
 	install := flags.Bool("install", false, "install the Bria provider hooks")
+	binaryPath := flags.String("binary", "", "stable absolute Bria activation binary")
 	backend := flags.String("backend", "codex", "provider backend (codex or claude)")
 	if err := flags.Parse(arguments); err != nil {
 		return err
 	}
-	if flags.NArg() != 0 || !filepath.IsAbs(*configPath) {
-		return fmt.Errorf("usage: bria provider-hook --config PATH [--install]")
-	}
-	nodeConfig, err := config.Load(*configPath)
-	if err != nil {
-		return err
+	if flags.NArg() != 0 || (*configPath != "" && !filepath.IsAbs(*configPath)) ||
+		(*bindingStorePath != "" && !filepath.IsAbs(*bindingStorePath)) ||
+		(*configPath == "" && *bindingStorePath == "") {
+		return fmt.Errorf("usage: bria provider-hook (--config PATH | --binding-store PATH) [--install --binary STABLE_PATH]")
 	}
 	if *install {
-		binary := os.Getenv("BRIA_PROVIDER_HOOK_BINARY")
+		if *configPath == "" {
+			return errors.New("provider hook installation requires --config")
+		}
+		if _, err := config.Load(*configPath); err != nil {
+			return err
+		}
+		binary := strings.TrimSpace(*binaryPath)
 		if binary == "" {
-			binary, err = os.Executable()
-			if err != nil {
-				return err
-			}
-		} else if !filepath.IsAbs(binary) {
-			return errors.New("installed Bria hook binary path must be absolute")
+			binary = strings.TrimSpace(os.Getenv("BRIA_PROVIDER_HOOK_BINARY"))
+		}
+		if binary == "" {
+			return errors.New("provider hook installation requires --binary with a stable activation path")
 		}
 		home, err := os.UserHomeDir()
 		if err != nil {
@@ -50,7 +55,17 @@ func runProviderHook(arguments []string) error {
 			filepath.Join(home, ".claude", "settings.json"),
 		)
 	}
-	store, err := providerbinding.NewStore(filepath.Join(nodeConfig.DataDir, "provider-bindings.json"))
+	storePath := *bindingStorePath
+	var nodeConfig config.Config
+	var err error
+	if storePath == "" {
+		nodeConfig, err = config.Load(*configPath)
+		if err != nil {
+			return err
+		}
+		storePath = filepath.Join(nodeConfig.DataDir, "provider-bindings.json")
+	}
+	store, err := providerbinding.NewStore(storePath)
 	if err != nil {
 		return err
 	}
@@ -66,6 +81,15 @@ func runProviderHook(arguments []string) error {
 		return nil
 	}
 	if result.WakeFinal {
+		if *configPath == "" {
+			return nil
+		}
+		if nodeConfig.NodeID == "" {
+			nodeConfig, err = config.Load(*configPath)
+			if err != nil {
+				return nil
+			}
+		}
 		if err := notifyProviderStop(ctx, nodeConfig, providerstop.Signal{
 			NodeID: result.NodeID, SessionID: result.SessionID,
 			ProviderSessionID: result.ProviderSessionID,
