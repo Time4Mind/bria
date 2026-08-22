@@ -48,12 +48,28 @@ func (c *Client) Lookup(ref domain.SessionRef, workdir string) (providerbinding.
 }
 
 func (c *Client) LookupRef(ref domain.SessionRef) (providerbinding.Record, bool, error) {
-	return c.lookupBinding(bindingLookupRequest{Ref: ref})
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return c.LookupRefContext(ctx, ref)
+}
+
+func (c *Client) LookupRefContext(
+	ctx context.Context,
+	ref domain.SessionRef,
+) (providerbinding.Record, bool, error) {
+	return c.lookupBindingContext(ctx, bindingLookupRequest{Ref: ref})
 }
 
 func (c *Client) lookupBinding(input bindingLookupRequest) (providerbinding.Record, bool, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+	return c.lookupBindingContext(ctx, input)
+}
+
+func (c *Client) lookupBindingContext(
+	ctx context.Context,
+	input bindingLookupRequest,
+) (providerbinding.Record, bool, error) {
 	var response bindingLookupResponse
 	if err := c.call(ctx, http.MethodPost, "/v1/provider-binding/lookup", input, &response); err != nil {
 		return providerbinding.Record{}, false, err

@@ -2,12 +2,17 @@ package runtimehost
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/Time4Mind/bria/internal/interactive"
+	"github.com/Time4Mind/bria/internal/promptidentity"
 )
+
+const inputConfirmationTimeout = 2 * time.Second
+const inputConfirmationBaselineTimeout = 750 * time.Millisecond
 
 func (e *LocalExecutor) executeOnce(
 	ctx context.Context,
@@ -61,11 +66,60 @@ func (e *LocalExecutor) executeOnceTimed(
 			}
 			result.ResolvedText = text
 		}
+		timing.inputBytes = len([]byte(text))
+		e.mu.RLock()
+		confirmer := e.inputConfirmer
+		e.mu.RUnlock()
+		baseline := InputConfirmationBaseline{}
+		baselineReady := false
+		if confirmer != nil {
+			baselineCtx, cancel := context.WithTimeout(ctx, inputConfirmationBaselineTimeout)
+			baselineStartedAt := e.now()
+			baseline, err = confirmer.BaselineInput(baselineCtx, binding)
+			cancel()
+			timing.confirmationBaseline = nonNegativeDuration(e.now().Sub(baselineStartedAt))
+			if err == nil {
+				baselineReady = true
+			} else {
+				timing.confirmationOutcome = "baseline_unavailable"
+				err = nil // The prompt is still submitted once; failure is classified afterward.
+			}
+		}
 		startedAt := e.now()
 		err = e.driver.SendLiteral(ctx, binding.TmuxTarget, request.OperationID, text)
 		timing.tmuxSend = nonNegativeDuration(e.now().Sub(startedAt))
 		if err != nil {
 			timing.failureStage = "tmux_send"
+			break
+		}
+		if confirmer != nil && baselineReady {
+			confirmationCtx, cancel := context.WithTimeout(ctx, inputConfirmationTimeout)
+			confirmationStartedAt := e.now()
+			confirmationErr := confirmer.ConfirmInput(
+				confirmationCtx, binding, baseline, promptidentity.Digest(strings.TrimSpace(text)),
+			)
+			cancel()
+			timing.confirmation = nonNegativeDuration(e.now().Sub(confirmationStartedAt))
+			switch {
+			case confirmationErr == nil:
+				timing.confirmationOutcome = "confirmed"
+				if baseline.LegacyGeneration {
+					timing.confirmationOutcome = "confirmed_legacy"
+				}
+				accepted := true
+				result.ProviderAccepted = &accepted
+			case errors.Is(confirmationErr, ErrStaleRuntime):
+				timing.confirmationOutcome = "stale_generation"
+			default:
+				timing.confirmationOutcome = "unconfirmed"
+			}
+		}
+		if confirmer != nil && timing.confirmationOutcome != "confirmed" &&
+			timing.confirmationOutcome != "confirmed_legacy" {
+			accepted := false
+			result.ProviderAccepted = &accepted
+			timing.failureStage = "confirmation"
+			err = ErrInputUnconfirmed
 		}
 	case ActionStop:
 		err = e.driver.SendKey(ctx, binding.TmuxTarget, "Escape")
@@ -110,7 +164,11 @@ func (e *LocalExecutor) executeOnceTimed(
 		result.GeneratedName, err = namer.Generate(ctx, binding.Backend, request.Text)
 	}
 	if err != nil {
-		result.Detail = "runtime operation failed"
+		if errors.Is(err, ErrInputUnconfirmed) {
+			result.Detail = "provider did not confirm submitted input"
+		} else {
+			result.Detail = "runtime operation failed"
+		}
 		return result, timing, err
 	}
 	result.Delivered = true

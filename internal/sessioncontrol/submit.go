@@ -138,7 +138,8 @@ func (c *Controller) submit(
 	if err := c.service.PublishSessionRuntime(stateCtx, session, phase, result); err != nil {
 		return Accepted{}, err
 	}
-	if action == runtimehost.ActionStop || action == runtimehost.ActionClear || input != nil {
+	if action == runtimehost.ActionStop || action == runtimehost.ActionClear ||
+		action == runtimehost.ActionSendInput {
 		c.observe(actor, request)
 	}
 	return Accepted{Session: session.Ref(), Receipt: receipt}, nil

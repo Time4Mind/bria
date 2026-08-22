@@ -127,6 +127,27 @@ func TestTmuxDriverSendsLiteralInputThroughStdin(t *testing.T) {
 	}
 }
 
+func TestAdaptiveInputSubmitDelayScalesAndStaysBounded(t *testing.T) {
+	base := 400 * time.Millisecond
+	for _, test := range []struct {
+		name       string
+		inputBytes int
+		timeout    time.Duration
+		want       time.Duration
+	}{
+		{name: "short", inputBytes: 900, timeout: 8 * time.Second, want: base},
+		{name: "eight kib", inputBytes: 8 << 10, timeout: 8 * time.Second, want: 1200 * time.Millisecond},
+		{name: "large capped", inputBytes: 128 << 10, timeout: 8 * time.Second, want: 3 * time.Second},
+		{name: "timeout bounded", inputBytes: 128 << 10, timeout: time.Second, want: 900 * time.Millisecond},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := adaptiveInputSubmitDelay(base, test.timeout, test.inputBytes); got != test.want {
+				t.Fatalf("delay=%s want=%s", got, test.want)
+			}
+		})
+	}
+}
+
 func TestTmuxDriverDeletesLoadedBufferWhenPasteFails(t *testing.T) {
 	runner := &recordingInputRunner{runError: errors.New("tmux unavailable")}
 	driver, err := NewTmuxDriver(runner, time.Second, 0, nil)

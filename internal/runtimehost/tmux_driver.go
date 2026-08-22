@@ -24,6 +24,11 @@ type TmuxDriver struct {
 
 const maxPaneCaptureBytes = 48 << 10
 
+const (
+	submitDelayPerKiB   = 100 * time.Millisecond
+	maxInputSubmitDelay = 3 * time.Second
+)
+
 func NewTmuxDriver(
 	runner InputCommandRunner,
 	timeout time.Duration,
@@ -86,10 +91,35 @@ func (d *TmuxDriver) SendLiteral(
 		return commandExitError("paste tmux input buffer", result)
 	}
 	pasted = true
-	if err := waitContext(runCtx, d.submitDelay); err != nil {
+	if err := waitContext(runCtx, adaptiveInputSubmitDelay(
+		d.submitDelay, d.timeout, len([]byte(text)),
+	)); err != nil {
 		return err
 	}
 	return d.sendKey(runCtx, target, "Enter")
+}
+
+func adaptiveInputSubmitDelay(base, timeout time.Duration, inputBytes int) time.Duration {
+	delay := base
+	if inputBytes > 0 {
+		blocks := inputBytes / 1024
+		maxBlocks := int(maxInputSubmitDelay / submitDelayPerKiB)
+		if blocks > maxBlocks {
+			blocks = maxBlocks
+		}
+		delay += time.Duration(blocks) * submitDelayPerKiB
+	}
+	limit := maxInputSubmitDelay
+	if timeoutLimit := timeout - 100*time.Millisecond; timeoutLimit < limit {
+		limit = timeoutLimit
+	}
+	if limit < base {
+		limit = base
+	}
+	if delay > limit {
+		delay = limit
+	}
+	return delay
 }
 
 func (d *TmuxDriver) SendKey(ctx context.Context, target, key string) error {

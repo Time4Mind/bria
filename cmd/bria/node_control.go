@@ -173,6 +173,11 @@ func startNodeRuntimeControl(
 		}
 		bindingStore = localBindings
 	}
+	inputConfirmer, err := newProviderTranscriptInputConfirmer(bindingStore, transcriptReader)
+	if err != nil {
+		return closeFailedRuntime(executor, store, err)
+	}
+	executor.SetInputConfirmer(inputConfirmer)
 	localStarts, startRouter, err := newLocalSessionStart(
 		node, nodeConfig, home, transcriptReader, bindingStore, executor, client,
 		backendRuntime.runner,

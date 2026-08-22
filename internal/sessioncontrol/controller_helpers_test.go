@@ -34,7 +34,9 @@ func controllerFixture(t *testing.T) (*Controller, *runtimeStub, *clusterstate.M
 	if err != nil {
 		t.Fatal(err)
 	}
-	runtime := &runtimeStub{results: make(map[string]runtimehost.Result)}
+	runtime := &runtimeStub{
+		results: make(map[string]runtimehost.Result), resultErrors: make(map[string]error),
+	}
 	controller, err := New(service, runtime)
 	if err != nil {
 		t.Fatal(err)

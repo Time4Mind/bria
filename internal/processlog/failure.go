@@ -46,7 +46,7 @@ func FailureClassForOutcome(outcome string) FailureClass {
 		"already_delivered", "ignored", "terminal", "skipped_current":
 		return FailureNone
 	case "retry_scheduled", "waiting", "settlement_pending", "final_pending",
-		"runtime_pending", "card_unavailable", "delivery_pending":
+		"runtime_pending", "card_unavailable", "delivery_pending", "submit_unconfirmed":
 		return FailureTransient
 	case "timeout", "foreground_timeout", "tmux_timeout", "queue_timeout", "deadline":
 		return FailureTimeout

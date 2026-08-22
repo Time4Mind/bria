@@ -257,7 +257,15 @@ func (c *Controller) applyResult(
 		session.LastOperation == nil || session.LastOperation.OperationID != request.OperationID {
 		return
 	}
-	if executionErr == nil && result.Delivered && request.Input != nil &&
+	if request.Action == runtimehost.ActionSendInput && request.Input == nil &&
+		executionErr == nil && result.Delivered &&
+		(result.ProviderAccepted == nil || *result.ProviderAccepted) {
+		// The transcript acknowledgement proves submission, not turn completion.
+		// Keep the durable operation queued until the canonical final settles it.
+		return
+	}
+	providerRejected := result.ProviderAccepted != nil && !*result.ProviderAccepted
+	if executionErr == nil && result.Delivered && !providerRejected && request.Input != nil &&
 		session.Name == "" && session.OwnerID == actor.UserID && result.ResolvedText != "" {
 		c.queueNaming(actor, request.OperationID+"-name", session, result.ResolvedText)
 	}
@@ -276,7 +284,7 @@ func (c *Controller) applyResult(
 	if request.Action == runtimehost.ActionSendInput {
 		phase = session.RuntimePhase
 	}
-	if executionErr != nil || !result.Delivered {
+	if executionErr != nil || !result.Delivered || providerRejected {
 		status = domain.OperationFailed
 		phase = domain.RuntimeDegraded
 	}

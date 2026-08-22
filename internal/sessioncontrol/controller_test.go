@@ -21,11 +21,12 @@ func (p machinePort) Apply(_ context.Context, command clusterstate.Command) (clu
 }
 
 type runtimeStub struct {
-	mu       sync.Mutex
-	requests []runtimehost.Request
-	results  map[string]runtimehost.Result
-	failures int
-	err      error
+	mu           sync.Mutex
+	requests     []runtimehost.Request
+	results      map[string]runtimehost.Result
+	resultErrors map[string]error
+	failures     int
+	err          error
 }
 
 type clearCommitApplier struct {
@@ -95,7 +96,7 @@ func (r *runtimeStub) LookupResult(
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	result, ok := r.results[request.OperationID]
-	return result, ok, nil
+	return result, ok, r.resultErrors[request.OperationID]
 }
 
 func clearControllerFixture(
@@ -124,7 +125,9 @@ func clearControllerFixture(
 	if err != nil {
 		t.Fatal(err)
 	}
-	runtime := &runtimeStub{results: make(map[string]runtimehost.Result)}
+	runtime := &runtimeStub{
+		results: make(map[string]runtimehost.Result), resultErrors: make(map[string]error),
+	}
 	controller, err := New(service, runtime)
 	if err != nil {
 		t.Fatal(err)
@@ -165,6 +168,50 @@ func TestSendInputPinsActiveSessionAndPublishesRunning(t *testing.T) {
 	}
 	if !session.UserRequestTracked || !session.UserRequestSeen {
 		t.Fatalf("accepted request was not durably tracked: %#v", session)
+	}
+}
+
+func TestPlainInputConfirmationKeepsTurnRunningAndUnconfirmedDegrades(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		accepted   bool
+		delivered  bool
+		resultErr  error
+		wantPhase  domain.RuntimePhase
+		wantStatus domain.OperationStatus
+	}{
+		{name: "confirmed", accepted: true, delivered: true, wantPhase: domain.RuntimeRunning, wantStatus: domain.OperationQueued},
+		{name: "unconfirmed", resultErr: runtimehost.ErrInputUnconfirmed, wantPhase: domain.RuntimeDegraded, wantStatus: domain.OperationFailed},
+		{name: "rejected invariant", delivered: true, wantPhase: domain.RuntimeDegraded, wantStatus: domain.OperationFailed},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			controller, runtime, machine := controllerFixture(t)
+			operationID := "plain-" + test.name
+			if _, err := controller.SendInput(
+				context.Background(), application.Principal{UserID: 7}, operationID, "prompt",
+			); err != nil {
+				t.Fatal(err)
+			}
+			accepted := test.accepted
+			runtime.mu.Lock()
+			runtime.results[operationID] = runtimehost.Result{
+				Accepted: true, Delivered: test.delivered, ProviderAccepted: &accepted,
+				Detail: "provider did not confirm submitted input",
+			}
+			runtime.resultErrors[operationID] = test.resultErr
+			runtime.mu.Unlock()
+
+			deadline := time.Now().Add(time.Second)
+			for time.Now().Before(deadline) {
+				session := machine.State().Sessions["node/session"]
+				if session.RuntimePhase == test.wantPhase && session.LastOperation != nil &&
+					session.LastOperation.Status == test.wantStatus {
+					return
+				}
+				time.Sleep(time.Millisecond)
+			}
+			t.Fatalf("session=%+v", machine.State().Sessions["node/session"])
+		})
 	}
 }
 

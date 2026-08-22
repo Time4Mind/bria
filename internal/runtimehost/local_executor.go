@@ -15,23 +15,24 @@ type LocalExecutor struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	mu            sync.RWMutex
-	submitMu      sync.Mutex
-	sessions      map[string]*localSession
-	active        map[string]struct{}
-	accepting     bool
-	workers       sync.WaitGroup
-	shutdownOnce  sync.Once
-	shutdownDone  chan struct{}
-	shutdownErr   error
-	completionMu  sync.Mutex
-	completionErr error
-	namer         NameGenerator
-	archiver      ArchiveWriter
-	inputs        InputResolver
-	now           func() time.Time
-	inputTiming   func(inputDeliveryTiming)
-	queueLimits   InputQueueLimitResolver
+	mu             sync.RWMutex
+	submitMu       sync.Mutex
+	sessions       map[string]*localSession
+	active         map[string]struct{}
+	accepting      bool
+	workers        sync.WaitGroup
+	shutdownOnce   sync.Once
+	shutdownDone   chan struct{}
+	shutdownErr    error
+	completionMu   sync.Mutex
+	completionErr  error
+	namer          NameGenerator
+	archiver       ArchiveWriter
+	inputs         InputResolver
+	now            func() time.Time
+	inputTiming    func(inputDeliveryTiming)
+	queueLimits    InputQueueLimitResolver
+	inputConfirmer InputConfirmer
 }
 
 type NameGenerator interface {
@@ -89,6 +90,12 @@ func (e *LocalExecutor) SetInputQueueLimitResolver(resolver InputQueueLimitResol
 		resolver = defaultInputQueueLimitResolver{}
 	}
 	e.queueLimits = resolver
+}
+
+func (e *LocalExecutor) SetInputConfirmer(confirmer InputConfirmer) {
+	e.mu.Lock()
+	e.inputConfirmer = confirmer
+	e.mu.Unlock()
 }
 
 // ActiveOperationIDs returns a point-in-time set used by store maintenance to
@@ -387,7 +394,8 @@ func (e *LocalExecutor) LookupResult(
 func storedOperationError(detail string) error {
 	for _, known := range []error{
 		ErrRuntimeUnavailable, ErrRuntimeShuttingDown, ErrStaleRuntime, ErrOperationIDConflict,
-		ErrOperationOutcomeUnknown, ErrTerminalUnavailable, ErrUnsupportedBackendAction,
+		ErrOperationOutcomeUnknown, ErrInputUnconfirmed, ErrTerminalUnavailable,
+		ErrUnsupportedBackendAction,
 	} {
 		if detail == known.Error() {
 			return known

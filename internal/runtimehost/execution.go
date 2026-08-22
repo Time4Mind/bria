@@ -15,6 +15,7 @@ var (
 	ErrOperationIDConflict      = errors.New("operation id was reused for another request")
 	ErrOperationOutcomeUnknown  = errors.New("operation outcome is unknown; refusing to repeat it")
 	ErrQueueFull                = errors.New("local runtime queue is full")
+	ErrInputUnconfirmed         = errors.New("provider did not confirm submitted input")
 	ErrTerminalUnavailable      = errors.New("local terminal is unavailable")
 	ErrUnsupportedBackendAction = errors.New("backend does not support this action")
 )
@@ -88,6 +89,7 @@ type Result struct {
 	GeneratedName        string `json:"generated_name,omitempty"`
 	ArchiveCommitted     bool   `json:"archive_committed,omitempty"`
 	ResolvedText         string `json:"resolved_text,omitempty"`
+	ProviderAccepted     *bool  `json:"provider_accepted,omitempty"`
 }
 
 type Receipt struct {
