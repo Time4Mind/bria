@@ -159,8 +159,8 @@ func (h *Handler) archivePages(
 		return telegramui.Screen{}, application.CardEventPages{}, err
 	}
 	events := []application.CardEvent(nil)
-	if h.controls != nil {
-		if transcriptEvents, transcriptErr := h.controls.Transcript(ctx, actor, ref); transcriptErr == nil {
+	if h.controls.transcript != nil {
+		if transcriptEvents, transcriptErr := h.controls.transcript.Transcript(ctx, actor, ref); transcriptErr == nil {
 			events = cardEvents(transcriptEvents)
 		}
 	}

@@ -204,7 +204,7 @@ func (h *Handler) nodeDisableErrors(
 func (h *Handler) closeNodeSessions(
 	ctx context.Context, actor application.Principal, nodeID domain.NodeID,
 ) []string {
-	if h.controls == nil {
+	if h.controls.lifecycle == nil {
 		return []string{"session controls unavailable"}
 	}
 	sessions, err := h.service.LiveSessionsOnNode(actor, nodeID)
@@ -216,13 +216,13 @@ func (h *Handler) closeNodeSessions(
 		ref := session.Ref()
 		op := fmt.Sprintf("disable-%s-%d-%d", nodeID, time.Now().UnixNano(), index)
 		if session.RuntimePhase != domain.RuntimeIdle && session.RuntimePhase != domain.RuntimeWaitingInput {
-			if _, err := h.controls.Stop(ctx, actor, op+"-stop", ref); err != nil ||
+			if _, err := h.controls.lifecycle.Stop(ctx, actor, op+"-stop", ref); err != nil ||
 				!h.waitUntilClosable(ctx, actor, ref) {
 				failed = append(failed, sessionLabel(session))
 				continue
 			}
 		}
-		accepted, err := h.controls.Close(ctx, actor, op+"-close", ref)
+		accepted, err := h.controls.lifecycle.Close(ctx, actor, op+"-close", ref)
 		if err != nil || accepted.Deferred {
 			failed = append(failed, sessionLabel(session))
 		}

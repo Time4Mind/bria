@@ -12,9 +12,9 @@ import (
 	"github.com/Time4Mind/bria/internal/transcript"
 )
 
-type deadlineControls struct{ SessionControls }
+type deadlineTranscriptControls struct{}
 
-func (deadlineControls) Transcript(
+func (deadlineTranscriptControls) Transcript(
 	ctx context.Context, _ application.Principal, _ domain.SessionRef,
 ) ([]transcript.Event, error) {
 	<-ctx.Done()
@@ -95,7 +95,8 @@ func TestBackgroundTranscriptReadHasIndependentDeadline(t *testing.T) {
 	backgroundTranscriptBudget = 10 * time.Millisecond
 	t.Cleanup(func() { backgroundTranscriptBudget = previous })
 	handler := &Handler{
-		controls: deadlineControls{}, cardRuntimeState: newCardRuntimeState(),
+		controls:         sessionControlPorts{transcript: deadlineTranscriptControls{}},
+		cardRuntimeState: newCardRuntimeState(),
 	}
 	_, err := handler.readBackgroundTranscript(
 		context.Background(), application.Principal{UserID: 7},

@@ -33,14 +33,14 @@
       latest-message ordering и timing. Replicated response-card state,
       visible epoch, active-session guards и page watermarks оставить единым
       semantic coordinator в `telegramapp`.
-  - [ ] R4.3. Проверить, что межпакетные interfaces узкие, принадлежат
+  - [x] R4.3. Проверить, что межпакетные interfaces узкие, принадлежат
     потребителю и не создают церемониальных слоёв:
     - [x] R4.3.1. Принимать cluster updater в `telegramapp` через локальный
       трёхметодный consumer-owned interface, а не через конкретный
       `*clusterupdate.Coordinator`.
-    - [ ] R4.3.2. Проверить широкий `SessionControls` по фактическим группам
-      потребителей; разделять только если это уменьшает связанность и тестовые
-      заглушки без усложнения composition root.
+    - [x] R4.3.2. Разложить широкий `SessionControls` на consumer-owned порты
+      ввода, lifecycle, интерактива, pane capture, транскрипта и файлов. В
+      composition root сохранить один составной контракт и один controller.
   - [ ] R4.4. Зафиксировать проверяемое направление зависимостей и отсутствие
     циклов и пакетов вида `util`/`common`/`api`/`types`/`interfaces`.
   - [ ] R4.5. Подтвердить итоговую компоновку: один `go.mod`, `cmd/bria` как

@@ -69,7 +69,7 @@ func (h *Handler) reconcileActiveFinalCards(
 	now time.Time,
 	schedule activeFinalReconcileSchedule,
 ) {
-	if h.controls == nil {
+	if h.controls.transcript == nil {
 		return
 	}
 	candidates := h.service.ActiveSessions()

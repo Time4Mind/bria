@@ -86,7 +86,7 @@ func (h *Handler) openClusterHealth(
 		CacheEntries: entries, CacheLimit: maxCachedCardSessions, CacheEvictions: evictions,
 		TranscriptAverage: average.Round(time.Millisecond).String(),
 		TranscriptMaximum: maximum.Round(time.Millisecond).String(), TranscriptTimeouts: slow,
-		AgentAvailable: targetErr == nil && h.starter != nil && h.controls != nil && workdir != "",
+		AgentAvailable: targetErr == nil && h.starter != nil && h.controls.input != nil && workdir != "",
 	}
 	for _, finding := range report.Findings {
 		input.Findings = append(input.Findings, telegramui.ClusterHealthFinding{
@@ -101,7 +101,7 @@ func (h *Handler) startClusterHealthAgent(
 	ctx context.Context,
 	actor application.Principal,
 ) (telegramui.Screen, domain.SessionRef, error) {
-	if h.starter == nil || h.controls == nil || h.clusterAgentWorkdir == "" {
+	if h.starter == nil || h.controls.input == nil || h.clusterAgentWorkdir == "" {
 		return telegramui.Screen{}, domain.SessionRef{}, domain.ErrInvalidState
 	}
 	node, err := h.service.ClusterAgentTarget(actor)
@@ -124,7 +124,7 @@ func (h *Handler) startClusterHealthAgent(
 	}
 	prompt := clusterHealthAgentPrompt(report)
 	operationID := "cluster-health-agent-" + string(session.ID)
-	if _, err := h.controls.SendInput(ctx, actor, operationID, prompt); err != nil {
+	if _, err := h.controls.input.SendInput(ctx, actor, operationID, prompt); err != nil {
 		return telegramui.Screen{}, domain.SessionRef{}, err
 	}
 	screen, err := h.renderSessionCard(ctx, actor, session.Ref(), 0)

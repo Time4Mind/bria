@@ -228,13 +228,13 @@ func (h *Handler) handleNavigationCallback(
 	} else if err == nil {
 		h.rememberCardPage(actor.UserID, screen)
 	}
-	if err == nil && callback.Action == telegramui.ActionSelectSession && h.controls != nil {
+	if err == nil && callback.Action == telegramui.ActionSelectSession && h.controls.pane != nil {
 		if ref, resolveErr := h.resolveSession(actor, callback.Action, callback.Token); resolveErr == nil {
 			h.rememberResolvedCardPage(actor.UserID, ref, screen)
 			h.schedulePaneRefresh(ctx, actor, ref, edited)
 		}
 	}
-	if err == nil && pageEdit && h.controls != nil && h.sessionNeedsPaneRefresh(actor, pageRef) {
+	if err == nil && pageEdit && h.controls.pane != nil && h.sessionNeedsPaneRefresh(actor, pageRef) {
 		h.schedulePaneRefresh(ctx, actor, pageRef, edited)
 	}
 	return err

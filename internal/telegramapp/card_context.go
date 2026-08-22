@@ -217,7 +217,7 @@ func (h *Handler) refreshBackgroundContexts(
 	ctx context.Context,
 	deliveries []application.BackgroundDelivery,
 ) {
-	if h.controls == nil {
+	if h.controls.transcript == nil {
 		return
 	}
 	semaphore := make(chan struct{}, backgroundSettleWorkers)

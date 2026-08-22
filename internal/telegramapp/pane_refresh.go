@@ -45,7 +45,7 @@ func (h *Handler) schedulePaneRefresh(
 	ref domain.SessionRef,
 	message telegrambot.Message,
 ) {
-	if h.controls == nil || message.ChatID == 0 || message.MessageID == 0 {
+	if h.controls.pane == nil || message.ChatID == 0 || message.MessageID == 0 {
 		return
 	}
 	h.paneMu.Lock()

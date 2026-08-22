@@ -250,7 +250,7 @@ func (h *Handler) runPaneCapture(
 	captureCtx, cancel := context.WithTimeout(parent, paneCaptureExecution)
 	defer cancel()
 	startedAt := time.Now()
-	flight.pane, flight.err = h.controls.CapturePane(captureCtx, actor, operationID, ref)
+	flight.pane, flight.err = h.controls.pane.CapturePane(captureCtx, actor, operationID, ref)
 	outcome := "ok"
 	if flight.err != nil {
 		switch {

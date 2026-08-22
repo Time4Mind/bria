@@ -15,7 +15,6 @@ import (
 )
 
 type countingTranscriptControls struct {
-	SessionControls
 	calls  int
 	events []transcript.Event
 	err    error
@@ -47,7 +46,7 @@ func TestBackgroundSettlementReadFailureUsesShortRetry(t *testing.T) {
 	}
 	controls := &countingTranscriptControls{err: errors.New("unavailable")}
 	handler := &Handler{
-		service: service, controls: controls,
+		service: service, controls: sessionControlPorts{transcript: controls},
 		paneRefreshState:   newPaneRefreshState(),
 		cardRuntimeState:   newCardRuntimeState(),
 		transcriptTriggers: newTranscriptTriggerTracker(now),
@@ -122,7 +121,7 @@ func TestBackgroundSettlementSkipsOnlyExactActivePaneWorker(t *testing.T) {
 		Kind: transcript.EventToolCall, Head: "Bash", Timestamp: now.Format(time.RFC3339Nano),
 	}}}
 	handler := &Handler{
-		service: service, controls: controls,
+		service: service, controls: sessionControlPorts{transcript: controls},
 		paneRefreshState:   newPaneRefreshState(),
 		cardRuntimeState:   newCardRuntimeState(),
 		transcriptTriggers: newTranscriptTriggerTracker(now),
@@ -194,12 +193,11 @@ func TestActiveFinalReconciliationUsesFiveSecondWatchdog(t *testing.T) {
 		t.Fatal(err)
 	}
 	controls := &countingTranscriptControls{}
-	handler, err := NewHandlerWithControls(
-		service, projector, codec, &clusterLogMessenger{}, controls,
-	)
+	handler, err := NewHandler(service, projector, codec, &clusterLogMessenger{})
 	if err != nil {
 		t.Fatal(err)
 	}
+	handler.controls.transcript = controls
 	schedule := make(activeFinalReconcileSchedule)
 	handler.reconcileActiveFinalCards(context.Background(), now, schedule)
 	if controls.calls != 1 {

@@ -37,10 +37,8 @@ func (h *Handler) renderSessionCardForSelection(
 	page int,
 	acknowledgeFinal bool,
 ) (telegramui.Screen, error) {
-	if recovery, ok := h.controls.(interface {
-		EnsureName(application.Principal, domain.SessionRef) bool
-	}); ok {
-		recovery.EnsureName(actor, ref)
+	if h.controls.nameEnsurer != nil {
+		h.controls.nameEnsurer.EnsureName(actor, ref)
 	}
 	if screen, ok, err := h.renderInteractiveSessionCard(ctx, actor, ref); ok || err != nil {
 		return screen, err
@@ -182,7 +180,7 @@ func (h *Handler) renderSessionCardSnapshotWithPane(
 	page int,
 	attachPane bool,
 ) (sessionCardSnapshot, error) {
-	if h.controls == nil {
+	if h.controls.transcript == nil {
 		screen, err := h.projector.SessionCard(actor, ref)
 		return sessionCardSnapshot{screen: screen}, err
 	}
@@ -199,7 +197,7 @@ func (h *Handler) renderSessionCardSnapshotWithPane(
 		return sessionCardSnapshot{}, sessionErr
 	}
 	phaseStarted = time.Now()
-	events, err := h.controls.Transcript(ctx, actor, ref)
+	events, err := h.controls.transcript.Transcript(ctx, actor, ref)
 	timing.transcript = time.Since(phaseStarted)
 	if err != nil {
 		// A transient node-control failure must not erase a previously rendered
@@ -264,7 +262,7 @@ func (h *Handler) renderSessionCardSnapshotWithPane(
 		phaseStarted = time.Now()
 		preferences, preferencesErr := h.service.Preferences(actor)
 		timing.preferences = time.Since(phaseStarted)
-		if attachPane && preferencesErr == nil &&
+		if attachPane && h.controls.pane != nil && preferencesErr == nil &&
 			preferences.EffectiveTerminalSnapshots() == domain.TerminalSnapshotAlways {
 			timing.pane = h.attachImmediatePane(ctx, actor, session, &screen)
 		}

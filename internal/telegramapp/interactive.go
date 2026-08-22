@@ -38,7 +38,8 @@ func (h *Handler) renderInteractiveSessionCard(
 	ref domain.SessionRef,
 ) (telegramui.Screen, bool, error) {
 	session, err := h.service.Session(actor, ref)
-	if err != nil || session.InteractivePrompt == nil || h.controls == nil {
+	if err != nil || session.InteractivePrompt == nil ||
+		h.controls.interactive == nil || h.controls.pane == nil {
 		return telegramui.Screen{}, false, err
 	}
 	captureCtx, cancel := context.WithTimeout(ctx, paneForegroundWait)
@@ -106,7 +107,7 @@ func (h *Handler) handleInteractiveCallback(
 	update telegrambot.IncomingUpdate,
 	callback telegramui.Callback,
 ) error {
-	if h.controls == nil {
+	if h.controls.interactive == nil {
 		return h.answerAndDrop(ctx, update.CallbackID, h.copy(actor).Text(i18n.ToastUnavailable))
 	}
 	target, err := h.resolveInteractive(actor, callback.Action, callback.Token)
@@ -135,7 +136,7 @@ func (h *Handler) handleInteractiveCallback(
 	}
 	actionCtx, cancel := context.WithTimeout(ctx, interactiveActionTimeout)
 	defer cancel()
-	pane, err := h.controls.SendKey(
+	pane, err := h.controls.interactive.SendKey(
 		actionCtx, actor, fmt.Sprintf("tg-%d-%s", update.UpdateID, callback.Action),
 		target.Session, key, target.PromptHash,
 	)

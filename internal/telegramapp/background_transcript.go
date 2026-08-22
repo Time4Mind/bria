@@ -18,7 +18,7 @@ func (h *Handler) readBackgroundTranscript(
 	requestCtx, cancel := context.WithTimeout(ctx, backgroundTranscriptBudget)
 	defer cancel()
 	startedAt := time.Now()
-	events, err := h.controls.Transcript(requestCtx, actor, ref)
+	events, err := h.controls.transcript.Transcript(requestCtx, actor, ref)
 	duration := time.Since(startedAt)
 	h.cardDataMu.Lock()
 	h.transcriptReads++

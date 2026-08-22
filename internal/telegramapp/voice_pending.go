@@ -55,13 +55,13 @@ func (h *Handler) captureVoiceBaseline(
 ) voicePendingBaseline {
 	receivedAt := time.Now()
 	session, err := h.service.ActiveSession(actor)
-	if err != nil || h.controls == nil {
+	if err != nil || h.controls.transcript == nil {
 		return voicePendingBaseline{receivedAt: receivedAt}
 	}
 	baseline := voicePendingBaseline{ref: session.Ref(), receivedAt: receivedAt}
 	baselineCtx, cancel := context.WithTimeout(ctx, voiceBaselineTimeout)
 	defer cancel()
-	events, err := h.controls.Transcript(baselineCtx, actor, session.Ref())
+	events, err := h.controls.transcript.Transcript(baselineCtx, actor, session.Ref())
 	if err != nil {
 		return baseline
 	}

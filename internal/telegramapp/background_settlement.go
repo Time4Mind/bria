@@ -32,7 +32,7 @@ func (h *Handler) settleDueRunningSessions(
 	retryInterval time.Duration,
 	schedule backgroundSettlementSchedule,
 ) {
-	if h.controls == nil {
+	if h.controls.transcript == nil {
 		return
 	}
 	if retryInterval <= 0 {

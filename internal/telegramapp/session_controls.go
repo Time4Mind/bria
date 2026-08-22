@@ -17,25 +17,77 @@ import (
 	"github.com/Time4Mind/bria/internal/transcript"
 )
 
-type SessionControls interface {
+type sessionInputControls interface {
 	SendInput(context.Context, application.Principal, string, string) (sessioncontrol.Accepted, error)
 	SendExternalInput(context.Context, application.Principal, string, runtimehost.InputPayload) (sessioncontrol.Accepted, error)
+}
+
+type sessionLifecycleControls interface {
 	Stop(context.Context, application.Principal, string, domain.SessionRef) (sessioncontrol.Accepted, error)
 	Clear(context.Context, application.Principal, string, domain.SessionRef) (sessioncontrol.Accepted, error)
 	Close(context.Context, application.Principal, string, domain.SessionRef) (sessioncontrol.Accepted, error)
 	Restore(context.Context, application.Principal, string, domain.SessionRef) (sessioncontrol.Accepted, error)
 	OpenTerminal(context.Context, application.Principal, string, domain.SessionRef) (sessioncontrol.Accepted, error)
-	CapturePane(context.Context, application.Principal, string, domain.SessionRef) ([]byte, error)
+}
+
+type sessionInteractiveControls interface {
 	SendKey(context.Context, application.Principal, string, domain.SessionRef,
 		runtimehost.InteractiveKey, string) ([]byte, error)
+}
+
+type sessionPaneControls interface {
+	CapturePane(context.Context, application.Principal, string, domain.SessionRef) ([]byte, error)
+}
+
+type sessionTranscriptControls interface {
 	Transcript(context.Context, application.Principal, domain.SessionRef) ([]transcript.Event, error)
+}
+
+type sessionFileControls interface {
 	OpenSessionFile(context.Context, application.Principal, domain.SessionRef, string) (nodecontrol.SessionFile, error)
+}
+
+// SessionControls is the single composition-root contract. Handler flows use
+// the narrower consumer-owned ports below, while production wiring can keep
+// passing one sessioncontrol.Controller without adapter ceremony.
+type SessionControls interface {
+	sessionInputControls
+	sessionLifecycleControls
+	sessionInteractiveControls
+	sessionPaneControls
+	sessionTranscriptControls
+	sessionFileControls
+}
+
+type sessionNameEnsurer interface {
+	EnsureName(application.Principal, domain.SessionRef) bool
 }
 
 type legacyArchiveRestorer interface {
 	RestoreWithProvider(
 		context.Context, application.Principal, string, domain.SessionRef, string,
 	) (sessioncontrol.Accepted, error)
+}
+
+type sessionControlPorts struct {
+	input         sessionInputControls
+	lifecycle     sessionLifecycleControls
+	interactive   sessionInteractiveControls
+	pane          sessionPaneControls
+	transcript    sessionTranscriptControls
+	files         sessionFileControls
+	nameEnsurer   sessionNameEnsurer
+	legacyRestore legacyArchiveRestorer
+}
+
+func bindSessionControlPorts(controls SessionControls) sessionControlPorts {
+	ports := sessionControlPorts{
+		input: controls, lifecycle: controls, interactive: controls, pane: controls,
+		transcript: controls, files: controls,
+	}
+	ports.nameEnsurer, _ = controls.(sessionNameEnsurer)
+	ports.legacyRestore, _ = controls.(legacyArchiveRestorer)
+	return ports
 }
 
 const (
@@ -66,7 +118,7 @@ func (h *Handler) handleSessionControlCallback(
 		restoreTiming = newRestoreCallbackTiming()
 		defer restoreTiming.log()
 	}
-	if h.controls == nil {
+	if h.controls.lifecycle == nil {
 		if restoreTiming != nil {
 			restoreTiming.outcome = "controls_unavailable"
 		}
@@ -138,9 +190,9 @@ func (h *Handler) handleSessionControlCallback(
 	operationID := fmt.Sprintf("tg-%d-%s", update.UpdateID, callback.Action)
 	switch callback.Action {
 	case telegramui.ActionStop:
-		_, err = h.controls.Stop(ctx, actor, operationID, ref)
+		_, err = h.controls.lifecycle.Stop(ctx, actor, operationID, ref)
 	case telegramui.ActionConfirmClear:
-		_, err = h.controls.Clear(ctx, actor, operationID, ref)
+		_, err = h.controls.lifecycle.Clear(ctx, actor, operationID, ref)
 	case telegramui.ActionConfirmClose:
 		current, sessionErr := h.service.Session(actor, ref)
 		if sessionErr != nil {
@@ -154,7 +206,7 @@ func (h *Handler) handleSessionControlCallback(
 			}
 		}
 		if err == nil {
-			_, err = h.controls.Close(ctx, actor, operationID, ref)
+			_, err = h.controls.lifecycle.Close(ctx, actor, operationID, ref)
 		}
 	case telegramui.ActionRestore:
 		phaseStartedAt = time.Now()
@@ -162,13 +214,13 @@ func (h *Handler) handleSessionControlCallback(
 		if sessionErr != nil {
 			err = sessionErr
 		} else if current.ProviderSessionID != "" {
-			_, err = h.controls.Restore(ctx, actor, operationID, ref)
+			_, err = h.controls.lifecycle.Restore(ctx, actor, operationID, ref)
 		} else {
 			var providerID string
 			providerID, err = h.discoverMissingProvider(ctx, actor, current)
 			if err == nil {
-				restorer, ok := h.controls.(legacyArchiveRestorer)
-				if !ok {
+				restorer := h.controls.legacyRestore
+				if restorer == nil {
 					err = sessioncontrol.ErrRuntimeUnavailable
 				} else {
 					_, err = restorer.RestoreWithProvider(ctx, actor, operationID, ref, providerID)
@@ -177,7 +229,7 @@ func (h *Handler) handleSessionControlCallback(
 		}
 		restoreTiming.control = time.Since(phaseStartedAt)
 	case telegramui.ActionTerminal:
-		_, err = h.controls.OpenTerminal(ctx, actor, operationID, ref)
+		_, err = h.controls.lifecycle.OpenTerminal(ctx, actor, operationID, ref)
 	}
 	if err != nil {
 		if restoreTiming != nil {

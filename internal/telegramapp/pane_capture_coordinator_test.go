@@ -12,7 +12,6 @@ import (
 )
 
 type coalescingCaptureControls struct {
-	SessionControls
 	mu       sync.Mutex
 	calls    int
 	started  chan struct{}
@@ -60,7 +59,10 @@ func TestPaneCaptureRetainsIngressAfterForegroundCancellation(t *testing.T) {
 	controls := &coalescingCaptureControls{
 		started: make(chan struct{}), release: release, contexts: make(chan context.Context, 1),
 	}
-	handler := &Handler{controls: controls, paneRefreshState: newPaneRefreshState()}
+	handler := &Handler{
+		controls:         sessionControlPorts{pane: controls},
+		paneRefreshState: newPaneRefreshState(),
+	}
 	ingress, err := interaction.NewIngress("test-ui", "event-42", "callback")
 	if err != nil {
 		t.Fatal(err)
@@ -86,7 +88,10 @@ func TestPaneCaptureContinuesAfterForegroundTimeoutAndCoalesces(t *testing.T) {
 	controls := &coalescingCaptureControls{
 		started: make(chan struct{}), release: make(chan struct{}),
 	}
-	handler := &Handler{controls: controls, paneRefreshState: newPaneRefreshState()}
+	handler := &Handler{
+		controls:         sessionControlPorts{pane: controls},
+		paneRefreshState: newPaneRefreshState(),
+	}
 	actor := application.Principal{UserID: 7}
 	ref := domain.SessionRef{NodeID: "node", SessionID: "session"}
 

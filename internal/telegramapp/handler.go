@@ -25,7 +25,7 @@ type Handler struct {
 	projector  *telegramview.Projector
 	tokens     *callbacktoken.Codec
 	messenger  Messenger
-	controls   SessionControls
+	controls   sessionControlPorts
 	leadership Leadership
 	starter    SessionStarter
 
@@ -133,7 +133,7 @@ func NewHandlerWithControls(
 	if controls == nil {
 		return nil, errors.New("session controls are required")
 	}
-	handler.controls = controls
+	handler.controls = bindSessionControlPorts(controls)
 	return handler, nil
 }
 

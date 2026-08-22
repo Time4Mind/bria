@@ -27,7 +27,7 @@ func (h *Handler) deliverFinalFiles(
 	ref domain.SessionRef,
 	events []transcript.Event,
 ) {
-	if h.controls == nil {
+	if h.controls.files == nil {
 		return
 	}
 	text, timestamp := latestFinalText(events)
@@ -40,7 +40,7 @@ func (h *Handler) deliverFinalFiles(
 			continue
 		}
 
-		file, err := h.controls.OpenSessionFile(ctx, actor, ref, path)
+		file, err := h.controls.files.OpenSessionFile(ctx, actor, ref, path)
 		if err != nil {
 			h.forgetDeliveredFile(key)
 			continue

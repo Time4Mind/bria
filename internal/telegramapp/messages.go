@@ -41,7 +41,7 @@ func (h *Handler) handleMessage(
 		return h.acceptNodeContract(ctx, actor, update.ChatID, text)
 	}
 	textInput := update.Content.Kind == "" || update.Content.Kind == telegrambot.IncomingText
-	if h.controls == nil || (textInput &&
+	if h.controls.input == nil || (textInput &&
 		(text == "" || text == "/start" || text == "/menu")) {
 		if text == "/start" || text == "/menu" {
 			h.clearCreateFlow(actor.UserID)
@@ -147,7 +147,7 @@ func (h *Handler) sendIncomingInput(
 ) (sessioncontrol.Accepted, error) {
 	operationID := operationIDForInput(update.UpdateID)
 	if update.Content.Kind == "" || update.Content.Kind == telegrambot.IncomingText {
-		return h.controls.SendInput(ctx, actor, operationID, update.Text)
+		return h.controls.input.SendInput(ctx, actor, operationID, update.Text)
 	}
 	kind, ok := runtimeInputKind(update.Content.Kind)
 	if !ok {
@@ -179,7 +179,7 @@ func (h *Handler) sendIncomingInput(
 		payload.TranscriptBaselineKnown = voiceBaseline.known
 		payload.TranscriptOrdinal = voiceBaseline.ordinal
 	}
-	return h.controls.SendExternalInput(ctx, actor, operationID, payload)
+	return h.controls.input.SendExternalInput(ctx, actor, operationID, payload)
 }
 
 func operationIDForInput(updateID int64) string {

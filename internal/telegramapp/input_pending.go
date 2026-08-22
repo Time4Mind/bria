@@ -36,7 +36,7 @@ func (h *Handler) captureInputBaseline(
 	actor application.Principal,
 ) inputPendingBaseline {
 	session, err := h.service.ActiveSession(actor)
-	if err != nil || h.controls == nil {
+	if err != nil || h.controls.transcript == nil {
 		return inputPendingBaseline{}
 	}
 	baseline := inputPendingBaseline{ref: session.Ref()}
@@ -47,7 +47,7 @@ func (h *Handler) captureInputBaseline(
 	}
 	baselineCtx, cancel := context.WithTimeout(ctx, inputBaselineTimeout)
 	defer cancel()
-	events, err := h.controls.Transcript(baselineCtx, actor, session.Ref())
+	events, err := h.controls.transcript.Transcript(baselineCtx, actor, session.Ref())
 	if err != nil {
 		return baseline
 	}
