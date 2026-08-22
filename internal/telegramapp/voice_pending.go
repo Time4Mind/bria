@@ -16,17 +16,19 @@ import (
 
 const (
 	voiceBaselineTimeout  = 250 * time.Millisecond
-	voicePendingLifetime  = 10 * time.Minute
+	maxPendingVoices      = 16
 	maxVoiceConfirmations = 1024
 )
 
 type voicePendingKey struct {
-	userID domain.UserID
-	ref    domain.SessionRef
+	userID     domain.UserID
+	ref        domain.SessionRef
+	generation uint64
 }
 
 type voicePendingBaseline struct {
 	ref            domain.SessionRef
+	generation     uint64
 	events         []transcript.Event
 	lastUserEvent  string
 	baselineID     string
@@ -62,7 +64,9 @@ func (h *Handler) captureVoiceBaseline(
 	if err != nil || h.controls.transcript == nil {
 		return voicePendingBaseline{receivedAt: receivedAt}
 	}
-	baseline := voicePendingBaseline{ref: session.Ref(), receivedAt: receivedAt}
+	baseline := voicePendingBaseline{
+		ref: session.Ref(), generation: session.RuntimeGeneration, receivedAt: receivedAt,
+	}
 	baselineCtx, cancel := context.WithTimeout(ctx, voiceBaselineTimeout)
 	defer cancel()
 	events, err := h.controls.transcript.Transcript(baselineCtx, actor, session.Ref())
@@ -77,20 +81,68 @@ func (h *Handler) captureVoiceBaseline(
 	return baseline
 }
 
-func (h *Handler) prepareVoiceBaseline(actor application.Principal, baseline *voicePendingBaseline) {
+func (h *Handler) prepareVoiceBaseline(
+	actor application.Principal,
+	operationID string,
+	baseline *voicePendingBaseline,
+) (bool, bool) {
 	baseline.ordinal = 1
-	if !baseline.known || baseline.ref.SessionID == "" {
-		return
+	if baseline.ref.SessionID == "" {
+		return true, false
 	}
-	key := voicePendingKey{userID: actor.UserID, ref: baseline.ref}
+	session, sessionErr := h.service.Session(actor, baseline.ref)
+	if sessionErr == nil {
+		switch {
+		case baseline.generation == 0:
+			baseline.generation = session.RuntimeGeneration
+		case baseline.generation != session.RuntimeGeneration:
+			// Clear/restore can replace the provider runtime between the transcript
+			// snapshot and admission. Discard that stale snapshot and track the
+			// one submitted prompt from the new generation by its acceptance time.
+			resetVoiceBaselineGeneration(baseline, session.RuntimeGeneration, time.Now())
+		}
+	}
+	if sessionErr == nil {
+		for _, acknowledgement := range session.VoiceAcknowledgements {
+			if acknowledgement.OperationID != operationID {
+				continue
+			}
+			baseline.known = acknowledgement.BaselineKnown
+			baseline.userEventCount = acknowledgement.BaselineCount
+			baseline.ordinal = acknowledgement.Ordinal
+			return true, false
+		}
+	}
+	key := voicePendingKey{
+		userID: actor.UserID, ref: baseline.ref, generation: baseline.generation,
+	}
+	h.voiceMu.Lock()
+	for _, pending := range h.pendingVoices[key] {
+		if pending.operationID != operationID {
+			continue
+		}
+		applyPendingVoiceBaseline(baseline, pending)
+		h.voiceMu.Unlock()
+		return true, false
+	}
+	h.voiceMu.Unlock()
+	if sessionErr == nil && baseline.known {
+		// Reconcile transcript-confirmed markers before admitting another voice,
+		// otherwise a full but already-drained queue would reject new input.
+		h.withPendingVoiceRows(actor, baseline.ref, session, baseline.events)
+	}
 	h.voiceMu.Lock()
 	defer h.voiceMu.Unlock()
-	now := baseline.receivedAt
-	if now.IsZero() {
-		now = time.Now()
-	}
 	for _, pending := range h.pendingVoices[key] {
-		if now.Sub(pending.acceptedAt) >= voicePendingLifetime {
+		if pending.operationID == operationID {
+			applyPendingVoiceBaseline(baseline, pending)
+			return true, false
+		}
+	}
+	unresolved := make(map[string]struct{}, maxPendingVoices)
+	for _, pending := range h.pendingVoices[key] {
+		unresolved[pending.operationID] = struct{}{}
+		if !baseline.known {
 			continue
 		}
 		if voiceBaselineMatches(
@@ -100,10 +152,13 @@ func (h *Handler) prepareVoiceBaseline(actor application.Principal, baseline *vo
 			baseline.ordinal = pending.ordinal + 1
 		}
 	}
-	if session, err := h.service.Session(actor, baseline.ref); err == nil {
+	if sessionErr == nil {
 		for _, acknowledgement := range session.VoiceAcknowledgements {
-			if now.Sub(acknowledgement.AcceptedAt) >= voicePendingLifetime ||
-				h.voiceConfirmedLocked(key, acknowledgement.OperationID) {
+			if h.voiceConfirmedLocked(key, acknowledgement.OperationID) {
+				continue
+			}
+			unresolved[acknowledgement.OperationID] = struct{}{}
+			if !baseline.known {
 				continue
 			}
 			acknowledgementBaselineID := ""
@@ -113,6 +168,7 @@ func (h *Handler) prepareVoiceBaseline(actor application.Principal, baseline *vo
 			if reconstructed {
 				acknowledgementBaselineID = transcriptBaselineID(eventKey)
 			} else if acknowledgement.BaselineKnown &&
+				!transcriptHasUserEventAfter(baseline.events, acknowledgement.AcceptedAt) &&
 				acknowledgement.BaselineCount == baseline.userEventCount {
 				// A bounded transcript may have already evicted the acknowledgement's
 				// baseline. Preserve the legacy count fallback only in that case.
@@ -127,18 +183,34 @@ func (h *Handler) prepareVoiceBaseline(actor application.Principal, baseline *vo
 			}
 		}
 	}
-	if baseline.ordinal > 16 {
-		baseline.ordinal = 16
+	if len(unresolved) >= maxPendingVoices || baseline.ordinal > maxPendingVoices {
+		return false, false
 	}
+	pending := newPendingVoice(operationID, baseline.ref, *baseline)
+	h.pendingVoices[key] = append(h.pendingVoices[key], pending)
+	return true, true
 }
 
-func (h *Handler) markVoicePending(
-	actor application.Principal,
-	ref domain.SessionRef,
-	operationID string,
-	baseline voicePendingBaseline,
+func resetVoiceBaselineGeneration(
+	baseline *voicePendingBaseline,
+	generation uint64,
+	receivedAt time.Time,
 ) {
-	key := voicePendingKey{userID: actor.UserID, ref: ref}
+	baseline.generation = generation
+	baseline.events = nil
+	baseline.lastUserEvent = ""
+	baseline.baselineID = ""
+	baseline.userEventCount = 0
+	baseline.ordinal = 1
+	baseline.receivedAt = receivedAt
+	baseline.known = false
+}
+
+func newPendingVoice(
+	operationID string,
+	ref domain.SessionRef,
+	baseline voicePendingBaseline,
+) voicePending {
 	pending := voicePending{
 		operationID: operationID, acceptedAt: baseline.receivedAt,
 		baselineKnown: baseline.known && baseline.ref == ref,
@@ -152,17 +224,47 @@ func (h *Handler) markVoicePending(
 	if pending.baselineKnown {
 		pending.baselineEvent = baseline.lastUserEvent
 	}
+	return pending
+}
+
+func applyPendingVoiceBaseline(baseline *voicePendingBaseline, pending voicePending) {
+	baseline.receivedAt = pending.acceptedAt
+	baseline.known = pending.baselineKnown
+	baseline.userEventCount = pending.baselineCount
+	baseline.lastUserEvent = pending.baselineEvent
+	baseline.baselineID = pending.baselineID
+	baseline.ordinal = pending.ordinal
+}
+
+func (h *Handler) removePendingVoice(
+	actor application.Principal,
+	ref domain.SessionRef,
+	generation uint64,
+	operationID string,
+) {
+	key := voicePendingKey{userID: actor.UserID, ref: ref, generation: generation}
 	h.voiceMu.Lock()
 	queue := h.pendingVoices[key]
-	if pending.ordinal == 0 {
-		pending.ordinal = 1
+	remaining := queue[:0]
+	for _, pending := range queue {
+		if pending.operationID != operationID {
+			remaining = append(remaining, pending)
+		}
 	}
-	h.pendingVoices[key] = append(queue, pending)
+	if len(remaining) == 0 {
+		delete(h.pendingVoices, key)
+	} else {
+		h.pendingVoices[key] = remaining
+	}
 	h.voiceMu.Unlock()
 }
 
-func (h *Handler) hasPendingVoice(actor application.Principal, ref domain.SessionRef) bool {
-	key := voicePendingKey{userID: actor.UserID, ref: ref}
+func (h *Handler) hasPendingVoice(
+	actor application.Principal,
+	ref domain.SessionRef,
+	generation uint64,
+) bool {
+	key := voicePendingKey{userID: actor.UserID, ref: ref, generation: generation}
 	h.voiceMu.Lock()
 	pending := len(h.pendingVoices[key]) > 0
 	h.voiceMu.Unlock()
@@ -175,7 +277,9 @@ func (h *Handler) withPendingVoiceRows(
 	session domain.Session,
 	events []transcript.Event,
 ) []transcript.Event {
-	key := voicePendingKey{userID: actor.UserID, ref: ref}
+	key := voicePendingKey{
+		userID: actor.UserID, ref: ref, generation: session.RuntimeGeneration,
+	}
 	now := time.Now()
 
 	h.voiceMu.Lock()
@@ -191,8 +295,7 @@ func (h *Handler) withPendingVoiceRows(
 	}
 	fallbackAt := time.Time{}
 	for _, acknowledgement := range session.VoiceAcknowledgements {
-		if now.Sub(acknowledgement.AcceptedAt) >= voicePendingLifetime ||
-			known[acknowledgement.OperationID] ||
+		if known[acknowledgement.OperationID] ||
 			h.voiceConfirmedLocked(key, acknowledgement.OperationID) {
 			continue
 		}
@@ -256,8 +359,8 @@ func (h *Handler) withPendingVoiceRows(
 			pending.ordinal = len(remaining) + 1
 			resolved = transcriptUserEventsSince(events, fallbackAt) >= pending.ordinal
 		}
-		if resolved || now.Sub(pending.acceptedAt) >= voicePendingLifetime {
-			if resolved && h.rememberVoiceConfirmationLocked(key, pending.operationID, now) {
+		if resolved {
+			if h.rememberVoiceConfirmationLocked(key, pending.operationID, now) {
 				confirmedOperations = append(confirmedOperations, pending.operationID)
 			}
 			continue
@@ -325,8 +428,7 @@ func (s *voicePendingState) sweepVoiceConfirmationsLocked(now time.Time) {
 	remove := 0
 	for remove < len(s.confirmedVoiceOrder) {
 		entry := s.confirmedVoiceOrder[remove]
-		if len(s.confirmedVoiceOrder)-remove <= maxVoiceConfirmations &&
-			now.Sub(entry.at) < voicePendingLifetime {
+		if len(s.confirmedVoiceOrder)-remove <= maxVoiceConfirmations {
 			break
 		}
 		if current := s.confirmedVoices[entry.key]; current != nil &&
@@ -437,6 +539,19 @@ func transcriptUserEventsSince(events []transcript.Event, since time.Time) int {
 		}
 	}
 	return count
+}
+
+func transcriptHasUserEventAfter(events []transcript.Event, after time.Time) bool {
+	for _, event := range events {
+		if event.Kind != transcript.EventUserText {
+			continue
+		}
+		at, err := time.Parse(time.RFC3339Nano, event.Timestamp)
+		if err == nil && at.After(after) {
+			return true
+		}
+	}
+	return false
 }
 
 func transcriptBaselineBefore(

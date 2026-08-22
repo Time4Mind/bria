@@ -29,6 +29,11 @@ func TestManualArchiveBecomesRestorableOnlyAfterArtifactCommit(t *testing.T) {
 		t.Fatal(err)
 	}
 	ready := state.Sessions[ref.Key()]
+	ready.VoiceAcknowledgements = []domain.VoiceAcknowledgement{{
+		OperationID: "legacy-voice", Status: domain.OperationSucceeded,
+		AcceptedAt: time.Unix(21, 0).UTC(), UpdatedAt: time.Unix(22, 0).UTC(), Ordinal: 1,
+	}}
+	state.Sessions[ref.Key()] = ready
 	restoredAt := time.Unix(30, 0).UTC()
 	if err := state.RestoreSession(1, ref, ready.Revision, restoredAt); err != nil {
 		t.Fatal(err)
@@ -40,6 +45,10 @@ func TestManualArchiveBecomesRestorableOnlyAfterArtifactCommit(t *testing.T) {
 	}
 	if restored.LiveSinceAt != restoredAt || restored.ArchiveID != "archive-restore" {
 		t.Fatalf("restored timestamps or provenance=%#v", restored)
+	}
+	if len(restored.VoiceAcknowledgements) != 0 {
+		t.Fatalf("restored session retained prior-generation voice acknowledgements=%#v",
+			restored.VoiceAcknowledgements)
 	}
 }
 

@@ -64,6 +64,8 @@ func (h *Handler) handleMessage(
 	}
 	voiceBaseline := voicePendingBaseline{}
 	inputBaseline := inputPendingBaseline{}
+	voiceQueueAvailable := true
+	voiceReservationCreated := false
 	if update.Content.Kind == telegrambot.IncomingVoice {
 		preferences, preferencesErr := h.service.Preferences(actor)
 		if preferencesErr != nil {
@@ -78,11 +80,27 @@ func (h *Handler) handleMessage(
 				telegramui.RenderVoiceInputEnableConfirmation(h.copy(actor), plans), nil)
 		}
 		voiceBaseline = h.captureVoiceBaseline(ctx, actor)
-		h.prepareVoiceBaseline(actor, &voiceBaseline)
+		voiceQueueAvailable, voiceReservationCreated = h.prepareVoiceBaseline(
+			actor, operationIDForInput(update.UpdateID), &voiceBaseline,
+		)
 	} else if pendingInputText(update) != "" {
 		inputBaseline = h.captureInputBaseline(ctx, actor)
 	}
-	accepted, err := h.sendIncomingInput(ctx, actor, update, voiceBaseline)
+	accepted := sessioncontrol.Accepted{Session: voiceBaseline.ref}
+	if voiceQueueAvailable {
+		accepted, err = h.sendIncomingInput(ctx, actor, update, voiceBaseline)
+	} else {
+		err = domain.ErrQueueFull
+	}
+	if err != nil && voiceReservationCreated &&
+		(errors.Is(err, domain.ErrQueueFull) || errors.Is(err, domain.ErrNotFound) ||
+			errors.Is(err, domain.ErrInvalidState) ||
+			errors.Is(err, sessioncontrol.ErrRuntimeUnavailable)) {
+		h.removePendingVoice(
+			actor, voiceBaseline.ref, voiceBaseline.generation,
+			operationIDForInput(update.UpdateID),
+		)
+	}
 	if errors.Is(err, domain.ErrQueueFull) {
 		screen, projectErr := h.projector.SessionCard(actor, accepted.Session)
 		if projectErr != nil {
@@ -90,6 +108,9 @@ func (h *Handler) handleMessage(
 		}
 		preferences, _ := h.service.Preferences(actor)
 		limit := preferences.EffectiveOfflineInputQueueLimit()
+		if update.Content.Kind == telegrambot.IncomingVoice && !voiceQueueAvailable {
+			limit = maxPendingVoices
+		}
 		screen.Text += "\n\n" + h.copy(actor).Format(i18n.CardOfflineQueueFull, limit, limit)
 		return h.sendProjected(ctx, update.ChatID, screen, nil)
 	}
@@ -120,7 +141,6 @@ func (h *Handler) handleMessage(
 	// tools and responses. Voice has its own pending transcription status row.
 	screen, err := h.projector.SessionCard(actor, accepted.Session)
 	if err == nil && update.Content.Kind == telegrambot.IncomingVoice && !accepted.Deferred {
-		h.markVoicePending(actor, accepted.Session, operationIDForInput(update.UpdateID), voiceBaseline)
 		processlog.Detailf(
 			"bria voice_input: stage=accepted ref=%q operation=%q outcome=transcribing",
 			accepted.Session.Key(), operationIDForInput(update.UpdateID),

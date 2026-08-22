@@ -61,11 +61,13 @@ func newInputDeliveryTiming(
 			execution.tmuxSend + execution.confirmation
 	}
 	return inputDeliveryTiming{
-		ref:                  fmt.Sprintf("%s/%s", binding.NodeID, binding.SessionID),
-		generation:           request.ExpectedGeneration,
-		operationID:          request.OperationID,
-		kind:                 inputKindLabel(request),
-		outcome:              inputOutcome(result, executionErr, execution.failureStage),
+		ref:         fmt.Sprintf("%s/%s", binding.NodeID, binding.SessionID),
+		generation:  request.ExpectedGeneration,
+		operationID: request.OperationID,
+		kind:        inputKindLabel(request),
+		outcome: inputOutcome(
+			result, executionErr, execution.failureStage, execution.confirmationOutcome,
+		),
 		total:                total,
 		queue:                queue.queue,
 		attachmentWait:       queue.attachmentWait,
@@ -98,9 +100,18 @@ func inputKindLabel(request Request) string {
 	}
 }
 
-func inputOutcome(result Result, executionErr error, failureStage string) string {
+func inputOutcome(
+	result Result,
+	executionErr error,
+	failureStage string,
+	confirmationOutcome string,
+) string {
 	if errors.Is(executionErr, ErrInputUnconfirmed) || failureStage == "confirmation" {
 		return "submit_unconfirmed"
+	}
+	if executionErr == nil && result.Delivered &&
+		(confirmationOutcome == "pending" || confirmationOutcome == "baseline_unavailable") {
+		return "submit_pending"
 	}
 	if executionErr == nil && result.Delivered {
 		return "delivered"

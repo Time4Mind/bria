@@ -344,6 +344,7 @@ func (s *State) restoreSession(
 	session.RuntimePhase = RuntimeDegraded
 	session.RuntimeIssue = ""
 	session.InteractivePrompt = nil
+	session.VoiceAcknowledgements = nil
 	session.ArchiveDescription = nil
 	session.DescriptionVersion = 0
 	session.RuntimeGeneration++

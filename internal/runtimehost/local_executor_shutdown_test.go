@@ -145,8 +145,17 @@ func TestLocalExecutorShutdownCancelsRunningOperationBeforeReturning(t *testing.
 
 func TestInputOutcomeClassifiesShutdownCancellation(t *testing.T) {
 	for _, err := range []error{ErrRuntimeShuttingDown, context.Canceled} {
-		if got := inputOutcome(Result{}, err, "tmux_send"); got != "cancelled" {
+		if got := inputOutcome(Result{}, err, "tmux_send", ""); got != "cancelled" {
 			t.Fatalf("error=%v outcome=%q", err, got)
+		}
+	}
+}
+
+func TestInputOutcomeClassifiesProviderQueueAsPendingNotFailed(t *testing.T) {
+	result := Result{Delivered: true}
+	for _, confirmation := range []string{"pending", "baseline_unavailable"} {
+		if got := inputOutcome(result, nil, "", confirmation); got != "submit_pending" {
+			t.Fatalf("confirmation=%q outcome=%q", confirmation, got)
 		}
 	}
 }

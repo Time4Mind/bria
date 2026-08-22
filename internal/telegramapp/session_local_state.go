@@ -98,13 +98,35 @@ func (h *Handler) sweepSessionLocalState(now time.Time) {
 		keys[key] = struct{}{}
 	}
 	h.sessionStateMu.Unlock()
+	h.voiceMu.Lock()
+	voiceKeys := make([]voicePendingKey, 0, len(h.pendingVoices)+len(h.confirmedVoices))
+	seenVoiceKeys := make(map[voicePendingKey]struct{}, len(h.pendingVoices)+len(h.confirmedVoices))
+	for key := range h.pendingVoices {
+		seenVoiceKeys[key] = struct{}{}
+		voiceKeys = append(voiceKeys, key)
+	}
+	for key := range h.confirmedVoices {
+		if _, ok := seenVoiceKeys[key]; ok {
+			continue
+		}
+		voiceKeys = append(voiceKeys, key)
+	}
+	h.voiceMu.Unlock()
 
 	invalid := make(map[sessionPageKey]bool)
+	invalidVoices := make(map[voicePendingKey]bool)
 	if h.service != nil {
 		for key := range keys {
 			ref := domain.SessionRef{NodeID: key.nodeID, SessionID: key.sessionID}
 			_, err := h.service.Session(application.Principal{UserID: key.userID}, ref)
 			invalid[key] = err != nil
+		}
+		for _, key := range voiceKeys {
+			session, err := h.service.Session(
+				application.Principal{UserID: key.userID}, key.ref,
+			)
+			invalidVoices[key] = err != nil || !session.IsLive() ||
+				session.RuntimeGeneration != key.generation
 		}
 	}
 
@@ -130,10 +152,41 @@ func (h *Handler) sweepSessionLocalState(now time.Time) {
 	removedPrompts := promptsBefore - len(h.promptHashes)
 	pageEntries, promptEntries := len(h.sessionPages), len(h.promptHashes)
 	h.sessionStateMu.Unlock()
+	h.voiceMu.Lock()
+	removedVoices := 0
+	for key, invalid := range invalidVoices {
+		if !invalid {
+			continue
+		}
+		removedVoices += len(h.pendingVoices[key]) + len(h.confirmedVoices[key])
+		delete(h.pendingVoices, key)
+		delete(h.confirmedVoices, key)
+	}
+	if removedVoices > 0 {
+		order := h.confirmedVoiceOrder[:0]
+		for _, entry := range h.confirmedVoiceOrder {
+			if current := h.confirmedVoices[entry.key]; current != nil &&
+				current[entry.operationID] == entry.at {
+				order = append(order, entry)
+			}
+		}
+		h.confirmedVoiceOrder = order
+	}
+	voiceEntries := 0
+	for _, pending := range h.pendingVoices {
+		voiceEntries += len(pending)
+	}
+	h.voiceMu.Unlock()
 	if removedPages > 0 || removedPrompts > 0 {
 		processlog.Detailf(
 			"bria telegram: session_local_state outcome=cleaned pages=%d prompts=%d page_entries=%d prompt_entries=%d",
 			removedPages, removedPrompts, pageEntries, promptEntries,
+		)
+	}
+	if removedVoices > 0 {
+		processlog.Detailf(
+			"bria telegram: voice_local_state outcome=cleaned removed=%d entries=%d",
+			removedVoices, voiceEntries,
 		)
 	}
 }

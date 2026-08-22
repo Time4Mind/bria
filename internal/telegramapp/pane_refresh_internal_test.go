@@ -7,6 +7,7 @@ import (
 
 	"github.com/Time4Mind/bria/internal/application"
 	"github.com/Time4Mind/bria/internal/domain"
+	"github.com/Time4Mind/bria/internal/runtimehost"
 	"github.com/Time4Mind/bria/internal/telegramui"
 	"github.com/Time4Mind/bria/internal/transcript"
 )
@@ -45,6 +46,29 @@ func TestSettledQueuedPromptRejectsPreviousTurnFinal(t *testing.T) {
 		session, promptAt.Add(-time.Second), promptAt.Add(10*time.Second),
 	) {
 		t.Fatal("previous turn final matched the current queued prompt")
+	}
+}
+
+func TestPendingProviderConfirmationRejectsPreviousTurnFinal(t *testing.T) {
+	promptAt := time.Unix(250, 0).UTC()
+	session := domain.Session{
+		ID: "session", NodeID: "node", RuntimePhase: domain.RuntimeRunning,
+		LastEventAt: promptAt,
+		LastOperation: &domain.SessionOperationResult{
+			OperationID: "pending-prompt", Action: domain.ActionSendInput,
+			Status: domain.OperationSucceeded, Detail: runtimehost.ProviderConfirmationPendingDetail,
+			At: promptAt,
+		},
+	}
+	if transcriptFinalBelongsToCurrentTurn(
+		session, promptAt.Add(-time.Second), promptAt.Add(10*time.Second),
+	) {
+		t.Fatal("previous turn final matched a prompt still waiting for provider confirmation")
+	}
+	if !transcriptFinalBelongsToCurrentTurn(
+		session, promptAt.Add(time.Second), promptAt.Add(10*time.Second),
+	) {
+		t.Fatal("current turn final was rejected after provider confirmation arrived")
 	}
 }
 

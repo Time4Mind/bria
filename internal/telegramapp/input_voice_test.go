@@ -248,7 +248,7 @@ func TestVoiceBaselineIdentitySeparatesPromptsWithEqualRecentUserCounts(t *testi
 	}
 }
 
-func TestExpiredVoiceAcknowledgementDoesNotInflateNewTranscriptOrdinal(t *testing.T) {
+func TestHistoricalVoiceAcknowledgementDoesNotInflateNewTranscriptOrdinal(t *testing.T) {
 	fixture := newFixture(t)
 	actor := application.Principal{UserID: 7}
 	preferences, err := fixture.service.Preferences(actor)
@@ -303,6 +303,105 @@ func TestExpiredVoiceAcknowledgementDoesNotInflateNewTranscriptOrdinal(t *testin
 	defer controls.mu.RUnlock()
 	if controls.external == nil || controls.external.TranscriptOrdinal != 1 {
 		t.Fatalf("new voice inherited stale transcript ordinal: %#v", controls.external)
+	}
+}
+
+func TestVoiceUpdateRetryReusesOnePendingReservation(t *testing.T) {
+	fixture := newFixture(t)
+	actor := application.Principal{UserID: 7}
+	preferences, err := fixture.service.Preferences(actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	preferences.Language = domain.LanguageRussian
+	preferences.VoiceBackend = domain.VoiceAuto
+	if err := fixture.service.SetPreferences(context.Background(), actor, preferences); err != nil {
+		t.Fatal(err)
+	}
+	ref := domain.SessionRef{NodeID: "allowed", SessionID: "live"}
+	controls := &blockingControls{ref: ref, events: []transcript.Event{{
+		Kind: transcript.EventUserText, Text: "baseline",
+		Timestamp: time.Now().Add(-time.Minute).Format(time.RFC3339Nano),
+	}}}
+	handler, err := telegramapp.NewHandlerWithControls(
+		fixture.service, fixture.projector, fixture.codec, fixture.messenger, controls,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	send := func(updateID int64) {
+		t.Helper()
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		if err := handler.HandleTelegramUpdate(ctx, telegrambot.IncomingUpdate{
+			UpdateID: updateID, Kind: telegrambot.IncomingMessage, ChatID: 7, UserID: 7,
+			Content: telegrambot.ContentDescriptor{
+				Kind: telegrambot.IncomingVoice, FileID: "voice-id", FileUniqueID: "voice-unique",
+			},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	send(700)
+	send(700)
+	latest := fixture.messenger.sent[len(fixture.messenger.sent)-1].Text
+	if count := strings.Count(latest, "Голосовое распознаётся"); count != 1 {
+		t.Fatalf("retry pending rows=%d screen=%q", count, latest)
+	}
+	send(701)
+	controls.mu.RLock()
+	defer controls.mu.RUnlock()
+	if controls.external == nil || controls.external.TranscriptOrdinal != 2 {
+		t.Fatalf("next voice after retry=%#v", controls.external)
+	}
+}
+
+func TestVoicePendingQueueRejectsSeventeenthWithoutDroppingOldest(t *testing.T) {
+	fixture := newFixture(t)
+	actor := application.Principal{UserID: 7}
+	preferences, err := fixture.service.Preferences(actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	preferences.VoiceBackend = domain.VoiceAuto
+	if err := fixture.service.SetPreferences(context.Background(), actor, preferences); err != nil {
+		t.Fatal(err)
+	}
+	ref := domain.SessionRef{NodeID: "allowed", SessionID: "live"}
+	controls := &blockingControls{ref: ref, events: []transcript.Event{{
+		Kind: transcript.EventUserText, Text: "baseline",
+		Timestamp: time.Now().Add(-time.Minute).Format(time.RFC3339Nano),
+	}}}
+	handler, err := telegramapp.NewHandlerWithControls(
+		fixture.service, fixture.projector, fixture.codec, fixture.messenger, controls,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index := 0; index <= 16; index++ {
+		ctx, cancel := context.WithCancel(context.Background())
+		err := handler.HandleTelegramUpdate(ctx, telegrambot.IncomingUpdate{
+			UpdateID: int64(600 + index), Kind: telegrambot.IncomingMessage,
+			ChatID: 7, UserID: 7,
+			Content: telegrambot.ContentDescriptor{
+				Kind: telegrambot.IncomingVoice, FileID: fmt.Sprintf("voice-%d", index),
+				FileUniqueID: fmt.Sprintf("unique-%d", index),
+			},
+		})
+		cancel()
+		if err != nil {
+			t.Fatalf("voice %d: %v", index+1, err)
+		}
+	}
+	controls.mu.RLock()
+	calls := controls.externalCalls
+	controls.mu.RUnlock()
+	if calls != 16 {
+		t.Fatalf("accepted voice inputs=%d want=16", calls)
+	}
+	latest := fixture.messenger.sent[len(fixture.messenger.sent)-1].Text
+	if !strings.Contains(latest, "16") || !strings.Contains(strings.ToLower(latest), "queue") {
+		t.Fatalf("voice queue limit explanation=%q", latest)
 	}
 }
 

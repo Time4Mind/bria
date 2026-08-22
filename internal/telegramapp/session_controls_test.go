@@ -26,6 +26,7 @@ type blockingControls struct {
 	text            string
 	transcriptCalls int
 	paneCalls       int
+	externalCalls   int
 }
 
 type closingControls struct {
@@ -73,7 +74,10 @@ func (c *blockingControls) SendInput(_ context.Context, _ application.Principal,
 }
 
 func (c *blockingControls) SendExternalInput(_ context.Context, _ application.Principal, _ string, input runtimehost.InputPayload) (sessioncontrol.Accepted, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.external = &input
+	c.externalCalls++
 	return sessioncontrol.Accepted{Session: c.ref}, nil
 }
 

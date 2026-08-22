@@ -37,15 +37,18 @@ func (s *inputConfirmerStub) ConfirmInput(
 
 func TestInputConfirmationMatchesExactPromptWithoutResending(t *testing.T) {
 	for _, test := range []struct {
-		name        string
-		legacy      bool
-		confirmErr  error
-		wantOutcome string
-		wantErr     error
+		name          string
+		legacy        bool
+		confirmErr    error
+		wantOutcome   string
+		wantErr       error
+		wantDelivered bool
+		wantAccepted  string
 	}{
-		{name: "confirmed", wantOutcome: "confirmed"},
-		{name: "confirmed legacy binding", legacy: true, wantOutcome: "confirmed_legacy"},
-		{name: "unconfirmed", confirmErr: context.DeadlineExceeded, wantOutcome: "unconfirmed", wantErr: ErrInputUnconfirmed},
+		{name: "confirmed", wantOutcome: "confirmed", wantDelivered: true, wantAccepted: "true"},
+		{name: "confirmed legacy binding", legacy: true, wantOutcome: "confirmed_legacy", wantDelivered: true, wantAccepted: "true"},
+		{name: "provider busy", confirmErr: context.DeadlineExceeded, wantOutcome: "pending", wantDelivered: true, wantAccepted: "nil"},
+		{name: "stale binding", confirmErr: ErrStaleRuntime, wantOutcome: "stale_generation", wantErr: ErrInputUnconfirmed, wantAccepted: "false"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			driver := &fakeRuntimeDriver{}
@@ -67,10 +70,19 @@ func TestInputConfirmationMatchesExactPromptWithoutResending(t *testing.T) {
 			if !errors.Is(executionErr, test.wantErr) {
 				t.Fatalf("execution err=%v want=%v", executionErr, test.wantErr)
 			}
-			wantDelivered := test.wantErr == nil
-			if result.Delivered != wantDelivered || result.ProviderAccepted == nil ||
-				*result.ProviderAccepted != wantDelivered {
-				t.Fatalf("result=%+v want delivered=%t", result, wantDelivered)
+			if result.Delivered != test.wantDelivered {
+				t.Fatalf("result=%+v want delivered=%t", result, test.wantDelivered)
+			}
+			switch test.wantAccepted {
+			case "nil":
+				if result.ProviderAccepted != nil {
+					t.Fatalf("result=%+v want pending confirmation", result)
+				}
+			case "true", "false":
+				want := test.wantAccepted == "true"
+				if result.ProviderAccepted == nil || *result.ProviderAccepted != want {
+					t.Fatalf("result=%+v want accepted=%t", result, want)
+				}
 			}
 			if confirmer.calls != 1 || confirmer.digest != promptidentity.Digest("длинный запрос\nс новой строкой") {
 				t.Fatalf("confirmer calls=%d digest=%q", confirmer.calls, confirmer.digest)
@@ -89,7 +101,7 @@ func TestInputConfirmationMatchesExactPromptWithoutResending(t *testing.T) {
 	}
 }
 
-func TestInputConfirmationBaselineFailureDoesNotDropPrompt(t *testing.T) {
+func TestInputConfirmationBaselineFailureLeavesSubmissionPending(t *testing.T) {
 	driver := &fakeRuntimeDriver{}
 	executor := newTestExecutor(t, driver)
 	confirmer := &inputConfirmerStub{baselineErr: errors.New("transcript unavailable")}
@@ -99,8 +111,8 @@ func TestInputConfirmationBaselineFailureDoesNotDropPrompt(t *testing.T) {
 	request := testRequest("baseline-unavailable", ActionSendInput)
 	request.Text = "still submit"
 	result, executionErr := submitAndWaitInputResult(t, executor, request)
-	if !errors.Is(executionErr, ErrInputUnconfirmed) || result.Delivered ||
-		result.ProviderAccepted == nil || *result.ProviderAccepted {
+	if executionErr != nil || !result.Delivered || result.ProviderAccepted != nil ||
+		result.Detail != ProviderConfirmationPendingDetail {
 		t.Fatalf("result=%+v err=%v", result, executionErr)
 	}
 	if confirmer.calls != 0 || len(driver.snapshot()) != 1 {

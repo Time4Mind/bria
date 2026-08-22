@@ -5,6 +5,7 @@ import "testing"
 func TestFailureClassForOutcomeIsExplicitAndFailsClosed(t *testing.T) {
 	tests := map[string]FailureClass{
 		"ok":                            FailureNone,
+		"submit_pending":                FailureNone,
 		"retry_scheduled":               FailureTransient,
 		"foreground_timeout":            FailureTimeout,
 		"rate_limited":                  FailureRateLimited,

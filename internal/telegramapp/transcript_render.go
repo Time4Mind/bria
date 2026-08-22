@@ -92,7 +92,7 @@ func (h *Handler) sessionSelectionMayUseCache(
 	if err != nil {
 		return false, err
 	}
-	if h.hasPendingVoice(actor, ref) {
+	if h.hasPendingVoice(actor, ref, session.RuntimeGeneration) {
 		return false, nil
 	}
 	switch session.RuntimePhase {

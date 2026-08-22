@@ -43,7 +43,7 @@ func FailureClassForOutcome(outcome string) FailureClass {
 	case "ok", "processed", "recovered", "delivered", "ready", "attached", "changed",
 		"stable_cache", "stale_cache", "verified_cache", "verified_png", "initial_ready",
 		"no_active_card", "background_settled", "inactive_session", "not_visible",
-		"already_delivered", "ignored", "terminal", "skipped_current":
+		"already_delivered", "ignored", "terminal", "skipped_current", "submit_pending":
 		return FailureNone
 	case "retry_scheduled", "waiting", "settlement_pending", "final_pending",
 		"runtime_pending", "card_unavailable", "delivery_pending", "submit_unconfirmed":

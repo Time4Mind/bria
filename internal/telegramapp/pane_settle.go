@@ -9,6 +9,7 @@ import (
 
 	"github.com/Time4Mind/bria/internal/application"
 	"github.com/Time4Mind/bria/internal/domain"
+	"github.com/Time4Mind/bria/internal/runtimehost"
 	"github.com/Time4Mind/bria/internal/transcript"
 )
 
@@ -94,6 +95,7 @@ func transcriptFinalBelongsToCurrentTurn(
 	// other finals older than the current turn remain stale.
 	return operation != nil && operation.Action == domain.ActionSendInput &&
 		operation.Status == domain.OperationSucceeded &&
+		operation.Detail != runtimehost.ProviderConfirmationPendingDetail &&
 		session.LastEventAt.Sub(finalAt) <= deliveredInputTimestampSkew &&
 		!now.Before(operation.At.Add(deliveredInputSettleGrace))
 }

@@ -111,11 +111,14 @@ func (e *LocalExecutor) executeOnceTimed(
 			case errors.Is(confirmationErr, ErrStaleRuntime):
 				timing.confirmationOutcome = "stale_generation"
 			default:
-				timing.confirmationOutcome = "unconfirmed"
+				// A busy provider can hold the submitted prompt in its own queue
+				// without writing the user event yet. Timeout is therefore
+				// inconclusive, not a rejection; transcript/final settlement keeps
+				// the durable operation pending.
+				timing.confirmationOutcome = "pending"
 			}
 		}
-		if confirmer != nil && timing.confirmationOutcome != "confirmed" &&
-			timing.confirmationOutcome != "confirmed_legacy" {
+		if confirmer != nil && timing.confirmationOutcome == "stale_generation" {
 			accepted := false
 			result.ProviderAccepted = &accepted
 			timing.failureStage = "confirmation"
@@ -173,6 +176,11 @@ func (e *LocalExecutor) executeOnceTimed(
 	}
 	result.Delivered = true
 	result.Detail = "runtime operation delivered"
+	if request.Action == ActionSendInput && result.ProviderAccepted == nil &&
+		(timing.confirmationOutcome == "pending" ||
+			timing.confirmationOutcome == "baseline_unavailable") {
+		result.Detail = ProviderConfirmationPendingDetail
+	}
 	if request.Action == ActionClose || request.Action == ActionDiscard {
 		e.retireClosedRuntime(binding)
 	}

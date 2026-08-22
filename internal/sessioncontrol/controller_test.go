@@ -174,15 +174,16 @@ func TestSendInputPinsActiveSessionAndPublishesRunning(t *testing.T) {
 func TestPlainInputConfirmationKeepsTurnRunningAndUnconfirmedDegrades(t *testing.T) {
 	for _, test := range []struct {
 		name       string
-		accepted   bool
+		accepted   string
 		delivered  bool
 		resultErr  error
 		wantPhase  domain.RuntimePhase
 		wantStatus domain.OperationStatus
 	}{
-		{name: "confirmed", accepted: true, delivered: true, wantPhase: domain.RuntimeRunning, wantStatus: domain.OperationQueued},
-		{name: "unconfirmed", resultErr: runtimehost.ErrInputUnconfirmed, wantPhase: domain.RuntimeDegraded, wantStatus: domain.OperationFailed},
-		{name: "rejected invariant", delivered: true, wantPhase: domain.RuntimeDegraded, wantStatus: domain.OperationFailed},
+		{name: "confirmed", accepted: "true", delivered: true, wantPhase: domain.RuntimeRunning, wantStatus: domain.OperationQueued},
+		{name: "pending", delivered: true, wantPhase: domain.RuntimeRunning, wantStatus: domain.OperationQueued},
+		{name: "unconfirmed", accepted: "false", resultErr: runtimehost.ErrInputUnconfirmed, wantPhase: domain.RuntimeDegraded, wantStatus: domain.OperationFailed},
+		{name: "rejected invariant", accepted: "false", delivered: true, wantPhase: domain.RuntimeDegraded, wantStatus: domain.OperationFailed},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			controller, runtime, machine := controllerFixture(t)
@@ -192,10 +193,14 @@ func TestPlainInputConfirmationKeepsTurnRunningAndUnconfirmedDegrades(t *testing
 			); err != nil {
 				t.Fatal(err)
 			}
-			accepted := test.accepted
+			var providerAccepted *bool
+			if test.accepted != "" {
+				accepted := test.accepted == "true"
+				providerAccepted = &accepted
+			}
 			runtime.mu.Lock()
 			runtime.results[operationID] = runtimehost.Result{
-				Accepted: true, Delivered: test.delivered, ProviderAccepted: &accepted,
+				Accepted: true, Delivered: test.delivered, ProviderAccepted: providerAccepted,
 				Detail: "provider did not confirm submitted input",
 			}
 			runtime.resultErrors[operationID] = test.resultErr
@@ -235,6 +240,44 @@ func TestExternalInputPinsDescriptorWithoutMediaBytes(t *testing.T) {
 	if request.Text != "" || request.Input == nil || request.Input.File.ID != "file-id" {
 		t.Fatalf("runtime request=%#v", request)
 	}
+}
+
+func TestVoiceInputProviderConfirmationPendingIsNotFailure(t *testing.T) {
+	controller, runtime, machine := controllerFixture(t)
+	input := runtimehost.InputPayload{
+		Kind: runtimehost.InputVoice,
+		File: runtimehost.InputFile{
+			Provider: "telegram", ID: "voice-id", UniqueID: "voice-unique", Size: 42,
+		},
+		TranscriptBaselineKnown: true,
+		TranscriptBaselineCount: 3,
+		TranscriptOrdinal:       1,
+	}
+	const operationID = "voice-confirmation-pending"
+	if _, err := controller.SendExternalInput(
+		context.Background(), application.Principal{UserID: 7}, operationID, input,
+	); err != nil {
+		t.Fatal(err)
+	}
+	runtime.mu.Lock()
+	runtime.results[operationID] = runtimehost.Result{
+		Accepted: true, Delivered: true, Detail: runtimehost.ProviderConfirmationPendingDetail,
+	}
+	runtime.mu.Unlock()
+
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		session := machine.State().Sessions["node/session"]
+		if session.RuntimePhase == domain.RuntimeRunning && session.LastOperation != nil &&
+			session.LastOperation.Status == domain.OperationSucceeded &&
+			session.LastOperation.Detail == runtimehost.ProviderConfirmationPendingDetail &&
+			len(session.VoiceAcknowledgements) == 1 &&
+			session.VoiceAcknowledgements[0].Status == domain.OperationSucceeded {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("session=%+v", machine.State().Sessions["node/session"])
 }
 
 func TestExternalInputObservationOutlivesOrdinaryOperationDeadline(t *testing.T) {

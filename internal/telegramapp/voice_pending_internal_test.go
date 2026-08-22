@@ -8,11 +8,11 @@ import (
 	"github.com/Time4Mind/bria/internal/domain"
 )
 
-func TestVoiceConfirmationCacheIsIdempotentBoundedAndExpires(t *testing.T) {
+func TestVoiceConfirmationCacheIsIdempotentAndBounded(t *testing.T) {
 	state := newVoicePendingState()
 	key := voicePendingKey{
-		userID: 7,
-		ref:    domain.SessionRef{NodeID: "node", SessionID: "session"},
+		userID: 7, generation: 1,
+		ref: domain.SessionRef{NodeID: "node", SessionID: "session"},
 	}
 	now := time.Unix(1000, 0).UTC()
 	state.voiceMu.Lock()
@@ -32,10 +32,26 @@ func TestVoiceConfirmationCacheIsIdempotentBoundedAndExpires(t *testing.T) {
 		t.Fatalf("confirmation cache order=%d entries=%d",
 			len(state.confirmedVoiceOrder), len(state.confirmedVoices[key]))
 	}
-	state.sweepVoiceConfirmationsLocked(now.Add(voicePendingLifetime + time.Minute))
-	if len(state.confirmedVoiceOrder) != 0 || len(state.confirmedVoices) != 0 {
+	state.sweepVoiceConfirmationsLocked(now.Add(24 * time.Hour))
+	if len(state.confirmedVoiceOrder) != maxVoiceConfirmations ||
+		len(state.confirmedVoices[key]) != maxVoiceConfirmations {
 		state.voiceMu.Unlock()
-		t.Fatal("expired voice confirmations survived sweep")
+		t.Fatal("bounded voice confirmations changed only because time elapsed")
 	}
 	state.voiceMu.Unlock()
+}
+
+func TestVoiceBaselineDropsStaleTranscriptOnGenerationChange(t *testing.T) {
+	baseline := voicePendingBaseline{
+		ref:        domain.SessionRef{NodeID: "node", SessionID: "session"},
+		generation: 1, lastUserEvent: "old", baselineID: "old-id",
+		userEventCount: 7, ordinal: 4, known: true,
+	}
+	now := time.Unix(2000, 0).UTC()
+	resetVoiceBaselineGeneration(&baseline, 2, now)
+	if baseline.generation != 2 || baseline.receivedAt != now || baseline.known ||
+		baseline.lastUserEvent != "" || baseline.baselineID != "" ||
+		baseline.userEventCount != 0 || baseline.ordinal != 1 || len(baseline.events) != 0 {
+		t.Fatalf("reset baseline=%#v", baseline)
+	}
 }

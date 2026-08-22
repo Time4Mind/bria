@@ -20,6 +20,12 @@ var (
 	ErrUnsupportedBackendAction = errors.New("backend does not support this action")
 )
 
+// ProviderConfirmationPendingDetail marks a prompt that was written to the
+// provider terminal once, but did not appear in the transcript within the
+// bounded confirmation window. It is a durable reconciliation marker, not an
+// error and never contains prompt content.
+const ProviderConfirmationPendingDetail = "provider confirmation pending"
+
 type Action string
 
 const (

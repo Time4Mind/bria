@@ -85,12 +85,24 @@ func TestSessionLocalStateSweepKeepsFreshLiveAndArchivedSessions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler := &Handler{service: service}
+	handler := &Handler{service: service, voicePendingState: newVoicePendingState()}
 	missing := domain.SessionRef{NodeID: "node", SessionID: "deleted"}
 	for _, ref := range append(refs, missing) {
 		key := pageKey(7, ref)
 		handler.storeSessionPageState(key, cardPageState{page: 1, pages: 1})
 		handler.storePromptHash(key, "hash")
+		generation := uint64(1)
+		if session, ok := state.Sessions[ref.Key()]; ok {
+			generation = session.RuntimeGeneration
+		}
+		voiceKey := voicePendingKey{userID: 7, ref: ref, generation: generation}
+		handler.pendingVoices[voiceKey] = append(
+			handler.pendingVoices[voiceKey],
+			newPendingVoice(
+				"voice-"+string(ref.SessionID), ref,
+				voicePendingBaseline{ref: ref, known: true, receivedAt: now, ordinal: 1},
+			),
+		)
 	}
 
 	handler.sweepSessionLocalState(time.Now())
@@ -108,6 +120,53 @@ func TestSessionLocalStateSweepKeepsFreshLiveAndArchivedSessions(t *testing.T) {
 	}
 	if got := handler.loadPromptHash(pageKey(7, missing)); got != "" {
 		t.Fatal("deleted session prompt retained")
+	}
+	handler.voiceMu.Lock()
+	liveVoiceKey := voicePendingKey{
+		userID: 7, ref: refs[0], generation: state.Sessions[refs[0].Key()].RuntimeGeneration,
+	}
+	if len(handler.pendingVoices[liveVoiceKey]) != 1 {
+		handler.voiceMu.Unlock()
+		t.Fatal("live pending voice removed")
+	}
+	for _, ref := range []domain.SessionRef{refs[1], missing} {
+		generation := uint64(1)
+		if session, ok := state.Sessions[ref.Key()]; ok {
+			generation = session.RuntimeGeneration
+		}
+		if len(handler.pendingVoices[voicePendingKey{
+			userID: 7, ref: ref, generation: generation,
+		}]) != 0 {
+			handler.voiceMu.Unlock()
+			t.Fatalf("unavailable pending voice retained for %s", ref.Key())
+		}
+	}
+	handler.voiceMu.Unlock()
+
+	live, err := service.Session(application.Principal{UserID: 7}, refs[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.ClearSession(
+		application.WithOperationScope(context.Background(), "clear-voice-generation"),
+		application.Principal{UserID: 7}, live,
+	); err != nil {
+		t.Fatal(err)
+	}
+	cleared, err := service.Session(application.Principal{UserID: 7}, refs[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if handler.hasPendingVoice(
+		application.Principal{UserID: 7}, refs[0], cleared.RuntimeGeneration,
+	) {
+		t.Fatal("old generation voice marker appeared after clear")
+	}
+	handler.sweepSessionLocalState(time.Now())
+	handler.voiceMu.Lock()
+	defer handler.voiceMu.Unlock()
+	if len(handler.pendingVoices[liveVoiceKey]) != 0 {
+		t.Fatal("old generation voice state survived sweep")
 	}
 }
 
