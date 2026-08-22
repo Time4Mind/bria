@@ -1,4 +1,4 @@
-package application
+package telegramapp
 
 import (
 	"fmt"
@@ -6,22 +6,11 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/Time4Mind/bria/internal/application"
 	"github.com/Time4Mind/bria/internal/domain"
 	"github.com/Time4Mind/bria/internal/i18n"
 	"github.com/Time4Mind/bria/internal/telegramui"
 )
-
-func (s *Service) Preferences(actor Principal) (domain.UserPreferences, error) {
-	if actor.UserID <= 0 {
-		return domain.UserPreferences{}, domain.ErrAccessDenied
-	}
-	state := s.reader.State()
-	preferences, ok := state.Preferences[actor.UserID]
-	if !ok {
-		return domain.UserPreferences{}, domain.ErrAccessDenied
-	}
-	return preferences, nil
-}
 
 func (p *TelegramProjector) Settings(actor Principal) (telegramui.Screen, error) {
 	state, err := p.actorState(actor)
@@ -167,7 +156,7 @@ func clusterAccountSummary(state *domain.State, userID domain.UserID) string {
 		} else if snapshot.FiveHour != nil {
 			usage = fmt.Sprintf("%d%%", snapshot.FiveHour.UsedPercent)
 		}
-		accountKey, _ := quotaAccountIdentity(state, snapshot)
+		accountKey, _ := application.QuotaAccountIdentity(state, snapshot)
 		key := strings.ToLower(snapshot.Backend) + "\x00" + accountKey
 		candidate := accountRow{
 			text:      html.EscapeString(snapshot.Backend) + " · " + html.EscapeString(account) + " · " + usage,

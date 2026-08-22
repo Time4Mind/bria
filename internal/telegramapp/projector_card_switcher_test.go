@@ -1,4 +1,4 @@
-package application_test
+package telegramapp_test
 
 import (
 	"fmt"
@@ -7,6 +7,7 @@ import (
 
 	"github.com/Time4Mind/bria/internal/application"
 	"github.com/Time4Mind/bria/internal/domain"
+	"github.com/Time4Mind/bria/internal/telegramapp"
 	"github.com/Time4Mind/bria/internal/telegramui"
 )
 
@@ -14,7 +15,7 @@ func TestLiveCardCarriesThreePerRowModeAwareSessionSwitcher(t *testing.T) {
 	projector, state, _ := projectorFixture(t)
 	actor := application.Principal{UserID: 2}
 	ref := domain.SessionRef{NodeID: "alpha", SessionID: "a-new"}
-	context := application.CardContext{BackgroundPercent: map[string]int{
+	context := telegramapp.CardContext{BackgroundPercent: map[string]int{
 		"alpha/a-old": 21, "alpha/a-new": 34, "alpha/shared": 55,
 		"gamma/g-old": 8, "gamma/g-new": 13,
 	}}

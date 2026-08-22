@@ -166,7 +166,7 @@ func cloneTranscriptEvents(events []transcript.Event) []transcript.Event {
 	return cloned
 }
 
-func (h *Handler) cardContext(ref domain.SessionRef) application.CardContext {
+func (h *Handler) cardContext(ref domain.SessionRef) CardContext {
 	h.cardDataMu.RLock()
 	active := h.cardContexts[ref.Key()]
 	background := make(map[string]int, len(h.cardContexts))
@@ -181,7 +181,7 @@ func (h *Handler) cardContext(ref domain.SessionRef) application.CardContext {
 		value := active.percent
 		activePercent = &value
 	}
-	return application.CardContext{
+	return CardContext{
 		ActivePercent: activePercent, BackgroundPercent: background,
 	}
 }

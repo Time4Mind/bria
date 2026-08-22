@@ -53,7 +53,7 @@ func (h *Handler) deliverActiveFinal(
 		return true, "already_delivered"
 	}
 	snapshot, err := h.renderSessionCardSnapshot(
-		ctx, actor, latest.Ref(), application.CardPageLatestResponseStart,
+		ctx, actor, latest.Ref(), CardPageLatestResponseStart,
 	)
 	if err != nil {
 		return false, "card_unavailable"

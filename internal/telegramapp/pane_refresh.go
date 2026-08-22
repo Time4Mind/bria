@@ -157,7 +157,7 @@ func (h *Handler) runPaneRefresh(
 				if finalAt, ok := finalTranscriptAt(snapshot.events); ok &&
 					transcriptFinalBelongsToCurrentTurn(session, finalAt, time.Now()) {
 					snapshot, renderErr = h.renderSessionCardSnapshot(
-						ctx, actor, ref, application.CardPageLatestResponseStart,
+						ctx, actor, ref, CardPageLatestResponseStart,
 					)
 					if renderErr != nil {
 						return
@@ -191,7 +191,7 @@ func (h *Handler) runPaneRefresh(
 		settled := h.settleFromTranscript(ctx, actor, session, snapshot.events)
 		if settled {
 			snapshot, err = h.renderSessionCardSnapshotWithoutPane(
-				ctx, actor, ref, application.CardPageLatestResponseStart,
+				ctx, actor, ref, CardPageLatestResponseStart,
 			)
 			if err != nil {
 				return

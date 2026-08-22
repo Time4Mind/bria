@@ -1,4 +1,4 @@
-package application
+package telegramapp
 
 import "github.com/Time4Mind/bria/internal/telegramui"
 

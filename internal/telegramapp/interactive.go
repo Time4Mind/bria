@@ -61,7 +61,7 @@ func (h *Handler) interactiveScreen(
 	prompt interactive.Prompt,
 ) (telegramui.Screen, error) {
 	base, err := h.projector.SessionCardPageWithContext(
-		actor, ref, nil, 0, application.CardContext{HideBackground: true},
+		actor, ref, nil, 0, CardContext{HideBackground: true},
 	)
 	if err != nil {
 		return telegramui.Screen{}, err

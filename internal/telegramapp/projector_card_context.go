@@ -1,10 +1,11 @@
-package application
+package telegramapp
 
 import (
 	"cmp"
 	"slices"
 	"time"
 
+	"github.com/Time4Mind/bria/internal/application"
 	"github.com/Time4Mind/bria/internal/domain"
 	"github.com/Time4Mind/bria/internal/telegramui"
 )
@@ -87,10 +88,10 @@ func displaySessionName(session domain.Session) string {
 	return "…"
 }
 
-func lastAgentActivity(events []CardEvent) string {
+func lastAgentActivity(events []application.CardEvent) string {
 	var latest time.Time
 	for _, event := range events {
-		if event.Kind == CardEventUserText || event.StartedAt.IsZero() {
+		if event.Kind == application.CardEventUserText || event.StartedAt.IsZero() {
 			continue
 		}
 		if event.StartedAt.After(latest) {

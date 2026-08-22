@@ -1,9 +1,10 @@
-package application
+package telegramapp
 
 import (
 	"fmt"
 	"strings"
 
+	"github.com/Time4Mind/bria/internal/application"
 	"github.com/Time4Mind/bria/internal/domain"
 	"github.com/Time4Mind/bria/internal/i18n"
 	"github.com/Time4Mind/bria/internal/telegramui"
@@ -24,7 +25,7 @@ func (p *TelegramProjector) SessionCard(
 func (p *TelegramProjector) SessionCardPage(
 	actor Principal,
 	ref domain.SessionRef,
-	events []CardEvent,
+	events []application.CardEvent,
 	requestedPage int,
 ) (telegramui.Screen, error) {
 	return p.SessionCardPageWithContext(actor, ref, events, requestedPage, CardContext{})
@@ -39,7 +40,7 @@ type CardContext struct {
 func (p *TelegramProjector) SessionCardPageWithContext(
 	actor Principal,
 	ref domain.SessionRef,
-	events []CardEvent,
+	events []application.CardEvent,
 	requestedPage int,
 	context CardContext,
 ) (telegramui.Screen, error) {
@@ -49,7 +50,7 @@ func (p *TelegramProjector) SessionCardPageWithContext(
 func (p *TelegramProjector) SessionCardViewWithContext(
 	actor Principal,
 	ref domain.SessionRef,
-	events []CardEvent,
+	events []application.CardEvent,
 	requestedPage int,
 	requestedAnchor string,
 	context CardContext,
@@ -76,7 +77,7 @@ func (p *TelegramProjector) SessionCardViewWithContext(
 	preferences := state.Preferences[actor.UserID]
 	queueCount := len(state.DeferredInputs[ref.Key()])
 	queueLimit := preferences.EffectiveOfflineInputQueueLimit()
-	pages := RenderCardEventPages(preferences, events, CardRenderOptions{})
+	pages := application.RenderCardEventPages(preferences, events, application.CardRenderOptions{})
 	page := requestedPage
 	anchorResolved := false
 	if requestedAnchor != "" {

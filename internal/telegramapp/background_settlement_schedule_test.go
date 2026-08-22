@@ -188,7 +188,7 @@ func TestActiveFinalReconciliationUsesFiveSecondWatchdog(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	projector, err := application.NewTelegramProjector(port, codec)
+	projector, err := NewTelegramProjector(port, codec)
 	if err != nil {
 		t.Fatal(err)
 	}

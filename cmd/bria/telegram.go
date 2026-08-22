@@ -63,7 +63,7 @@ func newTelegramAdapter(
 	}); err != nil {
 		return nil, err
 	}
-	projector, err := application.NewTelegramProjector(node.State(), codec)
+	projector, err := telegramapp.NewTelegramProjector(node.State(), codec)
 	if err != nil {
 		return nil, err
 	}

@@ -159,7 +159,7 @@ func (m *messengerStub) discardEventTrace() {
 type fixture struct {
 	handler   *telegramapp.Handler
 	service   *application.Service
-	projector *application.TelegramProjector
+	projector *telegramapp.TelegramProjector
 	machine   *clusterstate.Machine
 	codec     *callbacktoken.Codec
 	messenger *messengerStub

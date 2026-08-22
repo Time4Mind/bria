@@ -35,7 +35,7 @@ func (s *Service) QuotaAlertObservations() []QuotaAlertObservation {
 		if !state.CanAccessNode(ownerID, snapshot.NodeID) {
 			continue
 		}
-		accountKey, label := quotaAccountIdentity(state, snapshot)
+		accountKey, label := QuotaAccountIdentity(state, snapshot)
 		for window, value := range map[string]*domain.QuotaWindow{
 			"5h": snapshot.FiveHour, "week": snapshot.Weekly,
 		} {
@@ -66,7 +66,9 @@ func (s *Service) QuotaAlertObservations() []QuotaAlertObservation {
 	return result
 }
 
-func quotaAccountIdentity(
+// QuotaAccountIdentity returns the stable account key and display label used
+// by application policies and transport projections.
+func QuotaAccountIdentity(
 	state *domain.State,
 	snapshot domain.QuotaSnapshot,
 ) (string, string) {

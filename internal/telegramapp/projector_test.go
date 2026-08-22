@@ -1,4 +1,4 @@
-package application_test
+package telegramapp_test
 
 import (
 	"errors"
@@ -8,6 +8,7 @@ import (
 
 	"github.com/Time4Mind/bria/internal/application"
 	"github.com/Time4Mind/bria/internal/domain"
+	"github.com/Time4Mind/bria/internal/telegramapp"
 	"github.com/Time4Mind/bria/internal/telegramui"
 )
 
@@ -70,7 +71,7 @@ func allowedSessionTokenAction(action telegramui.Action) bool {
 	}
 }
 
-func projectorFixture(t *testing.T) (*application.TelegramProjector, *domain.State, *projectionTokens) {
+func projectorFixture(t *testing.T) (*telegramapp.TelegramProjector, *domain.State, *projectionTokens) {
 	t.Helper()
 	state := domain.NewState()
 	for _, node := range []domain.Node{
@@ -123,7 +124,7 @@ func projectorFixture(t *testing.T) (*application.TelegramProjector, *domain.Sta
 			"beta/b-archive": "b-archive",
 		},
 	}
-	projector, err := application.NewTelegramProjector(projectionReader{state}, tokens)
+	projector, err := telegramapp.NewTelegramProjector(projectionReader{state}, tokens)
 	if err != nil {
 		t.Fatal(err)
 	}

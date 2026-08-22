@@ -1,4 +1,4 @@
-package application_test
+package telegramapp_test
 
 import (
 	"errors"
@@ -6,17 +6,18 @@ import (
 
 	"github.com/Time4Mind/bria/internal/application"
 	"github.com/Time4Mind/bria/internal/domain"
+	"github.com/Time4Mind/bria/internal/telegramapp"
 )
 
 func TestProjectionACLFailuresDoNotRevealOrTokenizeEntities(t *testing.T) {
 	tests := []struct {
 		name string
-		run  func(*application.TelegramProjector) error
+		run  func(*telegramapp.TelegramProjector) error
 		want error
 	}{
 		{
 			name: "unknown actor",
-			run: func(projector *application.TelegramProjector) error {
+			run: func(projector *telegramapp.TelegramProjector) error {
 				_, err := projector.OpenSessions(application.Principal{UserID: 99})
 				return err
 			},
@@ -24,7 +25,7 @@ func TestProjectionACLFailuresDoNotRevealOrTokenizeEntities(t *testing.T) {
 		},
 		{
 			name: "forbidden live node",
-			run: func(projector *application.TelegramProjector) error {
+			run: func(projector *telegramapp.TelegramProjector) error {
 				_, err := projector.NodeSessions(application.Principal{UserID: 2}, "secret")
 				return err
 			},
@@ -32,7 +33,7 @@ func TestProjectionACLFailuresDoNotRevealOrTokenizeEntities(t *testing.T) {
 		},
 		{
 			name: "forbidden archive node",
-			run: func(projector *application.TelegramProjector) error {
+			run: func(projector *telegramapp.TelegramProjector) error {
 				_, err := projector.NodeArchives(application.Principal{UserID: 2}, "secret")
 				return err
 			},

@@ -56,7 +56,7 @@ func newFixtureWithLeader(t *testing.T, assigned bool) fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	projector, err := application.NewTelegramProjector(port, codec)
+	projector, err := telegramapp.NewTelegramProjector(port, codec)
 	if err != nil {
 		t.Fatal(err)
 	}

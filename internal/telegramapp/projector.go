@@ -1,16 +1,17 @@
-package application
+package telegramapp
 
 import (
 	"errors"
 	"hash/fnv"
-	"sort"
-	"strings"
-	"time"
 
+	"github.com/Time4Mind/bria/internal/application"
 	"github.com/Time4Mind/bria/internal/domain"
 	"github.com/Time4Mind/bria/internal/i18n"
 	"github.com/Time4Mind/bria/internal/telegramui"
 )
+
+type Principal = application.Principal
+type StateReader = application.StateReader
 
 type ProjectionTokens interface {
 	Node(domain.UserID, telegramui.Action, domain.NodeID) (telegramui.OpaqueToken, error)
@@ -88,40 +89,7 @@ func (p *TelegramProjector) actorState(actor Principal) (*domain.State, error) {
 }
 
 func visibleNodes(state *domain.State, actor Principal, leaderIDs ...domain.NodeID) []domain.Node {
-	nodes := state.VisibleNodes(actor.UserID)
-	preferences := state.Preferences[actor.UserID]
-	leaderID := domain.NodeID("")
-	if len(leaderIDs) > 0 {
-		leaderID = leaderIDs[0]
-	}
-	sort.Slice(nodes, func(left, right int) bool {
-		if nodes[left].Enabled() != nodes[right].Enabled() {
-			return nodes[left].Enabled()
-		}
-		if preferences.EffectiveNodeSort() == domain.NodeSortLeader &&
-			(nodes[left].ID == leaderID) != (nodes[right].ID == leaderID) {
-			return nodes[left].ID == leaderID
-		}
-		if preferences.EffectiveNodeSort() == domain.NodeSortName {
-			leftName := strings.ToLower(nodes[left].Name)
-			rightName := strings.ToLower(nodes[right].Name)
-			if leftName != rightName {
-				return leftName < rightName
-			}
-		}
-		leftAt, rightAt := nodes[left].CreatedAt, nodes[right].CreatedAt
-		if !leftAt.Equal(rightAt) {
-			if leftAt.IsZero() {
-				leftAt = time.Unix(0, 0)
-			}
-			if rightAt.IsZero() {
-				rightAt = time.Unix(0, 0)
-			}
-			return leftAt.Before(rightAt)
-		}
-		return nodes[left].ID < nodes[right].ID
-	})
-	return nodes
+	return application.VisibleNodes(state, actor, leaderIDs...)
 }
 
 func projectionNodeStatus(status domain.NodeStatus) telegramui.NodeStatus {

@@ -1,4 +1,4 @@
-package application_test
+package telegramapp_test
 
 import (
 	"fmt"

@@ -257,7 +257,7 @@ func (h *Handler) renderSessionCardSnapshotWithPane(
 	}
 	if err == nil {
 		if finalAt, final := finalTranscriptAt(events); final && screen.Checkpoint != nil &&
-			(screenShowsLatestCardPage(screen) || page == application.CardPageLatestResponseStart) {
+			(screenShowsLatestCardPage(screen) || page == CardPageLatestResponseStart) {
 			screen.Checkpoint.RenderedFinalAt = finalAt
 		}
 		phaseStarted = time.Now()

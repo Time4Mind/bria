@@ -104,7 +104,7 @@ func (h *Handler) reconcileActiveFinalCards(
 				return
 			}
 			snapshot, err := h.renderSessionCardSnapshot(
-				ctx, actor, session.Ref(), application.CardPageLatestResponseStart,
+				ctx, actor, session.Ref(), CardPageLatestResponseStart,
 			)
 			if err != nil {
 				return

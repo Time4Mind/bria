@@ -4,6 +4,8 @@ package application
 import (
 	"context"
 	"errors"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/Time4Mind/bria/internal/clusterstate"
@@ -58,7 +60,7 @@ func (s *Service) ListNodes(actor Principal) ([]NodeItem, error) {
 	if s.leaders != nil {
 		leaderID = domain.NodeID(s.leaders.LeaderID())
 	}
-	nodes := visibleNodes(state, actor, leaderID)
+	nodes := VisibleNodes(state, actor, leaderID)
 	items := make([]NodeItem, 0, len(nodes))
 	for _, node := range nodes {
 		count := 0
@@ -71,6 +73,50 @@ func (s *Service) ListNodes(actor Principal) ([]NodeItem, error) {
 		items = append(items, NodeItem{Node: node, LiveSessions: count})
 	}
 	return items, nil
+}
+
+// VisibleNodes applies the shared actor-visible node ordering used by every
+// interaction adapter. It returns domain data only; transport projection and
+// rendering remain adapter responsibilities.
+func VisibleNodes(
+	state *domain.State,
+	actor Principal,
+	leaderIDs ...domain.NodeID,
+) []domain.Node {
+	nodes := state.VisibleNodes(actor.UserID)
+	preferences := state.Preferences[actor.UserID]
+	leaderID := domain.NodeID("")
+	if len(leaderIDs) > 0 {
+		leaderID = leaderIDs[0]
+	}
+	sort.Slice(nodes, func(left, right int) bool {
+		if nodes[left].Enabled() != nodes[right].Enabled() {
+			return nodes[left].Enabled()
+		}
+		if preferences.EffectiveNodeSort() == domain.NodeSortLeader &&
+			(nodes[left].ID == leaderID) != (nodes[right].ID == leaderID) {
+			return nodes[left].ID == leaderID
+		}
+		if preferences.EffectiveNodeSort() == domain.NodeSortName {
+			leftName := strings.ToLower(nodes[left].Name)
+			rightName := strings.ToLower(nodes[right].Name)
+			if leftName != rightName {
+				return leftName < rightName
+			}
+		}
+		leftAt, rightAt := nodes[left].CreatedAt, nodes[right].CreatedAt
+		if !leftAt.Equal(rightAt) {
+			if leftAt.IsZero() {
+				leftAt = time.Unix(0, 0)
+			}
+			if rightAt.IsZero() {
+				rightAt = time.Unix(0, 0)
+			}
+			return leftAt.Before(rightAt)
+		}
+		return nodes[left].ID < nodes[right].ID
+	})
+	return nodes
 }
 
 func (s *Service) ListSessions(actor Principal) ([]SessionItem, error) {

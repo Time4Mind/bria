@@ -3,6 +3,7 @@ package interaction
 import (
 	"go/parser"
 	"go/token"
+	"io/fs"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -10,20 +11,23 @@ import (
 	"testing"
 )
 
-func TestCorePackagesDoNotDependOnTelegram(t *testing.T) {
+func TestCoreAndApplicationPackagesDoNotDependOnTelegram(t *testing.T) {
 	_, filename, _, ok := runtime.Caller(0)
 	if !ok {
 		t.Fatal("resolve test path")
 	}
 	root := filepath.Clean(filepath.Join(filepath.Dir(filename), "..", ".."))
 	core := []string{
-		"domain", "clusterstate", "consensus", "nodecontrol", "runtimehost",
+		"application", "domain", "clusterstate", "consensus", "nodecontrol", "runtimehost",
 		"sessioncontrol", "sessionstart",
 	}
 	for _, name := range core {
 		packageDir := filepath.Join(root, "internal", name)
 		files := token.NewFileSet()
-		packages, err := parser.ParseDir(files, packageDir, nil, parser.ImportsOnly)
+		productionFile := func(info fs.FileInfo) bool {
+			return !strings.HasSuffix(info.Name(), "_test.go")
+		}
+		packages, err := parser.ParseDir(files, packageDir, productionFile, parser.ImportsOnly)
 		if err != nil {
 			t.Fatalf("parse %s: %v", name, err)
 		}

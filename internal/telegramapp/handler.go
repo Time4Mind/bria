@@ -30,7 +30,7 @@ type Messenger interface {
 
 type Handler struct {
 	service    *application.Service
-	projector  *application.TelegramProjector
+	projector  *TelegramProjector
 	tokens     *callbacktoken.Codec
 	messenger  Messenger
 	controls   SessionControls
@@ -85,7 +85,7 @@ type Handler struct {
 
 func NewHandler(
 	service *application.Service,
-	projector *application.TelegramProjector,
+	projector *TelegramProjector,
 	tokens *callbacktoken.Codec,
 	messenger Messenger,
 ) (*Handler, error) {
@@ -129,7 +129,7 @@ func NewHandler(
 
 func NewHandlerWithControls(
 	service *application.Service,
-	projector *application.TelegramProjector,
+	projector *TelegramProjector,
 	tokens *callbacktoken.Codec,
 	messenger Messenger,
 	controls SessionControls,
@@ -147,7 +147,7 @@ func NewHandlerWithControls(
 
 func NewHandlerWithControlsAndLeadership(
 	service *application.Service,
-	projector *application.TelegramProjector,
+	projector *TelegramProjector,
 	tokens *callbacktoken.Codec,
 	messenger Messenger,
 	controls SessionControls,
