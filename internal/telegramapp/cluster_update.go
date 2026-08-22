@@ -17,7 +17,7 @@ type clusterUpdater interface {
 	Progress(context.Context, string) map[domain.NodeID]clusterupdate.Status
 }
 
-func (h *Handler) SetClusterUpdater(service *clusterupdate.Coordinator) error {
+func (h *Handler) SetClusterUpdater(service clusterUpdater) error {
 	if service == nil {
 		return domain.ErrInvalidState
 	}
