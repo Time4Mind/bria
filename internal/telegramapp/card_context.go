@@ -7,6 +7,7 @@ import (
 
 	"github.com/Time4Mind/bria/internal/application"
 	"github.com/Time4Mind/bria/internal/domain"
+	"github.com/Time4Mind/bria/internal/telegramview"
 	"github.com/Time4Mind/bria/internal/transcript"
 )
 
@@ -166,7 +167,7 @@ func cloneTranscriptEvents(events []transcript.Event) []transcript.Event {
 	return cloned
 }
 
-func (h *Handler) cardContext(ref domain.SessionRef) CardContext {
+func (h *Handler) cardContext(ref domain.SessionRef) telegramview.CardContext {
 	h.cardDataMu.RLock()
 	active := h.cardContexts[ref.Key()]
 	background := make(map[string]int, len(h.cardContexts))
@@ -181,7 +182,7 @@ func (h *Handler) cardContext(ref domain.SessionRef) CardContext {
 		value := active.percent
 		activePercent = &value
 	}
-	return CardContext{
+	return telegramview.CardContext{
 		ActivePercent: activePercent, BackgroundPercent: background,
 	}
 }

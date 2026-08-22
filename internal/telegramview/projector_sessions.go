@@ -1,4 +1,4 @@
-package telegramapp
+package telegramview
 
 import (
 	"fmt"
@@ -15,13 +15,13 @@ const (
 // OpenSessions preserves the configurable navigation fork. Host-first uses an
 // actor-filtered node selector unless exactly one enabled node is visible;
 // all-hosts opens one live grid.
-func (p *TelegramProjector) OpenSessions(
+func (p *Projector) OpenSessions(
 	actor Principal,
 ) (telegramui.Screen, error) {
 	return p.OpenSessionsPageWithContext(actor, 1, nil)
 }
 
-func (p *TelegramProjector) OpenSessionsWithContext(
+func (p *Projector) OpenSessionsWithContext(
 	actor Principal,
 	contextPercent map[string]int,
 ) (telegramui.Screen, error) {
@@ -31,7 +31,7 @@ func (p *TelegramProjector) OpenSessionsWithContext(
 // OpenNodeSelector always renders the host selector. It is used by the
 // explicit "Servers" back action and therefore must not follow SessionView or
 // collapse directly into the only visible host.
-func (p *TelegramProjector) OpenNodeSelector(actor Principal) (telegramui.Screen, error) {
+func (p *Projector) OpenNodeSelector(actor Principal) (telegramui.Screen, error) {
 	state, err := p.actorState(actor)
 	if err != nil {
 		return telegramui.Screen{}, err
@@ -39,14 +39,14 @@ func (p *TelegramProjector) OpenNodeSelector(actor Principal) (telegramui.Screen
 	return p.projectNodesPage(state, actor, 1, false, nil)
 }
 
-func (p *TelegramProjector) OpenSessionsPage(
+func (p *Projector) OpenSessionsPage(
 	actor Principal,
 	page int,
 ) (telegramui.Screen, error) {
 	return p.OpenSessionsPageWithContext(actor, page, nil)
 }
 
-func (p *TelegramProjector) OpenSessionsPageWithContext(
+func (p *Projector) OpenSessionsPageWithContext(
 	actor Principal,
 	page int,
 	contextPercent map[string]int,
@@ -71,14 +71,14 @@ func (p *TelegramProjector) OpenSessionsPageWithContext(
 	}
 }
 
-func (p *TelegramProjector) NodeSessions(
+func (p *Projector) NodeSessions(
 	actor Principal,
 	nodeID domain.NodeID,
 ) (telegramui.Screen, error) {
 	return p.NodeSessionsPageWithContext(actor, nodeID, 1, nil)
 }
 
-func (p *TelegramProjector) NodeSessionsWithContext(
+func (p *Projector) NodeSessionsWithContext(
 	actor Principal,
 	nodeID domain.NodeID,
 	contextPercent map[string]int,
@@ -86,7 +86,7 @@ func (p *TelegramProjector) NodeSessionsWithContext(
 	return p.NodeSessionsPageWithContext(actor, nodeID, 1, contextPercent)
 }
 
-func (p *TelegramProjector) NodeSessionsPage(
+func (p *Projector) NodeSessionsPage(
 	actor Principal,
 	nodeID domain.NodeID,
 	page int,
@@ -94,7 +94,7 @@ func (p *TelegramProjector) NodeSessionsPage(
 	return p.NodeSessionsPageWithContext(actor, nodeID, page, nil)
 }
 
-func (p *TelegramProjector) NodeSessionsPageWithContext(
+func (p *Projector) NodeSessionsPageWithContext(
 	actor Principal,
 	nodeID domain.NodeID,
 	page int,
@@ -146,7 +146,7 @@ func (p *TelegramProjector) NodeSessionsPageWithContext(
 	), nil
 }
 
-func (p *TelegramProjector) offlineLastCard(
+func (p *Projector) offlineLastCard(
 	state *domain.State,
 	actor Principal,
 	nodeID domain.NodeID,
@@ -169,7 +169,7 @@ func (p *TelegramProjector) offlineLastCard(
 	return &telegramui.SessionItem{Token: token, Name: session.Name}, nil
 }
 
-func (p *TelegramProjector) projectNodes(
+func (p *Projector) projectNodes(
 	state *domain.State,
 	actor Principal,
 	page int,
@@ -178,7 +178,7 @@ func (p *TelegramProjector) projectNodes(
 	return p.projectNodesPage(state, actor, page, true, contextPercent)
 }
 
-func (p *TelegramProjector) projectNodesPage(
+func (p *Projector) projectNodesPage(
 	state *domain.State,
 	actor Principal,
 	page int,
@@ -216,7 +216,7 @@ func (p *TelegramProjector) projectNodesPage(
 	), nil
 }
 
-func (p *TelegramProjector) projectSingleNodeSessions(
+func (p *Projector) projectSingleNodeSessions(
 	state *domain.State,
 	actor Principal,
 	node domain.Node,
@@ -257,7 +257,7 @@ func (p *TelegramProjector) projectSingleNodeSessions(
 	), nil
 }
 
-func (p *TelegramProjector) projectAllSessions(
+func (p *Projector) projectAllSessions(
 	state *domain.State,
 	actor Principal,
 	page int,

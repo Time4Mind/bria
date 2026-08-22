@@ -23,7 +23,14 @@
     тестом, запрещающим production-импорты Telegram из `application`.
   - [ ] R4.2. Проверить связность обязанностей и fan-out `telegramapp`; отделять
     только самостоятельные ответственности, не создавая формальных
-    micro-packages ради размера файлов или пакета.
+    micro-packages ради размера файлов или пакета:
+    - [x] R4.2.1. Выделить чистую проекцию actor-authorized state и callback-
+      tokens в `internal/telegramview`. Оставить Bot API transport, update-
+      routing и background lifecycle в `internal/telegramapp`; запретить
+      обратную зависимость architecture-тестом.
+    - [ ] R4.2.2. Повторно проверить оставшийся `telegramapp`, прежде всего
+      outbound delivery coordinator. Не выделять его, если card/visible-epoch
+      invariants нельзя перенести без расширения интерфейсов и риска flow.
   - [ ] R4.3. Проверить, что межпакетные interfaces узкие, принадлежат
     потребителю и не создают церемониальных слоёв.
   - [ ] R4.4. Зафиксировать проверяемое направление зависимостей и отсутствие

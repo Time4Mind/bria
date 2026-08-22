@@ -10,6 +10,7 @@ import (
 	"github.com/Time4Mind/bria/internal/domain"
 	"github.com/Time4Mind/bria/internal/processlog"
 	"github.com/Time4Mind/bria/internal/telegrambot"
+	"github.com/Time4Mind/bria/internal/telegramview"
 	"github.com/Time4Mind/bria/internal/transcript"
 )
 
@@ -157,7 +158,7 @@ func (h *Handler) runPaneRefresh(
 				if finalAt, ok := finalTranscriptAt(snapshot.events); ok &&
 					transcriptFinalBelongsToCurrentTurn(session, finalAt, time.Now()) {
 					snapshot, renderErr = h.renderSessionCardSnapshot(
-						ctx, actor, ref, CardPageLatestResponseStart,
+						ctx, actor, ref, telegramview.CardPageLatestResponseStart,
 					)
 					if renderErr != nil {
 						return
@@ -191,7 +192,7 @@ func (h *Handler) runPaneRefresh(
 		settled := h.settleFromTranscript(ctx, actor, session, snapshot.events)
 		if settled {
 			snapshot, err = h.renderSessionCardSnapshotWithoutPane(
-				ctx, actor, ref, CardPageLatestResponseStart,
+				ctx, actor, ref, telegramview.CardPageLatestResponseStart,
 			)
 			if err != nil {
 				return

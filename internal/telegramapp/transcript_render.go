@@ -8,6 +8,7 @@ import (
 	"github.com/Time4Mind/bria/internal/application"
 	"github.com/Time4Mind/bria/internal/domain"
 	"github.com/Time4Mind/bria/internal/telegramui"
+	"github.com/Time4Mind/bria/internal/telegramview"
 	"github.com/Time4Mind/bria/internal/transcript"
 )
 
@@ -257,7 +258,7 @@ func (h *Handler) renderSessionCardSnapshotWithPane(
 	}
 	if err == nil {
 		if finalAt, final := finalTranscriptAt(events); final && screen.Checkpoint != nil &&
-			(screenShowsLatestCardPage(screen) || page == CardPageLatestResponseStart) {
+			(screenShowsLatestCardPage(screen) || page == telegramview.CardPageLatestResponseStart) {
 			screen.Checkpoint.RenderedFinalAt = finalAt
 		}
 		phaseStarted = time.Now()

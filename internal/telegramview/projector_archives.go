@@ -1,4 +1,4 @@
-package telegramapp
+package telegramview
 
 import (
 	"fmt"
@@ -10,7 +10,7 @@ import (
 
 const archivePageSize = 6
 
-func (p *TelegramProjector) SelectedNodeArchives(
+func (p *Projector) SelectedNodeArchives(
 	actor Principal,
 ) (telegramui.Screen, error) {
 	state, err := p.actorState(actor)
@@ -20,7 +20,7 @@ func (p *TelegramProjector) SelectedNodeArchives(
 	return p.nodeArchives(state, actor, state.Navigation.ActiveNodeByUser[actor.UserID], 1)
 }
 
-func (p *TelegramProjector) OpenArchives(actor Principal) (telegramui.Screen, error) {
+func (p *Projector) OpenArchives(actor Principal) (telegramui.Screen, error) {
 	state, err := p.actorState(actor)
 	if err != nil {
 		return telegramui.Screen{}, err
@@ -59,7 +59,7 @@ func (p *TelegramProjector) OpenArchives(actor Principal) (telegramui.Screen, er
 	return telegramui.RenderArchiveNodes(actorCopy(state, actor), items), nil
 }
 
-func (p *TelegramProjector) OpenArchivesPage(
+func (p *Projector) OpenArchivesPage(
 	actor Principal,
 	page int,
 ) (telegramui.Screen, error) {
@@ -77,7 +77,7 @@ func (p *TelegramProjector) OpenArchivesPage(
 // ArchiveListPage returns the current page containing ref. Recomputing it from
 // replicated state keeps History -> Inspect -> Back stable even when newer
 // archives arrived after the original list was rendered.
-func (p *TelegramProjector) ArchiveListPage(
+func (p *Projector) ArchiveListPage(
 	actor Principal,
 	ref domain.SessionRef,
 ) (int, error) {
@@ -100,7 +100,7 @@ func (p *TelegramProjector) ArchiveListPage(
 	return 0, domain.ErrNotFound
 }
 
-func (p *TelegramProjector) NodeArchives(
+func (p *Projector) NodeArchives(
 	actor Principal,
 	nodeID domain.NodeID,
 ) (telegramui.Screen, error) {
@@ -111,7 +111,7 @@ func (p *TelegramProjector) NodeArchives(
 	return p.nodeArchives(state, actor, nodeID, 1)
 }
 
-func (p *TelegramProjector) nodeArchives(
+func (p *Projector) nodeArchives(
 	state *domain.State,
 	actor Principal,
 	nodeID domain.NodeID,
@@ -127,7 +127,7 @@ func (p *TelegramProjector) nodeArchives(
 	return p.archiveList(state, actor, nodeID, page)
 }
 
-func (p *TelegramProjector) archiveList(
+func (p *Projector) archiveList(
 	state *domain.State,
 	actor Principal,
 	nodeID domain.NodeID,
@@ -198,7 +198,7 @@ func archiveNodeForView(state *domain.State, actor Principal) domain.NodeID {
 	return ""
 }
 
-func (p *TelegramProjector) archiveSelectionToken(
+func (p *Projector) archiveSelectionToken(
 	actor Principal,
 	ref domain.SessionRef,
 	page int,
@@ -209,7 +209,7 @@ func (p *TelegramProjector) archiveSelectionToken(
 	return p.tokens.Session(actor.UserID, telegramui.ActionSelectArchive, ref)
 }
 
-func (p *TelegramProjector) archiveNavigationTokens(
+func (p *Projector) archiveNavigationTokens(
 	actor Principal,
 	page, pages int,
 ) (telegramui.OpaqueToken, telegramui.OpaqueToken, error) {

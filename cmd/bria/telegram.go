@@ -20,6 +20,7 @@ import (
 	"github.com/Time4Mind/bria/internal/sessionstart"
 	"github.com/Time4Mind/bria/internal/telegramapp"
 	"github.com/Time4Mind/bria/internal/telegrambot"
+	"github.com/Time4Mind/bria/internal/telegramview"
 )
 
 func newTelegramAdapter(
@@ -63,7 +64,7 @@ func newTelegramAdapter(
 	}); err != nil {
 		return nil, err
 	}
-	projector, err := telegramapp.NewTelegramProjector(node.State(), codec)
+	projector, err := telegramview.New(node.State(), codec)
 	if err != nil {
 		return nil, err
 	}

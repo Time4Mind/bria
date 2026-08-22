@@ -1,4 +1,4 @@
-package telegramapp
+package telegramview
 
 import (
 	"fmt"
@@ -15,14 +15,14 @@ import (
 // response carrier; zero continues to mean the live latest page.
 const CardPageLatestResponseStart = -1
 
-func (p *TelegramProjector) SessionCard(
+func (p *Projector) SessionCard(
 	actor Principal,
 	ref domain.SessionRef,
 ) (telegramui.Screen, error) {
 	return p.SessionCardPage(actor, ref, nil, 0)
 }
 
-func (p *TelegramProjector) SessionCardPage(
+func (p *Projector) SessionCardPage(
 	actor Principal,
 	ref domain.SessionRef,
 	events []application.CardEvent,
@@ -37,7 +37,7 @@ type CardContext struct {
 	HideBackground    bool
 }
 
-func (p *TelegramProjector) SessionCardPageWithContext(
+func (p *Projector) SessionCardPageWithContext(
 	actor Principal,
 	ref domain.SessionRef,
 	events []application.CardEvent,
@@ -47,7 +47,7 @@ func (p *TelegramProjector) SessionCardPageWithContext(
 	return p.SessionCardViewWithContext(actor, ref, events, requestedPage, "", context)
 }
 
-func (p *TelegramProjector) SessionCardViewWithContext(
+func (p *Projector) SessionCardViewWithContext(
 	actor Principal,
 	ref domain.SessionRef,
 	events []application.CardEvent,

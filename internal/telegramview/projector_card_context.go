@@ -1,4 +1,4 @@
-package telegramapp
+package telegramview
 
 import (
 	"cmp"

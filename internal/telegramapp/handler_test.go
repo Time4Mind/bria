@@ -14,6 +14,7 @@ import (
 	"github.com/Time4Mind/bria/internal/telegramapp"
 	"github.com/Time4Mind/bria/internal/telegrambot"
 	"github.com/Time4Mind/bria/internal/telegramui"
+	"github.com/Time4Mind/bria/internal/telegramview"
 )
 
 type failingBackendSetup struct{ err error }
@@ -159,7 +160,7 @@ func (m *messengerStub) discardEventTrace() {
 type fixture struct {
 	handler   *telegramapp.Handler
 	service   *application.Service
-	projector *telegramapp.TelegramProjector
+	projector *telegramview.Projector
 	machine   *clusterstate.Machine
 	codec     *callbacktoken.Codec
 	messenger *messengerStub

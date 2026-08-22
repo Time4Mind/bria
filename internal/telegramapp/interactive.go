@@ -15,6 +15,7 @@ import (
 	"github.com/Time4Mind/bria/internal/sessioncontrol"
 	"github.com/Time4Mind/bria/internal/telegrambot"
 	"github.com/Time4Mind/bria/internal/telegramui"
+	"github.com/Time4Mind/bria/internal/telegramview"
 )
 
 const interactiveActionTimeout = 5 * time.Second
@@ -61,7 +62,7 @@ func (h *Handler) interactiveScreen(
 	prompt interactive.Prompt,
 ) (telegramui.Screen, error) {
 	base, err := h.projector.SessionCardPageWithContext(
-		actor, ref, nil, 0, CardContext{HideBackground: true},
+		actor, ref, nil, 0, telegramview.CardContext{HideBackground: true},
 	)
 	if err != nil {
 		return telegramui.Screen{}, err

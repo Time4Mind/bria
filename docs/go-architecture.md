@@ -7,14 +7,19 @@ imports none of them.
 ![Bria interaction boundary](interaction-architecture.svg)
 
 The daemon starts interface implementations through the small
-`internal/interaction.Adapter` lifecycle. Telegram-specific polling, parsing,
-projection, rendering, Bot API calls, and callback handling stay in the
-Telegram adapter packages. `internal/application` exposes actor-authorized
-use cases and transport-neutral domain data; it does not import Telegram UI or
-callback contracts. A future Web, Matrix, or native client supplies another
-adapter over the same application service and does not change domain,
-consensus, membership, or session-runtime packages. An architecture test
-rejects Telegram imports from application and those core packages.
+`internal/interaction.Adapter` lifecycle. Telegram-specific responsibilities
+are split by cohesion: `internal/telegrambot` owns bounded Bot API transport and
+private-DM parsing; `internal/telegramapp` owns update routing, delivery
+coordination, and background lifecycle; `internal/telegramview` projects
+actor-authorized state and opaque callback tokens into semantic
+`internal/telegramui` screens. The view package owns no Bot API transport or
+background workers, and an architecture test prevents those dependencies from
+returning. `internal/application` exposes actor-authorized use cases and
+transport-neutral domain data; it does not import Telegram UI or callback
+contracts. A future Web, Matrix, or native client supplies another adapter over
+the same application service and does not change domain, consensus, membership,
+or session-runtime packages. Architecture tests reject Telegram imports from
+application and those core packages.
 
 Each machine runs one `bria` control daemon. On untrusted Linux execution
 hosts, provider CLIs and tmux run in a separate non-root `bria runner` identity

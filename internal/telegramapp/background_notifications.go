@@ -9,6 +9,7 @@ import (
 	"github.com/Time4Mind/bria/internal/domain"
 	"github.com/Time4Mind/bria/internal/i18n"
 	"github.com/Time4Mind/bria/internal/telegramui"
+	"github.com/Time4Mind/bria/internal/telegramview"
 )
 
 const backgroundSettleWorkers = 8
@@ -104,7 +105,7 @@ func (h *Handler) reconcileActiveFinalCards(
 				return
 			}
 			snapshot, err := h.renderSessionCardSnapshot(
-				ctx, actor, session.Ref(), CardPageLatestResponseStart,
+				ctx, actor, session.Ref(), telegramview.CardPageLatestResponseStart,
 			)
 			if err != nil {
 				return

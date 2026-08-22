@@ -1,4 +1,4 @@
-package telegramapp_test
+package telegramview_test
 
 import (
 	"strings"

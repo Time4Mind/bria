@@ -8,6 +8,7 @@ import (
 	"github.com/Time4Mind/bria/internal/application"
 	"github.com/Time4Mind/bria/internal/domain"
 	"github.com/Time4Mind/bria/internal/telegramui"
+	"github.com/Time4Mind/bria/internal/telegramview"
 )
 
 func sameProviderRuntime(current, expected domain.Session) bool {
@@ -53,7 +54,7 @@ func (h *Handler) deliverActiveFinal(
 		return true, "already_delivered"
 	}
 	snapshot, err := h.renderSessionCardSnapshot(
-		ctx, actor, latest.Ref(), CardPageLatestResponseStart,
+		ctx, actor, latest.Ref(), telegramview.CardPageLatestResponseStart,
 	)
 	if err != nil {
 		return false, "card_unavailable"

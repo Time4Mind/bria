@@ -2,10 +2,11 @@
 
 Bria's Telegram UI is an extension of the current CCBot interaction model,
 not a redesign. The Go package `internal/telegramui` captures semantic screens,
-buttons and callback actions without importing a Telegram SDK. The
-`internal/telegrambot` adapter owns bounded Bot API transport and private-DM
-parsing; `internal/telegramapp` owns actor-authorized routing and edit-in-place
-message transitions.
+buttons and callback actions without importing a Telegram SDK.
+`internal/telegramview` projects actor-authorized state and opaque callback
+tokens into those screens. The `internal/telegrambot` adapter owns bounded Bot
+API transport and private-DM parsing; `internal/telegramapp` owns routing,
+edit-in-place delivery coordination, and background lifecycle.
 
 ## Non-negotiable boundaries
 

@@ -1,4 +1,4 @@
-package telegramapp
+package telegramview
 
 import (
 	"cmp"
@@ -11,7 +11,7 @@ import (
 	"github.com/Time4Mind/bria/internal/telegramui"
 )
 
-func (p *TelegramProjector) StatusModeWithReturn(
+func (p *Projector) StatusModeWithReturn(
 	actor Principal,
 	mode telegramui.StatusMode,
 	backAction telegramui.Action,
@@ -51,7 +51,7 @@ func (p *TelegramProjector) StatusModeWithReturn(
 	}), nil
 }
 
-func (p *TelegramProjector) ConfirmLeader(
+func (p *Projector) ConfirmLeader(
 	actor Principal,
 	nodeID domain.NodeID,
 ) (telegramui.Screen, error) {
@@ -70,14 +70,14 @@ func (p *TelegramProjector) ConfirmLeader(
 	return telegramui.RenderLeaderConfirmation(actorCopy(state, actor), node.Name, token), nil
 }
 
-func (p *TelegramProjector) NodeSettings(
+func (p *Projector) NodeSettings(
 	actor Principal,
 	nodeID domain.NodeID,
 ) (telegramui.Screen, error) {
 	return p.nodeSettings(actor, nodeID, telegramui.ActionStatusMode, "settings")
 }
 
-func (p *TelegramProjector) NodeSettingsFromSessions(
+func (p *Projector) NodeSettingsFromSessions(
 	actor Principal,
 	nodeID domain.NodeID,
 ) (telegramui.Screen, error) {
@@ -88,7 +88,7 @@ func (p *TelegramProjector) NodeSettingsFromSessions(
 	return p.nodeSettings(actor, nodeID, telegramui.ActionSelectNode, back)
 }
 
-func (p *TelegramProjector) NodeSettingsWithReturn(
+func (p *Projector) NodeSettingsWithReturn(
 	actor Principal,
 	nodeID domain.NodeID,
 	backAction telegramui.Action,
@@ -97,7 +97,7 @@ func (p *TelegramProjector) NodeSettingsWithReturn(
 	return p.nodeSettings(actor, nodeID, backAction, backToken)
 }
 
-func (p *TelegramProjector) nodeSettings(
+func (p *Projector) nodeSettings(
 	actor Principal,
 	nodeID domain.NodeID,
 	backAction telegramui.Action,
@@ -194,7 +194,7 @@ func canAdministerNodes(state *domain.State, userID domain.UserID) bool {
 	return ok && (access.Role == domain.RoleOwner || access.Role == domain.RoleAdmin)
 }
 
-func (p *TelegramProjector) providerAliases(
+func (p *Projector) providerAliases(
 	state *domain.State,
 	userID domain.UserID,
 	node domain.Node,
@@ -226,7 +226,7 @@ func (p *TelegramProjector) providerAliases(
 	return items, nil
 }
 
-func (p *TelegramProjector) EnrollmentDetail(
+func (p *Projector) EnrollmentDetail(
 	actor Principal,
 	requestID string,
 ) (telegramui.Screen, error) {

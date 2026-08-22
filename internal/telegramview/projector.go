@@ -1,4 +1,6 @@
-package telegramapp
+// Package telegramview projects actor-authorized Bria state into semantic
+// Telegram screens. It owns no Bot API transport or background lifecycle.
+package telegramview
 
 import (
 	"errors"
@@ -27,27 +29,27 @@ type archiveProjectionTokens interface {
 	Archive(domain.UserID, telegramui.Action, domain.SessionRef, int) (telegramui.OpaqueToken, error)
 }
 
-type TelegramProjector struct {
+type Projector struct {
 	reader  StateReader
 	tokens  ProjectionTokens
 	leaders interface{ LeaderID() string }
 }
 
-func (p *TelegramProjector) SetLeadership(leaders interface{ LeaderID() string }) {
+func (p *Projector) SetLeadership(leaders interface{ LeaderID() string }) {
 	p.leaders = leaders
 }
 
-func NewTelegramProjector(
+func New(
 	reader StateReader,
 	tokens ProjectionTokens,
-) (*TelegramProjector, error) {
+) (*Projector, error) {
 	if reader == nil || tokens == nil {
 		return nil, errors.New("state reader and projection tokens are required")
 	}
-	return &TelegramProjector{reader: reader, tokens: tokens}, nil
+	return &Projector{reader: reader, tokens: tokens}, nil
 }
 
-func (p *TelegramProjector) MainMenu(actor Principal) (telegramui.Screen, error) {
+func (p *Projector) MainMenu(actor Principal) (telegramui.Screen, error) {
 	state, err := p.actorState(actor)
 	if err != nil {
 		return telegramui.Screen{}, err
@@ -74,7 +76,7 @@ func actorCopy(state *domain.State, actor Principal) i18n.Localizer {
 	return i18n.For(string(preferences.EffectiveLanguage()))
 }
 
-func (p *TelegramProjector) actorState(actor Principal) (*domain.State, error) {
+func (p *Projector) actorState(actor Principal) (*domain.State, error) {
 	if actor.UserID <= 0 {
 		return nil, domain.ErrAccessDenied
 	}

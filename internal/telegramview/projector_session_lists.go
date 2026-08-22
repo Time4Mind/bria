@@ -1,4 +1,4 @@
-package telegramapp
+package telegramview
 
 import (
 	"strconv"
@@ -19,7 +19,7 @@ func pageBounds(total, page, size int) (int, int, int, int) {
 	return page, pages, start, min(total, start+size)
 }
 
-func (p *TelegramProjector) nodeNavigationTokens(
+func (p *Projector) nodeNavigationTokens(
 	actor Principal,
 	page, pages int,
 ) (telegramui.OpaqueToken, telegramui.OpaqueToken, error) {
@@ -27,7 +27,7 @@ func (p *TelegramProjector) nodeNavigationTokens(
 		telegramui.ActionNodesNext, page, pages)
 }
 
-func (p *TelegramProjector) sessionNavigationTokens(
+func (p *Projector) sessionNavigationTokens(
 	actor Principal,
 	nodeID domain.NodeID,
 	page, pages int,
@@ -36,7 +36,7 @@ func (p *TelegramProjector) sessionNavigationTokens(
 		telegramui.ActionSessionsPrevious, telegramui.ActionSessionsNext, page, pages)
 }
 
-func (p *TelegramProjector) listNavigationTokens(
+func (p *Projector) listNavigationTokens(
 	actor Principal,
 	flow string,
 	previousAction, nextAction telegramui.Action,
@@ -65,7 +65,7 @@ func (p *TelegramProjector) listNavigationTokens(
 	return previous, next, err
 }
 
-func (p *TelegramProjector) sessionItems(
+func (p *Projector) sessionItems(
 	state *domain.State,
 	actor Principal,
 	nodeFilter domain.NodeID,

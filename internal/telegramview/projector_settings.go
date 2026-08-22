@@ -1,4 +1,4 @@
-package telegramapp
+package telegramview
 
 import (
 	"fmt"
@@ -12,7 +12,7 @@ import (
 	"github.com/Time4Mind/bria/internal/telegramui"
 )
 
-func (p *TelegramProjector) Settings(actor Principal) (telegramui.Screen, error) {
+func (p *Projector) Settings(actor Principal) (telegramui.Screen, error) {
 	state, err := p.actorState(actor)
 	if err != nil {
 		return telegramui.Screen{}, err
@@ -24,7 +24,7 @@ func (p *TelegramProjector) Settings(actor Principal) (telegramui.Screen, error)
 	return telegramui.RenderSettings(settingsInput(state, actor.UserID, preferences)), nil
 }
 
-func (p *TelegramProjector) SettingsCategory(
+func (p *Projector) SettingsCategory(
 	actor Principal,
 	category telegramui.SettingsCategory,
 ) (telegramui.Screen, error) {
@@ -55,7 +55,7 @@ func (p *TelegramProjector) SettingsCategory(
 	return telegramui.RenderSettingsCategory(input, category)
 }
 
-func (p *TelegramProjector) Setting(
+func (p *Projector) Setting(
 	actor Principal,
 	setting telegramui.SettingID,
 ) (telegramui.Screen, error) {
@@ -82,7 +82,7 @@ func (p *TelegramProjector) Setting(
 	return telegramui.RenderSetting(input, setting)
 }
 
-func (p *TelegramProjector) preferences(actor Principal) (domain.UserPreferences, error) {
+func (p *Projector) preferences(actor Principal) (domain.UserPreferences, error) {
 	state, err := p.actorState(actor)
 	if err != nil {
 		return domain.UserPreferences{}, err

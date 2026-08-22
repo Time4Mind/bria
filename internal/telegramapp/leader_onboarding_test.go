@@ -13,6 +13,7 @@ import (
 	"github.com/Time4Mind/bria/internal/telegramapp"
 	"github.com/Time4Mind/bria/internal/telegrambot"
 	"github.com/Time4Mind/bria/internal/telegramui"
+	"github.com/Time4Mind/bria/internal/telegramview"
 )
 
 func newFixture(t *testing.T) fixture {
@@ -56,7 +57,7 @@ func newFixtureWithLeader(t *testing.T, assigned bool) fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	projector, err := telegramapp.NewTelegramProjector(port, codec)
+	projector, err := telegramview.New(port, codec)
 	if err != nil {
 		t.Fatal(err)
 	}

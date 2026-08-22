@@ -1,4 +1,4 @@
-package telegramapp
+package telegramview
 
 import (
 	"slices"
@@ -8,7 +8,7 @@ import (
 	"github.com/Time4Mind/bria/internal/telegramui"
 )
 
-func (p *TelegramProjector) backendChoices(
+func (p *Projector) backendChoices(
 	state *domain.State, userID domain.UserID, node domain.Node,
 ) []telegramui.NodeBackendItem {
 	connected := make(map[string]bool, len(node.Backends))

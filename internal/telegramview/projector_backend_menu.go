@@ -1,4 +1,4 @@
-package telegramapp
+package telegramview
 
 import (
 	"strings"
@@ -7,7 +7,7 @@ import (
 	"github.com/Time4Mind/bria/internal/telegramui"
 )
 
-func (p *TelegramProjector) NodeBackends(
+func (p *Projector) NodeBackends(
 	actor Principal,
 	nodeID domain.NodeID,
 ) (telegramui.Screen, error) {
@@ -25,7 +25,7 @@ func (p *TelegramProjector) NodeBackends(
 	}), nil
 }
 
-func (p *TelegramProjector) NodeBackend(
+func (p *Projector) NodeBackend(
 	actor Principal,
 	nodeID domain.NodeID,
 	backend string,
@@ -68,7 +68,7 @@ func (p *TelegramProjector) NodeBackend(
 	return telegramui.RenderNodeBackendDetail(input), nil
 }
 
-func (p *TelegramProjector) backendMenuNode(
+func (p *Projector) backendMenuNode(
 	actor Principal,
 	nodeID domain.NodeID,
 ) (*domain.State, domain.Node, error) {

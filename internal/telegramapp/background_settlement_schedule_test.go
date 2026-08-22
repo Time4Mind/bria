@@ -10,6 +10,7 @@ import (
 	"github.com/Time4Mind/bria/internal/application"
 	"github.com/Time4Mind/bria/internal/callbacktoken"
 	"github.com/Time4Mind/bria/internal/domain"
+	"github.com/Time4Mind/bria/internal/telegramview"
 	"github.com/Time4Mind/bria/internal/transcript"
 )
 
@@ -188,7 +189,7 @@ func TestActiveFinalReconciliationUsesFiveSecondWatchdog(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	projector, err := NewTelegramProjector(port, codec)
+	projector, err := telegramview.New(port, codec)
 	if err != nil {
 		t.Fatal(err)
 	}

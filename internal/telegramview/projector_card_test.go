@@ -1,4 +1,4 @@
-package telegramapp_test
+package telegramview_test
 
 import (
 	"fmt"
@@ -8,8 +8,8 @@ import (
 
 	"github.com/Time4Mind/bria/internal/application"
 	"github.com/Time4Mind/bria/internal/domain"
-	"github.com/Time4Mind/bria/internal/telegramapp"
 	"github.com/Time4Mind/bria/internal/telegramui"
+	"github.com/Time4Mind/bria/internal/telegramview"
 )
 
 func TestSessionCardUsesSingleLineHeader(t *testing.T) {
@@ -69,7 +69,7 @@ func TestSessionCardSeparatesContextAndBackgroundLikeCCBot(t *testing.T) {
 	screen, err := projector.SessionCardPageWithContext(
 		application.Principal{UserID: 2}, ref,
 		[]application.CardEvent{{Kind: application.CardEventAssistantText, Text: "answer"}},
-		1, telegramapp.CardContext{
+		1, telegramview.CardContext{
 			ActivePercent:     &activePercent,
 			BackgroundPercent: map[string]int{backgroundRef.Key(): 61},
 		},
@@ -103,7 +103,7 @@ func TestSessionCardContextCanHideBackgroundForInteractivePrompt(t *testing.T) {
 	}
 	screen, err := projector.SessionCardPageWithContext(
 		application.Principal{UserID: 2}, ref, nil, 1,
-		telegramapp.CardContext{HideBackground: true},
+		telegramview.CardContext{HideBackground: true},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -133,7 +133,7 @@ func TestSessionCardAnchorSurvivesLeadingPageEviction(t *testing.T) {
 		t.Fatalf("initial target=%#v", target)
 	}
 	screen, err := projector.SessionCardViewWithContext(
-		actor, ref, events[2:], target.Number, target.Anchor, telegramapp.CardContext{},
+		actor, ref, events[2:], target.Number, target.Anchor, telegramview.CardContext{},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -284,7 +284,7 @@ func TestBackgroundPanelFollowsSessionViewMode(t *testing.T) {
 	ref := domain.SessionRef{NodeID: "alpha", SessionID: "a-new"}
 	hostFirst, err := projector.SessionCardPageWithContext(
 		actor, ref, nil, 0,
-		telegramapp.CardContext{BackgroundPercent: map[string]int{"alpha/a-old": 37}},
+		telegramview.CardContext{BackgroundPercent: map[string]int{"alpha/a-old": 37}},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -298,7 +298,7 @@ func TestBackgroundPanelFollowsSessionViewMode(t *testing.T) {
 	state.Preferences[2] = preferences
 	allHosts, err := projector.SessionCardPageWithContext(
 		actor, ref, nil, 0,
-		telegramapp.CardContext{BackgroundPercent: map[string]int{
+		telegramview.CardContext{BackgroundPercent: map[string]int{
 			"alpha/a-old": 37, "gamma/g-new": 82,
 		}},
 	)

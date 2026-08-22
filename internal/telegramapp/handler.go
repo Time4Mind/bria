@@ -16,6 +16,7 @@ import (
 	"github.com/Time4Mind/bria/internal/speechsetup"
 	"github.com/Time4Mind/bria/internal/telegrambot"
 	"github.com/Time4Mind/bria/internal/telegramui"
+	"github.com/Time4Mind/bria/internal/telegramview"
 )
 
 type Messenger interface {
@@ -30,7 +31,7 @@ type Messenger interface {
 
 type Handler struct {
 	service    *application.Service
-	projector  *TelegramProjector
+	projector  *telegramview.Projector
 	tokens     *callbacktoken.Codec
 	messenger  Messenger
 	controls   SessionControls
@@ -85,7 +86,7 @@ type Handler struct {
 
 func NewHandler(
 	service *application.Service,
-	projector *TelegramProjector,
+	projector *telegramview.Projector,
 	tokens *callbacktoken.Codec,
 	messenger Messenger,
 ) (*Handler, error) {
@@ -129,7 +130,7 @@ func NewHandler(
 
 func NewHandlerWithControls(
 	service *application.Service,
-	projector *TelegramProjector,
+	projector *telegramview.Projector,
 	tokens *callbacktoken.Codec,
 	messenger Messenger,
 	controls SessionControls,
@@ -147,7 +148,7 @@ func NewHandlerWithControls(
 
 func NewHandlerWithControlsAndLeadership(
 	service *application.Service,
-	projector *TelegramProjector,
+	projector *telegramview.Projector,
 	tokens *callbacktoken.Codec,
 	messenger Messenger,
 	controls SessionControls,

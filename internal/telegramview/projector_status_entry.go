@@ -1,12 +1,12 @@
-package telegramapp
+package telegramview
 
 import "github.com/Time4Mind/bria/internal/telegramui"
 
-func (p *TelegramProjector) Status(actor Principal) (telegramui.Screen, error) {
+func (p *Projector) Status(actor Principal) (telegramui.Screen, error) {
 	return p.StatusMode(actor, telegramui.StatusChoose)
 }
 
-func (p *TelegramProjector) StatusMode(
+func (p *Projector) StatusMode(
 	actor Principal,
 	mode telegramui.StatusMode,
 ) (telegramui.Screen, error) {
