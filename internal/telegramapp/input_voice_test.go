@@ -248,6 +248,64 @@ func TestVoiceBaselineIdentitySeparatesPromptsWithEqualRecentUserCounts(t *testi
 	}
 }
 
+func TestExpiredVoiceAcknowledgementDoesNotInflateNewTranscriptOrdinal(t *testing.T) {
+	fixture := newFixture(t)
+	actor := application.Principal{UserID: 7}
+	preferences, err := fixture.service.Preferences(actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	preferences.VoiceBackend = domain.VoiceAuto
+	if err := fixture.service.SetPreferences(context.Background(), actor, preferences); err != nil {
+		t.Fatal(err)
+	}
+	ref := domain.SessionRef{NodeID: "allowed", SessionID: "live"}
+	staleAt := time.Now().Add(-11 * time.Minute).UTC()
+	stale, err := clusterstate.NewCommand(
+		"stale-voice-ack", clusterstate.CommandPublishSessionRuntime, staleAt,
+		clusterstate.PublishSessionRuntime{
+			Session: ref, Generation: 1, Phase: domain.RuntimeRunning,
+			Result: &domain.SessionOperationResult{
+				OperationID: "stale-voice", Action: domain.ActionSendInput,
+				Status: domain.OperationSucceeded, InputKind: "voice",
+				TranscriptBaselineKnown: true, TranscriptBaselineCount: 1,
+				TranscriptOrdinal: 7,
+			},
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result := fixture.machine.Apply(stale); result.Err() != nil {
+		t.Fatal(result.Err())
+	}
+	controls := &blockingControls{ref: ref, events: []transcript.Event{{
+		Kind: transcript.EventUserText, Text: "current bounded baseline",
+		Timestamp: time.Now().Add(-time.Minute).Format(time.RFC3339Nano),
+	}}}
+	handler, err := telegramapp.NewHandlerWithControls(
+		fixture.service, fixture.projector, fixture.codec, fixture.messenger, controls,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := handler.HandleTelegramUpdate(ctx, telegrambot.IncomingUpdate{
+		UpdateID: 505, Kind: telegrambot.IncomingMessage, ChatID: 7, UserID: 7,
+		Content: telegrambot.ContentDescriptor{
+			Kind: telegrambot.IncomingVoice, FileID: "voice-id", FileUniqueID: "voice-505",
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	controls.mu.RLock()
+	defer controls.mu.RUnlock()
+	if controls.external == nil || controls.external.TranscriptOrdinal != 1 {
+		t.Fatalf("new voice inherited stale transcript ordinal: %#v", controls.external)
+	}
+}
+
 func TestVoicePendingWithoutTranscriptStaysBeforeBackgroundPanel(t *testing.T) {
 	fixture := newFixture(t)
 	actor := application.Principal{UserID: 7}
@@ -306,7 +364,7 @@ func TestVoicePendingWithoutTranscriptStaysBeforeBackgroundPanel(t *testing.T) {
 	}
 }
 
-func TestDeliveredVoiceAcknowledgementsSurviveHandlerRestartUntilCanonicalTranscript(t *testing.T) {
+func TestInflatedDeliveredVoiceOrdinalsAreRepairedAfterHandlerRestart(t *testing.T) {
 	fixture := newFixture(t)
 	actor := application.Principal{UserID: 7}
 	ref := domain.SessionRef{NodeID: "allowed", SessionID: "live"}
@@ -325,7 +383,9 @@ func TestDeliveredVoiceAcknowledgementsSurviveHandlerRestartUntilCanonicalTransc
 			OperationID: operationID, Action: domain.ActionSendInput,
 			Status: domain.OperationQueued, InputKind: "voice",
 			TranscriptBaselineKnown: true, TranscriptBaselineCount: 1,
-			TranscriptOrdinal: index,
+			// Simulate acknowledgements persisted by the old matcher after it
+			// counted an expired acknowledgement with the same bounded baseline.
+			TranscriptOrdinal: index + 1,
 		}
 		if err := fixture.service.PublishSessionRuntime(
 			application.WithOperationScope(context.Background(), operationID+"-queued"),

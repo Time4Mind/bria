@@ -85,7 +85,14 @@ func (h *Handler) prepareVoiceBaseline(actor application.Principal, baseline *vo
 	key := voicePendingKey{userID: actor.UserID, ref: baseline.ref}
 	h.voiceMu.Lock()
 	defer h.voiceMu.Unlock()
+	now := baseline.receivedAt
+	if now.IsZero() {
+		now = time.Now()
+	}
 	for _, pending := range h.pendingVoices[key] {
+		if now.Sub(pending.acceptedAt) >= voicePendingLifetime {
+			continue
+		}
 		if voiceBaselineMatches(
 			pending.baselineKnown, pending.baselineCount, pending.baselineID, *baseline,
 		) &&
@@ -95,6 +102,10 @@ func (h *Handler) prepareVoiceBaseline(actor application.Principal, baseline *vo
 	}
 	if session, err := h.service.Session(actor, baseline.ref); err == nil {
 		for _, acknowledgement := range session.VoiceAcknowledgements {
+			if now.Sub(acknowledgement.AcceptedAt) >= voicePendingLifetime ||
+				h.voiceConfirmedLocked(key, acknowledgement.OperationID) {
+				continue
+			}
 			acknowledgementBaselineID := ""
 			eventKey, reconstructed := transcriptBaselineBefore(
 				baseline.events, acknowledgement.AcceptedAt, acknowledgement.BaselineCount,
@@ -171,8 +182,12 @@ func (h *Handler) withPendingVoiceRows(
 	h.sweepVoiceConfirmationsLocked(now)
 	queue := h.pendingVoices[key]
 	known := make(map[string]bool, len(queue))
+	durableOrdinals := make(map[string]int)
 	for _, pending := range queue {
 		known[pending.operationID] = true
+		if pending.baselineID != "" && pending.ordinal > durableOrdinals[pending.baselineID] {
+			durableOrdinals[pending.baselineID] = pending.ordinal
+		}
 	}
 	fallbackAt := time.Time{}
 	for _, acknowledgement := range session.VoiceAcknowledgements {
@@ -194,11 +209,19 @@ func (h *Handler) withPendingVoiceRows(
 				baselineID = transcriptBaselineID(eventKey)
 			}
 		}
+		ordinal := acknowledgement.Ordinal
+		if baselineID != "" {
+			// Older builds could inflate the stored ordinal by counting an expired
+			// acknowledgement that happened to have the same bounded event count.
+			// Rebuild the ordinal from the exact transcript baseline on recovery.
+			ordinal = durableOrdinals[baselineID] + 1
+			durableOrdinals[baselineID] = ordinal
+		}
 		queue = append(queue, voicePending{
 			operationID: acknowledgement.OperationID, acceptedAt: acknowledgement.AcceptedAt,
 			status: acknowledgement.Status, baselineCount: acknowledgement.BaselineCount,
 			baselineKnown: acknowledgement.BaselineKnown, baselineEvent: baselineEvent,
-			baselineID: baselineID, ordinal: acknowledgement.Ordinal,
+			baselineID: baselineID, ordinal: ordinal,
 		})
 	}
 	for index := range queue {
