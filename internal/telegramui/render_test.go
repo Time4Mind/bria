@@ -65,7 +65,7 @@ func TestNodeSessionAndArchiveSurfacesGolden(t *testing.T) {
 [← Back -> menu]`)
 }
 
-func TestArchivePagesUseSameSixItemVisualAndKeepFinalGap(t *testing.T) {
+func TestArchivePagesUseSameApprovedSixItemRichTable(t *testing.T) {
 	items := make([]ArchiveItem, 0, 6)
 	for index := 7; index <= 12; index++ {
 		items = append(items, ArchiveItem{
@@ -80,27 +80,51 @@ func TestArchivePagesUseSameSixItemVisualAndKeepFinalGap(t *testing.T) {
 	if strings.Contains(screen.Text, "2 of 3") || strings.Contains(screen.Text, "sessions") {
 		t.Fatalf("archive text contains page or count metadata: %q", screen.Text)
 	}
-	want := "🗄 Archive · Mac\n\n" +
-		"7. session-7\n· Контекст сессии.\n· Нужный результат.\n\n─────\n\n" +
-		"8. session-8\n· Контекст сессии.\n· Нужный результат.\n\n─────\n\n" +
-		"9. session-9\n· Контекст сессии.\n· Нужный результат.\n\n─────\n\n" +
-		"10. session-10\n· Контекст сессии.\n· Нужный результат.\n\n─────\n\n" +
-		"11. session-11\n· Контекст сессии.\n· Нужный результат.\n\n─────\n\n" +
-		"12. session-12\n· Контекст сессии.\n· Нужный результат.\n\n─────\n⠀"
+	want := "🗄 Archive · Mac\n\n⠀\n\n" +
+		"| Name | Description |\n|---|---|\n" +
+		"| 7. session-7 | · Контекст сессии.<br>· Нужный результат. |\n" +
+		"| 8. session-8 | · Контекст сессии.<br>· Нужный результат. |\n" +
+		"| 9. session-9 | · Контекст сессии.<br>· Нужный результат. |\n" +
+		"| 10. session-10 | · Контекст сессии.<br>· Нужный результат. |\n" +
+		"| 11. session-11 | · Контекст сессии.<br>· Нужный результат. |\n" +
+		"| 12. session-12 | · Контекст сессии.<br>· Нужный результат. |"
 	if screen.Text != want {
 		t.Fatalf("archive text mismatch\n--- got ---\n%s\n--- want ---\n%s", screen.Text, want)
 	}
-	if got := strings.Count(screen.Text, "─────"); got != 6 {
-		t.Fatalf("separators=%d, want 6", got)
+	if !screen.RichMarkdown {
+		t.Fatal("archive table is not marked as Rich Markdown")
 	}
-	if strings.Count(screen.Text, "\n\n─────\n") != 6 {
-		t.Fatalf("separator blocks are not detached from descriptions: %q", screen.Text)
+	if strings.Contains(screen.Text, "─────") || strings.Count(screen.Text, "<br>") != 6 {
+		t.Fatalf("archive row layout is not the approved table: %q", screen.Text)
 	}
 	assertGoldenGrid(t, screen, `[7. session-7 -> archive_item@s7] | [8. session-8 -> archive_item@s8]
 [9. session-9 -> archive_item@s9] | [10. session-10 -> archive_item@s10]
 [11. session-11 -> archive_item@s11] | [12. session-12 -> archive_item@s12]
 [◀ -> archive_prev@previous] | [2/3 -> noop] | [▶ -> archive_next@next]
 [← Back -> menu]`)
+}
+
+func TestArchiveRichTableEscapesDynamicCells(t *testing.T) {
+	screen := RenderArchives(ArchiveListInput{
+		Copy: englishCopy, Title: "Archive", Page: 1, Pages: 1,
+		Items: []ArchiveItem{{
+			Token: "item", Index: 1, Name: "name | <x> *bold*",
+			Description: []string{"one | <two>", "three\nfour"},
+		}},
+	})
+	wantRow := "| 1. name \\| &lt;x&gt; \\*bold\\* | · one \\| &lt;two&gt;<br>· three four |"
+	if !strings.Contains(screen.Text, wantRow) {
+		t.Fatalf("escaped archive row=%q, want substring %q", screen.Text, wantRow)
+	}
+}
+
+func TestEmptyArchiveRemainsPlainText(t *testing.T) {
+	screen := RenderArchives(ArchiveListInput{
+		Copy: englishCopy, Title: "Archive", Page: 1, Pages: 1,
+	})
+	if screen.RichMarkdown || screen.Text != "Archive" {
+		t.Fatalf("empty archive=%#v", screen)
+	}
 }
 
 func TestUnavailableNodeKeepsReadSurfacesGolden(t *testing.T) {

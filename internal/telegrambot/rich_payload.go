@@ -189,7 +189,7 @@ func normalizeRichTables(text string) string {
 }
 
 func isRichTableSeparator(line string) bool {
-	cells := strings.Split(strings.Trim(strings.TrimSpace(line), "|"), "|")
+	cells := splitRichTableCells(line)
 	if len(cells) == 0 {
 		return false
 	}
@@ -203,7 +203,7 @@ func isRichTableSeparator(line string) bool {
 }
 
 func subWrapRichTableRow(line string) string {
-	cells := strings.Split(strings.Trim(strings.TrimSpace(line), "|"), "|")
+	cells := splitRichTableCells(line)
 	for index, cell := range cells {
 		value := strings.TrimSpace(cell)
 		if value != "" && !strings.HasPrefix(value, "<sub>") {
@@ -211,6 +211,29 @@ func subWrapRichTableRow(line string) string {
 		}
 	}
 	return "|" + strings.Join(cells, "|") + "|"
+}
+
+func splitRichTableCells(line string) []string {
+	body := strings.TrimSpace(line)
+	body = strings.TrimPrefix(body, "|")
+	body = strings.TrimSuffix(body, "|")
+	cells := make([]string, 0, 4)
+	start := 0
+	escaped := false
+	for index := 0; index < len(body); index++ {
+		switch body[index] {
+		case '\\':
+			escaped = !escaped
+			continue
+		case '|':
+			if !escaped {
+				cells = append(cells, body[start:index])
+				start = index + 1
+			}
+		}
+		escaped = false
+	}
+	return append(cells, body[start:])
 }
 
 const (

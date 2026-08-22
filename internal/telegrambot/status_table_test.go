@@ -19,3 +19,16 @@ func TestRichTextNormalizesSixColumnStatusTable(t *testing.T) {
 		}
 	}
 }
+
+func TestRichTextTableKeepsEscapedPipeInsideCell(t *testing.T) {
+	rich, err := buildRichTextMessage(
+		"Archive\n\n| Name | Description |\n|---|---|\n| a \\| b | first<br>second |",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "| <sub>a \\| b</sub> | <sub>first<br>second</sub> |"
+	if !strings.Contains(rich.Markdown, want) {
+		t.Fatalf("rich table=%q does not contain %q", rich.Markdown, want)
+	}
+}

@@ -50,8 +50,13 @@ func RenderArchiveNodes(copy i18n.Localizer, items []ArchiveNodeItem) Screen {
 func RenderArchives(input ArchiveListInput) Screen {
 	page, pages := normalizedPages(input.Page, input.Pages)
 	rows := make(Grid, 0, (len(input.Items)+1)/2+2)
-	lines := make([]string, 0, 2+len(input.Items)*6)
-	lines = append(lines, input.Title, "")
+	lines := make([]string, 0, 5+len(input.Items))
+	lines = append(lines, input.Title)
+	if len(input.Items) > 0 {
+		// Telegram trims repeated empty lines. A Braille blank preserves the
+		// approved visual gap between the archive title and the native table.
+		lines = append(lines, "", "⠀", "", input.Copy.Text(i18n.ArchiveTableHeader), "|---|---|")
+	}
 	for index, item := range input.Items {
 		if index%2 == 0 {
 			rows = append(rows, Row{})
@@ -62,22 +67,14 @@ func RenderArchives(input ArchiveListInput) Screen {
 		}
 		rows[len(rows)-1] = append(rows[len(rows)-1],
 			button(label, ActionSelectArchive, item.Token))
-		lines = append(lines, label)
+		descriptionLines := make([]string, 0, len(item.Description))
 		for _, description := range item.Description {
 			if description = strings.TrimSpace(description); description != "" {
-				lines = append(lines, "· "+description)
+				descriptionLines = append(descriptionLines, "· "+markdownTableCell(description))
 			}
 		}
-		// Keep the separator as its own visual block. Without the empty line above
-		// it reads as a continuation of the second description sentence.
-		lines = append(lines, "", "─────")
-		if index+1 < len(input.Items) {
-			lines = append(lines, "")
-		} else {
-			// Telegram trims trailing whitespace. A Braille blank preserves exactly
-			// one visual line between the final separator and the inline keyboard.
-			lines = append(lines, "⠀")
-		}
+		lines = append(lines, fmt.Sprintf("| %s | %s |",
+			markdownTableCell(label), strings.Join(descriptionLines, "<br>")))
 	}
 	if len(input.Items) == 0 {
 		rows = append(rows, Row{button(input.Copy.Text(i18n.NoArchivedSessions), ActionNoop, "")})
@@ -92,7 +89,10 @@ func RenderArchives(input ArchiveListInput) Screen {
 	}
 	rows = append(rows, navigation,
 		Row{button(input.Copy.Text(i18n.ButtonBack), ActionMenu, "")})
-	return Screen{Name: ScreenArchives, Text: strings.TrimRight(strings.Join(lines, "\n"), "\n"), Grid: rows}
+	return Screen{
+		Name: ScreenArchives, Text: strings.TrimRight(strings.Join(lines, "\n"), "\n"),
+		RichMarkdown: len(input.Items) > 0, Grid: rows,
+	}
 }
 
 type ArchiveInspectInput struct {

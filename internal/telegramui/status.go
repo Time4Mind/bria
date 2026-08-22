@@ -2,6 +2,7 @@ package telegramui
 
 import (
 	"fmt"
+	"html"
 	"strings"
 	"time"
 
@@ -218,5 +219,10 @@ func quotaUsage(copy i18n.Localizer, snapshot domain.QuotaSnapshot) string {
 }
 
 func markdownTableCell(value string) string {
-	return strings.NewReplacer("\\", "\\\\", "|", "\\|", "\r", " ", "\n", " ").Replace(value)
+	value = strings.NewReplacer("\r", " ", "\n", " ").Replace(value)
+	value = html.EscapeString(value)
+	return strings.NewReplacer(
+		"\\", "\\\\", "|", "\\|", "`", "\\`", "*", "\\*", "_", "\\_",
+		"~", "\\~", "[", "\\[", "]", "\\]",
+	).Replace(value)
 }

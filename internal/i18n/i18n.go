@@ -49,6 +49,7 @@ const (
 	ArchiveOlderPages            Key = "archive.older_pages"
 	NodeArchiveTitle             Key = "archive.node_title"
 	NoArchivedSessions           Key = "archive.empty"
+	ArchiveTableHeader           Key = "archive.table.header"
 	CardViewOnly                 Key = "card.view_only"
 	CardServerUnavailable        Key = "card.server_unavailable"
 	CardOfflineInputQueued       Key = "card.offline_input_queued"

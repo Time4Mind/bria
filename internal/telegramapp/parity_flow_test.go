@@ -84,10 +84,15 @@ func TestCarrierFlowArchiveRestoreReturnsToLiveCard(t *testing.T) {
 	}
 	origin := telegrambot.Message{ChatID: 7, MessageID: 504}
 	invokeCarrierAction(t, handler, 530, origin, telegramui.ActionArchive, "")
-	invokeCarrierData(t, handler, 531, origin,
-		callbackForAction(t, lastEdited(t, fixture), telegramui.ActionSelectArchive))
+	list := lastSent(t, fixture)
+	if !list.RichMarkdown {
+		t.Fatalf("archive list is not rich: %#v", list)
+	}
+	richOrigin := stubMessageForScreen(len(fixture.messenger.sent), list)
+	invokeCarrierData(t, handler, 531, richOrigin,
+		callbackForAction(t, list, telegramui.ActionSelectArchive))
 	inspect := lastEdited(t, fixture)
-	invokeCarrierData(t, handler, 532, origin,
+	invokeCarrierData(t, handler, 532, richOrigin,
 		callbackForAction(t, inspect, telegramui.ActionRestore))
 	card := lastEdited(t, fixture)
 	if card.Name != telegramui.ScreenSessionCard || !strings.Contains(card.Text, "Archived · Allowed") {
@@ -136,9 +141,11 @@ func TestCarrierRestoreWorkerDoesNotRenderSupersedingGeneration(t *testing.T) {
 	}
 	origin := telegrambot.Message{ChatID: 7, MessageID: 505}
 	invokeCarrierAction(t, handler, 540, origin, telegramui.ActionArchive, "")
-	invokeCarrierData(t, handler, 541, origin,
-		callbackForAction(t, lastEdited(t, fixture), telegramui.ActionSelectArchive))
-	invokeCarrierData(t, handler, 542, origin,
+	list := lastSent(t, fixture)
+	richOrigin := stubMessageForScreen(len(fixture.messenger.sent), list)
+	invokeCarrierData(t, handler, 541, richOrigin,
+		callbackForAction(t, list, telegramui.ActionSelectArchive))
+	invokeCarrierData(t, handler, 542, richOrigin,
 		callbackForAction(t, lastEdited(t, fixture), telegramui.ActionRestore))
 	first := fixture.machine.State().Sessions[ref.Key()]
 	if err := fixture.service.ClearSession(
@@ -176,14 +183,14 @@ func TestCarrierFlowArchiveInspectHistoryAndBack(t *testing.T) {
 	}
 	origin := telegrambot.Message{ChatID: 7, MessageID: 502}
 	invokeCarrierAction(t, handler, 510, origin, telegramui.ActionArchive, "")
-	list := lastEdited(t, fixture)
-	invokeCarrierData(t, handler, 511, origin,
+	list := lastSent(t, fixture)
+	richOrigin := stubMessageForScreen(len(fixture.messenger.sent), list)
+	invokeCarrierData(t, handler, 511, richOrigin,
 		callbackForAction(t, list, telegramui.ActionSelectArchive))
-	inspect := lastSent(t, fixture)
+	inspect := lastEdited(t, fixture)
 	if !strings.Contains(inspect.Text, "latest page") {
 		t.Fatalf("inspect=%#v", inspect)
 	}
-	richOrigin := telegrambot.Message{ChatID: 7, MessageID: 506, Rich: true}
 	invokeCarrierData(t, handler, 512, richOrigin,
 		callbackForAction(t, inspect, telegramui.ActionArchiveHistory))
 	history := lastEdited(t, fixture)
