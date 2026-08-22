@@ -6,6 +6,34 @@ imports none of them.
 
 ![Bria interaction boundary](interaction-architecture.svg)
 
+## Repository layout and ownership
+
+The repository has one root `go.mod` and no `go.work` or nested application
+module. Its executable layout is deliberately small:
+
+- `cmd/bria` is the Go composition root. It owns CLI/config parsing, concrete
+  dependency wiring, process lifecycle and OS-facing daemon orchestration;
+- `internal/domain` owns deterministic replicated state and invariants;
+- `internal/application` owns actor-authorized use cases and transport-neutral
+  access to domain state;
+- focused `internal` packages own runtime/session control, Raft, persistence,
+  recovery, archive, provider and platform implementations;
+- `internal/interaction` owns the small lifecycle implemented by interaction
+  adapters; Telegram packages remain an outer adapter family;
+- `cmd/bria-apple-speech` is a separately signed Swift helper, not a second Go
+  module or application authority;
+- Go commands in `scripts` build release metadata and keys. They are auxiliary
+  tooling and are not imported by the daemon.
+
+Production packages never import `cmd/bria`. Core packages outside the
+Telegram adapter family never import Telegram packages. Consumer-owned ports
+keep `telegramapp` dependent on narrow session-control and updater behavior,
+not concrete coordinators. `scripts/check_architecture.py` loads the actual Go
+import graph, rejects cycles and reverse dependencies, and disallows ownership-
+hiding package names such as `util`, `common`, `types`, `interfaces`, and `api`.
+`scripts/check_module_size.py` independently enforces the physical source-size
+limit without creating packages solely to satisfy a line counter.
+
 The daemon starts interface implementations through the small
 `internal/interaction.Adapter` lifecycle. Telegram-specific responsibilities
 are split by cohesion: `internal/telegrambot` owns Bot API transport and
@@ -16,15 +44,16 @@ response-card coordination, visible-screen epochs, and background lifecycle;
 `internal/telegramview` projects actor-authorized state and opaque callback
 tokens into semantic `internal/telegramui` screens. View and outbound packages
 own no application/card orchestration, and architecture tests prevent those
-dependencies from returning. `internal/application` exposes actor-authorized use cases and
-transport-neutral domain data; it does not import Telegram UI or callback
-contracts. A future Web, Matrix, or native client supplies another adapter over
-the same application service and does not change domain, consensus, membership,
-or session-runtime packages. Architecture tests reject Telegram imports from
-application and those core packages. Response-card state remains in
-`telegramapp`: its replicated carrier identity, active-session checks, visible
-epoch, page watermark, and Telegram replacement are one atomic user-flow
-invariant and are intentionally not split into transport-level packages.
+dependencies from returning. `internal/application` exposes actor-authorized
+use cases and transport-neutral domain data; it does not import Telegram UI or
+callback contracts. A future Web, Matrix, or native client supplies another
+adapter over the same application service and does not change domain,
+consensus, membership, or session-runtime packages. Architecture tests reject
+Telegram imports from application and those core packages. Response-card state
+remains in `telegramapp`: its replicated carrier identity, active-session
+checks, visible epoch, page watermark, and Telegram replacement are one atomic
+user-flow invariant and are intentionally not split into transport-level
+packages.
 
 Each machine runs one `bria` control daemon. On untrusted Linux execution
 hosts, provider CLIs and tmux run in a separate non-root `bria runner` identity

@@ -43,6 +43,24 @@ updates, rollback, and canary checks are documented in
 [operations](docs/operations.md). Contributions must also follow
 the pragmatic Go engineering contract in [CONTRIBUTING.md](CONTRIBUTING.md).
 
+## Go repository layout
+
+Bria uses one root `go.mod`; there is no `go.work` or nested application
+module. `cmd/bria` is the only Go production entry point and composition root:
+it parses CLI/configuration, wires concrete infrastructure to application
+contracts, and owns daemon lifecycle. Reusable production behavior lives under
+`internal`, so it cannot become an accidental public SDK. The separately built
+`cmd/bria-apple-speech` helper is Swift, while Go commands under `scripts` are
+release tooling and are not linked into the daemon.
+
+The core direction is `domain <- application/use cases <- adapters`.
+`internal/interaction` defines the transport-neutral adapter lifecycle;
+Telegram parsing, projection and delivery are split between `telegrambot`,
+`telegramview`, `telegramui`, `telegramoutbound`, and the coordinating
+`telegramapp`. Session/runtime, Raft, storage, node-control and platform
+implementations remain independent of Telegram. The complete ownership map and
+enforced dependency rules are in [Go architecture](docs/go-architecture.md).
+
 ## Implemented Go foundation
 
 - actor-first domain model with a replicated sole-owner boundary and legacy
