@@ -65,7 +65,7 @@ func TestRuntimeStoreRemainsOpenUntilShutdownWorkersFinish(t *testing.T) {
 	if err := executor.Shutdown(ctx); err == nil {
 		t.Fatal("blocked worker unexpectedly completed before timeout")
 	}
-	if err := closeRuntimeStoreAfterWorkers(executor, store); err != nil {
+	if err := closeRuntimeStoreAfterWorkers(executor, store, true); err != nil {
 		t.Fatal(err)
 	}
 	if _, found, err := store.Lookup(request.OperationID); err != nil || !found {
@@ -76,7 +76,7 @@ func TestRuntimeStoreRemainsOpenUntilShutdownWorkersFinish(t *testing.T) {
 	if err := executor.Shutdown(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if err := closeRuntimeStoreAfterWorkers(executor, store); err != nil {
+	if err := closeRuntimeStoreAfterWorkers(executor, store, true); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := store.Lookup(request.OperationID); err == nil {

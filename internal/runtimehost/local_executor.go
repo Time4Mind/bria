@@ -91,6 +91,18 @@ func (e *LocalExecutor) SetInputQueueLimitResolver(resolver InputQueueLimitResol
 	e.queueLimits = resolver
 }
 
+// ActiveOperationIDs returns a point-in-time set used by store maintenance to
+// avoid expiring an operation that can still commit a durable result.
+func (e *LocalExecutor) ActiveOperationIDs() map[string]struct{} {
+	e.submitMu.Lock()
+	defer e.submitMu.Unlock()
+	active := make(map[string]struct{}, len(e.active))
+	for operationID := range e.active {
+		active[operationID] = struct{}{}
+	}
+	return active
+}
+
 // PrepareRecovery replaces an older archived runtime incarnation with an
 // unattached binding. Commands for the restored generation can then queue
 // before the provider session has finished resuming.

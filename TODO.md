@@ -129,9 +129,12 @@
   запросы используют тот же реплицированный лимит 5/10/20, что и offline
   очередь; четыре дополнительных места зарезервированы для управляющих
   операций. Лимит разрешается на origin node без нового wire-поля.
-- [ ] S4. Добавить retention/compaction для completed mutation-записей в
-  `runtime/operations.db`, сохранив необходимое окно идемпотентности и защиту
-  от повторного выполнения команд.
+- [x] S4. Все pending/completed mutation-записи в `runtime/operations.db`
+  удаляются через 30 дней от принятия; active операции защищены до durable
+  completion. Тяжёлый result payload очищается через 15 минут, capture-кэш
+  удаляется через 15 минут. Почасовой sweep продолжает bounded scan с курсора,
+  а startup compaction срабатывает только для базы от 64 MiB и не менее 50%
+  свободных страниц.
 - [ ] S5. Подчинить root context и общему shutdown backend/speech/update
   installers, backend-watchers и disable-node workers. Дедуплицировать один
   worker на resource identity и дожидаться его завершения в `Close`.

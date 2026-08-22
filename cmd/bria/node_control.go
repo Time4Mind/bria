@@ -314,6 +314,13 @@ func startNodeRuntimeControl(
 		descriptionClient: descriptionClient,
 		server:            server, listener: listener, errors: make(chan error, 1),
 	}
+	maintenanceCtx, maintenanceCancel := context.WithCancel(ctx)
+	control.maintenanceCancel = maintenanceCancel
+	control.maintenanceDone = make(chan struct{})
+	go func() {
+		defer close(control.maintenanceDone)
+		store.RunMaintenance(maintenanceCtx, executor.ActiveOperationIDs)
+	}()
 	control.enrollment, err = startEnrollmentRuntime(
 		ctx, node, nodeConfig, certificate, client, enrollments,
 	)

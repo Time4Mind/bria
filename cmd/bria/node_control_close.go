@@ -15,6 +15,9 @@ func (c *nodeRuntimeControl) Close() error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
+	if c.maintenanceCancel != nil {
+		c.maintenanceCancel()
+	}
 	// Close runtime admission before waiting for HTTP keep-alives. Requests
 	// already accepted are terminally drained while the servers shut down.
 	c.executor.BeginShutdown()
@@ -40,7 +43,19 @@ func (c *nodeRuntimeControl) Close() error {
 			"bria runtime shutdown: outcome=completion_failed workers_stopped=true",
 		)
 	}
-	storeErr := closeRuntimeStoreAfterWorkers(c.executor, c.store)
+	maintenanceStopped := true
+	if c.maintenanceDone != nil {
+		select {
+		case <-c.maintenanceDone:
+		case <-ctx.Done():
+			maintenanceStopped = false
+			processlog.Failuref(
+				processlog.Service, processlog.FailureTimeout,
+				"bria runtime shutdown: outcome=maintenance_timeout store_closed=false",
+			)
+		}
+	}
+	storeErr := closeRuntimeStoreAfterWorkers(c.executor, c.store, maintenanceStopped)
 	if storeErr != nil {
 		processlog.Failuref(
 			processlog.Service, processlog.FailureIO,
@@ -53,8 +68,9 @@ func (c *nodeRuntimeControl) Close() error {
 func closeRuntimeStoreAfterWorkers(
 	executor *runtimehost.LocalExecutor,
 	store *runtimehost.BoltOperationStore,
+	maintenanceStopped bool,
 ) error {
-	if !executor.ShutdownComplete() {
+	if !executor.ShutdownComplete() || !maintenanceStopped {
 		return nil
 	}
 	return store.Close()

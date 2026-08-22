@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"net"
 
 	"github.com/Time4Mind/bria/internal/nodecontrol"
@@ -28,4 +29,6 @@ type nodeRuntimeControl struct {
 	enrollment        *enrollmentRuntime
 	listener          net.Listener
 	errors            chan error
+	maintenanceCancel context.CancelFunc
+	maintenanceDone   chan struct{}
 }
