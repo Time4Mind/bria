@@ -96,9 +96,7 @@ func (r *localSessionStartReconciler) Reconcile(ctx context.Context) error {
 	for _, session := range state.Sessions {
 		if session.NodeID != r.nodeID || !session.IsLive() ||
 			session.RuntimePhase != domain.RuntimeStarting {
-			if session.NodeID == r.nodeID && session.State == domain.SessionArchived &&
-				session.ArchiveReason == domain.ArchiveResumeFailed &&
-				session.ArchiveID == "" && !session.ArchiveReady && !session.ProviderResume {
+			if session.NodeID == r.nodeID && localArchivedRuntimeIsTerminal(session) {
 				key := session.Ref().Key()
 				if r.cleaned[key] == session.RuntimeGeneration {
 					continue
@@ -199,24 +197,48 @@ func (r *localSessionStartReconciler) Reconcile(ctx context.Context) error {
 				}
 			}
 		}
-		if err := r.runtimes.Unregister(
+		unregisterErr := r.runtimes.Unregister(
 			string(candidate.session.NodeID), string(candidate.session.ID),
 			candidate.session.RuntimeGeneration,
-		); err != nil && err != runtimehost.ErrRuntimeUnavailable {
+		)
+		if unregisterErr != nil && unregisterErr != runtimehost.ErrRuntimeUnavailable {
 			if firstErr == nil {
-				firstErr = fmt.Errorf("unregister terminal start %s: %w", key, err)
+				firstErr = fmt.Errorf("unregister terminal start %s: %w", key, unregisterErr)
 			}
 			continue
 		}
 		delete(r.terminal, key)
 		r.cleaned[key] = candidate.session.RuntimeGeneration
-		processlog.Servicef(
-			"bria local session start: outcome=terminal_runtime_cleaned ref=%q generation=%d target_present=%t",
-			key, candidate.session.RuntimeGeneration, targetExists,
-		)
+		if targetExists || unregisterErr == nil {
+			processlog.Servicef(
+				"bria local session start: outcome=terminal_runtime_cleaned ref=%q generation=%d target_present=%t",
+				key, candidate.session.RuntimeGeneration, targetExists,
+			)
+		}
 	}
 	r.tracked = starting
 	return firstErr
+}
+
+func localArchivedRuntimeIsTerminal(session domain.Session) bool {
+	if session.State != domain.SessionArchived {
+		return false
+	}
+	switch session.ArchiveReason {
+	case domain.ArchiveIdle, domain.ArchiveNodeReboot:
+		return true
+	case domain.ArchiveManual:
+		// A manual close archives the transcript before retiring the runtime.
+		// Until that durable bundle is ready, the provider may still be needed by
+		// the idempotent close retry.
+		return session.ArchiveReady
+	case domain.ArchiveResumeFailed:
+		// A provider-resume session without an archive remains repairable by the
+		// runtime reattach flow. Every other failed recovery is terminal.
+		return !(session.ProviderResume && session.ArchiveID == "" && !session.ArchiveReady)
+	default:
+		return false
+	}
 }
 
 func runLocalSessionStartReconciler(

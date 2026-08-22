@@ -284,3 +284,72 @@ func TestLocalSessionStartReconcilerRecoversTerminalFreshStartAfterRestart(t *te
 		})
 	}
 }
+
+func TestLocalSessionStartReconcilerCleansTerminalArchivedRuntimesAfterRestart(t *testing.T) {
+	for _, test := range []struct {
+		name         string
+		reason       domain.ArchiveReason
+		archiveID    string
+		archiveReady bool
+		wantClosed   bool
+	}{
+		{name: "idle archive", reason: domain.ArchiveIdle, wantClosed: true},
+		{name: "node reboot archive", reason: domain.ArchiveNodeReboot, wantClosed: true},
+		{
+			name: "completed manual archive", reason: domain.ArchiveManual,
+			archiveID: "archive-manual", archiveReady: true, wantClosed: true,
+		},
+		{
+			name: "manual archive still committing", reason: domain.ArchiveManual,
+			archiveID: "archive-manual", wantClosed: false,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			state := domain.NewState()
+			created := time.Unix(100, 0).UTC()
+			if err := state.AddNode(domain.Node{ID: "node", Name: "node", Status: domain.NodeOnline}); err != nil {
+				t.Fatal(err)
+			}
+			if err := state.SetNodeAccess(7, domain.RoleOwner, "node"); err != nil {
+				t.Fatal(err)
+			}
+			session := domain.Session{
+				ID: "session", NodeID: "node", OwnerID: 7, Backend: "codex",
+				Workdir: "/workspace", ProviderSessionID: "provider",
+				State: domain.SessionLive, RuntimePhase: domain.RuntimeIdle,
+				RuntimeGeneration: 1, CreatedAt: created, LiveSinceAt: created,
+				LastEventAt: created,
+			}
+			if err := state.AddSession(session); err != nil {
+				t.Fatal(err)
+			}
+			archived := state.Sessions[session.Ref().Key()]
+			archived.State = domain.SessionArchived
+			archived.RuntimePhase = domain.RuntimeIdle
+			archived.ArchiveReason = test.reason
+			archived.ArchiveID = test.archiveID
+			archived.ArchiveReady = test.archiveReady
+			archived.ArchivedAt = created.Add(time.Minute)
+			state.Sessions[session.Ref().Key()] = archived
+			targets := &runtimeExistenceStub{exists: true}
+			unregister := &localUnregisterStub{}
+			reconciler := &localSessionStartReconciler{
+				nodeID: "node", tmuxSession: "bria", state: localStartStateStub{state},
+				provisioner: &localProvisionerStub{}, runtimes: unregister, targets: targets,
+				tracked: make(map[string]domain.Session), terminal: make(map[string]terminalStartRuntime),
+				now: func() time.Time { return created.Add(10 * time.Minute) },
+			}
+			for range localSessionStartConfirmations {
+				if err := reconciler.Reconcile(context.Background()); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if got := targets.closeCalls > 0; got != test.wantClosed {
+				t.Fatalf("closed=%t want=%t", got, test.wantClosed)
+			}
+			if got := unregister.calls > 0; got != test.wantClosed {
+				t.Fatalf("unregistered=%t want=%t", got, test.wantClosed)
+			}
+		})
+	}
+}
