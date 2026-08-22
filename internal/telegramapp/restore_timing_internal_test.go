@@ -10,6 +10,7 @@ import (
 
 	"github.com/Time4Mind/bria/internal/domain"
 	"github.com/Time4Mind/bria/internal/processlog"
+	"github.com/Time4Mind/bria/internal/telegramoutbound"
 )
 
 func TestRestoreTimingLogsCorrelatedBoundedStages(t *testing.T) {
@@ -34,7 +35,7 @@ func TestRestoreTimingLogsCorrelatedBoundedStages(t *testing.T) {
 		startedAt: time.Now().Add(-30 * time.Millisecond), outcome: "ok",
 		pane: paneAttachTiming{outcome: "skipped"},
 	}).log(tagged, ref, 0)
-	logSlowTelegramOperationContext(
+	telegramoutbound.LogOperation(
 		tagged, "edit_screen_text", 42, time.Now().Add(-30*time.Millisecond), nil,
 	)
 	if err := manager.Close(); err != nil {

@@ -18,7 +18,7 @@ func (h *Handler) HandleTelegramUpdate(
 		h.cancelClusterUpdateRefresh(domain.UserID(update.UserID))
 	}
 	if update.Kind == telegrambot.IncomingMessage && h.activity != nil {
-		h.activity.observeIncoming(update.ChatID, update.MessageID)
+		h.activity.ObserveIncoming(update.ChatID, update.MessageID)
 	}
 	actor := application.Principal{UserID: domain.UserID(update.UserID)}
 	if !h.service.IsOwner(actor) {

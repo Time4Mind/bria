@@ -76,7 +76,7 @@ func (h *Handler) appendClusterEvent(
 		err     error
 	)
 	if h.activity != nil {
-		message, edited, err = h.activity.upsertNewest(
+		message, edited, err = h.activity.UpsertNewest(
 			ctx, chatID, previous.Message, screen, newScreen,
 		)
 	} else {

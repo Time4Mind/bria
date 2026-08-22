@@ -6,6 +6,7 @@ import (
 
 	"github.com/Time4Mind/bria/internal/domain"
 	"github.com/Time4Mind/bria/internal/processlog"
+	"github.com/Time4Mind/bria/internal/telegramoutbound"
 )
 
 type restoreTimingContextKey struct{}
@@ -22,8 +23,11 @@ func withRestoreTiming(
 	generation uint64,
 	stage string,
 ) context.Context {
-	return context.WithValue(ctx, restoreTimingContextKey{}, restoreTimingTag{
+	ctx = context.WithValue(ctx, restoreTimingContextKey{}, restoreTimingTag{
 		ref: ref, generation: generation, stage: stage,
+	})
+	return telegramoutbound.WithRestoreTrace(ctx, telegramoutbound.RestoreTrace{
+		Ref: ref.Key(), Generation: generation, Stage: stage,
 	})
 }
 

@@ -27,6 +27,13 @@ func TestTelegramViewDoesNotDependOnTransportOrOrchestration(t *testing.T) {
 	)
 }
 
+func TestTelegramOutboundDoesNotDependOnApplicationOrCardOrchestration(t *testing.T) {
+	assertPackageImportsExclude(
+		t, "telegramoutbound", "/internal/application", "/internal/domain",
+		"/internal/telegramapp", "/internal/telegramview",
+	)
+}
+
 func assertPackageImportsExclude(t *testing.T, name string, forbidden ...string) {
 	t.Helper()
 	_, filename, _, ok := runtime.Caller(0)

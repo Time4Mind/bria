@@ -21,16 +21,18 @@
   - [x] R4.1. Перенести Telegram-проектор и его визуальные контракты из
     нейтрального `application` в `telegramapp`. Защитить границу architecture-
     тестом, запрещающим production-импорты Telegram из `application`.
-  - [ ] R4.2. Проверить связность обязанностей и fan-out `telegramapp`; отделять
+  - [x] R4.2. Проверить связность обязанностей и fan-out `telegramapp`; отделять
     только самостоятельные ответственности, не создавая формальных
     micro-packages ради размера файлов или пакета:
     - [x] R4.2.1. Выделить чистую проекцию actor-authorized state и callback-
       tokens в `internal/telegramview`. Оставить Bot API transport, update-
       routing и background lifecycle в `internal/telegramapp`; запретить
       обратную зависимость architecture-тестом.
-    - [ ] R4.2.2. Повторно проверить оставшийся `telegramapp`, прежде всего
-      outbound delivery coordinator. Не выделять его, если card/visible-epoch
-      invariants нельзя перенести без расширения интерфейсов и риска flow.
+    - [x] R4.2.2. Выделить transport-level outbound coordination в
+      `internal/telegramoutbound`: сериализацию Bot API writes, flood-wait,
+      latest-message ordering и timing. Replicated response-card state,
+      visible epoch, active-session guards и page watermarks оставить единым
+      semantic coordinator в `telegramapp`.
   - [ ] R4.3. Проверить, что межпакетные interfaces узкие, принадлежат
     потребителю и не создают церемониальных слоёв.
   - [ ] R4.4. Зафиксировать проверяемое направление зависимостей и отсутствие

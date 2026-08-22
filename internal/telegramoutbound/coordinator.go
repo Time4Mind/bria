@@ -1,9 +1,10 @@
-package telegramapp
+// Package telegramoutbound coordinates bounded Telegram Bot API writes.
+// It owns transport serialization, flood-wait suppression, message ordering,
+// and outbound timing, but no response-card or visible-session semantics.
+package telegramoutbound
 
 import (
 	"context"
-	"errors"
-	"strconv"
 	"sync"
 	"time"
 
@@ -12,27 +13,24 @@ import (
 	"github.com/Time4Mind/bria/internal/telegramui"
 )
 
-const slowTelegramOperation = 750 * time.Millisecond
-const tracedTelegramOperation = 25 * time.Millisecond
-
-// activityMessenger records only message ordering information. It never reads
+// Coordinator records only message ordering information. It never reads
 // message contents and exists so a compact service log is edited only while it
 // is still the newest message in the private chat.
-type activityMessenger struct {
-	inner             Messenger
+type Coordinator struct {
+	inner             Transport
 	mu                sync.Mutex
 	latest            map[int64]int64
 	outboundBlockedAt map[int64]time.Time
 }
 
-func newActivityMessenger(inner Messenger) *activityMessenger {
-	return &activityMessenger{
+func New(inner Transport) *Coordinator {
+	return &Coordinator{
 		inner: inner, latest: make(map[int64]int64),
 		outboundBlockedAt: make(map[int64]time.Time),
 	}
 }
 
-func (m *activityMessenger) AnswerCallbackQuery(
+func (m *Coordinator) AnswerCallbackQuery(
 	ctx context.Context, callbackID string, text string,
 ) error {
 	startedAt := time.Now()
@@ -41,7 +39,7 @@ func (m *activityMessenger) AnswerCallbackQuery(
 	return err
 }
 
-func (m *activityMessenger) SendTyping(ctx context.Context, chatID int64) error {
+func (m *Coordinator) SendTyping(ctx context.Context, chatID int64) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if err := m.localFloodWaitLocked("sendChatAction", chatID); err != nil {
@@ -52,7 +50,7 @@ func (m *activityMessenger) SendTyping(ctx context.Context, chatID int64) error 
 	return err
 }
 
-func (m *activityMessenger) SendDocument(
+func (m *Coordinator) SendDocument(
 	ctx context.Context, request telegrambot.DocumentRequest,
 ) (telegrambot.Message, error) {
 	m.mu.Lock()
@@ -68,7 +66,7 @@ func (m *activityMessenger) SendDocument(
 	return message, err
 }
 
-func (m *activityMessenger) SendScreen(
+func (m *Coordinator) SendScreen(
 	ctx context.Context, chatID int64, screen telegramui.Screen,
 ) (telegrambot.Message, error) {
 	queuedAt := time.Now()
@@ -90,7 +88,7 @@ func (m *activityMessenger) SendScreen(
 	return message, err
 }
 
-func (m *activityMessenger) EditScreen(
+func (m *Coordinator) EditScreen(
 	ctx context.Context, message telegrambot.Message, screen telegramui.Screen,
 ) (telegrambot.Message, error) {
 	queuedAt := time.Now()
@@ -112,7 +110,7 @@ func (m *activityMessenger) EditScreen(
 	return edited, err
 }
 
-func (m *activityMessenger) editFloodWait(chatID int64) (time.Duration, bool) {
+func (m *Coordinator) EditFloodWait(chatID int64) (time.Duration, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	blockedAt := m.outboundBlockedAt[chatID]
@@ -124,7 +122,7 @@ func (m *activityMessenger) editFloodWait(chatID int64) (time.Duration, bool) {
 	return remaining, true
 }
 
-func (m *activityMessenger) localFloodWaitLocked(method string, chatID int64) error {
+func (m *Coordinator) localFloodWaitLocked(method string, chatID int64) error {
 	blockedAt := m.outboundBlockedAt[chatID]
 	if !time.Now().Before(blockedAt) {
 		delete(m.outboundBlockedAt, chatID)
@@ -136,7 +134,7 @@ func (m *activityMessenger) localFloodWaitLocked(method string, chatID int64) er
 	}
 }
 
-func (m *activityMessenger) rememberFloodWaitLocked(chatID int64, err error) {
+func (m *Coordinator) rememberFloodWaitLocked(chatID int64, err error) {
 	retryAfter, limited := telegrambot.RemoteFloodWait(err)
 	if !limited || retryAfter <= 0 {
 		return
@@ -153,81 +151,7 @@ func (m *activityMessenger) rememberFloodWaitLocked(chatID int64, err error) {
 	)
 }
 
-func screenOperation(base string, screen telegramui.Screen) string {
-	if screen.Pane == nil {
-		return base + "_text"
-	}
-	if len(screen.Pane.PNG) > 0 {
-		return base + "_upload"
-	}
-	if screen.Pane.FileID != "" {
-		return base + "_file_id"
-	}
-	return base + "_pane"
-}
-
-func logSlowTelegramOperation(
-	operation string,
-	messageID int64,
-	startedAt time.Time,
-	err error,
-) {
-	logSlowTelegramOperationContext(
-		context.Background(), operation, messageID, startedAt, err,
-	)
-}
-
-func logSlowTelegramOperationContext(
-	ctx context.Context,
-	operation string,
-	messageID int64,
-	startedAt time.Time,
-	err error,
-) {
-	duration := time.Since(startedAt)
-	if duration < tracedTelegramOperation {
-		return
-	}
-	outcome := "ok"
-	if err != nil {
-		outcome = "failed"
-	}
-	restoreFields := ""
-	if tag, ok := restoreTimingFromContext(ctx); ok {
-		restoreFields = " restore_ref=" + strconv.Quote(tag.ref.Key()) + " restore_generation=" +
-			strconv.FormatUint(tag.generation, 10) + " restore_stage=" + tag.stage
-	}
-	processlog.Failuref(
-		processlog.Detail, outboundFailureClass(err),
-		"bria telegram: outbound_timing operation=%s message_id=%d duration_ms=%d outcome=%s%s",
-		operation, messageID, duration.Milliseconds(), outcome, restoreFields,
-	)
-	if duration < slowTelegramOperation {
-		return
-	}
-	processlog.Failuref(
-		processlog.Service, outboundFailureClass(err),
-		"bria telegram: slow_outbound operation=%s message_id=%d duration_ms=%d outcome=%s%s",
-		operation, messageID, duration.Milliseconds(), outcome, restoreFields,
-	)
-}
-
-func outboundFailureClass(err error) processlog.FailureClass {
-	switch {
-	case err == nil:
-		return processlog.FailureNone
-	case errors.Is(err, context.DeadlineExceeded):
-		return processlog.FailureTimeout
-	case errors.Is(err, context.Canceled):
-		return processlog.FailureCancelled
-	}
-	if _, limited := telegrambot.FloodWait(err); limited {
-		return processlog.FailureRateLimited
-	}
-	return processlog.FailureTransport
-}
-
-func (m *activityMessenger) DeleteMessage(
+func (m *Coordinator) DeleteMessage(
 	ctx context.Context, message telegrambot.Message,
 ) error {
 	m.mu.Lock()
@@ -245,7 +169,7 @@ func (m *activityMessenger) DeleteMessage(
 	return err
 }
 
-func (m *activityMessenger) ClearKeyboard(
+func (m *Coordinator) ClearKeyboard(
 	ctx context.Context, message telegrambot.Message,
 ) error {
 	m.mu.Lock()
@@ -258,7 +182,7 @@ func (m *activityMessenger) ClearKeyboard(
 	return err
 }
 
-func (m *activityMessenger) ReplaceKeyboard(
+func (m *Coordinator) ReplaceKeyboard(
 	ctx context.Context,
 	message telegrambot.Message,
 	grid telegramui.Grid,
@@ -281,7 +205,7 @@ func (m *activityMessenger) ReplaceKeyboard(
 	return err
 }
 
-func (m *activityMessenger) observeIncoming(chatID, messageID int64) {
+func (m *Coordinator) ObserveIncoming(chatID, messageID int64) {
 	if chatID <= 0 || messageID <= 0 {
 		return
 	}
@@ -290,15 +214,15 @@ func (m *activityMessenger) observeIncoming(chatID, messageID int64) {
 	m.observeLocked(chatID, messageID)
 }
 
-func (m *activityMessenger) observeLocked(chatID, messageID int64) {
+func (m *Coordinator) observeLocked(chatID, messageID int64) {
 	if chatID > 0 && messageID > m.latest[chatID] {
 		m.latest[chatID] = messageID
 	}
 }
 
-// upsertNewest serializes the last-message check with every outbound send.
+// UpsertNewest serializes the last-message check with every outbound send.
 // Editing does not change Telegram ordering, while a new send becomes latest.
-func (m *activityMessenger) upsertNewest(
+func (m *Coordinator) UpsertNewest(
 	ctx context.Context,
 	chatID int64,
 	previous telegrambot.Message,
@@ -324,4 +248,4 @@ func (m *activityMessenger) upsertNewest(
 	return message, false, err
 }
 
-var _ Messenger = (*activityMessenger)(nil)
+var _ Transport = (*Coordinator)(nil)

@@ -1,4 +1,4 @@
-package telegramapp
+package telegramoutbound
 
 import (
 	"context"
@@ -33,9 +33,9 @@ func (m *floodEditMessenger) EditScreen(context.Context, telegrambot.Message, te
 func (*floodEditMessenger) DeleteMessage(context.Context, telegrambot.Message) error { return nil }
 func (*floodEditMessenger) ClearKeyboard(context.Context, telegrambot.Message) error { return nil }
 
-func TestActivityMessengerSuppressesEditsDuringFloodWait(t *testing.T) {
+func TestCoordinatorSuppressesEditsDuringFloodWait(t *testing.T) {
 	inner := &floodEditMessenger{}
-	messenger := newActivityMessenger(inner)
+	messenger := New(inner)
 	message := telegrambot.Message{ChatID: 7, MessageID: 9}
 	screen := telegramui.Screen{Name: telegramui.ScreenMenu, Text: "menu"}
 	if _, err := messenger.EditScreen(context.Background(), message, screen); err == nil {
@@ -55,11 +55,11 @@ func TestActivityMessengerSuppressesEditsDuringFloodWait(t *testing.T) {
 	}
 }
 
-func TestActivityMessengerSuppressesWritesAfterSendFloodWait(t *testing.T) {
+func TestCoordinatorSuppressesWritesAfterSendFloodWait(t *testing.T) {
 	inner := &floodEditMessenger{sendErr: &telegrambot.APIError{
 		Method: "sendRichMessage", Code: 429, RetryAfter: time.Minute,
 	}}
-	messenger := newActivityMessenger(inner)
+	messenger := New(inner)
 	screen := telegramui.Screen{Name: telegramui.ScreenMenu, Text: "menu"}
 	if _, err := messenger.SendScreen(context.Background(), 7, screen); err == nil {
 		t.Fatal("first send unexpectedly succeeded")

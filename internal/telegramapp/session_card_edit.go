@@ -6,6 +6,7 @@ import (
 
 	"github.com/Time4Mind/bria/internal/application"
 	"github.com/Time4Mind/bria/internal/telegrambot"
+	"github.com/Time4Mind/bria/internal/telegramoutbound"
 	"github.com/Time4Mind/bria/internal/telegramui"
 )
 
@@ -27,7 +28,7 @@ func (h *Handler) editExplicitSessionScreen(
 	}
 	defer release()
 	if _, restoreTagged := restoreTimingFromContext(ctx); restoreTagged {
-		logSlowTelegramOperationContext(
+		telegramoutbound.LogOperation(
 			ctx, "card_edit_queue", origin.MessageID, queuedAt, nil,
 		)
 	}

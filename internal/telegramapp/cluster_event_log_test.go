@@ -10,6 +10,7 @@ import (
 	"github.com/Time4Mind/bria/internal/clusterstate"
 	"github.com/Time4Mind/bria/internal/domain"
 	"github.com/Time4Mind/bria/internal/telegrambot"
+	"github.com/Time4Mind/bria/internal/telegramoutbound"
 	"github.com/Time4Mind/bria/internal/telegramui"
 )
 
@@ -59,7 +60,7 @@ func (*clusterLogMessenger) ClearKeyboard(context.Context, telegrambot.Message) 
 
 func TestClusterEventLogEditsOnlyWhileItIsNewest(t *testing.T) {
 	base := &clusterLogMessenger{}
-	activity := newActivityMessenger(base)
+	activity := telegramoutbound.New(base)
 	handler := &Handler{
 		messenger: activity, activity: activity,
 		clusterEventLogs: make(map[int64]clusterEventLog),
@@ -87,7 +88,7 @@ func TestClusterEventLogEditsOnlyWhileItIsNewest(t *testing.T) {
 	}
 
 	// A user message after the log means the next event must start a new block.
-	activity.observeIncoming(7, 50)
+	activity.ObserveIncoming(7, 50)
 	base.nextID = 50
 	if err := handler.appendClusterEvent(context.Background(), target, clusterEvent{
 		Kind: clusterEventLeader, NodeName: "Бета", At: first.Add(2 * time.Minute),
@@ -104,7 +105,7 @@ func TestClusterEventLogEditsOnlyWhileItIsNewest(t *testing.T) {
 
 func TestClusterEventLogKeepsOnlySixNewestEvents(t *testing.T) {
 	base := &clusterLogMessenger{}
-	activity := newActivityMessenger(base)
+	activity := telegramoutbound.New(base)
 	handler := &Handler{
 		messenger: activity, activity: activity,
 		clusterEventLogs: make(map[int64]clusterEventLog),
@@ -150,7 +151,7 @@ func TestClusterEventObserverReportsLeaderAndNodeTransitions(t *testing.T) {
 		t.Fatal(err)
 	}
 	base := &clusterLogMessenger{}
-	activity := newActivityMessenger(base)
+	activity := telegramoutbound.New(base)
 	handler := &Handler{
 		service: service, messenger: activity, activity: activity,
 		clusterEventLogs: make(map[int64]clusterEventLog),

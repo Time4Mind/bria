@@ -3,7 +3,6 @@
 package telegramapp
 
 import (
-	"context"
 	"errors"
 	"sync"
 	"time"
@@ -15,19 +14,11 @@ import (
 	"github.com/Time4Mind/bria/internal/providerauth"
 	"github.com/Time4Mind/bria/internal/speechsetup"
 	"github.com/Time4Mind/bria/internal/telegrambot"
-	"github.com/Time4Mind/bria/internal/telegramui"
+	"github.com/Time4Mind/bria/internal/telegramoutbound"
 	"github.com/Time4Mind/bria/internal/telegramview"
 )
 
-type Messenger interface {
-	AnswerCallbackQuery(context.Context, string, string) error
-	SendTyping(context.Context, int64) error
-	SendDocument(context.Context, telegrambot.DocumentRequest) (telegrambot.Message, error)
-	SendScreen(context.Context, int64, telegramui.Screen) (telegrambot.Message, error)
-	EditScreen(context.Context, telegrambot.Message, telegramui.Screen) (telegrambot.Message, error)
-	DeleteMessage(context.Context, telegrambot.Message) error
-	ClearKeyboard(context.Context, telegrambot.Message) error
-}
+type Messenger = telegramoutbound.Transport
 
 type Handler struct {
 	service    *application.Service
@@ -75,7 +66,7 @@ type Handler struct {
 	cardTransportMu     sync.Mutex
 	cardTransports      map[string]telegrambot.Message
 	cardTransportOrder  []string
-	activity            *activityMessenger
+	activity            *telegramoutbound.Coordinator
 	clusterEventMu      sync.Mutex
 	clusterEventLogs    map[int64]clusterEventLog
 	clusterUpdateMu     sync.Mutex
@@ -93,7 +84,7 @@ func NewHandler(
 	if service == nil || projector == nil || tokens == nil || messenger == nil {
 		return nil, errors.New("Telegram application dependencies are required")
 	}
-	activity := newActivityMessenger(messenger)
+	activity := telegramoutbound.New(messenger)
 	return &Handler{
 		service: service, projector: projector, tokens: tokens, messenger: activity,
 		activity:               activity,

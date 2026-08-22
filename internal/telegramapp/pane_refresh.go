@@ -113,7 +113,7 @@ func (h *Handler) runPaneRefresh(
 			!h.currentPaneGeneration(actor.UserID, generation) {
 			return
 		}
-		if retryAfter, blocked := h.activity.editFloodWait(message.ChatID); blocked {
+		if retryAfter, blocked := h.activity.EditFloodWait(message.ChatID); blocked {
 			// Keep this generation registered so the recovery watchdog does not
 			// start a fresh worker every 1.2s. Final-answer reconciliation uses a
 			// send and remains independent of the edit cooldown.

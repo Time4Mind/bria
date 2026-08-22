@@ -8,6 +8,7 @@ import (
 	"github.com/Time4Mind/bria/internal/i18n"
 	"github.com/Time4Mind/bria/internal/processlog"
 	"github.com/Time4Mind/bria/internal/telegrambot"
+	"github.com/Time4Mind/bria/internal/telegramoutbound"
 	"github.com/Time4Mind/bria/internal/telegramui"
 )
 
@@ -59,7 +60,7 @@ func (h *Handler) freezeHistoricalCard(
 		outcome = "failed"
 	}
 	processlog.Failuref(
-		processlog.Detail, outboundFailureClass(err),
+		processlog.Detail, telegramoutbound.FailureClass(err),
 		"bria telegram: keyboard_freeze message_id=%d current_id=%d buttons=%d outcome=%s",
 		message.MessageID, current.MessageID, len(grid), outcome,
 	)

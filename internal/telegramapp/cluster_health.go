@@ -63,7 +63,7 @@ func (h *Handler) openClusterHealth(
 		})
 	}
 	if h.activity != nil {
-		if remaining, limited := h.activity.editFloodWait(int64(actor.UserID)); limited {
+		if remaining, limited := h.activity.EditFloodWait(int64(actor.UserID)); limited {
 			report.Findings = append(report.Findings, application.ClusterHealthFinding{
 				Code: "telegram.edit_limited", Severity: application.HealthWarning,
 				Evidence: fmt.Sprintf("local edit cooldown remaining=%s", remaining.Round(time.Second)),

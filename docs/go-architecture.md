@@ -8,18 +8,23 @@ imports none of them.
 
 The daemon starts interface implementations through the small
 `internal/interaction.Adapter` lifecycle. Telegram-specific responsibilities
-are split by cohesion: `internal/telegrambot` owns bounded Bot API transport and
-private-DM parsing; `internal/telegramapp` owns update routing, delivery
-coordination, and background lifecycle; `internal/telegramview` projects
-actor-authorized state and opaque callback tokens into semantic
-`internal/telegramui` screens. The view package owns no Bot API transport or
-background workers, and an architecture test prevents those dependencies from
-returning. `internal/application` exposes actor-authorized use cases and
+are split by cohesion: `internal/telegrambot` owns Bot API transport and
+private-DM parsing; `internal/telegramoutbound` serializes outbound writes,
+suppresses known flood-wait windows, tracks newest-message ordering, and records
+transport timing; `internal/telegramapp` owns update routing, semantic
+response-card coordination, visible-screen epochs, and background lifecycle;
+`internal/telegramview` projects actor-authorized state and opaque callback
+tokens into semantic `internal/telegramui` screens. View and outbound packages
+own no application/card orchestration, and architecture tests prevent those
+dependencies from returning. `internal/application` exposes actor-authorized use cases and
 transport-neutral domain data; it does not import Telegram UI or callback
 contracts. A future Web, Matrix, or native client supplies another adapter over
 the same application service and does not change domain, consensus, membership,
 or session-runtime packages. Architecture tests reject Telegram imports from
-application and those core packages.
+application and those core packages. Response-card state remains in
+`telegramapp`: its replicated carrier identity, active-session checks, visible
+epoch, page watermark, and Telegram replacement are one atomic user-flow
+invariant and are intentionally not split into transport-level packages.
 
 Each machine runs one `bria` control daemon. On untrusted Linux execution
 hosts, provider CLIs and tmux run in a separate non-root `bria runner` identity
