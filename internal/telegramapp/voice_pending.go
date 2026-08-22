@@ -2,6 +2,8 @@ package telegramapp
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"time"
 
 	"github.com/Time4Mind/bria/internal/application"
@@ -27,6 +29,7 @@ type voicePendingBaseline struct {
 	ref            domain.SessionRef
 	events         []transcript.Event
 	lastUserEvent  string
+	baselineID     string
 	userEventCount int
 	ordinal        int
 	receivedAt     time.Time
@@ -36,6 +39,7 @@ type voicePendingBaseline struct {
 type voicePending struct {
 	operationID   string
 	baselineEvent string
+	baselineID    string
 	baselineCount int
 	ordinal       int
 	acceptedAt    time.Time
@@ -47,11 +51,6 @@ type voiceConfirmation struct {
 	key         voicePendingKey
 	operationID string
 	at          time.Time
-}
-
-type voiceRetirement struct {
-	operationID string
-	reason      string
 }
 
 func (h *Handler) captureVoiceBaseline(
@@ -72,6 +71,7 @@ func (h *Handler) captureVoiceBaseline(
 	}
 	baseline.events = events
 	baseline.lastUserEvent = lastTranscriptUserEvent(events)
+	baseline.baselineID = transcriptBaselineID(baseline.lastUserEvent)
 	baseline.userEventCount = transcriptUserEventCount(events)
 	baseline.known = true
 	return baseline
@@ -86,15 +86,31 @@ func (h *Handler) prepareVoiceBaseline(actor application.Principal, baseline *vo
 	h.voiceMu.Lock()
 	defer h.voiceMu.Unlock()
 	for _, pending := range h.pendingVoices[key] {
-		if pending.baselineKnown && pending.baselineCount == baseline.userEventCount &&
+		if voiceBaselineMatches(
+			pending.baselineKnown, pending.baselineCount, pending.baselineID, *baseline,
+		) &&
 			pending.ordinal >= baseline.ordinal {
 			baseline.ordinal = pending.ordinal + 1
 		}
 	}
 	if session, err := h.service.Session(actor, baseline.ref); err == nil {
 		for _, acknowledgement := range session.VoiceAcknowledgements {
-			if acknowledgement.BaselineKnown &&
-				acknowledgement.BaselineCount == baseline.userEventCount &&
+			acknowledgementBaselineID := ""
+			eventKey, reconstructed := transcriptBaselineBefore(
+				baseline.events, acknowledgement.AcceptedAt, acknowledgement.BaselineCount,
+			)
+			if reconstructed {
+				acknowledgementBaselineID = transcriptBaselineID(eventKey)
+			} else if acknowledgement.BaselineKnown &&
+				acknowledgement.BaselineCount == baseline.userEventCount {
+				// A bounded transcript may have already evicted the acknowledgement's
+				// baseline. Preserve the legacy count fallback only in that case.
+				acknowledgementBaselineID = baseline.baselineID
+			}
+			if voiceBaselineMatches(
+				acknowledgement.BaselineKnown, acknowledgement.BaselineCount,
+				acknowledgementBaselineID, *baseline,
+			) &&
 				acknowledgement.Ordinal >= baseline.ordinal {
 				baseline.ordinal = acknowledgement.Ordinal + 1
 			}
@@ -116,6 +132,7 @@ func (h *Handler) markVoicePending(
 		operationID: operationID, acceptedAt: baseline.receivedAt,
 		baselineKnown: baseline.known && baseline.ref == ref,
 		baselineCount: baseline.userEventCount,
+		baselineID:    baseline.baselineID,
 		ordinal:       baseline.ordinal, status: domain.OperationQueued,
 	}
 	if pending.acceptedAt.IsZero() {
@@ -167,10 +184,21 @@ func (h *Handler) withPendingVoiceRows(
 		if fallbackAt.IsZero() || acknowledgement.AcceptedAt.Before(fallbackAt) {
 			fallbackAt = acknowledgement.AcceptedAt
 		}
+		baselineEvent := ""
+		baselineID := ""
+		if acknowledgement.BaselineKnown {
+			if eventKey, reconstructed := transcriptBaselineBefore(
+				events, acknowledgement.AcceptedAt, acknowledgement.BaselineCount,
+			); reconstructed {
+				baselineEvent = eventKey
+				baselineID = transcriptBaselineID(eventKey)
+			}
+		}
 		queue = append(queue, voicePending{
 			operationID: acknowledgement.OperationID, acceptedAt: acknowledgement.AcceptedAt,
 			status: acknowledgement.Status, baselineCount: acknowledgement.BaselineCount,
-			baselineKnown: acknowledgement.BaselineKnown, ordinal: acknowledgement.Ordinal,
+			baselineKnown: acknowledgement.BaselineKnown, baselineEvent: baselineEvent,
+			baselineID: baselineID, ordinal: acknowledgement.Ordinal,
 		})
 	}
 	for index := range queue {
@@ -182,43 +210,32 @@ func (h *Handler) withPendingVoiceRows(
 		}
 	}
 	remaining := queue[:0]
-	retiredOperations := make([]voiceRetirement, 0)
+	confirmedOperations := make([]string, 0)
 	for _, pending := range queue {
-		resolved := pending.status == domain.OperationSucceeded
-		reason := "delivered"
-		if !resolved && pending.baselineKnown {
+		resolved := false
+		if pending.baselineKnown {
 			after := transcriptUserEventCount(events) - pending.baselineCount
 			found := after >= 0
 			if pending.baselineEvent != "" {
 				after, found = transcriptUserEventsAfter(events, pending.baselineEvent)
+			} else if pending.baselineID != "" {
+				after, found = transcriptUserEventsAfterID(events, pending.baselineID)
 			}
 			resolved = after >= pending.ordinal
 			if !found {
 				resolved = transcriptUserEventsSince(events, pending.acceptedAt) >= pending.ordinal
 			}
-			if resolved {
-				reason = "transcript"
-			}
 		}
 		if !resolved && !pending.baselineKnown {
 			resolved = transcriptUserEventsSince(events, pending.acceptedAt) >= pending.ordinal
-			if resolved {
-				reason = "transcript"
-			}
 		}
-		if !resolved && !pending.baselineKnown && !fallbackAt.IsZero() {
+		if !pending.baselineKnown && !fallbackAt.IsZero() {
 			pending.ordinal = len(remaining) + 1
 			resolved = transcriptUserEventsSince(events, fallbackAt) >= pending.ordinal
-			if resolved {
-				reason = "transcript"
-			}
 		}
 		if resolved || now.Sub(pending.acceptedAt) >= voicePendingLifetime {
 			if resolved && h.rememberVoiceConfirmationLocked(key, pending.operationID, now) {
-				retiredOperations = append(retiredOperations, voiceRetirement{
-					operationID: pending.operationID,
-					reason:      reason,
-				})
+				confirmedOperations = append(confirmedOperations, pending.operationID)
 			}
 			continue
 		}
@@ -231,10 +248,10 @@ func (h *Handler) withPendingVoiceRows(
 	}
 	pendingRows := append([]voicePending(nil), remaining...)
 	h.voiceMu.Unlock()
-	for _, retired := range retiredOperations {
+	for _, operationID := range confirmedOperations {
 		processlog.Detailf(
-			"bria voice_input: stage=placeholder ref=%q operation=%q outcome=retired reason=%s",
-			ref.Key(), retired.operationID, retired.reason,
+			"bria voice_input: stage=transcript ref=%q operation=%q outcome=confirmed",
+			ref.Key(), operationID,
 		)
 	}
 
@@ -366,6 +383,25 @@ func transcriptUserEventsAfter(events []transcript.Event, baseline string) (int,
 	return count, true
 }
 
+func transcriptUserEventsAfterID(events []transcript.Event, baselineID string) (int, bool) {
+	found := false
+	count := 0
+	for _, event := range events {
+		if event.Kind != transcript.EventUserText {
+			continue
+		}
+		if found {
+			count++
+			continue
+		}
+		found = transcriptBaselineID(transcriptEventKey(event)) == baselineID
+	}
+	if !found {
+		return 0, false
+	}
+	return count, true
+}
+
 func transcriptUserEventsSince(events []transcript.Event, since time.Time) int {
 	count := 0
 	for _, event := range events {
@@ -380,8 +416,55 @@ func transcriptUserEventsSince(events []transcript.Event, since time.Time) int {
 	return count
 }
 
+func transcriptBaselineBefore(
+	events []transcript.Event,
+	acceptedAt time.Time,
+	baselineCount int,
+) (string, bool) {
+	latestKey := ""
+	latestAt := time.Time{}
+	for _, event := range events {
+		if event.Kind != transcript.EventUserText {
+			continue
+		}
+		at, err := time.Parse(time.RFC3339Nano, event.Timestamp)
+		if err != nil || at.After(acceptedAt) || (!latestAt.IsZero() && at.Before(latestAt)) {
+			continue
+		}
+		latestAt = at
+		latestKey = transcriptEventKey(event)
+	}
+	if latestKey != "" {
+		return latestKey, true
+	}
+	return "", baselineCount == 0
+}
+
 func transcriptEventKey(event transcript.Event) string {
 	return event.Timestamp + "\x00" + event.Text
+}
+
+func transcriptBaselineID(eventKey string) string {
+	if eventKey == "" {
+		return ""
+	}
+	digest := sha256.Sum256([]byte(eventKey))
+	return hex.EncodeToString(digest[:])
+}
+
+func voiceBaselineMatches(
+	known bool,
+	count int,
+	baselineID string,
+	target voicePendingBaseline,
+) bool {
+	if !known || !target.known {
+		return false
+	}
+	if baselineID != "" || target.baselineID != "" {
+		return baselineID == target.baselineID
+	}
+	return count == target.userEventCount
 }
 
 func transcriptUserEventCount(events []transcript.Event) int {

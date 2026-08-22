@@ -11,6 +11,7 @@ import (
 	"github.com/Time4Mind/bria/internal/application"
 	"github.com/Time4Mind/bria/internal/clusterstate"
 	"github.com/Time4Mind/bria/internal/domain"
+	"github.com/Time4Mind/bria/internal/runtimehost"
 	"github.com/Time4Mind/bria/internal/telegramapp"
 	"github.com/Time4Mind/bria/internal/telegrambot"
 	"github.com/Time4Mind/bria/internal/telegramui"
@@ -177,6 +178,76 @@ func TestVoicePendingRowMatchesCCBotUntilTranscriptArrives(t *testing.T) {
 	}
 }
 
+func TestVoiceBaselineIdentitySeparatesPromptsWithEqualRecentUserCounts(t *testing.T) {
+	fixture := newFixture(t)
+	actor := application.Principal{UserID: 7}
+	preferences, err := fixture.service.Preferences(actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	preferences.Language = domain.LanguageRussian
+	preferences.VoiceBackend = domain.VoiceAuto
+	if err := fixture.service.SetPreferences(context.Background(), actor, preferences); err != nil {
+		t.Fatal(err)
+	}
+	ref := domain.SessionRef{NodeID: "allowed", SessionID: "live"}
+	session, err := fixture.service.Session(actor, ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.service.PublishSessionRuntime(
+		application.WithOperationScope(context.Background(), "voice-baseline-running"),
+		session, domain.RuntimeRunning, nil,
+	); err != nil {
+		t.Fatal(err)
+	}
+	controls := &blockingControls{ref: ref, events: []transcript.Event{{
+		Kind: transcript.EventUserText, Text: "old bounded prompt",
+		Timestamp: time.Now().Add(-time.Minute).Format(time.RFC3339Nano),
+	}}}
+	handler, err := telegramapp.NewHandlerWithControls(
+		fixture.service, fixture.projector, fixture.codec, fixture.messenger, controls,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sendVoice := func(updateID int64) runtimehost.InputPayload {
+		t.Helper()
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		if err := handler.HandleTelegramUpdate(ctx, telegrambot.IncomingUpdate{
+			UpdateID: updateID, Kind: telegrambot.IncomingMessage, ChatID: 7, UserID: 7,
+			Content: telegrambot.ContentDescriptor{
+				Kind: telegrambot.IncomingVoice, FileID: "voice-id", FileUniqueID: fmt.Sprintf("voice-%d", updateID),
+			},
+		}); err != nil {
+			t.Fatal(err)
+		}
+		controls.mu.RLock()
+		defer controls.mu.RUnlock()
+		if controls.external == nil {
+			t.Fatal("voice was not submitted")
+		}
+		return *controls.external
+	}
+	first := sendVoice(503)
+	controls.mu.Lock()
+	controls.events = []transcript.Event{{
+		Kind: transcript.EventUserText, Text: "first recognized prompt",
+		Timestamp: time.Now().Format(time.RFC3339Nano),
+	}}
+	controls.external = nil
+	controls.mu.Unlock()
+	second := sendVoice(504)
+	if first.TranscriptBaselineCount != second.TranscriptBaselineCount {
+		t.Fatalf("test did not reproduce a bounded-count collision: first=%#v second=%#v", first, second)
+	}
+	if first.TranscriptOrdinal != 1 || second.TranscriptOrdinal != 1 {
+		t.Fatalf("distinct prompt baselines share an ordinal: first=%d second=%d",
+			first.TranscriptOrdinal, second.TranscriptOrdinal)
+	}
+}
+
 func TestVoicePendingWithoutTranscriptStaysBeforeBackgroundPanel(t *testing.T) {
 	fixture := newFixture(t)
 	actor := application.Principal{UserID: 7}
@@ -235,7 +306,7 @@ func TestVoicePendingWithoutTranscriptStaysBeforeBackgroundPanel(t *testing.T) {
 	}
 }
 
-func TestDeliveredVoiceAcknowledgementsRetireAfterHandlerRestartWithoutDistinctTranscript(t *testing.T) {
+func TestDeliveredVoiceAcknowledgementsSurviveHandlerRestartUntilCanonicalTranscript(t *testing.T) {
 	fixture := newFixture(t)
 	actor := application.Principal{UserID: 7}
 	ref := domain.SessionRef{NodeID: "allowed", SessionID: "live"}
@@ -281,9 +352,21 @@ func TestDeliveredVoiceAcknowledgementsRetireAfterHandlerRestartWithoutDistinctT
 	}
 	selectSessionForVoiceTest(t, handler, fixture, ref, 501)
 	latest := latestVoiceTestScreen(t, fixture)
+	if count := strings.Count(latest, "recognized and sent"); count != 2 {
+		t.Fatalf("durable voice acknowledgements after restart=%d screen=%q", count, latest)
+	}
+	controls.appendTranscriptEvent(transcript.Event{
+		Kind: transcript.EventUserText, Text: "first recognized voice",
+	})
+	controls.appendTranscriptEvent(transcript.Event{
+		Kind: transcript.EventUserText, Text: "second recognized voice",
+	})
+	selectSessionForVoiceTest(t, handler, fixture, ref, 502)
+	latest = latestVoiceTestScreen(t, fixture)
 	if strings.Contains(latest, "recognized and sent") ||
-		!strings.Contains(latest, baselineEvent.Text) {
-		t.Fatalf("delivered voice placeholders survived restart: %q", latest)
+		!strings.Contains(latest, "first recognized voice") ||
+		!strings.Contains(latest, "second recognized voice") {
+		t.Fatalf("canonical transcript did not replace durable acknowledgements: %q", latest)
 	}
 }
 
