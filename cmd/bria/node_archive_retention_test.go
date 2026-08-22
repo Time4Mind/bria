@@ -126,9 +126,12 @@ func TestLocalArchivePurgeDeletesTombstoneAndOrphanButPreservesRacingArchive(t *
 	second.Sessions[racing.Ref().Key()] = racing
 	archives := &purgeArchiveStub{ready: []string{"old-bundle", "orphan", racing.ArchiveID}}
 	bindings := &purgeBindingStub{}
+	runtimes := &runtimeExistenceStub{exists: true}
 	reconciler := &localArchivePurgeReconciler{
-		nodeID: "node", state: &purgeStateStub{states: []*domain.State{first, second}},
-		archives: archives, bindings: bindings, cleaned: make(map[string]bool),
+		nodeID: "node", tmuxSession: "bria",
+		state:    &purgeStateStub{states: []*domain.State{first, second}},
+		archives: archives, bindings: bindings, runtimes: runtimes,
+		cleaned: make(map[string]bool),
 	}
 	if err := reconciler.Reconcile(context.Background()); err != nil {
 		t.Fatal(err)
@@ -144,5 +147,8 @@ func TestLocalArchivePurgeDeletesTombstoneAndOrphanButPreservesRacingArchive(t *
 	}
 	if len(archives.deleted) != 2 {
 		t.Fatalf("deleted archives=%v", archives.deleted)
+	}
+	if runtimes.closeCalls != 1 {
+		t.Fatalf("purged runtime close calls=%d, want one exact target cleanup", runtimes.closeCalls)
 	}
 }

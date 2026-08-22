@@ -339,7 +339,8 @@ func startNodeRuntimeControl(
 	go runLocalArchiveReconciler(ctx, node.State(), nodeConfig, driver, archiveWriter)
 	go runLocalRuntimeReconciler(ctx, node, nodeConfig, client, executor, driver)
 	go runLocalSessionStartReconciler(
-		ctx, nodeConfig.NodeID, node.State(), localStarts, executor,
+		ctx, nodeConfig.NodeID, nodeConfig.TmuxSession,
+		node.State(), localStarts, executor, driver,
 	)
 	go runProviderBindingReconciler(
 		ctx, nodeConfig, node.State(), bindingStore, driver,
@@ -347,7 +348,8 @@ func startNodeRuntimeControl(
 	go runArchiveRetentionReconciler(ctx, node)
 	go runArchiveDescriptionReconciler(ctx, node, descriptionRouter)
 	go runLocalArchivePurgeReconciler(
-		ctx, domain.NodeID(nodeConfig.NodeID), node.State(), archiveWriter, bindingStore,
+		ctx, domain.NodeID(nodeConfig.NodeID), nodeConfig.TmuxSession,
+		node.State(), archiveWriter, bindingStore, driver,
 	)
 	artifactCleaner := updateArtifactCleaner(updates.local)
 	if artifactCleaner == nil {

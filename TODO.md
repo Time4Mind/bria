@@ -111,3 +111,36 @@
   блок: между описанием и линией, а также после линии остаётся по одному
   отступу. Модель и domain validation ограничивают две строки описания суммарно
   шестнадцатью словами.
+
+## Аудит долговременной стабильности 2026-08-22
+
+- [x] S1. Гарантированно убирать Bria-owned tmux runtime после терминально
+  неуспешного Start/Resume и после purge. Пока сессия находится в durable
+  `RuntimeStarting`, выполняется provision/recovery либо не истёк защитный
+  grace, окно не закрывать. Перед удалением повторно проверять exact ref,
+  runtime generation и актуальное состояние сессии; неоднозначные окна только
+  логировать.
+- [ ] S2. Сделать shutdown runtime транзакционным: прекратить admission,
+  завершить или terminally cancel queued операции, дождаться workers и только
+  затем закрывать Bolt store. Не оставлять операции в вечном `pending` после
+  контролируемого рестарта.
+- [ ] S3. Ограничить per-session FIFO и ввести явный backpressure для потока
+  runtime-команд при зависшем или ещё не attached provider.
+- [ ] S4. Добавить retention/compaction для completed mutation-записей в
+  `runtime/operations.db`, сохранив необходимое окно идемпотентности и защиту
+  от повторного выполнения команд.
+- [ ] S5. Подчинить root context и общему shutdown backend/speech/update
+  installers, backend-watchers и disable-node workers. Дедуплицировать один
+  worker на resource identity и дожидаться его завершения в `Close`.
+- [ ] S6. Добавить cap/TTL/sweep для Telegram process-local state: unknown DM,
+  `clusterUpdateWatch`, interactive `seen`, abandoned `pendingVoices` и quota/
+  panel checkpoints. Очистка не должна менять response-card и voice flow.
+- [ ] S7. Ограничить workspace activity cache, дедуплицировать и отменять
+  filesystem scans через context; зависший scan не должен навсегда оставлять
+  path в `refreshing`.
+- [ ] S8. Убрать глобальную сериализацию Telegram transport: сохранить ordering
+  внутри одного chat/user, но не блокировать остальные чаты медленным upload
+  или document send; ожидание lane должно уважать context cancellation.
+- [ ] S9. Добавить byte/count quota поверх существующего TTL processlog и
+  проверить flood-сценарий, чтобы всплеск detail/service не заполнил диск до
+  очередного age-based sweep.

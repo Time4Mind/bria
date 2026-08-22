@@ -12,6 +12,7 @@ import (
 	"github.com/Time4Mind/bria/internal/clusterstate"
 	"github.com/Time4Mind/bria/internal/domain"
 	"github.com/Time4Mind/bria/internal/processlog"
+	"github.com/Time4Mind/bria/internal/runtimehost"
 )
 
 const archiveRetentionInterval = time.Hour
@@ -124,12 +125,19 @@ type archiveBindingStore interface {
 	DeleteIfGeneration(domain.SessionRef, uint64) error
 }
 
+type archiveRuntimeTarget interface {
+	TargetExists(context.Context, string) (bool, error)
+	Close(context.Context, string) error
+}
+
 type localArchivePurgeReconciler struct {
-	nodeID   domain.NodeID
-	state    archiveStateReader
-	archives archiveBundleStore
-	bindings archiveBindingStore
-	cleaned  map[string]bool
+	nodeID      domain.NodeID
+	tmuxSession string
+	state       archiveStateReader
+	archives    archiveBundleStore
+	bindings    archiveBindingStore
+	runtimes    archiveRuntimeTarget
+	cleaned     map[string]bool
 }
 
 func (r *localArchivePurgeReconciler) Reconcile(ctx context.Context) error {
@@ -162,6 +170,23 @@ func (r *localArchivePurgeReconciler) Reconcile(ctx context.Context) error {
 				"preserve archive bundle %s: still referenced by a session", tombstone.ArchiveID,
 			))
 			continue
+		}
+		target := runtimehost.TmuxTarget(
+			r.tmuxSession, string(tombstone.Session.NodeID), string(tombstone.Session.SessionID),
+		)
+		targetExists, err := r.runtimes.TargetExists(ctx, target)
+		if err != nil {
+			joined = errors.Join(joined, fmt.Errorf("inspect purged runtime %s: %w", key, err))
+			continue
+		}
+		if targetExists {
+			if err := r.runtimes.Close(ctx, target); err != nil {
+				stillExists, inspectErr := r.runtimes.TargetExists(ctx, target)
+				if inspectErr != nil || stillExists {
+					joined = errors.Join(joined, fmt.Errorf("close purged runtime %s: %w", key, err))
+					continue
+				}
+			}
 		}
 		if err := r.bindings.DeleteIfGeneration(tombstone.Session, tombstone.RuntimeGeneration); err != nil {
 			joined = errors.Join(joined, fmt.Errorf("delete provider binding %s: %w", key, err))
@@ -206,12 +231,15 @@ func (r *localArchivePurgeReconciler) Reconcile(ctx context.Context) error {
 func runLocalArchivePurgeReconciler(
 	ctx context.Context,
 	nodeID domain.NodeID,
+	tmuxSession string,
 	state archiveStateReader,
 	archives archiveBundleStore,
 	bindings archiveBindingStore,
+	runtimes archiveRuntimeTarget,
 ) {
 	reconciler := &localArchivePurgeReconciler{
-		nodeID: nodeID, state: state, archives: archives, bindings: bindings,
+		nodeID: nodeID, tmuxSession: tmuxSession,
+		state: state, archives: archives, bindings: bindings, runtimes: runtimes,
 		cleaned: make(map[string]bool),
 	}
 	ticker := time.NewTicker(2 * time.Second)
