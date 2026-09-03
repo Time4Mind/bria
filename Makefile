@@ -13,6 +13,7 @@ GO_ENV = env GOENV=off GOTOOLCHAIN=local GOWORK=off GOPROXY=off GOSUMDB=off \
 	GOCACHE="$(CURDIR)/.cache/go-build" \
 	GOMODCACHE="$(CURDIR)/.cache/go-mod" \
 	CGO_ENABLED=0
+GO_RACE_ENV = $(GO_ENV) CGO_ENABLED=1
 
 .PHONY: check check-policy check-format check-architecture check-test check-race check-vet check-operational check-full build release release-evidence release-supply-chain release-verify
 
@@ -39,7 +40,7 @@ check-test:
 	$(GO_ENV) $(GO) test -mod=readonly ./...
 
 check-race:
-	$(GO_ENV) $(GO) test -race -mod=readonly ./...
+	$(GO_RACE_ENV) $(GO) test -race -mod=readonly ./...
 
 check-vet:
 	$(GO_ENV) $(GO) vet -mod=readonly ./...

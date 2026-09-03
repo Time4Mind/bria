@@ -25,7 +25,7 @@ var requiredInvariantLines = []string{
 	"- проверка доказательств и явное описание неопределённости;",
 	"- быстрые профильные проверки во время разработки и полный набор перед выпуском;",
 	"- проверка физического результата;",
-	"- предварительный перечень, отдельное подтверждение и повторное чтение для внешних изменений.",
+	"- точная bounded последовательность и точные цели с terminal criterion, одно явное подтверждение на действие или bounded sequence, действующее до terminal criterion и включающее необходимые commit, push и CI-fix iterations, выполнение только согласованного scope, повторное чтение после каждого существенного внешнего write и новое подтверждение для новых, расширенных или destructive targets, deploy, изменений secrets и исходящих messages.",
 }
 
 var requiredPolicyClauseLines = map[string][]string{
@@ -88,12 +88,13 @@ var requiredPolicyClauseLines = map[string][]string{
 	},
 	"Safety and writes": {
 		"Публикация, отправка сообщений, изменение удалённого репозитория, установка, перезапуск, удаление данных и другие видимые или труднообратимые действия разрешены только в явно согласованном объёме.",
-		"Перед каждым таким действием:",
-		"1. Показать точную цель и перечень изменений.",
-		"2. Получить отдельное однозначное подтверждение пользователя.",
-		"3. Выполнить только подтверждённое действие.",
-		"4. Повторно прочитать целевое состояние и проверить фактический результат.",
-		"Одно подтверждение не распространяется на последующие действия.",
+		"До внешнего write:",
+		"1. Показать точную bounded последовательность действий, точные цели и terminal criterion.",
+		"2. Получить одно явное подтверждение на отдельное действие или bounded sequence. Подтверждение bounded sequence действует до указанного terminal criterion и включает необходимые commit, push и CI-fix iterations.",
+		"3. Выполнить только этот согласованный scope.",
+		"4. После каждого существенного внешнего write повторно прочитать целевое состояние и проверить фактический результат.",
+		"Новые или расширенные targets требуют нового подтверждения.",
+		"Deploy, изменения secrets, исходящие messages и любое destructive действие, включая destructive write к уже перечисленной цели, всегда требуют нового подтверждения, даже если они заранее перечислены.",
 		"Неопределённый сетевой ответ не считать ни успехом, ни отказом: сначала безопасно перечитать состояние, затем решать вопрос о повторе.",
 	},
 }
@@ -128,11 +129,42 @@ func TestPolicyCheckerRejectsMutationOfEveryRequiredClause(t *testing.T) {
 	}
 }
 
+func TestMakefileSeparatesRaceCgoFromOfflineNonRaceEnvironment(t *testing.T) {
+	makefile := readMakefile(t)
+	if !strings.Contains(makefile, "CGO_ENABLED=0") {
+		t.Fatal("Makefile must keep CGO disabled for the non-race environment")
+	}
+	if !strings.Contains(makefile, "GO_RACE_ENV = $(GO_ENV) CGO_ENABLED=1") {
+		t.Fatal("Makefile must define the race environment as GO_ENV plus CGO_ENABLED=1")
+	}
+	raceRecipe := makefileTargetRecipe(t, makefile, "check-race")
+	if !strings.Contains(raceRecipe, "$(GO_RACE_ENV) $(GO) test -race") {
+		t.Fatalf("check-race recipe = %q, must use GO_RACE_ENV", raceRecipe)
+	}
+	if strings.Contains(raceRecipe, "$(GO_ENV) $(GO) test -race") {
+		t.Fatalf("check-race recipe = %q, must not use the CGO-disabled environment", raceRecipe)
+	}
+	for _, target := range []string{"check-test", "check-vet"} {
+		recipe := makefileTargetRecipe(t, makefile, target)
+		if !strings.Contains(recipe, "$(GO_ENV) $(GO)") {
+			t.Fatalf("%s recipe = %q, must keep the non-race environment", target, recipe)
+		}
+	}
+}
+
 func TestPolicyCheckerAllowsUntrackedPolicyBeforeFirstCommit(t *testing.T) {
 	repo := makeRepo(t, readProjectPolicy(t))
 	if errors := checkPolicy(repo); len(errors) != 0 {
 		t.Fatalf("checkPolicy() errors = %v, want none", errors)
 	}
+}
+
+func TestPolicyCheckerRejectsMissingPolicy(t *testing.T) {
+	repo := makeRepo(t, readProjectPolicy(t))
+	if err := os.Remove(filepath.Join(repo, "AGENTS.md")); err != nil {
+		t.Fatalf("remove AGENTS.md: %v", err)
+	}
+	assertErrorContains(t, checkPolicy(repo), "AGENTS.md is missing")
 }
 
 func TestPolicyCheckerRequiresTrackedPolicyAfterFirstCommit(t *testing.T) {
@@ -147,6 +179,21 @@ func TestPolicyCheckerRequiresTrackedPolicyAfterFirstCommit(t *testing.T) {
 		"commit", "--quiet", "-m", "initial",
 	)
 	assertErrorContains(t, checkPolicy(repo), "must be tracked")
+}
+
+func TestPolicyCheckerRejectsIgnoredPolicyAfterFirstCommit(t *testing.T) {
+	repo := makeRepo(t, readProjectPolicy(t))
+	writeFile(t, filepath.Join(repo, ".gitignore"), "AGENTS.md\n")
+	writeFile(t, filepath.Join(repo, "README.md"), "# Test repository\n")
+	runGit(t, repo, "add", ".gitignore", "README.md")
+	runGit(
+		t,
+		repo,
+		"-c", "user.name=Bria Tests",
+		"-c", "user.email=bria-tests@example.invalid",
+		"commit", "--quiet", "-m", "initial",
+	)
+	assertErrorContains(t, checkPolicy(repo), "excluded by a Git ignore rule")
 }
 
 func TestPolicyCheckerRejectsMissingSectionAndRequiredConcept(t *testing.T) {
@@ -1846,6 +1893,42 @@ func readProjectPolicy(t *testing.T) string {
 		t.Fatalf("read project AGENTS.md: %v", err)
 	}
 	return string(data)
+}
+
+func readMakefile(t *testing.T) string {
+	t.Helper()
+	_, filename, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller() failed")
+	}
+	data, err := os.ReadFile(filepath.Join(filepath.Dir(filename), "..", "Makefile"))
+	if err != nil {
+		t.Fatalf("read Makefile: %v", err)
+	}
+	return string(data)
+}
+
+func makefileTargetRecipe(t *testing.T, makefile, target string) string {
+	t.Helper()
+	lines := strings.Split(makefile, "\n")
+	start := -1
+	for index, line := range lines {
+		if line == target+":" {
+			start = index + 1
+			break
+		}
+	}
+	if start == -1 {
+		t.Fatalf("Makefile target %q is missing", target)
+	}
+	var recipe []string
+	for _, line := range lines[start:] {
+		if !strings.HasPrefix(line, "\t") {
+			break
+		}
+		recipe = append(recipe, line)
+	}
+	return strings.Join(recipe, "\n")
 }
 
 func writeFile(t *testing.T, path, contents string) {
