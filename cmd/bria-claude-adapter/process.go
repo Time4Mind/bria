@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -92,10 +93,22 @@ func (child *osChild) Kill() error {
 	child.reaping = true
 	signalErr := child.signalBeforeWait()
 	waitErr := child.command.Wait()
+	reaped := child.command.ProcessState != nil
+	permissionRaceConfirmedGone := false
+	if reaped && !child.inherited && errors.Is(signalErr, os.ErrPermission) {
+		// Darwin can report EPERM when a dedicated group disappears between the
+		// pre-Wait identity probe and SIGKILL. Only a non-signalling post-reap
+		// ESRCH confirmation makes that race benign. Any live, reused, or
+		// uninspectable group remains a fail-closed stop error.
+		permissionRaceConfirmedGone = processgroup.ConfirmTreeGone(child.command) == nil
+	}
 	child.publishDone(waitErr)
 	child.lifecycleMu.Unlock()
-	if signalErr != nil {
+	if !reaped {
 		return claude.ErrChildStop
+	}
+	if signalErr != nil && !permissionRaceConfirmedGone {
+		return fmt.Errorf("%w: %v", claude.ErrChildStop, signalErr)
 	}
 	return nil
 }

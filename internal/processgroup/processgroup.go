@@ -10,5 +10,6 @@ var (
 	ErrNotStarted          = errors.New("process command has not started")
 	ErrAlreadyStarted      = errors.New("process command has already started")
 	ErrUnsafeConfiguration = errors.New("process command is not in a dedicated process group")
+	ErrTreeExitUnconfirmed = errors.New("process tree exit was not confirmed")
 	ErrUnsupported         = errors.New("process tree isolation is unsupported on this platform")
 )

@@ -100,9 +100,9 @@ var requiredPolicyClauseLines = map[string][]string{
 
 func TestPolicyCheckerEnforcesEveryMandatoryInvariant(t *testing.T) {
 	original := readProjectPolicy(t)
-	for _, invariant := range requiredInvariantLines {
+	for invariantIndex, invariant := range requiredInvariantLines {
 		invariant := invariant
-		t.Run(invariant, func(t *testing.T) {
+		t.Run(fmt.Sprintf("invariant/%02d", invariantIndex), func(t *testing.T) {
 			if !strings.Contains(original, invariant) {
 				t.Fatalf("project AGENTS.md does not contain fixture invariant %q", invariant)
 			}
@@ -115,9 +115,9 @@ func TestPolicyCheckerEnforcesEveryMandatoryInvariant(t *testing.T) {
 func TestPolicyCheckerRejectsMutationOfEveryRequiredClause(t *testing.T) {
 	original := readProjectPolicy(t)
 	for section, clauses := range requiredPolicyClauseLines {
-		for _, clause := range clauses {
+		for clauseIndex, clause := range clauses {
 			section, clause := section, clause
-			t.Run(section+"/"+clause, func(t *testing.T) {
+			t.Run(fmt.Sprintf("%s/%02d", section, clauseIndex), func(t *testing.T) {
 				if !strings.Contains(original, clause) {
 					t.Fatalf("project AGENTS.md does not contain fixture clause %q", clause)
 				}

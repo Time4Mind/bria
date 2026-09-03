@@ -79,6 +79,32 @@ func TerminateTree(cmd *exec.Cmd) error {
 	return signalTree(cmd, syscall.SIGTERM)
 }
 
+// ConfirmTreeGone performs a non-signalling post-reap probe of a command's
+// dedicated process group. It succeeds only when Wait recorded the leader's
+// state and the operating system reports that the original group no longer
+// exists. A reused group ID is therefore never signalled and fails closed.
+func ConfirmTreeGone(cmd *exec.Cmd) error {
+	if cmd == nil {
+		return ErrInvalidCommand
+	}
+	if cmd.Process == nil || cmd.Process.Pid < 2 {
+		return ErrNotStarted
+	}
+	attributes := cmd.SysProcAttr
+	if attributes == nil || !attributes.Setpgid || attributes.Pgid != 0 || attributes.Foreground || attributes.Setsid {
+		return ErrUnsafeConfiguration
+	}
+	if cmd.ProcessState == nil {
+		return ErrTreeExitUnconfirmed
+	}
+	if err := syscall.Kill(-cmd.Process.Pid, 0); errors.Is(err, syscall.ESRCH) {
+		return nil
+	} else if err != nil && !errors.Is(err, syscall.EPERM) {
+		return fmt.Errorf("probe reaped process group: %w", err)
+	}
+	return ErrTreeExitUnconfirmed
+}
+
 // KillCurrentTree terminates the current executable and its descendants only
 // when the executable is the verified leader of its own process group. A
 // successful call does not return.

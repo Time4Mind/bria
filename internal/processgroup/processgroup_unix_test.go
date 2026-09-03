@@ -215,6 +215,99 @@ func TestReapedCommandIsAnIdempotentNoOp(t *testing.T) {
 	}
 }
 
+func TestConfirmTreeGoneAcceptsOnlyAbsentDedicatedGroup(t *testing.T) {
+	testBinary, err := os.Executable()
+	if err != nil {
+		t.Fatalf("resolve test executable: %v", err)
+	}
+
+	t.Run("absent after reap", func(t *testing.T) {
+		command := exec.Command(testBinary, "-test.run=^TestProcessGroupHelper$")
+		command.Env = append(os.Environ(), helperModeEnvironment+"=exit")
+		if err := processgroup.Configure(command); err != nil {
+			t.Fatalf("configure short-lived command: %v", err)
+		}
+		if err := command.Run(); err != nil {
+			t.Fatalf("run short-lived command: %v", err)
+		}
+		if err := processgroup.ConfirmTreeGone(command); err != nil {
+			t.Fatalf("confirm absent reaped tree: %v", err)
+		}
+	})
+
+	t.Run("surviving descendant", func(t *testing.T) {
+		readyPath := filepath.Join(t.TempDir(), "orphan-grandchild.pid")
+		command := exec.Command(testBinary, "-test.run=^TestProcessGroupHelper$")
+		command.Env = append(os.Environ(),
+			helperModeEnvironment+"=orphan-parent",
+			helperReadyEnvironment+"="+readyPath,
+		)
+		if err := processgroup.Configure(command); err != nil {
+			t.Fatalf("configure orphan parent: %v", err)
+		}
+		if err := command.Start(); err != nil {
+			t.Fatalf("start orphan parent: %v", err)
+		}
+		grandchildPID := waitForPID(t, readyPath, 3*time.Second)
+		groupID := command.Process.Pid
+		if err := command.Wait(); err != nil {
+			t.Fatalf("wait orphan parent: %v", err)
+		}
+		t.Cleanup(func() {
+			_ = syscall.Kill(-groupID, syscall.SIGKILL)
+			waitForProcessGroupGone(t, groupID, 3*time.Second)
+		})
+		if err := processgroup.ConfirmTreeGone(command); !errors.Is(err, processgroup.ErrTreeExitUnconfirmed) {
+			t.Fatalf("confirm tree with surviving descendant %d = %v, want %v", grandchildPID, err, processgroup.ErrTreeExitUnconfirmed)
+		}
+		if err := syscall.Kill(grandchildPID, 0); err != nil {
+			t.Fatalf("confirmation probe signalled surviving descendant: %v", err)
+		}
+	})
+
+	t.Run("unverified command", func(t *testing.T) {
+		command := exec.Command(testBinary, "-test.run=^TestProcessGroupHelper$")
+		command.Env = append(os.Environ(), helperModeEnvironment+"=exit")
+		if err := command.Run(); err != nil {
+			t.Fatalf("run unverified command: %v", err)
+		}
+		if err := processgroup.ConfirmTreeGone(command); !errors.Is(err, processgroup.ErrUnsafeConfiguration) {
+			t.Fatalf("confirm unverified tree = %v, want %v", err, processgroup.ErrUnsafeConfiguration)
+		}
+	})
+
+	t.Run("reused group id is never signalled", func(t *testing.T) {
+		sentinel := exec.Command(testBinary, "-test.run=^TestProcessGroupHelper$")
+		sentinel.Env = append(os.Environ(), helperModeEnvironment+"=grandchild")
+		if err := processgroup.Configure(sentinel); err != nil {
+			t.Fatalf("configure sentinel group: %v", err)
+		}
+		if err := sentinel.Start(); err != nil {
+			t.Fatalf("start sentinel group: %v", err)
+		}
+		t.Cleanup(func() {
+			_ = processgroup.KillTree(sentinel)
+			_ = sentinel.Wait()
+		})
+
+		reaped := exec.Command(testBinary, "-test.run=^TestProcessGroupHelper$")
+		reaped.Env = append(os.Environ(), helperModeEnvironment+"=exit")
+		if err := processgroup.Configure(reaped); err != nil {
+			t.Fatalf("configure reaped command: %v", err)
+		}
+		if err := reaped.Run(); err != nil {
+			t.Fatalf("run reaped command: %v", err)
+		}
+		reaped.Process = &os.Process{Pid: sentinel.Process.Pid}
+		if err := processgroup.ConfirmTreeGone(reaped); !errors.Is(err, processgroup.ErrTreeExitUnconfirmed) {
+			t.Fatalf("confirm reused group id = %v, want %v", err, processgroup.ErrTreeExitUnconfirmed)
+		}
+		if err := syscall.Kill(sentinel.Process.Pid, 0); err != nil {
+			t.Fatalf("confirmation probe signalled reused group: %v", err)
+		}
+	})
+}
+
 func TestConfigureDescendantInheritsOnlyFromVerifiedGroupLeader(t *testing.T) {
 	testBinary, err := os.Executable()
 	if err != nil {
@@ -473,6 +566,24 @@ func TestProcessGroupHelper(t *testing.T) {
 		if err := os.WriteFile(os.Getenv(helperResultEnvironment), []byte("safe"), 0o600); err != nil {
 			os.Exit(46)
 		}
+	case "orphan-parent":
+		testBinary, err := os.Executable()
+		if err != nil {
+			os.Exit(47)
+		}
+		grandchild := exec.Command(testBinary, "-test.run=^TestProcessGroupHelper$")
+		grandchild.Env = append(os.Environ(), helperModeEnvironment+"=grandchild")
+		if err := grandchild.Start(); err != nil {
+			os.Exit(48)
+		}
+		if err := os.WriteFile(
+			os.Getenv(helperReadyEnvironment),
+			[]byte(strconv.Itoa(grandchild.Process.Pid)),
+			0o600,
+		); err != nil {
+			os.Exit(49)
+		}
+		return
 	case "grandchild":
 		for {
 			time.Sleep(time.Hour)

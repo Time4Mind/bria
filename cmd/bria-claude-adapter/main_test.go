@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -173,6 +174,16 @@ func TestOSProcessAbortRacesNaturalExitWithoutPostReapSignal(t *testing.T) {
 		if err := child.Kill(); err != nil {
 			t.Fatalf("Kill(%d after reap) error = %v", iteration, err)
 		}
+	}
+}
+
+func TestOSChildKillFailsClosedWithoutReapConfirmation(t *testing.T) {
+	child := &osChild{
+		command: exec.Command("unused"),
+		done:    make(chan error, 1),
+	}
+	if err := child.Kill(); !errors.Is(err, claude.ErrChildStop) {
+		t.Fatalf("Kill(unstarted) error = %v, want %v", err, claude.ErrChildStop)
 	}
 }
 

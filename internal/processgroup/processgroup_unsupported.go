@@ -50,6 +50,17 @@ func TerminateTree(cmd *exec.Cmd) error {
 	return ErrUnsupported
 }
 
+// ConfirmTreeGone fails closed on platforms without verified tree isolation.
+func ConfirmTreeGone(cmd *exec.Cmd) error {
+	if cmd == nil {
+		return ErrInvalidCommand
+	}
+	if cmd.Process == nil {
+		return ErrNotStarted
+	}
+	return ErrUnsupported
+}
+
 // KillCurrentTree fails closed on unverified platforms.
 func KillCurrentTree() error {
 	return ErrUnsupported
