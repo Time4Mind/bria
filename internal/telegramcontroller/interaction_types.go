@@ -1,0 +1,12 @@
+package telegramcontroller
+
+import "bria/internal/turnprocessing"
+
+type InteractionHandler = turnprocessing.InteractionHandler
+type InteractionEnvelope = turnprocessing.InteractionEnvelope
+type InteractionResponseAcceptance = turnprocessing.InteractionResponseAcceptance
+type InteractionAcceptanceHandler = turnprocessing.InteractionAcceptanceHandler
+type InteractionTextInput = turnprocessing.InteractionTextInput
+type InteractionTextResult = turnprocessing.InteractionTextResult
+type InteractionTextHandler = turnprocessing.InteractionTextHandler
+type InteractionSourceTombstone = turnprocessing.InteractionSourceTombstone

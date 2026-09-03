@@ -1,0 +1,87 @@
+# Secrets and local authorization data
+.env
+.env.*
+/secrets/
+/credentials/
+auth.json
+credentials.json
+*.key
+*.pem
+*.p12
+*.token
+
+# Runtime state and session data
+.bria/
+/data/
+/state/
+/runtime/
+/sessions/
+/inbox/
+/outbox/
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.session
+*.session-journal
+*.pid
+*.sock
+
+# Backups and generated archives
+/backup/
+/backups/
+/archive/
+/archives/
+*.bak
+*.backup
+*.tgz
+*.tar.gz
+*.zip
+
+# Logs and diagnostics
+/logs/
+*.log
+coverage.out
+.coverage
+htmlcov/
+
+# Build output
+bin/
+/build/
+/dist/
+/.avis/
+/bria
+/bria-codex-adapter
+/bria-claude-adapter
+/bria-container-preflight
+*.test
+*.exe
+
+# Tool caches and local environments
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.cache/
+.venv/
+venv/
+
+# Local agent context and disposable development workspaces
+/.agents/
+/.ccbot-inbox/
+/.claude/
+/.codex/
+/.worktrees/
+/.tmp/
+/tmp/
+
+# Editor and operating-system files
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# AGENTS.md is a required, tracked project policy. Do not ignore it.
+!AGENTS.md

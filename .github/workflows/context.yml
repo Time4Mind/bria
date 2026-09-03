@@ -1,0 +1,29 @@
+name: Stage 1 checks
+# Action commit SHAs below were resolved from official actions/* tag refs on 2026-09-03.
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-stage-1:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Run full stage 1 checks
+        run: make check-full
+
+      - name: Verify repository-policy mutation coverage
+        run: go test ./scripts -run 'TestPolicyChecker|TestLinkChecker|TestFilenameChecker'

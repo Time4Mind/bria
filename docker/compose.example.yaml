@@ -1,0 +1,71 @@
+# Every host file/directory must be owned by BRIA_UID:BRIA_GID. Keep provider
+# executables 0555, model/provider-lock 0444/0400, and every config file 0600.
+x-bria-security: &bria-security
+  user: "${BRIA_UID:-65532}:${BRIA_GID:-65532}"
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,nodev,size=256m
+  restart: unless-stopped
+
+x-bria-build: &bria-build
+  context: ..
+  args:
+    VERSION: "${BRIA_VERSION:?set an exact Bria version}"
+    REVISION: "${BRIA_REVISION:?set the exact source revision}"
+
+services:
+  combined:
+    <<: *bria-security
+    profiles: [combined]
+    build: *bria-build
+    image: "bria:${BRIA_VERSION}"
+    environment:
+      BRIA_ROLE: combined
+      BRIA_CONFIG: /etc/bria/config.json
+      BRIA_PROVIDER_LOCK: /etc/bria/provider-lock.json
+    volumes:
+      - ./runtime/combined/config:/etc/bria:ro
+      - ./runtime/combined/state:/var/lib/bria:rw
+      - ./runtime/combined/provider-auth:/var/lib/bria/provider-auth:rw
+      - ${BRIA_CODEX_BIN:?mount an exact locked Codex binary}:/opt/bria/providers/codex:ro
+      - ${BRIA_CLAUDE_BIN:?mount an exact locked Claude binary}:/opt/bria/providers/claude:ro
+      - ${BRIA_PARAKEET_BIN:?mount an exact locked Parakeet wrapper}:/opt/bria/providers/parakeet:ro
+      - ${BRIA_PARAKEET_MODEL:?mount the exact locked Parakeet model}:/opt/bria/models/parakeet-model.bin:ro
+      - ${BRIA_WORKSPACE:?mount an explicit workspace}:/workspaces/project:rw
+
+  coordinator:
+    <<: *bria-security
+    profiles: [distributed]
+    build: *bria-build
+    image: "bria:${BRIA_VERSION}"
+    environment:
+      BRIA_ROLE: coordinator
+      BRIA_CONFIG: /etc/bria/config.json
+      BRIA_PROVIDER_LOCK: /etc/bria/provider-lock.json
+    ports:
+      - "127.0.0.1:${BRIA_COORDINATOR_PORT:-7443}:7443"
+    volumes:
+      - ./runtime/coordinator/config:/etc/bria:ro
+      - ./runtime/coordinator/state:/var/lib/bria:rw
+      - ./runtime/coordinator/provider-auth:/var/lib/bria/provider-auth:rw
+
+  executor:
+    <<: *bria-security
+    profiles: [distributed]
+    build: *bria-build
+    image: "bria:${BRIA_VERSION}"
+    environment:
+      BRIA_ROLE: executor
+      BRIA_CONFIG: /etc/bria/config.json
+      BRIA_PROVIDER_LOCK: /etc/bria/provider-lock.json
+    volumes:
+      - ./runtime/executor/config:/etc/bria:ro
+      - ./runtime/executor/state:/var/lib/bria:rw
+      - ./runtime/executor/provider-auth:/var/lib/bria/provider-auth:rw
+      - ${BRIA_CODEX_BIN:?mount an exact locked Codex binary}:/opt/bria/providers/codex:ro
+      - ${BRIA_CLAUDE_BIN:?mount an exact locked Claude binary}:/opt/bria/providers/claude:ro
+      - ${BRIA_PARAKEET_BIN:?mount an exact locked Parakeet wrapper}:/opt/bria/providers/parakeet:ro
+      - ${BRIA_PARAKEET_MODEL:?mount the exact locked Parakeet model}:/opt/bria/models/parakeet-model.bin:ro
+      - ${BRIA_WORKSPACE:?mount an explicit workspace}:/workspaces/project:rw

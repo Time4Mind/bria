@@ -1,0 +1,106 @@
+name: Platform build matrix
+# Action commit SHAs below were resolved from official actions/* tag refs on 2026-09-03.
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test-native:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner:
+          - ubuntu-latest
+          - macos-latest
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Test native runtime
+        env:
+          GOENV: "off"
+          GOTOOLCHAIN: local
+          GOWORK: "off"
+          GOPROXY: "off"
+          GOSUMDB: "off"
+          CGO_ENABLED: "0"
+        run: go test -mod=readonly ./...
+      - name: Build executable trio
+        env:
+          GOENV: "off"
+          GOTOOLCHAIN: local
+          GOWORK: "off"
+          GOPROXY: "off"
+          GOSUMDB: "off"
+          CGO_ENABLED: "0"
+        run: |
+          go build -mod=readonly -trimpath -buildvcs=false -o bin/bria ./cmd/bria
+          go build -mod=readonly -trimpath -buildvcs=false -o bin/bria-codex-adapter ./cmd/bria-codex-adapter
+          go build -mod=readonly -trimpath -buildvcs=false -o bin/bria-claude-adapter ./cmd/bria-claude-adapter
+
+  cross-compile-supported-targets:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Cross-compile executable trio
+        env:
+          GOENV: "off"
+          GOTOOLCHAIN: local
+          GOWORK: "off"
+          GOPROXY: "off"
+          GOSUMDB: "off"
+          CGO_ENABLED: "0"
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          go build -mod=readonly -trimpath -buildvcs=false -o bin/bria ./cmd/bria
+          go build -mod=readonly -trimpath -buildvcs=false -o bin/bria-codex-adapter ./cmd/bria-codex-adapter
+          go build -mod=readonly -trimpath -buildvcs=false -o bin/bria-claude-adapter ./cmd/bria-claude-adapter
+
+  wsl-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Validate WSL service scaffold
+        run: ./packaging/test_contracts.sh
+      - name: State evidence boundary
+        run: echo 'WSL runtime acceptance requires a real WSL host and is not claimed by this Linux CI job.'
+
+  docker-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Build non-root role-selected image without publishing
+        run: docker build --build-arg VERSION=0.0.0-ci --build-arg REVISION=${GITHUB_SHA} --tag bria:ci .
+      - name: Check configured runtime identity
+        run: |
+          test "$(docker image inspect bria:ci --format '{{.Config.User}}')" = '65532:65532'
+          test "$(docker image inspect bria:ci --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "${GITHUB_SHA}"
+          test "$(docker image inspect bria:ci --format '{{index .Config.Labels "io.time4mind.bria.role-selection"}}')" = 'config-and-fail-closed-preflight'

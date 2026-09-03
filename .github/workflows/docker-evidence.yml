@@ -1,0 +1,72 @@
+name: Docker contract evidence
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Exact non-dev Bria version for this evidence build
+        required: true
+        type: string
+      revision:
+        description: Exact 40-character source commit to check out and build
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  produce-contract-evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.revision }}
+          persist-credentials: false
+      - name: Validate immutable evidence identity
+        env:
+          EVIDENCE_VERSION: ${{ inputs.version }}
+          EVIDENCE_REVISION: ${{ inputs.revision }}
+        run: |
+          case "$EVIDENCE_VERSION" in ''|dev|.*|*..*|*[!0-9A-Za-z._+-]*) exit 2 ;; esac
+          case "$EVIDENCE_REVISION" in *[!0-9a-f]*|'') exit 2 ;; esac
+          test "${#EVIDENCE_REVISION}" -eq 40
+          test "$(git rev-parse HEAD)" = "$EVIDENCE_REVISION"
+          ./packaging/verify-supply-chain.sh
+      - name: Build image without publishing
+        env:
+          EVIDENCE_VERSION: ${{ inputs.version }}
+          EVIDENCE_REVISION: ${{ inputs.revision }}
+        run: docker build --build-arg VERSION="$EVIDENCE_VERSION" --build-arg REVISION="$EVIDENCE_REVISION" --tag bria:evidence .
+      - name: Collect bounded contract evidence
+        env:
+          EVIDENCE_VERSION: ${{ inputs.version }}
+          EVIDENCE_REVISION: ${{ inputs.revision }}
+        run: |
+          mkdir -p docker-evidence
+          image_id=$(docker image inspect bria:evidence --format '{{.Id}}')
+          image_user=$(docker image inspect bria:evidence --format '{{.Config.User}}')
+          image_revision=$(docker image inspect bria:evidence --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')
+          role_selection=$(docker image inspect bria:evidence --format '{{index .Config.Labels "io.time4mind.bria.role-selection"}}')
+          test "$image_user" = '65532:65532'
+          test "$image_revision" = "$EVIDENCE_REVISION"
+          test "$role_selection" = 'config-and-fail-closed-preflight'
+          bria_sha=$(docker run --rm --entrypoint sha256sum bria:evidence /opt/bria/bria | cut -d ' ' -f 1)
+          codex_adapter_sha=$(docker run --rm --entrypoint sha256sum bria:evidence /opt/bria/bria-codex-adapter | cut -d ' ' -f 1)
+          claude_adapter_sha=$(docker run --rm --entrypoint sha256sum bria:evidence /opt/bria/bria-claude-adapter | cut -d ' ' -f 1)
+          preflight_sha=$(docker run --rm --entrypoint sha256sum bria:evidence /opt/bria/bria-container-preflight | cut -d ' ' -f 1)
+          for digest in "$bria_sha" "$codex_adapter_sha" "$claude_adapter_sha" "$preflight_sha"; do
+            case "$digest" in *[!0-9a-f]*|'') exit 1 ;; esac
+            test "${#digest}" -eq 64
+          done
+          printf '{"schema_version":1,"evidence_kind":"docker_contract_only","release_receipt":false,"version":"%s","revision":"%s","workflow_run_id":"%s","image_id":"%s","container_user":"%s","role_selection":"%s","bria_sha256":"%s","codex_adapter_sha256":"%s","claude_adapter_sha256":"%s","preflight_sha256":"%s","limitation":"no provider bundles, secrets, networking E2E, or release publication"}\n' \
+            "$EVIDENCE_VERSION" "$EVIDENCE_REVISION" "$GITHUB_RUN_ID" "$image_id" "$image_user" "$role_selection" "$bria_sha" "$codex_adapter_sha" "$claude_adapter_sha" "$preflight_sha" > docker-evidence/docker-contract-evidence.json
+          test "$(wc -c < docker-evidence/docker-contract-evidence.json)" -le 16384
+      - name: Upload internal evidence artifact only
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: docker-contract-${{ inputs.revision }}-${{ github.run_id }}
+          path: docker-evidence/docker-contract-evidence.json
+          if-no-files-found: error
+          retention-days: 14

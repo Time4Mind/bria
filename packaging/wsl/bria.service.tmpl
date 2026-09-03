@@ -1,0 +1,23 @@
+[Unit]
+Description=Bria personal agent coordinator (WSL)
+ConditionVirtualization=wsl
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=@BRIA_BIN@ run --config @BRIA_CONFIG@
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=15s
+KillMode=control-group
+NoNewPrivileges=true
+PrivateTmp=true
+UMask=0077
+# Bria persists sanitized bounded events through internal/safelog. Do not
+# create a second unbounded journal or raw stderr store at the service layer.
+StandardOutput=null
+StandardError=null
+
+[Install]
+WantedBy=default.target

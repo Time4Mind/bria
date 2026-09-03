@@ -1,0 +1,81 @@
+name: Build release artifacts
+# Action commit SHAs below were resolved from official actions/* tag refs on 2026-09-03.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version without a leading directory path
+        required: true
+        type: string
+      evidence_artifact_name:
+        description: Existing artifact containing release-evidence.json and its external receipts
+        required: true
+        type: string
+      evidence_run_id:
+        description: Completed workflow run ID that produced the evidence artifact
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  build-release-bundle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Run complete repository release gate
+        run: make check-full
+      - name: Require immutable build inputs
+        run: make release-supply-chain
+      - name: Download independently collected release evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ inputs.evidence_artifact_name }}
+          run-id: ${{ inputs.evidence_run_id }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/release-evidence
+      - name: Bind release evidence to this build
+        run: |
+          test -f "$RUNNER_TEMP/release-evidence/release-evidence.json"
+          printf 'BRIA_RELEASE_EVIDENCE_MANIFEST=%s\n' "$RUNNER_TEMP/release-evidence/release-evidence.json" >> "$GITHUB_ENV"
+      - name: Materialize ephemeral release signing inputs
+        env:
+          RELEASE_SIGNING_KEY_PEM: ${{ secrets.RELEASE_SIGNING_KEY_PEM }}
+          RELEASE_TRUST_JSON: ${{ secrets.RELEASE_TRUST_JSON }}
+        run: |
+          test -n "$RELEASE_SIGNING_KEY_PEM"
+          test -n "$RELEASE_TRUST_JSON"
+          umask 077
+          printf '%s' "$RELEASE_SIGNING_KEY_PEM" > "$RUNNER_TEMP/bria-release-signing-key.pem"
+          printf '%s' "$RELEASE_TRUST_JSON" > "$RUNNER_TEMP/bria-release-trust.json"
+          printf 'RELEASE_SIGNING_KEY_FILE=%s\n' "$RUNNER_TEMP/bria-release-signing-key.pem" >> "$GITHUB_ENV"
+          printf 'RELEASE_TRUST_FILE=%s\n' "$RUNNER_TEMP/bria-release-trust.json" >> "$GITHUB_ENV"
+      - name: Build deterministic cross-platform archives
+        env:
+          VERSION: ${{ inputs.version }}
+          REVISION: ${{ github.sha }}
+          SOURCE_DATE_EPOCH: "0"
+          RELEASE_KEY_ID: ${{ vars.RELEASE_KEY_ID }}
+        run: make release
+      - name: Verify owner-signed canonical manifest
+        env:
+          VERSION: ${{ inputs.version }}
+        run: make release-verify
+      - name: Upload immutable workflow artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: bria-${{ inputs.version }}
+          path: dist/${{ inputs.version }}/
+          if-no-files-found: error
+          retention-days: 14
+      - name: Remove ephemeral signing key
+        if: always()
+        run: rm -f -- "$RUNNER_TEMP/bria-release-signing-key.pem" "$RUNNER_TEMP/bria-release-trust.json"
