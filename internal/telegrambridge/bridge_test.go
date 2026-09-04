@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -397,6 +398,36 @@ func TestSenderReturnsOnlyPositiveTelegramReceipt(t *testing.T) {
 	}
 }
 
+func TestSenderConvertsProviderMarkdownToTelegramEntities(t *testing.T) {
+	t.Parallel()
+
+	client := mustTelegramClient(t, func(request *http.Request) (*http.Response, error) {
+		var body telegram.SendMessageRequest
+		decodeJSON(t, request, &body)
+		if body.Text != "Проверка\n/root\n" {
+			t.Fatalf("formatted text = %q", body.Text)
+		}
+		want := []telegram.MessageEntity{
+			{Type: "bold", Offset: 0, Length: 8},
+			{Type: "pre", Offset: 9, Length: 6, Language: "text"},
+		}
+		if !reflect.DeepEqual(body.Entities, want) {
+			t.Fatalf("formatted entities = %#v, want %#v", body.Entities, want)
+		}
+		return response(http.StatusOK, `{"ok":true,"result":{"message_id":502,"from":{"id":600,"is_bot":true},"chat":{"id":42,"type":"private"},"text":"formatted"}}`), nil
+	})
+	sender, err := telegrambridge.NewSender(client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sender.SendStatus(context.Background(), "status:markdown", coordinator.Status{
+		ConversationID: 42,
+		Text:           "**Проверка**\n```text\n/root\n```",
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestSenderNeverRetriesTransientSendFailure(t *testing.T) {
 	t.Parallel()
 
@@ -488,6 +519,29 @@ func TestSenderCallbackAcknowledgementFailureDoesNotBlockCardEdit(t *testing.T) 
 		}
 	case <-time.After(time.Second):
 		t.Fatal("callback acknowledgement outcome was not persisted")
+	}
+}
+
+func TestSenderDirectCallbackAcknowledgementDoesNotMutateTelegramMessages(t *testing.T) {
+	t.Parallel()
+
+	acknowledged := make(chan struct{}, 1)
+	client := mustTelegramClient(t, func(request *http.Request) (*http.Response, error) {
+		if !strings.HasSuffix(request.URL.Path, "/answerCallbackQuery") {
+			t.Fatalf("unexpected visible Telegram mutation %q", request.URL.Path)
+		}
+		acknowledged <- struct{}{}
+		return response(http.StatusOK, `{"ok":true,"result":true}`), nil
+	})
+	sender, err := telegrambridge.NewSender(client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sender.AcknowledgeCallback(context.Background(), "status:93", "callback-2")
+	select {
+	case <-acknowledged:
+	case <-time.After(time.Second):
+		t.Fatal("callback was not acknowledged")
 	}
 }
 

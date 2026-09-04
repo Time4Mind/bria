@@ -12,6 +12,7 @@ import (
 	"bria/internal/domain"
 	"bria/internal/telegram"
 	"bria/internal/telegramcontroller"
+	"bria/internal/telegramformat"
 	"bria/internal/telegramui"
 )
 
@@ -88,9 +89,11 @@ func (notifier *Notifier) Notify(
 		return errors.New("Telegram notification could not be paginated")
 	}
 	for index, page := range pagination.Pages {
+		text, entities := telegramformat.Markdown(prefix + page.Content)
 		message, sendErr := notifier.client.SendMessage(ctx, telegram.SendMessageRequest{
-			ChatID: telegram.ChatID(notification.ConversationID),
-			Text:   prefix + page.Content,
+			ChatID:   telegram.ChatID(notification.ConversationID),
+			Text:     text,
+			Entities: entities,
 		})
 		if sendErr != nil {
 			return fmt.Errorf(

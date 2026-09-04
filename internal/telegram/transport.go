@@ -154,6 +154,7 @@ type BootstrapOffsetRequest struct {
 type SendMessageRequest struct {
 	ChatID      ChatID                `json:"chat_id"`
 	Text        string                `json:"text"`
+	Entities    []MessageEntity       `json:"entities,omitempty"`
 	ReplyMarkup *InlineKeyboardMarkup `json:"reply_markup,omitempty"`
 	Priority    MutationPriority      `json:"-"`
 }
@@ -162,8 +163,16 @@ type EditMessageTextRequest struct {
 	ChatID      ChatID                `json:"chat_id"`
 	MessageID   MessageID             `json:"message_id"`
 	Text        string                `json:"text"`
+	Entities    []MessageEntity       `json:"entities,omitempty"`
 	ReplyMarkup *InlineKeyboardMarkup `json:"reply_markup,omitempty"`
 	Priority    MutationPriority      `json:"-"`
+}
+
+type MessageEntity struct {
+	Type     string `json:"type"`
+	Offset   int    `json:"offset"`
+	Length   int    `json:"length"`
+	Language string `json:"language,omitempty"`
 }
 
 type InlineKeyboardMarkup struct {

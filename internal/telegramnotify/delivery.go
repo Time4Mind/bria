@@ -9,6 +9,7 @@ import (
 
 	"bria/internal/telegram"
 	"bria/internal/telegramcontroller"
+	"bria/internal/telegramformat"
 	"bria/internal/telegramui"
 )
 
@@ -102,8 +103,9 @@ func (notifier *Notifier) Deliver(
 			receipt.State = DeliveryUnknown
 			return receipt, fmt.Errorf("Telegram part %s has an unresolved ambiguous delivery", partID)
 		}
+		text, entities := telegramformat.Markdown(prefix + page.Content)
 		message, sendErr := notifier.client.SendMessage(ctx, telegram.SendMessageRequest{
-			ChatID: telegram.ChatID(notification.ConversationID), Text: prefix + page.Content,
+			ChatID: telegram.ChatID(notification.ConversationID), Text: text, Entities: entities,
 		})
 		if sendErr != nil || message.MessageID <= 0 {
 			receipt.State = deliveryFailureState(sendErr)

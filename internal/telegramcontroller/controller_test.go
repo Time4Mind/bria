@@ -1192,6 +1192,56 @@ func TestProcessDurableInputCommitsExactAcceptanceBeforeEventsAndCompletion(t *t
 	}
 }
 
+func TestProcessDurableInputKeepsAcceptedTurnAliveAfterReturningReceipt(t *testing.T) {
+	ready := readySession(t, "33333333-3333-4333-9333-333333333335", domain.ProviderCodex, t.TempDir(), "provider-3", 1)
+	release := make(chan struct{})
+	canceled := make(chan error, 1)
+	interactive := &interactiveSubmitter{submitWithCallbacks: func(ctx context.Context, _ domain.SessionID, _ string, callbacks sessionruntime.TurnCallbacks) (sessionruntime.TurnResult, error) {
+		if err := callbacks.OnAccepted(callbacks.MessageID); err != nil {
+			return sessionruntime.TurnResult{}, err
+		}
+		select {
+		case <-release:
+			return sessionruntime.TurnResult{TerminalStatus: sessionruntime.StatusCompleted, Final: "done"}, nil
+		case <-ctx.Done():
+			canceled <- ctx.Err()
+			return sessionruntime.TurnResult{}, ctx.Err()
+		}
+	}}
+	finals := make(chan telegramcontroller.Notification, 1)
+	controller := newController(t, nil, &memorySessions{byID: map[domain.SessionID]domain.Session{ready.ID(): ready}}, interactive,
+		notifierFunc(func(_ context.Context, notification telegramcontroller.Notification) error {
+			if notification.Kind == telegramcontroller.NotificationFinal {
+				finals <- notification
+			}
+			return nil
+		}), telegramcontroller.Options{Recovered: []domain.Session{ready}})
+	t.Cleanup(func() { _ = controller.Close(context.Background()) })
+
+	receipt, err := controller.ProcessDurableInput(context.Background(), telegramcontroller.DurableLeasedInput{
+		SessionID: ready.ID(), MessageID: "telegram-update:302", Sequence: 8, Payload: []byte("durable text"),
+	}, telegramcontroller.DurableInputCallbacks{OnAccepted: func(context.Context, telegramcontroller.DurableInputAcceptance) error { return nil }})
+	if err != nil || !receipt.Accepted || receipt.Completion != telegramcontroller.DurableInputSucceeded {
+		t.Fatalf("ProcessDurableInput() = (%#v, %v)", receipt, err)
+	}
+	select {
+	case err := <-canceled:
+		t.Fatalf("accepted turn context was canceled when custody receipt returned: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(release)
+	select {
+	case notification := <-finals:
+		if notification.Text != "done" {
+			t.Fatalf("final notification = %#v", notification)
+		}
+	case err := <-canceled:
+		t.Fatalf("accepted turn was canceled before final: %v", err)
+	case <-time.After(time.Second):
+		t.Fatal("accepted turn did not reach final after custody receipt returned")
+	}
+}
+
 func TestProcessDurableInputSteersFollowUpIntoCurrentTurnWithoutWaitingForFinal(t *testing.T) {
 	ready := readySession(t, "33333333-3333-4333-9333-333333333334", domain.ProviderCodex, t.TempDir(), "provider-3", 1)
 	releaseRoot := make(chan struct{})

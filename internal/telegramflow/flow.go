@@ -66,6 +66,9 @@ type TransportSender interface {
 	coordinator.KeyboardSender
 	coordinator.CarrierEditor
 }
+type CallbackAcknowledger interface {
+	AcknowledgeCallback(context.Context, string, string)
+}
 type Config struct {
 	OwnerUserID        int64
 	OwnerPrivateChatID int64
@@ -93,6 +96,7 @@ type Handler struct {
 	messageUI          MessageExecutor
 	callbacks          CallbackExecutor
 	operations         CallbackOperationStore
+	acknowledger       CallbackAcknowledger
 	pending            *pendingStore
 }
 type Sender struct {
@@ -135,6 +139,7 @@ func New(config Config) (*Handler, *Sender, error) {
 		return nil, nil, err
 	}
 	pending := &pendingStore{items: make(map[string]Prepared)}
+	acknowledger, _ := config.Sender.(CallbackAcknowledger)
 	return &Handler{
 			ownerUserID:        config.OwnerUserID,
 			ownerPrivateChatID: config.OwnerPrivateChatID,
@@ -146,6 +151,7 @@ func New(config Config) (*Handler, *Sender, error) {
 			messageUI:          config.MessageUI,
 			callbacks:          config.Callbacks,
 			operations:         config.Operations,
+			acknowledger:       acknowledger,
 			pending:            pending,
 		}, &Sender{
 			base:       config.Sender,
@@ -257,14 +263,10 @@ func (handler *Handler) Handle(ctx context.Context, update coordinator.Update) (
 	)
 	if err != nil {
 		if recoverableCallbackError(err) {
-			return coordinator.Decision{
-				Kind: coordinator.DecisionStatus,
-				Status: coordinator.Status{
-					ConversationID:  update.ConversationID,
-					Text:            "Кнопка недействительна или устарела. Откройте актуальную карточку.",
-					CallbackQueryID: update.CallbackQueryID,
-				},
-			}, nil
+			if handler.acknowledger != nil {
+				handler.acknowledger.AcknowledgeCallback(ctx, operationID, update.CallbackQueryID)
+			}
+			return coordinator.Decision{Kind: coordinator.DecisionSkip}, nil
 		}
 		return coordinator.Decision{}, err
 	}

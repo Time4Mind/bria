@@ -893,7 +893,6 @@ func TestRunNeverExecutesUnsignedRawCallbackData(t *testing.T) {
 	var polls atomic.Int32
 	mutationPath := ""
 	ackDone := make(chan struct{})
-	sendDone := make(chan struct{})
 	dependencies := testCommandDependencies(t, &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		calls.Add(1)
 		switch {
@@ -907,7 +906,6 @@ func TestRunNeverExecutesUnsignedRawCallbackData(t *testing.T) {
 				return telegramResponse(`{"ok":true,"result":[{"update_id":51,"callback_query":{"id":"callback-51","from":{"id":42,"is_bot":false,"first_name":"A"},"message":{"message_id":52,"from":{"id":600,"is_bot":true,"first_name":"Bria"},"chat":{"id":42,"type":"private"}},"data":"ft:stop"}}]}`), nil
 			case 3:
 				<-ackDone
-				<-sendDone
 				cancel()
 				return nil, context.Canceled
 			default:
@@ -920,13 +918,6 @@ func TestRunNeverExecutesUnsignedRawCallbackData(t *testing.T) {
 			}
 			close(ackDone)
 			return telegramResponse(`{"ok":true,"result":true}`), nil
-		case strings.HasSuffix(request.URL.Path, "/sendMessage"):
-			body := requestBody(t, request)
-			if !strings.Contains(body, "недействительна") || strings.Contains(body, "reply_markup") {
-				t.Fatalf("stale callback response = %q", body)
-			}
-			close(sendDone)
-			return telegramResponse(`{"ok":true,"result":{"message_id":53,"from":{"id":600,"is_bot":true},"chat":{"id":42,"type":"private"},"text":"stale"}}`), nil
 		default:
 			mutationPath = request.URL.Path
 			return telegramResponse(`{"ok":false,"error_code":400,"description":"unsafe callback mutation rejected"}`), nil
@@ -937,8 +928,8 @@ func TestRunNeverExecutesUnsignedRawCallbackData(t *testing.T) {
 	if code := runContextWithDependencies(ctx, []string{"run", "--config", configPath}, &stdout, &stderr, dependencies); code != 0 {
 		t.Fatalf("run exit code = %d, mutation = %q, stderr = %q", code, mutationPath, stderr.String())
 	}
-	if calls.Load() != 6 {
-		t.Fatalf("Telegram calls = %d, want identity, bootstrap, callback poll, callback ack, safe stale response, resumed poll", calls.Load())
+	if calls.Load() != 5 {
+		t.Fatalf("Telegram calls = %d, want identity, bootstrap, callback poll, silent callback ack, resumed poll", calls.Load())
 	}
 	if mutationPath != "" {
 		t.Fatalf("raw callback reached unsafe mutation endpoint %q", mutationPath)

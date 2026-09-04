@@ -40,10 +40,11 @@ func (messageStub) Handle(context.Context, coordinator.Update) (coordinator.Deci
 }
 
 type transportStub struct {
-	receipt coordinator.Receipt
-	err     error
-	sends   int
-	edits   int
+	receipt      coordinator.Receipt
+	err          error
+	sends        int
+	edits        int
+	acknowledged int
 }
 
 func (stub *transportStub) SendStatus(context.Context, string, coordinator.Status) (coordinator.Receipt, error) {
@@ -57,6 +58,9 @@ func (stub *transportStub) SendStatusWithKeyboard(context.Context, string, coord
 func (stub *transportStub) EditStatusWithKeyboard(context.Context, string, coordinator.Status, *coordinator.KeyboardMarkup) (coordinator.Receipt, error) {
 	stub.edits++
 	return stub.receipt, stub.err
+}
+func (stub *transportStub) AcknowledgeCallback(context.Context, string, string) {
+	stub.acknowledged++
 }
 
 type projectorStub struct {

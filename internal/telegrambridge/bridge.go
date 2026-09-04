@@ -3,6 +3,7 @@ package telegrambridge
 import (
 	"bria/internal/coordinator"
 	"bria/internal/telegram"
+	"bria/internal/telegramformat"
 	"context"
 	"errors"
 	"fmt"
@@ -218,9 +219,11 @@ func (sender *Sender) SendStatus(
 	status coordinator.Status,
 ) (coordinator.Receipt, error) {
 	sender.acknowledgeCallback(ctx, operationID, status.CallbackQueryID)
+	text, entities := telegramformat.Markdown(status.Text)
 	message, err := sender.client.SendMessage(ctx, telegram.SendMessageRequest{
 		ChatID:   telegram.ChatID(status.ConversationID),
-		Text:     status.Text,
+		Text:     text,
+		Entities: entities,
 		Priority: callbackPriority(status.CallbackQueryID),
 	})
 	if err != nil {
@@ -243,8 +246,9 @@ func (sender *Sender) SendStatusWithKeyboard(
 	}
 	sender.acknowledgeCallback(ctx, operationID, status.CallbackQueryID)
 	markup := coordinatorMarkup(keyboard)
+	text, entities := telegramformat.Markdown(status.Text)
 	message, err := sender.client.SendMessage(ctx, telegram.SendMessageRequest{
-		ChatID: telegram.ChatID(status.ConversationID), Text: status.Text, ReplyMarkup: markup,
+		ChatID: telegram.ChatID(status.ConversationID), Text: text, Entities: entities, ReplyMarkup: markup,
 		Priority: callbackPriority(status.CallbackQueryID),
 	})
 	if err != nil {
@@ -267,8 +271,9 @@ func (sender *Sender) EditStatusWithKeyboard(
 	}
 	sender.acknowledgeCallback(ctx, operationID, status.CallbackQueryID)
 	markup := coordinatorMarkup(keyboard)
+	text, entities := telegramformat.Markdown(status.Text)
 	message, err := sender.client.EditMessageText(ctx, telegram.EditMessageTextRequest{
-		ChatID: telegram.ChatID(status.ConversationID), MessageID: telegram.MessageID(status.SourceMessageID), Text: status.Text, ReplyMarkup: markup,
+		ChatID: telegram.ChatID(status.ConversationID), MessageID: telegram.MessageID(status.SourceMessageID), Text: text, Entities: entities, ReplyMarkup: markup,
 		Priority: callbackPriority(status.CallbackQueryID),
 	})
 	if err != nil {
@@ -315,6 +320,10 @@ func (sender *Sender) acknowledgeCallback(ctx context.Context, operationID, call
 		}
 	}()
 	<-started
+}
+
+func (sender *Sender) AcknowledgeCallback(ctx context.Context, operationID, callbackQueryID string) {
+	sender.acknowledgeCallback(ctx, operationID, callbackQueryID)
 }
 
 func callbackPriority(callbackQueryID string) telegram.MutationPriority {

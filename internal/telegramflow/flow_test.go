@@ -565,8 +565,8 @@ func TestAcceptedTurnRecoveryCallbackIsOneTimeAndCarriesExactGeneration(t *testi
 	replay.ID++
 	replay.CallbackQueryID = "turn-recovery-replay"
 	replayed, err := handler.Handle(context.Background(), replay)
-	if err != nil || replayed.Kind != coordinator.DecisionStatus || replayed.Status.CallbackQueryID != replay.CallbackQueryID || executor.calls != 1 {
-		t.Fatalf("second callback = %#v, %v, calls=%d; want one-time stale response", replayed, err, executor.calls)
+	if err != nil || replayed.Kind != coordinator.DecisionSkip || executor.calls != 1 || base.acknowledgements != 1 {
+		t.Fatalf("second callback = %#v, %v, calls=%d, acknowledgements=%d; want one-time silent acknowledgement", replayed, err, executor.calls, base.acknowledgements)
 	}
 }
 
@@ -815,10 +815,11 @@ func TestConfirmUnknownStatusRejectsReceiptForDifferentEditCarrier(t *testing.T)
 }
 
 type sender struct {
-	receipt coordinator.Receipt
-	err     error
-	sends   int
-	edits   int
+	receipt          coordinator.Receipt
+	err              error
+	sends            int
+	edits            int
+	acknowledgements int
 }
 
 type failNextUpdateStore struct {
@@ -849,6 +850,9 @@ func (sender *sender) SendStatusWithKeyboard(context.Context, string, coordinato
 func (sender *sender) EditStatusWithKeyboard(context.Context, string, coordinator.Status, *coordinator.KeyboardMarkup) (coordinator.Receipt, error) {
 	sender.edits++
 	return sender.receipt, sender.err
+}
+func (sender *sender) AcknowledgeCallback(context.Context, string, string) {
+	sender.acknowledgements++
 }
 
 func TestFlowAuthenticatesPlansAndBindsReplacementOnlyAfterConfirmedEdit(t *testing.T) {
@@ -1063,16 +1067,17 @@ func TestBackgroundCompletionBindsOnlyConfirmedNotificationCarrierAndKeepsActive
 	}
 }
 
-func TestHandlerDoesNotRevealUIToForeignCallbackAndKeepsOwnerInvalidButtonRecoverable(t *testing.T) {
+func TestHandlerSilentlyAcknowledgesOwnerInvalidButton(t *testing.T) {
 	now := time.Unix(1_800_000_000, 0).UTC()
 	presenter := newPresenter(t, now)
 	messages := &messageHandler{}
+	transport := &sender{receipt: coordinator.Receipt{MessageID: 1}}
 	handler, _, err := telegramflow.New(telegramflow.Config{
 		OwnerUserID: 7, OwnerPrivateChatID: 42, Presenter: presenter,
 		CallbackRegistry: telegrampipeline.NewMemoryCallbackRegistry(func() time.Time { return now }),
 		UIState:          telegramstate.NewMemoryStore(), Messages: messages, Callbacks: &callbackExecutor{},
 		Operations: telegramflow.NewMemoryCallbackOperationStore(),
-		Sender:     &sender{receipt: coordinator.Receipt{MessageID: 1}},
+		Sender:     transport,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -1091,7 +1096,7 @@ func TestHandlerDoesNotRevealUIToForeignCallbackAndKeepsOwnerInvalidButtonRecove
 	if err != nil {
 		t.Fatalf("owner invalid callback stopped handler: %v", err)
 	}
-	if owner.Kind != coordinator.DecisionStatus || owner.Status.SourceMessageID != 0 || owner.Status.CallbackQueryID != "owner" || owner.Status.Text == "" {
+	if owner.Kind != coordinator.DecisionSkip || transport.acknowledgements != 1 {
 		t.Fatalf("owner invalid callback decision = %#v", owner)
 	}
 }

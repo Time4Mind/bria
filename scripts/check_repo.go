@@ -1081,11 +1081,11 @@ var telegramControllerAllowedImports = []string{
 }
 
 var telegramBridgeAllowedImports = []string{
-	"internal/callbacktoken", "internal/coordinator", "internal/telegram", "internal/telegramrecovery", "internal/telegramui",
+	"internal/callbacktoken", "internal/coordinator", "internal/telegram", "internal/telegramformat", "internal/telegramrecovery", "internal/telegramui",
 }
 
 var telegramNotifyAllowedImports = []string{
-	"internal/domain", "internal/telegram", "internal/telegramcontroller", "internal/telegramui",
+	"internal/domain", "internal/telegram", "internal/telegramcontroller", "internal/telegramformat", "internal/telegramui",
 }
 
 type packagePolicy struct {
@@ -1594,9 +1594,14 @@ var packagePolicies = map[string]packagePolicy{
 	"internal/telegrambridge": {
 		responsibility: "adapt Telegram transport payloads and callback tokens",
 		allowedImports: []string{
-			"internal/callbacktoken", "internal/coordinator", "internal/telegram", "internal/telegramrecovery", "internal/telegramrecovery/statusrecovery", "internal/telegramui",
+			"internal/callbacktoken", "internal/coordinator", "internal/telegram", "internal/telegramformat", "internal/telegramrecovery", "internal/telegramrecovery/statusrecovery", "internal/telegramui",
 		},
 		maxProductionLines: 1350,
+	},
+	"internal/telegramformat": {
+		responsibility:     "convert bounded provider Markdown into Telegram text entities",
+		allowedImports:     []string{"internal/telegram"},
+		maxProductionLines: 150,
 	},
 	"internal/mutationscheduler": {
 		responsibility:     "persist and schedule Telegram mutation admission and cooldown",
@@ -1631,7 +1636,7 @@ var packagePolicies = map[string]packagePolicy{
 	"internal/telegramnotify": {
 		responsibility: "deliver final and background Telegram notifications",
 		allowedImports: []string{
-			"internal/domain", "internal/telegram", "internal/telegramcontroller", "internal/telegramui",
+			"internal/domain", "internal/telegram", "internal/telegramcontroller", "internal/telegramformat", "internal/telegramui",
 		},
 		maxProductionLines: 800,
 	},

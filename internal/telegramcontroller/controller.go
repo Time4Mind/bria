@@ -2592,11 +2592,15 @@ func (controller *Controller) ProcessDurableInput(
 	}
 	acceptedSignal := make(chan struct{}, 1)
 	resultSignal := make(chan turnResult, 1)
+	turnContext, cancelTurn := context.WithCancel(context.WithoutCancel(ctx))
+	stopTurnOnRootCancellation := context.AfterFunc(controller.rootContext, cancelTurn)
 	controller.durableWork.Add(1)
 	go func() {
 		defer controller.durableWork.Done()
+		defer stopTurnOnRootCancellation()
+		defer cancelTurn()
 		acceptedOnce := false
-		completion, accepted := worker.runTurnWithAcceptance(ctx, queuedTurn{
+		completion, accepted := worker.runTurnWithAcceptance(turnContext, queuedTurn{
 			text: string(input.Payload), messageID: input.MessageID, attachments: append([]AttachmentRef(nil), input.Attachments...),
 		}, func(callbackCtx context.Context) error {
 			if acceptedOnce {
@@ -2614,7 +2618,7 @@ func (controller *Controller) ProcessDurableInput(
 		})
 		var completionErr error
 		if accepted {
-			completionErr = turnprocessing.CompleteAttachments(context.WithoutCancel(ctx), controller.attachments, turnprocessing.Request{
+			completionErr = turnprocessing.CompleteAttachments(context.WithoutCancel(turnContext), controller.attachments, turnprocessing.Request{
 				SessionID: input.SessionID, ProviderSessionID: binding.SessionID, MessageID: input.MessageID,
 				Input: PreparedInput{Text: string(input.Payload), Attachments: append([]AttachmentRef(nil), input.Attachments...)},
 			})
@@ -2638,6 +2642,7 @@ func (controller *Controller) ProcessDurableInput(
 		}
 		return receipt, nil
 	case <-ctx.Done():
+		cancelTurn()
 		controller.publishPromptState(context.WithoutCancel(ctx), input.SessionID, input.MessageID, string(input.Payload), "🙅‍♂")
 		return receipt, ctx.Err()
 	}
