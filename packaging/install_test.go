@@ -284,7 +284,7 @@ func signedReleaseFixture(t *testing.T, root, version, binaryVersion, trustPath,
 		if err := os.MkdirAll(bundle, 0o700); err != nil {
 			t.Fatal(err)
 		}
-		bria := []byte("#!/bin/sh\ncase \"${1:-}\" in --version) printf 'bria " + binaryVersion + "\\n' ;; check-config) exit 0 ;; *) exit 0 ;; esac\n")
+		bria := []byte("#!/bin/sh\ncase \"${1:-}\" in --version) printf 'bria " + binaryVersion + "\\n' ;; install-parakeet|check-config) exit 0 ;; *) exit 0 ;; esac\n")
 		writeExecutable(t, filepath.Join(bundle, "bria"), bria)
 		writeExecutable(t, filepath.Join(bundle, "bria-codex-adapter"), []byte("#!/bin/sh\nexit 0\n"))
 		writeExecutable(t, filepath.Join(bundle, "bria-claude-adapter"), []byte("#!/bin/sh\nexit 0\n"))

@@ -15,6 +15,7 @@ import (
 	"bria/internal/coordinator"
 	"bria/internal/domain"
 	"bria/internal/instancelock"
+	"bria/internal/parakeetinstall"
 	"bria/internal/sessionruntime"
 	"bria/internal/settings"
 	"bria/internal/singlemachinecomposition"
@@ -35,6 +36,8 @@ type commandDependencies struct {
 	executable     func() (string, error)
 	environment    func() []string
 	telegramHTTP   func() telegram.HTTPClient
+	installSpeech  func(context.Context, parakeetinstall.Paths) error
+	verifySpeech   func(context.Context, parakeetinstall.Paths) error
 	composeRuntime func(config.Config, []string, string, sessionruntime.Options) (providerRuntime, error)
 }
 
@@ -81,6 +84,8 @@ func runContextWithDependencies(ctx context.Context, args []string, stdout, stde
 			err = checkConfig(args[2], deps)
 		case "check-telegram":
 			err = checkTelegram(ctx, args[2], deps)
+		case "install-parakeet":
+			err = installParakeet(ctx, args[2], deps)
 		default:
 			fmt.Fprintln(stderr, "bria: unknown command")
 			return 2
@@ -98,10 +103,30 @@ func runContextWithDependencies(ctx context.Context, args []string, stdout, stde
 		if args[0] == "check-telegram" {
 			fmt.Fprintln(stdout, "Telegram identity: OK")
 		}
+		if args[0] == "install-parakeet" {
+			fmt.Fprintln(stdout, "Parakeet dependencies: OK")
+		}
 		return 0
 	}
 	fmt.Fprintln(stderr, "bria: unknown command")
 	return 2
+}
+
+func installParakeet(ctx context.Context, configPath string, dependencies commandDependencies) error {
+	configuration, err := config.LoadFile(configPath)
+	if err != nil {
+		return fmt.Errorf("load configuration: %w", err)
+	}
+	if !configuration.Executes() {
+		return nil
+	}
+	if configuration.Parakeet == nil || dependencies.installSpeech == nil {
+		return errors.New("Parakeet installation dependencies are required")
+	}
+	return dependencies.installSpeech(ctx, parakeetinstall.Paths{
+		Executable: configuration.Parakeet.Executable,
+		Model:      configuration.Parakeet.ModelPath,
+	})
 }
 
 func checkConfig(configPath string, dependencies commandDependencies) error {
@@ -123,6 +148,17 @@ func checkConfig(configPath string, dependencies commandDependencies) error {
 	}
 	if !configuration.Executes() {
 		return nil
+	}
+	if !configuration.IsLegacy() {
+		if configuration.Parakeet == nil || dependencies.verifySpeech == nil {
+			return errors.New("Parakeet verification dependencies are required")
+		}
+		if err := dependencies.verifySpeech(context.Background(), parakeetinstall.Paths{
+			Executable: configuration.Parakeet.Executable,
+			Model:      configuration.Parakeet.ModelPath,
+		}); err != nil {
+			return fmt.Errorf("verify Parakeet dependencies: %w", err)
+		}
 	}
 	if dependencies.executable == nil || dependencies.environment == nil || dependencies.composeRuntime == nil {
 		return errors.New("runtime composition dependencies are required")
@@ -164,7 +200,11 @@ func checkTelegram(ctx context.Context, configPath string, dependencies commandD
 	return readiness.Ready(ctx, coordinator.Checkpoint{})
 }
 func productionDependencies() commandDependencies {
-	return commandDependencies{acquireLock: func(path string) (instanceLock, error) { return instancelock.Acquire(path) }, executable: os.Executable, environment: os.Environ, telegramHTTP: telegram.NewProductionHTTPClient, composeRuntime: composeProviderRuntime}
+	return commandDependencies{
+		acquireLock: func(path string) (instanceLock, error) { return instancelock.Acquire(path) },
+		executable:  os.Executable, environment: os.Environ, telegramHTTP: telegram.NewProductionHTTPClient,
+		installSpeech: parakeetinstall.Install, verifySpeech: parakeetinstall.Verify, composeRuntime: composeProviderRuntime,
+	}
 }
 func composeProviderRuntime(c config.Config, e []string, x string, o sessionruntime.Options) (providerRuntime, error) {
 	return singlemachinecomposition.ComposeProviderRuntime(c, e, x, o)
@@ -198,6 +238,7 @@ Usage:
   bria run --config /absolute/path/to/config.json
   bria check-config --config /absolute/path/to/config.json
   bria check-telegram --config /absolute/path/to/config.json
+  bria install-parakeet --config /absolute/path/to/config.json
 `)
 }
 

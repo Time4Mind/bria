@@ -16,6 +16,7 @@ import (
 	"bria/internal/app"
 	"bria/internal/config"
 	"bria/internal/domain"
+	"bria/internal/parakeetinstall"
 	"bria/internal/safelog"
 	"bria/internal/sessionruntime"
 	"bria/internal/settings"
@@ -1285,6 +1286,7 @@ func testCommandDependencies(t *testing.T, httpClient telegram.HTTPClient) comma
 		telegramHTTP: func() telegram.HTTPClient {
 			return httpClient
 		},
+		verifySpeech:   func(context.Context, parakeetinstall.Paths) error { return nil },
 		composeRuntime: composeProviderRuntime,
 	}
 }

@@ -3,14 +3,14 @@ package telegramcontroller
 import (
 	"context"
 	"errors"
-	"fmt"
 	"sort"
-	"strings"
 
 	"bria/internal/coordinator"
 	"bria/internal/domain"
 	"bria/internal/sessioncreation"
 	"bria/internal/settingsport"
+	"bria/internal/telegramcreationview"
+	"bria/internal/telegramsettingsview"
 )
 
 const (
@@ -60,7 +60,7 @@ func (controller *Controller) advanceCreationPreferenceV2(ctx context.Context, s
 			return SemanticActionResult{}, err
 		}
 		controller.cancelCreateDraft()
-		return controller.settingsSemanticResult(ctx)
+		return controller.settingsCategorySemanticResult(ctx, telegramsettingsview.CategoryCreation)
 	}
 	return controller.advanceCreateV2(ctx, snapshot, 0)
 }
@@ -70,32 +70,24 @@ func (controller *Controller) clearCreationPreferencesV2(ctx context.Context) (S
 	if !ok {
 		return SemanticActionResult{}, errors.New("session creation settings are not configured")
 	}
-	current, err := controller.settings.Snapshot(ctx)
-	if err != nil {
+	computerID := controller.currentNodeID()
+	if err := preferences.ClearDefaultProvider(ctx, computerID); err != nil {
 		return SemanticActionResult{}, err
 	}
-	computers := map[domain.ComputerID]struct{}{controller.localComputerID: {}}
-	for computerID := range current.DefaultProviders {
-		computers[computerID] = struct{}{}
+	if err := preferences.ClearDefaultWorkdir(ctx, computerID); err != nil {
+		return SemanticActionResult{}, err
 	}
-	for computerID := range current.DefaultWorkdirs {
-		computers[computerID] = struct{}{}
-	}
-	for computerID := range computers {
-		if err := preferences.ClearDefaultProvider(ctx, computerID); err != nil {
-			return SemanticActionResult{}, err
-		}
-		if err := preferences.ClearDefaultWorkdir(ctx, computerID); err != nil {
-			return SemanticActionResult{}, err
-		}
-	}
-	return controller.settingsSemanticResult(ctx)
+	return controller.settingsCategorySemanticResult(ctx, telegramsettingsview.CategoryCreation)
 }
 
 func (controller *Controller) beginNewSessionV2(ctx context.Context, updateID int64) (SemanticActionResult, error) {
 	computers, defaults, err := controller.creationStateV2(ctx)
 	if err != nil {
 		return SemanticActionResult{}, err
+	}
+	if len(computers) == 0 {
+		controller.cancelCreateDraft()
+		return controller.nodeListSemanticResult(ctx)
 	}
 	snapshot := controller.createFlow.BeginV2(computers, defaults)
 	return controller.advanceCreateV2(ctx, snapshot, updateID)
@@ -127,11 +119,23 @@ func (controller *Controller) creationStateV2(ctx context.Context) ([]sessioncre
 	}
 	if controller.creationEnvironment != nil {
 		computers, err := controller.creationEnvironment.AvailableComputers(ctx)
-		return computers, defaults, err
+		if err != nil {
+			return nil, defaults, err
+		}
+		selected := controller.currentNodeID()
+		for _, computer := range computers {
+			if computer.ID == selected {
+				return []sessioncreation.Computer{computer}, defaults, nil
+			}
+		}
+		return nil, defaults, nil
 	}
 	capabilities, err := controller.providerCapabilitiesV2(ctx)
 	if err != nil {
 		return nil, defaults, err
+	}
+	if controller.currentNodeID() != controller.localComputerID {
+		return nil, defaults, nil
 	}
 	return []sessioncreation.Computer{{
 		ID: controller.localComputerID, Name: string(controller.localComputerID),
@@ -170,6 +174,10 @@ func (controller *Controller) currentCreateSnapshotV2(ctx context.Context) (sess
 }
 
 func (controller *Controller) advanceCreateV2(ctx context.Context, snapshot sessioncreation.Snapshot, updateID int64) (SemanticActionResult, error) {
+	if snapshot.Step == sessioncreation.StepUnavailable {
+		controller.cancelCreateDraft()
+		return controller.nodeListSemanticResult(ctx)
+	}
 	if snapshot.Step == sessioncreation.StepDirectory && snapshot.CurrentDirectory == "" {
 		if defaultWorkdir := controller.createFlow.DefaultWorkdir(); defaultWorkdir != "" {
 			if directories, err := controller.browseCreationDirectoryV2(ctx, snapshot.Draft.ComputerID, defaultWorkdir); err == nil {
@@ -277,10 +285,7 @@ func (controller *Controller) selectCreateProviderV2(ctx context.Context, provid
 		return errProviderUnavailable
 	}
 	if !enabled {
-		if snapshot.Draft.ComputerID != controller.localComputerID || controller.providerPreferences == nil {
-			return errProviderUnavailable
-		}
-		if err := controller.providerPreferences.ToggleProvider(ctx, provider); err != nil {
+		if err := controller.toggleNodeProvider(ctx, snapshot.Draft.ComputerID, provider); err != nil {
 			return err
 		}
 	}
@@ -405,7 +410,7 @@ func (controller *Controller) handleCreateNavigationV2(ctx context.Context, acti
 				return SemanticActionResult{}, err
 			}
 			controller.cancelCreateDraft()
-			return controller.settingsSemanticResult(ctx)
+			return controller.settingsCategorySemanticResult(ctx, telegramsettingsview.CategoryCreation)
 		}
 		return controller.finishDirectorySelectionV2(ctx, action.UpdateID)
 	case SemanticCreateDirectoryNew:
@@ -418,9 +423,9 @@ func (controller *Controller) handleCreateNavigationV2(ctx context.Context, acti
 			controller.createFlow.Cancel()
 			if controller.currentCreationPreferenceMode() != "" {
 				controller.setCreationPreferenceMode("")
-				return controller.settingsSemanticResult(ctx)
+				return controller.settingsCategorySemanticResult(ctx, telegramsettingsview.CategoryCreation)
 			}
-			return SemanticActionResult{Surface: mainMenuSurface("Меню")}, nil
+			return controller.sessionListSemanticResult(ctx)
 		}
 		if controller.currentCreationPreferenceMode() != "" {
 			return controller.advanceCreationPreferenceV2(ctx, back)
@@ -549,84 +554,16 @@ func (controller *Controller) confirmCreateDraftV2(ctx context.Context, updateID
 }
 
 func renderCreateSurfaceV2(snapshot sessioncreation.Snapshot) *SemanticSurface {
-	lines := []string{"Новое"}
-	rows := make([][]SemanticButton, 0, 14)
-	if snapshot.ValidationError != "" {
-		lines = append(lines, "Ошибка: "+snapshot.ValidationError)
+	return semanticCreationSurface(telegramcreationview.Render(snapshot))
+}
+
+func semanticCreationSurface(view telegramcreationview.Surface) *SemanticSurface {
+	rows := make([][]SemanticButton, len(view.Rows))
+	for rowIndex, row := range view.Rows {
+		rows[rowIndex] = make([]SemanticButton, len(row))
+		for buttonIndex, button := range row {
+			rows[rowIndex][buttonIndex] = SemanticButton{Label: button.Label, Action: SemanticActionKind(button.Action), Choice: button.Choice}
+		}
 	}
-	switch snapshot.Step {
-	case sessioncreation.StepComputer:
-		lines = append(lines, "Выберите компьютер.")
-		for index, computer := range snapshot.Computers {
-			rows = append(rows, []SemanticButton{{Label: computer.Name, Action: SemanticCreateChoice, Choice: index + 1}})
-		}
-	case sessioncreation.StepProvider:
-		lines = append(lines, "Выберите бэкенд.")
-		buttons := make([]SemanticButton, 0, len(snapshot.Providers))
-		for _, capability := range snapshot.Providers {
-			if !capability.Installed {
-				continue
-			}
-			label := authorizationProviderName(capability.Provider)
-			if !capability.Enabled {
-				label += " · включить"
-			}
-			action := SemanticCreateSelectCodex
-			if capability.Provider == domain.ProviderClaude {
-				action = SemanticCreateSelectClaude
-			}
-			buttons = append(buttons, SemanticButton{Label: label, Action: action})
-		}
-		if len(buttons) > 0 {
-			rows = append(rows, buttons)
-		}
-	case sessioncreation.StepInstallRequired:
-		lines = append(lines, "На компьютере не установлен ни один бэкенд.")
-		rows = append(rows, []SemanticButton{{Label: "Настройки", Action: SemanticMenuSettings}})
-	case sessioncreation.StepDirectory:
-		if snapshot.CurrentDirectory == "" {
-			lines = append(lines, "Выберите корень.")
-		} else {
-			lines = append(lines, "Папка: "+snapshot.CurrentDirectory)
-		}
-		for index, directory := range snapshot.Directories {
-			rows = append(rows, []SemanticButton{{Label: directory.Name, Action: SemanticCreateChoice, Choice: index + 1}})
-		}
-		if snapshot.Pages > 1 {
-			rows = append(rows, []SemanticButton{
-				{Label: "◀", Action: SemanticCreatePrevious},
-				{Label: fmt.Sprintf("%d/%d", snapshot.Page, snapshot.Pages), Action: SemanticCreateFirst},
-				{Label: "▶", Action: SemanticCreateNext},
-			})
-		}
-		if snapshot.CurrentDirectory != "" {
-			rows = append(rows, []SemanticButton{
-				{Label: "↑", Action: SemanticCreateUp},
-				{Label: "Выбрать", Action: SemanticCreatePick},
-				{Label: "Создать папку", Action: SemanticCreateDirectoryNew},
-			})
-		}
-	case sessioncreation.StepDirectoryName:
-		lines = append(lines, "Отправьте отдельным сообщением имя дочерней папки.")
-	case sessioncreation.StepRecommendation:
-		lines = append(lines, "Продолжить архивную сессию?")
-		for index, item := range snapshot.Recommendations {
-			rows = append(rows, []SemanticButton{{Label: item.Label, Action: SemanticCreateChoice, Choice: index + 1}})
-		}
-		if snapshot.Pages > 1 {
-			rows = append(rows, []SemanticButton{
-				{Label: "◀", Action: SemanticCreatePrevious},
-				{Label: fmt.Sprintf("%d/%d", snapshot.Page, snapshot.Pages), Action: SemanticCreateFirst},
-				{Label: "▶", Action: SemanticCreateNext},
-			})
-		}
-		rows = append(rows, []SemanticButton{{Label: "Новое", Action: SemanticCreateFresh}})
-	default:
-		lines = append(lines, "Нет доступных компьютеров.")
-	}
-	if snapshot.Step != sessioncreation.StepComputer && snapshot.Step != sessioncreation.StepUnavailable {
-		rows = append(rows, []SemanticButton{{Label: "Назад", Action: SemanticCreateBack}})
-	}
-	rows = append(rows, []SemanticButton{{Label: "≡ Меню", Action: SemanticMenuBack}})
-	return &SemanticSurface{Text: strings.Join(lines, "\n"), Rows: rows}
+	return &SemanticSurface{Text: view.Text, Rows: rows}
 }

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"bria/internal/processgroup"
 	"bria/internal/speech"
 )
 
@@ -63,6 +64,10 @@ func (c Command) Transcribe(ctx context.Context, audioPath string) (string, erro
 	command := exec.CommandContext(ctx, c.Executable, arguments...)
 	command.Env = append([]string{}, c.Environment...)
 	command.Dir = c.WorkingDirectory
+	if err := processgroup.Configure(command); err != nil {
+		return "", speech.ErrInvalidConfiguration
+	}
+	command.Cancel = func() error { return processgroup.KillTree(command) }
 	transcript := &limitedBuffer{limit: c.MaxTranscriptBytes}
 	diagnostic := &limitedBuffer{limit: c.MaxDiagnosticBytes, discardOverflow: true}
 	command.Stdout = transcript

@@ -17,6 +17,7 @@ import (
 	"bria/internal/durableflow"
 	"bria/internal/interactioncomposition"
 	"bria/internal/messagejournal"
+	"bria/internal/providerquota"
 	"bria/internal/recoverycomposition"
 	"bria/internal/recoveryruntime"
 	"bria/internal/runtimefactory"
@@ -204,6 +205,10 @@ func runTelegramController(
 	computerID, err := configuredComputerID(configuration)
 	if err != nil {
 		return fmt.Errorf("resolve local computer identity: %w", err)
+	}
+	quotaService, err := providerquota.FromConfig(computerID, configuration, dependencies.Environment(), 10*time.Minute)
+	if err != nil {
+		return fmt.Errorf("compose provider quota service: %w", err)
 	}
 
 	state, err := storage.OpenSessionStore(configuration.StatePath)
@@ -427,6 +432,7 @@ func runTelegramController(
 			QueueLimit: effectiveSettings.QueueLimit, Lifecycle: starter, UIState: state,
 			Settings: telegramPreferences, Providers: settingscomposition.ProviderPreferences{Store: providerPreferences},
 			CreationEnvironment: creationEnvironment,
+			Quotas:              quotaService,
 			Stopper:             turnStopper, ArchivedResumer: archivedResumer, SessionCloser: sessionCloser,
 			TurnLifecycle: turnLifecycle, DurableInput: inputCustody, DurableOutput: outputCustody,
 			InputPreparer: inputPreparer, Attachments: attachments, RuntimeEvents: runtimeEvents, Finals: finals,
@@ -541,10 +547,7 @@ func runTelegramController(
 		Checkpoints: checkpoints, Confirmer: loop, Interval: outboundReceiptInterval,
 		Report: durableReporter("coordinator_receipt", "telegram.status_receipt_failed"),
 	}
-	runErr := runControllerWithMaintenance(ctx, loop, expiry, safeLogger, inputDispatcher, outputDispatcher, statusDelivery, receiptReconciler, processSupervision, expiryReporter)
-	// A shutdown can race immediately after Telegram returned its receipt but
-	// before the periodic projection into the outer checkpoint. Reconcile once
-	// more from durable inner state using a fresh bounded local context.
+	runErr := runControllerWithMaintenance(ctx, loop, expiry, safeLogger, inputDispatcher, outputDispatcher, statusDelivery, receiptReconciler, processSupervision, quotaService, expiryReporter)
 	reconcileContext, cancelReconcile := context.WithTimeout(context.Background(), controllerCloseTimeout)
 	reconcileErr := telegramruntimecomposition.ReconcileEnqueuedOutbound(reconcileContext, checkpoints, loop)
 	cancelReconcile()
@@ -573,8 +576,7 @@ func Run(ctx context.Context, configPath string, dependencies Dependencies) erro
 	return runTelegramController(ctx, configPath, dependencies)
 }
 
-// ComposeProviderRuntime derives runtime and accepted-turn recovery from one
-// immutable command snapshot. Archive discovery is intentionally not inferred.
+// ComposeProviderRuntime derives runtime and recovery from one command snapshot.
 func ComposeProviderRuntime(configuration config.Config, environment []string, executable string, options sessionruntime.Options) (ProviderRuntime, error) {
 	if !configuration.ProviderEnabled(domain.ProviderCodex) && !configuration.ProviderEnabled(domain.ProviderClaude) {
 		return unavailableProviderRuntime{}, nil
@@ -692,9 +694,10 @@ func runControllerWithMaintenance(
 	statuses contextRunner,
 	receipts contextRunner,
 	supervision contextRunner,
+	quotas contextRunner,
 	report sessionexpiry.ErrorReporter,
 ) error {
-	if ctx == nil || controller == nil || expiry == nil || cleanup == nil || input == nil || output == nil || statuses == nil || receipts == nil || supervision == nil || report == nil {
+	if ctx == nil || controller == nil || expiry == nil || cleanup == nil || input == nil || output == nil || statuses == nil || receipts == nil || supervision == nil || quotas == nil || report == nil {
 		return errors.New("controller maintenance dependencies are required")
 	}
 	runContext, cancel := context.WithCancel(ctx)
@@ -703,7 +706,7 @@ func runControllerWithMaintenance(
 		component string
 		err       error
 	}
-	results := make(chan result, 8)
+	results := make(chan result, 9)
 	go func() {
 		results <- result{component: "controller", err: controller.Run(runContext)}
 	}()
@@ -728,15 +731,14 @@ func runControllerWithMaintenance(
 	go func() {
 		results <- result{component: "session supervision", err: supervision.Run(runContext)}
 	}()
+	go func() {
+		results <- result{component: "provider quota", err: quotas.Run(runContext)}
+	}()
 	first := <-results
 	cancel()
-	<-results
-	<-results
-	<-results
-	<-results
-	<-results
-	<-results
-	<-results
+	for range 8 {
+		<-results
+	}
 	if first.component == "controller" {
 		return first.err
 	}

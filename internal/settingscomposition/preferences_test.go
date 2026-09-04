@@ -145,9 +145,13 @@ func TestPreferencesDriveTypedControllerAndDurableFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = controller.Close(context.Background()) })
-	result, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticMenuSettings})
-	if err != nil || result.Surface == nil || !strings.Contains(result.Surface.Text, "Срок жизни сессий: never") || !strings.Contains(result.Surface.Text, "Лимит страниц: 64") {
-		t.Fatalf("settings surface = (%#v, %v)", result, err)
+	result, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticSettingsCategory, Choice: 4})
+	if err != nil || result.Surface == nil || !strings.Contains(result.Surface.Text, "Срок жизни сессий: never") {
+		t.Fatalf("archive settings surface = (%#v, %v)", result, err)
+	}
+	result, err = controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticSettingsCategory, Choice: 1})
+	if err != nil || result.Surface == nil || !strings.Contains(result.Surface.Text, "Лимит страниц: 64") {
+		t.Fatalf("card settings surface = (%#v, %v)", result, err)
 	}
 	for _, action := range []telegramcontroller.SemanticActionKind{
 		telegramcontroller.SemanticSettingsContinueExisting, telegramcontroller.SemanticSettingsScreen,

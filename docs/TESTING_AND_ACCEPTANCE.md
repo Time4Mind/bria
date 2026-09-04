@@ -34,11 +34,13 @@ make check-full
 ```sh
 bin/bria check-config --config /absolute/path/to/config.json
 bin/bria check-telegram --config /absolute/path/to/config.json
+bin/bria install-parakeet --config /absolute/path/to/config.json
 bin/bria run --config /absolute/path/to/config.json
 ```
 
 - `check-config` читает и проверяет локальную конфигурацию, Telegram token, callback key, provider commands, соседние adapter binaries и очищенное окружение исполнителей. Он не обращается к Telegram и не захватывает рабочую instance lock.
 - `check-telegram` вызывает только `getMe` и подтверждает точное имя ожидаемого бота. Он не вызывает `getUpdates`, не устанавливает backlog fence и не запускает исполнителей.
+- `install-parakeet` является mutating network-командой для нативной роли `combined`/`executor`: отсутствующий `ffmpeg` ставится поддержанным package manager, а runtime и модель активируются только после проверки pinned размера и SHA-256. Для `coordinator` команда ничего не скачивает и не меняет.
 - `run` захватывает exclusive lock для state path, перечитывает секреты, компонует runtime и запускает Telegram loop. При отсутствии checkpoint первый запуск после проверки identity устанавливает и сохраняет backlog fence до обработки новых сообщений.
 
 ### Классификация текущих доказательств
@@ -71,7 +73,7 @@ bin/bria run --config /absolute/path/to/config.json
 - текстовый и голосовой ввод с переходами `🙋‍♂️`, `👨‍💻` и `🙅‍♂️`;
 - приём фотографий и допустимых текстовых подписей без скачивания видео;
 - автоматическое обнаружение файлов в финальном ответе, единое уведомление об ошибке для группы файлов и ручной повтор только недоставленных файлов;
-- единый архив сессий Codex и Claude без разделения по приложению, из которого они были запущены;
+- отдельные списки и архивы выбранных нод без разделения по приложению, из которого сессии были запущены;
 - срок жизни сессии: `никогда`, 6, 12, 24 или 48 часов от создания либо восстановления; занятая сессия закрывается только после завершения текущей работы;
 - настройки из Telegram и локального файла показывают одно состояние, а ошибочное изменение целиком отклоняется.
 

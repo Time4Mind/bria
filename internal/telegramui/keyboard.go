@@ -27,6 +27,8 @@ const (
 	ActionMenuStatus                           Action = "menu_status"
 	ActionMenuSettings                         Action = "menu_settings"
 	ActionMenuBack                             Action = "menu_back"
+	ActionMenuNodes                            Action = "menu_nodes"
+	ActionSelectNode                           Action = "select_node"
 	ActionCreateSelectCodex                    Action = "create_select_codex"
 	ActionCreateSelectClaude                   Action = "create_select_claude"
 	ActionCreateWorkdir                        Action = "create_workdir"
@@ -42,6 +44,7 @@ const (
 	ActionCreateFresh                          Action = "create_fresh"
 	ActionCreateCodex                          Action = "create_codex"
 	ActionCreateClaude                         Action = "create_claude"
+	ActionSettingsCategory                     Action = "settings_category"
 	ActionSettingsScreen                       Action = "settings_screen"
 	ActionSettingsDetail                       Action = "settings_detail"
 	ActionSettingsPageLimit                    Action = "settings_page_limit"
@@ -87,12 +90,12 @@ const (
 
 func IsGlobalAction(action Action) bool {
 	switch action {
-	case ActionMenuSessions, ActionMenuNew, ActionMenuArchive, ActionMenuStatus,
+	case ActionMenuSessions, ActionMenuNew, ActionMenuArchive, ActionMenuStatus, ActionMenuNodes, ActionSelectNode,
 		ActionMenuSettings, ActionMenuBack, ActionCreateSelectCodex, ActionCreateSelectClaude,
 		ActionCreateWorkdir, ActionCreateConfirm, ActionCreateCodex, ActionCreateClaude,
 		ActionCreateChoice, ActionCreatePrevious, ActionCreateFirst, ActionCreateNext,
 		ActionCreateUp, ActionCreatePick, ActionCreateDirectoryNew, ActionCreateBack, ActionCreateFresh,
-		ActionSettingsScreen, ActionSettingsDetail, ActionSettingsPageLimit, ActionSettingsContinueExisting,
+		ActionSettingsCategory, ActionSettingsScreen, ActionSettingsDetail, ActionSettingsPageLimit, ActionSettingsContinueExisting,
 		ActionSettingsTechnicalActions, ActionSettingsBackgroundQuestions, ActionSettingsBackgroundErrors,
 		ActionSettingsArchiveRecommendations,
 		ActionSettingsDefaultProvider, ActionSettingsDefaultWorkdir, ActionSettingsClearCreationDefaults,
@@ -250,6 +253,11 @@ func ProjectCardKeyboard(input CardKeyboardInput) (CardKeyboard, error) {
 		}
 		rows = append(rows, row)
 	}
+	rows = append(rows, ButtonRow{
+		{Action: ActionMenuNew},
+		{Action: ActionMenuNodes},
+		{Action: ActionMenuBack},
+	})
 	return CardKeyboard{Rows: rows}, nil
 }
 

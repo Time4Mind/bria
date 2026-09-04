@@ -385,6 +385,34 @@ func (store *SessionStore) LoadActiveSession(ctx context.Context) (domain.Sessio
 	return state.ActiveSession, nil
 }
 
+// LoadNodeSelection returns the durable selected node and a copy of the last
+// active session recorded for every node.
+func (store *SessionStore) LoadNodeSelection(ctx context.Context) (domain.ComputerID, map[domain.ComputerID]domain.SessionID, error) {
+	state, err := store.LoadTelegramUI(ctx)
+	if err != nil {
+		return "", nil, err
+	}
+	active := make(map[domain.ComputerID]domain.SessionID, len(state.ActiveSessions))
+	for nodeID, sessionID := range state.ActiveSessions {
+		active[nodeID] = sessionID
+	}
+	return state.SelectedNode, active, nil
+}
+
+// LoadNodeSessionHistory returns each node's most-recently-active sessions,
+// newest first. Older state files legitimately return an empty history.
+func (store *SessionStore) LoadNodeSessionHistory(ctx context.Context) (map[domain.ComputerID][]domain.SessionID, error) {
+	state, err := store.LoadTelegramUI(ctx)
+	if err != nil {
+		return nil, err
+	}
+	history := make(map[domain.ComputerID][]domain.SessionID, len(state.RecentSessions))
+	for nodeID, sessions := range state.RecentSessions {
+		history[nodeID] = append([]domain.SessionID(nil), sessions...)
+	}
+	return history, nil
+}
+
 // UpdateTelegramUI atomically updates Telegram presentation state in the same
 // document as sessions and the coordinator checkpoint.
 func (store *SessionStore) UpdateTelegramUI(ctx context.Context, fn func(*telegramstate.State) error) error {
@@ -427,6 +455,16 @@ func (store *SessionStore) SetActiveSession(ctx context.Context, sessionID domai
 	}
 	return store.UpdateTelegramUI(ctx, func(state *telegramstate.State) error {
 		state.ActiveSession = sessionID
+		if state.SelectedNode != "" {
+			if state.ActiveSessions == nil {
+				state.ActiveSessions = make(map[domain.ComputerID]domain.SessionID)
+			}
+			state.ActiveSessions[state.SelectedNode] = sessionID
+			if state.RecentSessions == nil {
+				state.RecentSessions = make(map[domain.ComputerID][]domain.SessionID)
+			}
+			state.RecentSessions[state.SelectedNode] = promoteRecentSession(state.RecentSessions[state.SelectedNode], sessionID)
+		}
 		if state.Cards == nil {
 			state.Cards = make(map[domain.SessionID]telegramstate.Card)
 		}
@@ -435,6 +473,77 @@ func (store *SessionStore) SetActiveSession(ctx context.Context, sessionID domai
 				SessionID: sessionID,
 				Page:      telegramstate.Page{Current: 1, Total: 1, FollowLatest: true},
 			}
+		}
+		return nil
+	})
+}
+
+// SetSelectedNode persists the current node and projects that node's last
+// active session into the legacy ActiveSession field.
+func (store *SessionStore) SetSelectedNode(ctx context.Context, nodeID domain.ComputerID) error {
+	if strings.TrimSpace(string(nodeID)) == "" {
+		return errors.New("selected node id is required")
+	}
+	return store.UpdateTelegramUI(ctx, func(state *telegramstate.State) error {
+		state.SelectedNode = nodeID
+		state.ActiveSession = state.ActiveSessions[nodeID]
+		return nil
+	})
+}
+
+// SetNodeActiveSession selects nodeID and persists its last active session.
+func (store *SessionStore) SetNodeActiveSession(ctx context.Context, nodeID domain.ComputerID, sessionID domain.SessionID) error {
+	if strings.TrimSpace(string(nodeID)) == "" || strings.TrimSpace(string(sessionID)) == "" {
+		return errors.New("node and active session ids are required")
+	}
+	return store.UpdateTelegramUI(ctx, func(state *telegramstate.State) error {
+		state.SelectedNode = nodeID
+		state.ActiveSession = sessionID
+		if state.ActiveSessions == nil {
+			state.ActiveSessions = make(map[domain.ComputerID]domain.SessionID)
+		}
+		state.ActiveSessions[nodeID] = sessionID
+		if state.RecentSessions == nil {
+			state.RecentSessions = make(map[domain.ComputerID][]domain.SessionID)
+		}
+		state.RecentSessions[nodeID] = promoteRecentSession(state.RecentSessions[nodeID], sessionID)
+		if state.Cards == nil {
+			state.Cards = make(map[domain.SessionID]telegramstate.Card)
+		}
+		if _, ok := state.Cards[sessionID]; !ok {
+			state.Cards[sessionID] = telegramstate.Card{
+				SessionID: sessionID,
+				Page:      telegramstate.Page{Current: 1, Total: 1, FollowLatest: true},
+			}
+		}
+		return nil
+	})
+}
+
+func promoteRecentSession(history []domain.SessionID, sessionID domain.SessionID) []domain.SessionID {
+	result := make([]domain.SessionID, 1, len(history)+1)
+	result[0] = sessionID
+	for _, candidate := range history {
+		if candidate != sessionID {
+			result = append(result, candidate)
+		}
+	}
+	if len(result) > 512 {
+		result = result[:512]
+	}
+	return result
+}
+
+// ClearNodeActiveSession removes one node's active-session projection while
+// retaining the selected node itself.
+func (store *SessionStore) ClearNodeActiveSession(ctx context.Context, nodeID domain.ComputerID) error {
+	if strings.TrimSpace(string(nodeID)) == "" {
+		return errors.New("node id is required")
+	}
+	return store.UpdateTelegramUI(ctx, func(state *telegramstate.State) error {
+		delete(state.ActiveSessions, nodeID)
+		if state.SelectedNode == nodeID {
+			state.ActiveSession = ""
 		}
 		return nil
 	})

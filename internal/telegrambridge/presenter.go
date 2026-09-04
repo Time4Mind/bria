@@ -208,7 +208,9 @@ func (presenter *Presenter) presentKeyboard(
 				)
 			}
 			tokenSessionID := logicalSessionID
-			if button.Action == telegramui.ActionSelectSession ||
+			if telegramui.IsGlobalAction(button.Action) {
+				tokenSessionID = telegramui.GlobalSurfaceID
+			} else if button.Action == telegramui.ActionSelectSession ||
 				(button.Action == telegramui.ActionResume && button.Target.SessionSlot > 0) {
 				tokenSessionID = selectableSessionIDs[button.Target.SessionSlot-1]
 			}
@@ -524,9 +526,22 @@ func presentButton(button telegramui.Button) (string, callbacktoken.Action, int,
 	case telegramui.ActionMenuStatus:
 		return presentGlobalButton(button, "Статус", callbacktoken.ActionMenuStatus)
 	case telegramui.ActionMenuSettings:
-		return presentGlobalButton(button, "Настройки", callbacktoken.ActionMenuSettings)
+		label := button.Label
+		if label == "" {
+			label = "Настройки"
+		}
+		return presentGlobalButton(button, label, callbacktoken.ActionMenuSettings)
 	case telegramui.ActionMenuBack:
 		return presentGlobalButton(button, "≡ Меню", callbacktoken.ActionMenuBack)
+	case telegramui.ActionMenuNodes:
+		return presentGlobalButton(button, "Ноды", callbacktoken.ActionMenuNodes)
+	case telegramui.ActionSelectNode:
+		if button.Target.Choice < 1 || button.Target.Choice > callbacktoken.MaxTarget || button.Target.Page != 0 ||
+			button.Target.FollowLatest || button.Target.SessionSlot != 0 || button.Target.InteractionChoice != 0 ||
+			button.Indicator != nil || button.Label == "" {
+			return "", 0, 0, errors.New("node choice button is invalid")
+		}
+		return button.Label, callbacktoken.ActionSelectNode, button.Target.Choice, nil
 	case telegramui.ActionCreateSelectCodex:
 		label := button.Label
 		if label == "" {
@@ -557,7 +572,7 @@ func presentButton(button telegramui.Button) (string, callbacktoken.Action, int,
 	case telegramui.ActionCreateNext:
 		return presentGlobalButton(button, "▶", callbacktoken.ActionCreateNext)
 	case telegramui.ActionCreateUp:
-		return presentGlobalButton(button, "↑", callbacktoken.ActionCreateUp)
+		return presentGlobalButton(button, "..", callbacktoken.ActionCreateUp)
 	case telegramui.ActionCreatePick:
 		return presentGlobalButton(button, "Выбрать", callbacktoken.ActionCreatePick)
 	case telegramui.ActionCreateDirectoryNew:
@@ -570,6 +585,13 @@ func presentButton(button telegramui.Button) (string, callbacktoken.Action, int,
 		return presentGlobalButton(button, "Codex", callbacktoken.ActionCreateCodex)
 	case telegramui.ActionCreateClaude:
 		return presentGlobalButton(button, "Claude", callbacktoken.ActionCreateClaude)
+	case telegramui.ActionSettingsCategory:
+		if button.Target.Choice < 1 || button.Target.Choice > callbacktoken.MaxTarget || button.Target.Page != 0 ||
+			button.Target.FollowLatest || button.Target.SessionSlot != 0 || button.Target.InteractionChoice != 0 ||
+			button.Indicator != nil || button.Label == "" {
+			return "", 0, 0, errors.New("settings category button is invalid")
+		}
+		return button.Label, callbacktoken.ActionSettingsCategory, button.Target.Choice, nil
 	case telegramui.ActionSettingsScreen:
 		return presentGlobalButton(button, "Screen", callbacktoken.ActionSettingsScreen)
 	case telegramui.ActionSettingsDetail:
@@ -709,6 +731,10 @@ func decodeFields(fields callbacktoken.Fields) (telegramui.Action, telegramui.Bu
 		return telegramui.ActionMenuSettings, telegramui.ButtonTarget{}, nil
 	case callbacktoken.ActionMenuBack:
 		return telegramui.ActionMenuBack, telegramui.ButtonTarget{}, nil
+	case callbacktoken.ActionMenuNodes:
+		return telegramui.ActionMenuNodes, telegramui.ButtonTarget{}, nil
+	case callbacktoken.ActionSelectNode:
+		return telegramui.ActionSelectNode, telegramui.ButtonTarget{Choice: fields.Target}, nil
 	case callbacktoken.ActionCreateSelectCodex:
 		return telegramui.ActionCreateSelectCodex, telegramui.ButtonTarget{}, nil
 	case callbacktoken.ActionCreateSelectClaude:
@@ -739,6 +765,8 @@ func decodeFields(fields callbacktoken.Fields) (telegramui.Action, telegramui.Bu
 		return telegramui.ActionCreateCodex, telegramui.ButtonTarget{}, nil
 	case callbacktoken.ActionCreateClaude:
 		return telegramui.ActionCreateClaude, telegramui.ButtonTarget{}, nil
+	case callbacktoken.ActionSettingsCategory:
+		return telegramui.ActionSettingsCategory, telegramui.ButtonTarget{Choice: fields.Target}, nil
 	case callbacktoken.ActionSettingsScreen:
 		return telegramui.ActionSettingsScreen, telegramui.ButtonTarget{}, nil
 	case callbacktoken.ActionSettingsDetail:

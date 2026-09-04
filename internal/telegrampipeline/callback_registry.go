@@ -43,7 +43,6 @@ type fileCallbackRegistryState struct {
 	Version       int                                           `json:"version"`
 	Presentations map[domain.SessionID]fileCallbackPresentation `json:"presentations"`
 }
-
 type FileCallbackRegistry struct {
 	mu            sync.Mutex
 	path          string

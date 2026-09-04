@@ -130,6 +130,10 @@ func semanticActionFromPlan(plan telegrampipeline.CallbackPlan) (telegramcontrol
 		kind = telegramcontroller.SemanticMenuSettings
 	case telegramui.ActionMenuBack:
 		kind = telegramcontroller.SemanticMenuBack
+	case telegramui.ActionMenuNodes:
+		kind = telegramcontroller.SemanticMenuNodes
+	case telegramui.ActionSelectNode:
+		kind = telegramcontroller.SemanticSelectNode
 	case telegramui.ActionCreateSelectCodex:
 		kind = telegramcontroller.SemanticCreateSelectCodex
 	case telegramui.ActionCreateSelectClaude:
@@ -160,6 +164,8 @@ func semanticActionFromPlan(plan telegrampipeline.CallbackPlan) (telegramcontrol
 		kind = telegramcontroller.SemanticCreateCodex
 	case telegramui.ActionCreateClaude:
 		kind = telegramcontroller.SemanticCreateClaude
+	case telegramui.ActionSettingsCategory:
+		kind = telegramcontroller.SemanticSettingsCategory
 	case telegramui.ActionSettingsScreen:
 		kind = telegramcontroller.SemanticSettingsScreen
 	case telegramui.ActionSettingsDetail:
@@ -242,8 +248,12 @@ func callbackEffectForAction(action telegramui.Action) telegrampipeline.Callback
 		return telegrampipeline.EffectShowStatus
 	case telegramui.ActionMenuSettings:
 		return telegrampipeline.EffectOpenSettings
+	case telegramui.ActionSettingsCategory:
+		return telegrampipeline.EffectOpenSettings
 	case telegramui.ActionMenuBack:
 		return telegrampipeline.EffectOpenMenu
+	case telegramui.ActionMenuNodes, telegramui.ActionSelectNode:
+		return telegrampipeline.EffectShowStatus
 	case telegramui.ActionCreateSelectCodex:
 		return telegrampipeline.EffectSelectCreateCodex
 	case telegramui.ActionCreateSelectClaude:
@@ -334,11 +344,12 @@ func projectSemanticSurface(surface telegramcontroller.SemanticSurface) (*telegr
 			}
 			button := telegramui.Button{Action: action}
 			switch action {
-			case telegramui.ActionCreateChoice, telegramui.ActionCreateFirst,
+			case telegramui.ActionSettingsCategory, telegramui.ActionMenuSettings, telegramui.ActionSelectNode,
+				telegramui.ActionCreateChoice, telegramui.ActionCreateFirst,
 				telegramui.ActionCreateSelectCodex, telegramui.ActionCreateSelectClaude:
 				button.Label = semantic.Label
 			}
-			if action == telegramui.ActionCreateChoice {
+			if action == telegramui.ActionCreateChoice || action == telegramui.ActionSettingsCategory || action == telegramui.ActionSelectNode {
 				button.Target.Choice = semantic.Choice
 			}
 			if action == telegramui.ActionSelectSession || action == telegramui.ActionResume {
@@ -388,6 +399,12 @@ func telegramUIAction(action telegramcontroller.SemanticActionKind) (telegramui.
 		return telegramui.ActionMenuSettings, nil
 	case telegramcontroller.SemanticMenuBack:
 		return telegramui.ActionMenuBack, nil
+	case telegramcontroller.SemanticMenuNodes:
+		return telegramui.ActionMenuNodes, nil
+	case telegramcontroller.SemanticSelectNode:
+		return telegramui.ActionSelectNode, nil
+	case telegramcontroller.SemanticSettingsCategory:
+		return telegramui.ActionSettingsCategory, nil
 	case telegramcontroller.SemanticCreateSelectCodex:
 		return telegramui.ActionCreateSelectCodex, nil
 	case telegramcontroller.SemanticCreateSelectClaude:

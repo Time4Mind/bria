@@ -35,6 +35,7 @@ require_executable packaging/verify-supply-chain.sh
 require_file .github/workflows/platform.yml
 require_file .github/workflows/release.yml
 require_file packaging/releasemanifest/main.go
+grep -q 'install-parakeet --config' "$repo_dir/packaging/validate-install.sh" || fail "release validation must provision Parakeet before config composition"
 
 grep -q '^USER [^0]' "$repo_dir/Dockerfile" || fail "Dockerfile must select a non-root user"
 grep -q 'main.version=' "$repo_dir/Dockerfile" || fail "Dockerfile must inject a release version"

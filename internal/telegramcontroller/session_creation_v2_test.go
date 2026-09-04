@@ -15,9 +15,10 @@ import (
 )
 
 type creationEnvironmentStub struct {
-	computers []sessioncreation.Computer
-	roots     map[domain.ComputerID][]sessioncreation.Directory
-	children  map[string][]sessioncreation.Directory
+	computers  []sessioncreation.Computer
+	registered []sessioncreation.Computer
+	roots      map[domain.ComputerID][]sessioncreation.Directory
+	children   map[string][]sessioncreation.Directory
 }
 
 func localCreationEnvironment(t *testing.T, root string, capabilities ...sessioncreation.ProviderCapability) sessioncreation.Environment {
@@ -33,6 +34,12 @@ func localCreationEnvironment(t *testing.T, root string, capabilities ...session
 
 func (environment *creationEnvironmentStub) AvailableComputers(context.Context) ([]sessioncreation.Computer, error) {
 	return append([]sessioncreation.Computer(nil), environment.computers...), nil
+}
+func (environment *creationEnvironmentStub) RegisteredComputers(context.Context) ([]sessioncreation.Computer, error) {
+	if environment.registered == nil {
+		return append([]sessioncreation.Computer(nil), environment.computers...), nil
+	}
+	return append([]sessioncreation.Computer(nil), environment.registered...), nil
 }
 func (environment *creationEnvironmentStub) Roots(_ context.Context, computerID domain.ComputerID) ([]sessioncreation.Directory, error) {
 	return append([]sessioncreation.Directory(nil), environment.roots[computerID]...), nil
@@ -50,25 +57,125 @@ func (environment *creationEnvironmentStub) CreateChild(context.Context, domain.
 func (environment *creationEnvironmentStub) Parent(context.Context, domain.ComputerID, string) (string, bool) {
 	return "", false
 }
+func (environment *creationEnvironmentStub) ToggleProvider(_ context.Context, computerID domain.ComputerID, provider domain.Provider) error {
+	for computerIndex := range environment.computers {
+		if environment.computers[computerIndex].ID != computerID {
+			continue
+		}
+		for capabilityIndex := range environment.computers[computerIndex].Capabilities {
+			capability := &environment.computers[computerIndex].Capabilities[capabilityIndex]
+			if capability.Provider == provider && capability.Installed {
+				capability.Enabled = !capability.Enabled
+				return nil
+			}
+		}
+	}
+	return errors.New("provider is unavailable on node")
+}
 
-func TestSessionCreationV2AlwaysChoosesAmongMultipleAvailableComputers(t *testing.T) {
+func TestSessionCreationV2UsesSelectedNodeWithoutComputerStep(t *testing.T) {
 	environment := &creationEnvironmentStub{
 		computers: []sessioncreation.Computer{
-			{ID: "first", Name: "First", Capabilities: []sessioncreation.ProviderCapability{{Provider: domain.ProviderCodex, Installed: true, Enabled: true}}},
+			{ID: "local", Name: "Coordinator", Capabilities: []sessioncreation.ProviderCapability{{Provider: domain.ProviderCodex, Installed: true, Enabled: true}}},
 			{ID: "second", Name: "Second", Capabilities: []sessioncreation.ProviderCapability{{Provider: domain.ProviderClaude, Installed: true, Enabled: true}}},
 		},
-		roots: map[domain.ComputerID][]sessioncreation.Directory{"second": {{Name: "/work", Path: "/work"}}},
+		roots: map[domain.ComputerID][]sessioncreation.Directory{
+			"local":  {{Name: "/local", Path: "/local"}},
+			"second": {{Name: "/work", Path: "/work"}},
+		},
 	}
 	controller := newController(t, nil, &memorySessions{}, nil, nil, telegramcontroller.Options{CreationEnvironment: environment})
 	t.Cleanup(func() { _ = controller.Close(context.Background()) })
 
 	initial, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticMenuNew, UpdateID: 1})
-	if err != nil || initial.Surface == nil || len(initial.Surface.Rows) < 2 || initial.Surface.Rows[0][0].Label != "First" || initial.Surface.Rows[1][0].Label != "Second" {
-		t.Fatalf("initial computer choice = (%#v, %v)", initial, err)
+	if err != nil || initial.Surface == nil || initial.Surface.Text != "Новое\nВыберите корень." || initial.Surface.Rows[0][0].Label != "📁 /local" {
+		t.Fatalf("coordinator creation = (%#v, %v)", initial, err)
 	}
-	next, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticCreateChoice, Choice: 2, UpdateID: 2})
-	if err != nil || next.Surface == nil || next.Surface.Text != "Новое\nВыберите корень." || next.Surface.Rows[0][0].Label != "/work" {
-		t.Fatalf("second computer choice = (%#v, %v)", next, err)
+	nodes, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticMenuNodes, UpdateID: 2})
+	if err != nil || nodes.Surface == nil || len(nodes.Surface.Rows) < 2 || !strings.Contains(nodes.Surface.Rows[0][0].Label, "Coordinator") {
+		t.Fatalf("nodes = (%#v, %v)", nodes, err)
+	}
+	if _, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticSelectNode, Choice: 2, UpdateID: 3}); err != nil {
+		t.Fatal(err)
+	}
+	next, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticMenuNew, UpdateID: 4})
+	if err != nil || next.Surface == nil || next.Surface.Text != "Новое\nВыберите корень." || next.Surface.Rows[0][0].Label != "📁 /work" {
+		t.Fatalf("selected-node creation = (%#v, %v)", next, err)
+	}
+}
+
+func TestSessionCreationV2CreatesWithSelectedRemoteNodeCapabilities(t *testing.T) {
+	environment := &creationEnvironmentStub{
+		computers: []sessioncreation.Computer{
+			{ID: "local", Name: "Coordinator", Capabilities: []sessioncreation.ProviderCapability{{Provider: domain.ProviderCodex, Installed: true, Enabled: true}}},
+			{ID: "worker", Name: "Worker", Capabilities: []sessioncreation.ProviderCapability{{Provider: domain.ProviderClaude, Installed: true, Enabled: true}}},
+		},
+		roots:    map[domain.ComputerID][]sessioncreation.Directory{"worker": {{Name: "/work", Path: "/work"}}},
+		children: map[string][]sessioncreation.Directory{"/work": {}},
+	}
+	localProviders := &testProviderPreferences{values: map[domain.Provider]telegramcontroller.ProviderPreference{
+		domain.ProviderCodex:  {Provider: domain.ProviderCodex, Configured: true, Enabled: true},
+		domain.ProviderClaude: {Provider: domain.ProviderClaude, Configured: true, Enabled: false},
+	}}
+	var intent app.ConfirmedSessionIntent
+	sessions := newLockedSessions()
+	controller := newController(t, creatorFunc(func(_ context.Context, got app.ConfirmedSessionIntent) (app.CreateSessionResult, error) {
+		intent = got
+		starting, createErr := domain.NewStartingSession("55555555-5555-4555-9555-555555555555", got.IntentID, got.ComputerID, got.Provider, got.Workdir)
+		if createErr != nil {
+			return app.CreateSessionResult{}, createErr
+		}
+		ready, readyErr := starting.Ready(domain.ProviderBinding{Provider: got.Provider, SessionID: "remote-provider", Generation: 1})
+		if readyErr == nil {
+			sessions.Set(ready)
+		}
+		return app.CreateSessionResult{Session: ready}, readyErr
+	}), sessions, nil, nil, telegramcontroller.Options{CreationEnvironment: environment, Providers: localProviders})
+	t.Cleanup(func() { _ = controller.Close(context.Background()) })
+
+	if _, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticSelectNode, Choice: 2}); err != nil {
+		t.Fatal(err)
+	}
+	root, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticMenuNew, UpdateID: 1})
+	if err != nil || root.Surface == nil || root.Surface.Rows[0][0].Label != "📁 /work" {
+		t.Fatalf("remote root = (%#v, %v)", root, err)
+	}
+	if _, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticCreateChoice, Choice: 1}); err != nil {
+		t.Fatal(err)
+	}
+	created, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticCreatePick, UpdateID: 2})
+	if err != nil || created.Card == nil {
+		t.Fatalf("remote create = (%#v, %v)", created, err)
+	}
+	if intent.ComputerID != "worker" || intent.Provider != domain.ProviderClaude || intent.Workdir != "/work" {
+		t.Fatalf("remote intent = %#v", intent)
+	}
+	if localProviders.values[domain.ProviderClaude].Enabled {
+		t.Fatal("remote create mutated coordinator provider settings")
+	}
+}
+
+func TestSessionCreationV2ActivatesInstalledBackendOnSelectedRemoteNode(t *testing.T) {
+	environment := &creationEnvironmentStub{
+		computers: []sessioncreation.Computer{
+			{ID: "local", Name: "Coordinator", Capabilities: []sessioncreation.ProviderCapability{{Provider: domain.ProviderCodex, Installed: true, Enabled: true}}},
+			{ID: "worker", Name: "Worker", Capabilities: []sessioncreation.ProviderCapability{{Provider: domain.ProviderClaude, Installed: true, Enabled: false}}},
+		},
+		roots: map[domain.ComputerID][]sessioncreation.Directory{"worker": {{Name: "/work", Path: "/work"}}},
+	}
+	controller := newController(t, nil, &memorySessions{}, nil, nil, telegramcontroller.Options{CreationEnvironment: environment})
+	t.Cleanup(func() { _ = controller.Close(context.Background()) })
+
+	if _, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticSelectNode, Choice: 2}); err != nil {
+		t.Fatal(err)
+	}
+	choice, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticMenuNew, UpdateID: 1})
+	if err != nil || choice.Surface == nil || !strings.Contains(choice.Surface.Rows[0][0].Label, "включить") {
+		t.Fatalf("remote disabled backend = (%#v, %v)", choice, err)
+	}
+	next, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticCreateSelectClaude, UpdateID: 2})
+	if err != nil || next.Surface == nil || !strings.Contains(next.Surface.Text, "Выберите корень") || !environment.computers[1].Capabilities[0].Enabled {
+		t.Fatalf("remote backend activation = (%#v, %v), environment=%#v", next, err, environment.computers)
 	}
 }
 
@@ -99,7 +206,7 @@ func TestSessionCreationV2BrowsesAndCreatesWithoutConfirmation(t *testing.T) {
 	t.Cleanup(func() { _ = controller.Close(context.Background()) })
 
 	initial, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticMenuNew, UpdateID: 10})
-	if err != nil || initial.Surface == nil || initial.Surface.Rows[0][0].Label != root {
+	if err != nil || initial.Surface == nil || initial.Surface.Rows[0][0].Label != "📁 "+root {
 		t.Fatalf("root choice = (%#v, %v)", initial, err)
 	}
 	opened, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticCreateChoice, Choice: 1, UpdateID: 11})
@@ -272,7 +379,7 @@ func TestSessionCreationDefaultsCanBeChosenAndClearedThroughSettings(t *testing.
 	}
 
 	directoryChoice, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticSettingsDefaultWorkdir, UpdateID: 72})
-	if err != nil || directoryChoice.Surface == nil || directoryChoice.Surface.Rows[0][0].Label != root {
+	if err != nil || directoryChoice.Surface == nil || directoryChoice.Surface.Rows[0][0].Label != "📁 "+root {
 		t.Fatalf("default directory roots = (%#v, %v)", directoryChoice, err)
 	}
 	_, _ = controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticCreateChoice, Choice: 1, UpdateID: 73})

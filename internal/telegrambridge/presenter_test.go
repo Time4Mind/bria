@@ -50,6 +50,7 @@ func TestPresenterPreservesCanonicalRowsLabelsAndSignedSemanticCallbacks(t *test
 		{"Screen"},
 		{"Сессия 1", "Сессия 2"},
 		{"Сессия 3"},
+		{"Новое", "Ноды", "≡ Меню"},
 	}
 	if got := labels(markup.InlineKeyboard); !reflect.DeepEqual(got, wantLabels) {
 		t.Fatalf("labels/rows = %#v, want %#v", got, wantLabels)
@@ -74,6 +75,11 @@ func TestPresenterPreservesCanonicalRowsLabelsAndSignedSemanticCallbacks(t *test
 			{SessionID: testSelectableSessionIDs[1], Action: telegramui.ActionSelectSession},
 		},
 		{{SessionID: testSelectableSessionIDs[2], Action: telegramui.ActionSelectSession}},
+		{
+			{SessionID: telegramui.GlobalSurfaceID, Action: telegramui.ActionMenuNew},
+			{SessionID: telegramui.GlobalSurfaceID, Action: telegramui.ActionMenuNodes},
+			{SessionID: telegramui.GlobalSurfaceID, Action: telegramui.ActionMenuBack},
+		},
 	}
 	for rowIndex, row := range markup.InlineKeyboard {
 		for buttonIndex, button := range row {
@@ -107,6 +113,7 @@ func TestPresenterSignsAndDecodesEverySettingsAction(t *testing.T) {
 	now := time.Unix(1_800_000_000, 0).UTC()
 	presenter := mustPresenter(t, mustCallbackCodec(t, func() time.Time { return now }), func() time.Time { return now }, 15*time.Minute)
 	actions := []telegramui.Action{
+		telegramui.ActionSettingsCategory,
 		telegramui.ActionSettingsScreen, telegramui.ActionSettingsDetail, telegramui.ActionSettingsPageLimit,
 		telegramui.ActionSettingsContinueExisting, telegramui.ActionSettingsTechnicalActions,
 		telegramui.ActionSettingsBackgroundQuestions, telegramui.ActionSettingsBackgroundErrors, telegramui.ActionSettingsArchiveRecommendations,
@@ -118,7 +125,12 @@ func TestPresenterSignsAndDecodesEverySettingsAction(t *testing.T) {
 	}
 	rows := make([]telegramui.ButtonRow, len(actions))
 	for index, action := range actions {
-		rows[index] = telegramui.ButtonRow{{Action: action}}
+		button := telegramui.Button{Action: action}
+		if action == telegramui.ActionSettingsCategory {
+			button.Label = "🗄 Сессии и архив"
+			button.Target.Choice = 4
+		}
+		rows[index] = telegramui.ButtonRow{button}
 	}
 	markup, err := presenter.PresentKeyboard(telegramui.GlobalSurfaceID, nil, telegramui.CardKeyboard{Rows: rows})
 	if err != nil {
@@ -126,7 +138,7 @@ func TestPresenterSignsAndDecodesEverySettingsAction(t *testing.T) {
 	}
 	for index, action := range actions {
 		decoded, err := presenter.DecodeCallback(markup.InlineKeyboard[index][0].CallbackData)
-		if err != nil || decoded.Action != action {
+		if err != nil || decoded.Action != action || (action == telegramui.ActionSettingsCategory && decoded.Target.Choice != 4) {
 			t.Fatalf("settings action %q decoded as %#v, %v", action, decoded, err)
 		}
 	}
@@ -202,6 +214,7 @@ func TestPresenterSignsEveryGlobalSurfaceActionWithoutRawCallbackData(t *testing
 	actions := []telegramui.Action{
 		telegramui.ActionMenuSessions, telegramui.ActionMenuNew, telegramui.ActionMenuArchive,
 		telegramui.ActionMenuStatus, telegramui.ActionMenuSettings, telegramui.ActionMenuBack,
+		telegramui.ActionMenuNodes,
 		telegramui.ActionCreateSelectCodex, telegramui.ActionCreateSelectClaude,
 		telegramui.ActionCreateWorkdir, telegramui.ActionCreateConfirm,
 		telegramui.ActionCreateCodex, telegramui.ActionCreateClaude,
@@ -225,6 +238,29 @@ func TestPresenterSignsEveryGlobalSurfaceActionWithoutRawCallbackData(t *testing
 		if err != nil || decoded.Action != want || decoded.SessionID != telegramui.GlobalSurfaceID {
 			t.Fatalf("action %q decoded=%#v err=%v", want, decoded, err)
 		}
+	}
+}
+
+func TestPresenterSignsNodeChoiceWithOpaqueIndex(t *testing.T) {
+	t.Parallel()
+	now := time.Unix(1_800_000_000, 0).UTC()
+	presenter := mustPresenter(t, mustCallbackCodec(t, func() time.Time { return now }), func() time.Time { return now }, time.Minute)
+	markup, err := presenter.PresentKeyboard(
+		telegramui.GlobalSurfaceID,
+		nil,
+		telegramui.CardKeyboard{Rows: []telegramui.ButtonRow{{{
+			Action: telegramui.ActionSelectNode,
+			Target: telegramui.ButtonTarget{Choice: 2},
+			Label:  "Worker",
+		}}}},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := presenter.DecodeCallback(markup.InlineKeyboard[0][0].CallbackData)
+	if err != nil || decoded.Action != telegramui.ActionSelectNode || decoded.Target.Choice != 2 ||
+		decoded.SessionID != telegramui.GlobalSurfaceID {
+		t.Fatalf("decoded node choice = %#v, err=%v", decoded, err)
 	}
 }
 

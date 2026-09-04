@@ -17,6 +17,7 @@ import (
 	"bria/internal/sessionruntime"
 	"bria/internal/settingsport"
 	"bria/internal/telegramcontroller"
+	"bria/internal/telegramsettingsview"
 )
 
 const (
@@ -236,7 +237,7 @@ func TestSettingsCallbacksPersistAndTogglePreferences(t *testing.T) {
 	preferences := &testPreferences{}
 	controller := newController(t, creatorFunc(nil), &memorySessions{}, submitterFunc(nil), notifierFunc(nil), telegramcontroller.Options{Settings: preferences})
 	decision, err := controller.Handle(context.Background(), coordinator.Update{ID: 1, Kind: coordinator.UpdateCallback, ActorID: ownerID, ConversationID: chatID, ConversationKind: "private", CallbackQueryID: "q", SourceMessageID: 9, Text: "menu:settings"})
-	if err != nil || decision.Kind != coordinator.DecisionStatus || !strings.Contains(decision.Status.Text, "Screen: false") {
+	if err != nil || decision.Kind != coordinator.DecisionStatus || !strings.Contains(decision.Status.Text, "Выберите раздел") {
 		t.Fatalf("settings = %#v, err=%v", decision, err)
 	}
 	if _, err := controller.Handle(context.Background(), coordinator.Update{ID: 2, Kind: coordinator.UpdateCallback, ActorID: ownerID, ConversationID: chatID, ConversationKind: "private", CallbackQueryID: "q2", SourceMessageID: 9, Text: "settings:screen"}); err != nil {
@@ -257,15 +258,45 @@ func TestSemanticProviderSettingsUseTypedPortWithoutCredentials(t *testing.T) {
 	})
 	t.Cleanup(func() { _ = controller.Close(context.Background()) })
 
-	initial, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticMenuSettings})
+	initial, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticSettingsCategory, Choice: int(telegramsettingsview.CategoryProviders)})
 	if err != nil || initial.Surface == nil || !strings.Contains(initial.Surface.Text, "codex: включен, настроен") || !strings.Contains(initial.Surface.Text, "claude: выключен, настроен") {
 		t.Fatalf("provider surface = (%#v, %v)", initial, err)
 	}
-	if _, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticSettingsProviderCodex}); err != nil {
-		t.Fatal(err)
+	updated, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticSettingsProviderCodex})
+	if err != nil || updated.Surface == nil || !strings.Contains(updated.Surface.Text, "Исполнители") || !strings.Contains(updated.Surface.Text, "codex: выключен, настроен") {
+		t.Fatalf("updated provider category = (%#v, %v)", updated, err)
 	}
 	if providers.values[domain.ProviderCodex].Enabled {
 		t.Fatal("Codex remained enabled after typed provider action")
+	}
+}
+
+func TestSemanticSettingsCategoriesNavigateAndKeepMutationsInsideTheirGroup(t *testing.T) {
+	preferences := &testPreferences{settings: settingsport.Snapshot{
+		CardDetail: "standard", CardPageLimit: 64, ShowTechnicalActions: true,
+		ContinueExisting: true, NotifyBackgroundQuestions: true, NotifyBackgroundErrors: true,
+		SessionLifetime: "never", VoiceRecognition: "parakeet",
+	}}
+	controller := newController(t, creatorFunc(nil), &memorySessions{}, submitterFunc(nil), notifierFunc(nil), telegramcontroller.Options{Settings: preferences})
+	t.Cleanup(func() { _ = controller.Close(context.Background()) })
+
+	root, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticMenuSettings})
+	if err != nil || root.Surface == nil || len(root.Surface.Rows) != 8 {
+		t.Fatalf("settings root = (%#v, %v)", root, err)
+	}
+	for index, row := range root.Surface.Rows[:7] {
+		if len(row) != 1 || row[0].Action != telegramcontroller.SemanticSettingsCategory || row[0].Choice != index+1 {
+			t.Fatalf("settings category row %d = %#v", index, row)
+		}
+	}
+
+	card, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticSettingsCategory, Choice: int(telegramsettingsview.CategoryCard)})
+	if err != nil || card.Surface == nil || !strings.Contains(card.Surface.Text, "Содержимое карточки") {
+		t.Fatalf("card category = (%#v, %v)", card, err)
+	}
+	updated, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticSettingsDetail})
+	if err != nil || updated.Surface == nil || !strings.Contains(updated.Surface.Text, "Содержимое карточки") || !strings.Contains(updated.Surface.Text, "Детализация карточки: compact") {
+		t.Fatalf("updated card category = (%#v, %v)", updated, err)
 	}
 }
 
@@ -1801,6 +1832,8 @@ func TestSemanticActionRejectsMissingOrUnexpectedTargetFields(t *testing.T) {
 	for _, action := range []telegramcontroller.SemanticAction{
 		{Kind: telegramcontroller.SemanticStop},
 		{Kind: telegramcontroller.SemanticClose, SessionID: "session", Page: 1},
+		{Kind: telegramcontroller.SemanticSettingsCategory},
+		{Kind: telegramcontroller.SemanticSettingsCategory, Choice: 99},
 		{Kind: "unknown", SessionID: "session"},
 	} {
 		if _, err := controller.HandleSemanticAction(context.Background(), action); err == nil {
@@ -1827,7 +1860,6 @@ func TestGlobalSemanticActionsExposeOnlyTypedSurfacesAndStableCreateIdentity(t *
 	)
 	t.Cleanup(func() { _ = controller.Close(context.Background()) })
 	for _, kind := range []telegramcontroller.SemanticActionKind{
-		telegramcontroller.SemanticMenuSessions,
 		telegramcontroller.SemanticMenuNew,
 		telegramcontroller.SemanticMenuArchive,
 		telegramcontroller.SemanticMenuStatus,
@@ -1840,6 +1872,10 @@ func TestGlobalSemanticActionsExposeOnlyTypedSurfacesAndStableCreateIdentity(t *
 		if err != nil || result.Surface == nil || result.Surface.Text == "" {
 			t.Fatalf("global action %q = (%#v, %v), want typed surface", kind, result, err)
 		}
+	}
+	opened, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticMenuSessions})
+	if err != nil || opened.Card == nil || opened.Card.SessionID != ready.ID() || opened.Surface != nil {
+		t.Fatalf("sessions action = (%#v, %v), want active card", opened, err)
 	}
 	if _, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticMenuNew, UpdateID: 775}); err != nil {
 		t.Fatal(err)
@@ -1870,7 +1906,7 @@ func TestSemanticCreateUsesOnlyExplicitConfirmedAbsoluteDraft(t *testing.T) {
 		sessioncreation.ProviderCapability{Provider: domain.ProviderCodex, Installed: true, Enabled: true})})
 	t.Cleanup(func() { _ = controller.Close(context.Background()) })
 	preview, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticMenuNew, UpdateID: 399})
-	if err != nil || preview.Surface == nil || preview.Surface.Rows[0][0].Label != workdir {
+	if err != nil || preview.Surface == nil || preview.Surface.Rows[0][0].Label != "📁 "+workdir {
 		t.Fatalf("draft preview = (%#v, %v)", preview, err)
 	}
 	if _, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticCreateChoice, Choice: 1, UpdateID: 400}); err != nil {
@@ -1905,7 +1941,7 @@ func TestSemanticNewSessionDoesNotRequireInjectedDraftSelector(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Surface == nil || strings.Contains(result.Surface.Text, "не настроено") || result.Surface.Rows[0][0].Label != workdir {
+	if result.Surface == nil || strings.Contains(result.Surface.Text, "не настроено") || result.Surface.Rows[0][0].Label != "📁 "+workdir {
 		t.Fatalf("new-session surface = %#v, want directory roots after skipping sole computer and backend", result.Surface)
 	}
 	if hasSemanticAction(result.Surface.Rows, telegramcontroller.SemanticCreateSelectCodex) || hasSemanticAction(result.Surface.Rows, telegramcontroller.SemanticCreatePick) {
@@ -1944,7 +1980,7 @@ func TestSemanticNewSessionDoesNotInferDefaultsFromPreviousSessions(t *testing.T
 		t.Fatalf("provider choice = (%#v, %v)", initial, err)
 	}
 	changed, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticCreateSelectCodex})
-	if err != nil || changed.Surface == nil || changed.Surface.Rows[0][0].Label != workdir {
+	if err != nil || changed.Surface == nil || changed.Surface.Rows[0][0].Label != "📁 "+workdir {
 		t.Fatalf("changed provider draft = (%#v, %v)", changed, err)
 	}
 }

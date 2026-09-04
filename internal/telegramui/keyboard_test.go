@@ -38,6 +38,11 @@ func TestProjectCardKeyboardKeepsCanonicalSemanticRowOrder(t *testing.T) {
 			{Action: telegramui.ActionSelectSession, Target: telegramui.ButtonTarget{SessionSlot: 2}},
 		},
 		{{Action: telegramui.ActionSelectSession, Target: telegramui.ButtonTarget{SessionSlot: 3}}},
+		{
+			{Action: telegramui.ActionMenuNew},
+			{Action: telegramui.ActionMenuNodes},
+			{Action: telegramui.ActionMenuBack},
+		},
 	}}
 
 	if !reflect.DeepEqual(keyboard, want) {
@@ -66,7 +71,7 @@ func TestProjectCardKeyboardUsesCloseAndOmitsCollapsedOptionsRow(t *testing.T) {
 		t.Fatalf("ProjectCardKeyboard() error = %v", err)
 	}
 
-	if got, want := len(keyboard.Rows), 2; got != want {
+	if got, want := len(keyboard.Rows), 3; got != want {
 		t.Fatalf("row count = %d, want %d", got, want)
 	}
 	if got, want := keyboard.Rows[1], (telegramui.ButtonRow{
@@ -74,5 +79,12 @@ func TestProjectCardKeyboardUsesCloseAndOmitsCollapsedOptionsRow(t *testing.T) {
 		{Action: telegramui.ActionOptions},
 	}); !reflect.DeepEqual(got, want) {
 		t.Fatalf("control row = %#v, want %#v", got, want)
+	}
+	if got, want := keyboard.Rows[2], (telegramui.ButtonRow{
+		{Action: telegramui.ActionMenuNew},
+		{Action: telegramui.ActionMenuNodes},
+		{Action: telegramui.ActionMenuBack},
+	}); !reflect.DeepEqual(got, want) {
+		t.Fatalf("navigation row = %#v, want %#v", got, want)
 	}
 }

@@ -63,3 +63,57 @@ func TestCreationDraftActionsMapAcrossSignedRuntimeBoundary(t *testing.T) {
 		})
 	}
 }
+
+func TestSettingsCategoryMapsAcrossSignedRuntimeBoundary(t *testing.T) {
+	target := telegramui.ButtonTarget{Choice: 4}
+	plan, err := telegrampipeline.PlanAcceptedCallback(telegrampipeline.AcceptedCallback{
+		UpdateID: 1, SessionID: domain.SessionID(telegramui.GlobalSurfaceID),
+		Carrier: telegramstate.Carrier{ChatID: 1, MessageID: 2},
+		Action:  telegramui.ActionSettingsCategory, Target: target,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Effect != telegrampipeline.EffectOpenSettings {
+		t.Fatalf("effect = %q", plan.Effect)
+	}
+	semantic, err := semanticActionFromPlan(plan)
+	if err != nil || semantic.Kind != telegramcontroller.SemanticSettingsCategory || semantic.Choice != 4 {
+		t.Fatalf("semantic category = (%#v, %v)", semantic, err)
+	}
+	projected, err := telegramUIAction(semantic.Kind)
+	if err != nil || projected != telegramui.ActionSettingsCategory {
+		t.Fatalf("projected category = (%q, %v)", projected, err)
+	}
+}
+
+func TestNodeActionsMapAcrossSignedRuntimeBoundary(t *testing.T) {
+	tests := []struct {
+		action telegramui.Action
+		kind   telegramcontroller.SemanticActionKind
+		target telegramui.ButtonTarget
+	}{
+		{telegramui.ActionMenuNodes, telegramcontroller.SemanticMenuNodes, telegramui.ButtonTarget{}},
+		{telegramui.ActionSelectNode, telegramcontroller.SemanticSelectNode, telegramui.ButtonTarget{Choice: 2}},
+	}
+	for _, test := range tests {
+		t.Run(string(test.action), func(t *testing.T) {
+			plan, err := telegrampipeline.PlanAcceptedCallback(telegrampipeline.AcceptedCallback{
+				UpdateID: 1, SessionID: domain.SessionID(telegramui.GlobalSurfaceID),
+				Carrier: telegramstate.Carrier{ChatID: 1, MessageID: 2},
+				Action:  test.action, Target: test.target,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			semantic, err := semanticActionFromPlan(plan)
+			if err != nil || semantic.Kind != test.kind || semantic.Choice != test.target.Choice {
+				t.Fatalf("semantic node action = (%#v, %v)", semantic, err)
+			}
+			projected, err := telegramUIAction(test.kind)
+			if err != nil || projected != test.action {
+				t.Fatalf("projected node action = (%q, %v)", projected, err)
+			}
+		})
+	}
+}

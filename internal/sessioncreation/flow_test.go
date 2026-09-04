@@ -44,11 +44,8 @@ func TestFlowSeparatesInstalledAndEnabledProviders(t *testing.T) {
 	}
 	computer.Capabilities[0].Enabled = true
 	current, _ := flow.CurrentV2([]sessioncreation.Computer{computer}, defaults)
-	if current.Step != sessioncreation.StepProvider {
-		t.Fatalf("current step = %q, want explicit provider step retained", current.Step)
-	}
-	if err := flow.SelectProviderV2(domain.ProviderCodex, defaults); err != nil {
-		t.Fatal(err)
+	if current.Step != sessioncreation.StepDirectory || current.Draft.Provider != domain.ProviderCodex {
+		t.Fatalf("current step = %#v, want sole enabled provider selected", current)
 	}
 }
 

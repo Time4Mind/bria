@@ -15,7 +15,6 @@ type CallbackClaimSnapshot struct {
 	UpdateID        int64  `json:"update_id"`
 	CallbackQueryID string `json:"callback_query_id"`
 }
-
 type CallbackPresentationSnapshot struct {
 	SessionID            domain.SessionID                 `json:"session_id"`
 	Carrier              telegramstate.Carrier            `json:"carrier"`

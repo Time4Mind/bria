@@ -38,7 +38,9 @@ func TestRenderSessionCardBuildsHistoryPagesAndSemanticKeyboard(t *testing.T) {
 		got.Keyboard.Rows[1][1].Action != telegramui.ActionOptions {
 		t.Fatalf("semantic control row = %#v", got.Keyboard.Rows[1])
 	}
-	if len(got.Keyboard.Rows) != 4 || got.Keyboard.Rows[3][0].Target.SessionSlot != 1 {
+	if len(got.Keyboard.Rows) != 5 || got.Keyboard.Rows[3][0].Target.SessionSlot != 1 ||
+		got.Keyboard.Rows[4][0].Action != telegramui.ActionMenuNew ||
+		got.Keyboard.Rows[4][1].Action != telegramui.ActionMenuNodes {
 		t.Fatalf("semantic keyboard = %#v", got.Keyboard)
 	}
 }

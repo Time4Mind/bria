@@ -28,6 +28,8 @@ type Computer struct {
 	ID           domain.ComputerID
 	Name         string
 	Capabilities []ProviderCapability
+	Coordinator  bool
+	Available    bool
 }
 
 type Directory struct {
@@ -44,6 +46,18 @@ type Environment interface {
 	Browse(context.Context, domain.ComputerID, string) ([]Directory, error)
 	CreateChild(context.Context, domain.ComputerID, string, string) (string, error)
 	Parent(context.Context, domain.ComputerID, string) (string, bool)
+}
+
+// Inventory optionally exposes registered computers which are currently
+// unavailable. Environment.AvailableComputers remains the authoritative live
+// readiness check used before creation.
+type Inventory interface {
+	RegisteredComputers(context.Context) ([]Computer, error)
+}
+
+// ProviderActivator changes an installed provider on its owning node.
+type ProviderActivator interface {
+	ToggleProvider(context.Context, domain.ComputerID, domain.Provider) error
 }
 
 type CapabilitySource func(context.Context) ([]ProviderCapability, error)
@@ -78,7 +92,13 @@ func (environment *LocalEnvironment) AvailableComputers(ctx context.Context) ([]
 	}
 	computer := environment.computer
 	computer.Capabilities = append([]ProviderCapability(nil), capabilities...)
+	computer.Coordinator = true
+	computer.Available = true
 	return []Computer{computer}, nil
+}
+
+func (environment *LocalEnvironment) RegisteredComputers(ctx context.Context) ([]Computer, error) {
+	return environment.AvailableComputers(ctx)
 }
 
 func (environment *LocalEnvironment) Roots(ctx context.Context, computerID domain.ComputerID) ([]Directory, error) {

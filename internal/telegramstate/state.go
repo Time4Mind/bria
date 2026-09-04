@@ -20,6 +20,7 @@ const (
 	FormatVersion = 1
 	maxPages      = 512
 	maxAnchor     = 1024
+	maxNodeID     = 256
 )
 
 // Carrier identifies the Telegram message currently carrying a session card.
@@ -52,18 +53,33 @@ type Card struct {
 
 // State is the complete Telegram UI state for the configured owner chat.
 type State struct {
-	Version       int                       `json:"version"`
-	ActiveSession domain.SessionID          `json:"active_session,omitempty"`
-	ScreenEnabled bool                      `json:"screen_enabled"`
-	Cards         map[domain.SessionID]Card `json:"cards"`
+	Version        int                                      `json:"version"`
+	SelectedNode   domain.ComputerID                        `json:"selected_node,omitempty"`
+	ActiveSession  domain.SessionID                         `json:"active_session,omitempty"`
+	ActiveSessions map[domain.ComputerID]domain.SessionID   `json:"active_sessions,omitempty"`
+	RecentSessions map[domain.ComputerID][]domain.SessionID `json:"recent_sessions,omitempty"`
+	ScreenEnabled  bool                                     `json:"screen_enabled"`
+	Cards          map[domain.SessionID]Card                `json:"cards"`
 }
 
 // New returns an empty state with Screen disabled by default.
-func New() State { return State{Version: FormatVersion, Cards: make(map[domain.SessionID]Card)} }
+func New() State {
+	return State{
+		Version: FormatVersion, ActiveSessions: make(map[domain.ComputerID]domain.SessionID),
+		RecentSessions: make(map[domain.ComputerID][]domain.SessionID), Cards: make(map[domain.SessionID]Card),
+	}
+}
 
 func (s State) Clone() State {
 	clone := New()
-	clone.Version, clone.ActiveSession, clone.ScreenEnabled = s.Version, s.ActiveSession, s.ScreenEnabled
+	clone.Version, clone.SelectedNode, clone.ActiveSession, clone.ScreenEnabled =
+		s.Version, s.SelectedNode, s.ActiveSession, s.ScreenEnabled
+	for nodeID, sessionID := range s.ActiveSessions {
+		clone.ActiveSessions[nodeID] = sessionID
+	}
+	for nodeID, sessions := range s.RecentSessions {
+		clone.RecentSessions[nodeID] = append([]domain.SessionID(nil), sessions...)
+	}
 	for id, card := range s.Cards {
 		card.History = append([]string(nil), card.History...)
 		card.HistoryKeys = append([]string(nil), card.HistoryKeys...)
@@ -78,6 +94,46 @@ func (s State) Validate() error {
 	}
 	if s.Cards == nil {
 		return errors.New("cards map is required")
+	}
+	for nodeID, sessionID := range s.ActiveSessions {
+		if strings.TrimSpace(string(nodeID)) != string(nodeID) || nodeID == "" ||
+			len(nodeID) > maxNodeID || !utf8.ValidString(string(nodeID)) {
+			return errors.New("active-session node identity is invalid")
+		}
+		if strings.TrimSpace(string(sessionID)) == "" {
+			return fmt.Errorf("active session for node %q is invalid", nodeID)
+		}
+		if _, ok := s.Cards[sessionID]; !ok {
+			return fmt.Errorf("active session %q for node %q has no card", sessionID, nodeID)
+		}
+	}
+	for nodeID, sessions := range s.RecentSessions {
+		if strings.TrimSpace(string(nodeID)) != string(nodeID) || nodeID == "" || len(nodeID) > maxNodeID || len(sessions) > 512 {
+			return errors.New("recent-session node identity or history is invalid")
+		}
+		seen := make(map[domain.SessionID]struct{}, len(sessions))
+		for _, sessionID := range sessions {
+			if strings.TrimSpace(string(sessionID)) == "" {
+				return errors.New("recent session identity is invalid")
+			}
+			if _, duplicate := seen[sessionID]; duplicate {
+				return errors.New("recent session identity is duplicated")
+			}
+			seen[sessionID] = struct{}{}
+			if _, ok := s.Cards[sessionID]; !ok {
+				return fmt.Errorf("recent session %q for node %q has no card", sessionID, nodeID)
+			}
+		}
+	}
+	if s.SelectedNode != "" {
+		if strings.TrimSpace(string(s.SelectedNode)) != string(s.SelectedNode) ||
+			len(s.SelectedNode) > maxNodeID || !utf8.ValidString(string(s.SelectedNode)) {
+			return errors.New("selected node identity is invalid")
+		}
+		selectedActive := s.ActiveSessions[s.SelectedNode]
+		if selectedActive != s.ActiveSession {
+			return errors.New("selected node active session does not match global projection")
+		}
 	}
 	for id, card := range s.Cards {
 		if strings.TrimSpace(string(id)) == "" || card.SessionID != id {

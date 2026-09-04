@@ -753,6 +753,89 @@ func TestSessionStorePersistsActiveCardCarrier(t *testing.T) {
 	}
 }
 
+func TestSessionStorePersistsSelectedNodeAndPerNodeActiveSession(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "state.json")
+	store, err := storage.OpenSessionStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session := mustStartingSession(t, "node-session", "node-intent")
+	if _, _, err := store.PutStartingIfAbsent(context.Background(), session); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetNodeActiveSession(context.Background(), session.ComputerID(), session.ID()); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := storage.OpenSessionStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	selected, active, err := reopened.LoadNodeSelection(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if selected != session.ComputerID() || active[selected] != session.ID() {
+		t.Fatalf("node selection = %q %#v, want %q -> %q", selected, active, session.ComputerID(), session.ID())
+	}
+	if err := reopened.SetSelectedNode(context.Background(), "node-without-sessions"); err != nil {
+		t.Fatal(err)
+	}
+	state, err := reopened.LoadTelegramUI(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.SelectedNode != "node-without-sessions" || state.ActiveSession != "" {
+		t.Fatalf("selected empty node state = %#v", state)
+	}
+	if err := reopened.SetNodeActiveSession(context.Background(), session.ComputerID(), session.ID()); err != nil {
+		t.Fatal(err)
+	}
+	if err := reopened.ClearNodeActiveSession(context.Background(), session.ComputerID()); err != nil {
+		t.Fatal(err)
+	}
+	state, err = reopened.LoadTelegramUI(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.SelectedNode != session.ComputerID() || state.ActiveSession != "" || state.ActiveSessions[session.ComputerID()] != "" {
+		t.Fatalf("cleared node active state = %#v", state)
+	}
+}
+
+func TestSessionStorePersistsPerNodeMostRecentlyActiveOrder(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "state.json")
+	store, err := storage.OpenSessionStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := mustStartingSession(t, "first-node-session", "first-node-intent")
+	second := mustStartingSession(t, "second-node-session", "second-node-intent")
+	for _, session := range []domain.Session{first, second} {
+		if _, _, err := store.PutStartingIfAbsent(context.Background(), session); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, sessionID := range []domain.SessionID{first.ID(), second.ID(), first.ID()} {
+		if err := store.SetNodeActiveSession(context.Background(), first.ComputerID(), sessionID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	reopened, err := storage.OpenSessionStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	history, err := reopened.LoadNodeSessionHistory(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := history[first.ComputerID()]
+	if len(got) != 2 || got[0] != first.ID() || got[1] != second.ID() {
+		t.Fatalf("recent order = %#v, want [%q %q]", got, first.ID(), second.ID())
+	}
+}
+
 func TestSessionStorePersistsBoundedCardHistory(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "state.json")

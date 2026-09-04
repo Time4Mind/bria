@@ -25,6 +25,7 @@ test "$actual" = "bria $expected_version" || {
 
 if test "$#" -eq 3; then
 	case "$3" in /*) ;; *) usage ;; esac
+	"$bin_dir/bria" install-parakeet --config "$3"
 	"$bin_dir/bria" check-config --config "$3"
 fi
 

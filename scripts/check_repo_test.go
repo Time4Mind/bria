@@ -478,7 +478,7 @@ func TestArchitectureCheckerRegistersCurrentCompositionBoundaries(t *testing.T) 
 			path:           "internal/singlemachinecomposition",
 			responsibility: "compose the single-computer Bria process",
 			imports: []string{
-				"internal/app", "internal/authcomposition", "internal/callbacktoken", "internal/claudestore", "internal/config", "internal/coordinator", "internal/domain", "internal/durablecomposition", "internal/durableflow", "internal/interactioncomposition", "internal/messagejournal", "internal/recoverycomposition", "internal/recoveryruntime", "internal/runtimefactory", "internal/safelog", "internal/sessioncreation", "internal/sessionexpiry", "internal/sessionid", "internal/sessionruntime", "internal/sessionsupervisor", "internal/settings", "internal/settingscomposition", "internal/storage", "internal/supervisioncomposition", "internal/telegram", "internal/telegrambridge", "internal/telegramcompletioncomposition", "internal/telegramcontroller", "internal/telegramflow", "internal/telegramnotify", "internal/telegrampipeline", "internal/telegrampromptcomposition", "internal/telegramrecoverycomposition", "internal/telegramruntimecomposition", "internal/turnruntimecomposition", "internal/workdir",
+				"internal/app", "internal/authcomposition", "internal/callbacktoken", "internal/claudestore", "internal/config", "internal/coordinator", "internal/domain", "internal/durablecomposition", "internal/durableflow", "internal/interactioncomposition", "internal/messagejournal", "internal/processenv", "internal/providerquota", "internal/recoverycomposition", "internal/recoveryruntime", "internal/runtimefactory", "internal/safelog", "internal/sessioncreation", "internal/sessionexpiry", "internal/sessionid", "internal/sessionruntime", "internal/sessionsupervisor", "internal/settings", "internal/settingscomposition", "internal/storage", "internal/supervisioncomposition", "internal/telegram", "internal/telegrambridge", "internal/telegramcompletioncomposition", "internal/telegramcontroller", "internal/telegramflow", "internal/telegramnotify", "internal/telegrampipeline", "internal/telegrampromptcomposition", "internal/telegramrecoverycomposition", "internal/telegramruntimecomposition", "internal/turnruntimecomposition", "internal/workdir",
 			},
 			limit: 800,
 		},
@@ -1311,12 +1311,26 @@ func TestArchitectureCheckerRegistersStableMediaProductionAdapters(t *testing.T)
 		testPackage("internal/mediaproduction", "internal/files", "internal/mediaflow", "internal/speech/parakeet"),
 		testPackage("internal/files"),
 		testPackage("internal/mediaflow", "internal/files"),
-		testPackage("internal/speech/parakeet", "internal/speech"),
+		testPackage("internal/speech/parakeet", "internal/processgroup", "internal/speech"),
+		testPackage("internal/processgroup"),
 		testPackage("internal/speech"),
 	}
 	if errors := checkGraph(packages); len(errors) != 0 {
 		t.Fatalf("checkGraph() errors = %v, want none", errors)
 	}
+}
+
+func TestArchitectureCheckerRegistersParakeetInstallerWithoutRuntimeCoupling(t *testing.T) {
+	installer := testPackage("internal/parakeetinstall")
+	installer.ProductionLines = 650
+	if errors := checkGraph([]packageInfo{installer}); len(errors) != 0 {
+		t.Fatalf("checkGraph() errors = %v, want none", errors)
+	}
+	assertErrorContains(
+		t,
+		checkGraph(graphWithEdge("internal/parakeetinstall", "internal/config")),
+		"package imports dependency outside registered boundary: internal/parakeetinstall -> internal/config",
+	)
 }
 
 func TestArchitectureCheckerRegistersBoundedRuntimeEventScreen(t *testing.T) {
@@ -1600,7 +1614,13 @@ func TestArchitectureCheckerRegistersSettingsAndProviderInputPolicies(t *testing
 		},
 		{
 			path:           "internal/telegramsettings",
-			responsibility: "render and apply Telegram settings surfaces through neutral preferences ports",
+			responsibility: "apply Telegram settings through neutral preferences ports",
+			imports:        []string{"internal/domain", "internal/settingsport"},
+			limit:          200,
+		},
+		{
+			path:           "internal/telegramsettingsview",
+			responsibility: "render grouped Telegram settings surfaces through neutral preferences ports",
 			imports:        []string{"internal/domain", "internal/settingsport"},
 			limit:          200,
 		},

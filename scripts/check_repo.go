@@ -1077,7 +1077,7 @@ var sessionRuntimeAllowedImports = []string{
 }
 
 var telegramControllerAllowedImports = []string{
-	"internal/app", "internal/coordinator", "internal/domain", "internal/sessioncreation", "internal/sessionruntime", "internal/settingsport", "internal/telegramsettings", "internal/turnprocessing",
+	"internal/app", "internal/coordinator", "internal/domain", "internal/sessioncreation", "internal/sessionruntime", "internal/settingsport", "internal/telegramcreationview", "internal/telegramnodes", "internal/telegramsettings", "internal/telegramsettingsview", "internal/telegramstatus", "internal/turnprocessing",
 }
 
 var telegramBridgeAllowedImports = []string{
@@ -1111,7 +1111,7 @@ var packagePolicies = map[string]packagePolicy{
 		// adapters belong in bounded internal packages, not in this root.
 		responsibility: "compose the coordinator process",
 		allowedImports: []string{
-			"internal/app", "internal/config", "internal/coordinator", "internal/domain", "internal/instancelock", "internal/sessionruntime", "internal/settings", "internal/singlemachinecomposition", "internal/storage", "internal/telegram", "internal/telegrambridge", "internal/telegramnotify",
+			"internal/app", "internal/config", "internal/coordinator", "internal/domain", "internal/instancelock", "internal/parakeetinstall", "internal/sessionruntime", "internal/settings", "internal/singlemachinecomposition", "internal/storage", "internal/telegram", "internal/telegrambridge", "internal/telegramnotify",
 		},
 		maxProductionLines: 1700,
 		compositionRoot:    true,
@@ -1459,12 +1459,26 @@ var packagePolicies = map[string]packagePolicy{
 		allowedImports:     []string{"internal/domain", "internal/sessionruntime", "internal/turnprocessing"},
 		maxProductionLines: 250,
 	},
+	"internal/claudequota": {
+		responsibility:     "collect Claude subscription quota through one isolated supervised CLI session",
+		allowedImports:     []string{"internal/domain", "internal/processgroup", "internal/telegramstatus"},
+		maxProductionLines: 450,
+	},
+	"internal/providerquota": {
+		responsibility:     "collect bounded read-only provider quota snapshots",
+		allowedImports:     []string{"internal/claudequota", "internal/config", "internal/domain", "internal/processenv", "internal/processgroup", "internal/telegramstatus"},
+		maxProductionLines: 300,
+	},
 	"internal/p4runtimecomposition": {
 		responsibility: "compose opt-in P4 media and Screen runtime adapters",
 		allowedImports: []string{
 			"internal/config", "internal/domain", "internal/inputcomposition", "internal/mediaproduction", "internal/providerinputcomposition", "internal/screen", "internal/screenproduction", "internal/sessionruntime", "internal/settings", "internal/speech/parakeet", "internal/storage", "internal/telegram", "internal/turnprocessing",
 		},
 		maxProductionLines: 200,
+	},
+	"internal/parakeetinstall": {
+		responsibility:     "provision pinned local Parakeet runtime dependencies",
+		maxProductionLines: 700,
 	},
 	"internal/observability": {
 		responsibility:     "record safe terminal timing and operational measurements",
@@ -1483,7 +1497,7 @@ var packagePolicies = map[string]packagePolicy{
 	"internal/singlemachinecomposition": {
 		responsibility: "compose the single-computer Bria process",
 		allowedImports: []string{
-			"internal/app", "internal/authcomposition", "internal/callbacktoken", "internal/claudestore", "internal/config", "internal/coordinator", "internal/domain", "internal/durablecomposition", "internal/durableflow", "internal/interactioncomposition", "internal/messagejournal", "internal/recoverycomposition", "internal/recoveryruntime", "internal/runtimefactory", "internal/safelog", "internal/sessioncreation", "internal/sessionexpiry", "internal/sessionid", "internal/sessionruntime", "internal/sessionsupervisor", "internal/settings", "internal/settingscomposition", "internal/storage", "internal/supervisioncomposition", "internal/telegram", "internal/telegrambridge", "internal/telegramcompletioncomposition", "internal/telegramcontroller", "internal/telegramflow", "internal/telegramnotify", "internal/telegrampipeline", "internal/telegrampromptcomposition", "internal/telegramrecoverycomposition", "internal/telegramruntimecomposition", "internal/turnruntimecomposition", "internal/workdir",
+			"internal/app", "internal/authcomposition", "internal/callbacktoken", "internal/claudestore", "internal/config", "internal/coordinator", "internal/domain", "internal/durablecomposition", "internal/durableflow", "internal/interactioncomposition", "internal/messagejournal", "internal/processenv", "internal/providerquota", "internal/recoverycomposition", "internal/recoveryruntime", "internal/runtimefactory", "internal/safelog", "internal/sessioncreation", "internal/sessionexpiry", "internal/sessionid", "internal/sessionruntime", "internal/sessionsupervisor", "internal/settings", "internal/settingscomposition", "internal/storage", "internal/supervisioncomposition", "internal/telegram", "internal/telegrambridge", "internal/telegramcompletioncomposition", "internal/telegramcontroller", "internal/telegramflow", "internal/telegramnotify", "internal/telegrampipeline", "internal/telegrampromptcomposition", "internal/telegramrecoverycomposition", "internal/telegramruntimecomposition", "internal/turnruntimecomposition", "internal/workdir",
 		},
 		maxProductionLines: 800,
 	},
@@ -1563,7 +1577,7 @@ var packagePolicies = map[string]packagePolicy{
 	},
 	"internal/speech/parakeet": {
 		responsibility:     "run the local Parakeet recognizer",
-		allowedImports:     []string{"internal/speech"},
+		allowedImports:     []string{"internal/processgroup", "internal/speech"},
 		maxProductionLines: 300,
 	},
 	"internal/storage": {
@@ -1618,10 +1632,15 @@ var packagePolicies = map[string]packagePolicy{
 		allowedImports:     []string{"internal/domain"},
 		maxProductionLines: 900,
 	},
+	"internal/telegramcreationview": {
+		responsibility:     "render the transport-neutral Telegram session-creation wizard",
+		allowedImports:     []string{"internal/domain", "internal/sessioncreation"},
+		maxProductionLines: 200,
+	},
 	"internal/telegramcontroller": {
 		responsibility: "coordinate Telegram session interactions",
 		allowedImports: []string{
-			"internal/app", "internal/coordinator", "internal/domain", "internal/sessioncreation", "internal/sessionruntime", "internal/settingsport", "internal/telegramsettings", "internal/turnprocessing",
+			"internal/app", "internal/coordinator", "internal/domain", "internal/sessioncreation", "internal/sessionruntime", "internal/settingsport", "internal/telegramcreationview", "internal/telegramnodes", "internal/telegramsettings", "internal/telegramsettingsview", "internal/telegramstatus", "internal/turnprocessing",
 		},
 		maxProductionLines: 3900,
 	},
@@ -1639,6 +1658,11 @@ var packagePolicies = map[string]packagePolicy{
 			"internal/domain", "internal/telegram", "internal/telegramcontroller", "internal/telegramformat", "internal/telegramui",
 		},
 		maxProductionLines: 800,
+	},
+	"internal/telegramnodes": {
+		responsibility:     "own selected-node inventory, provider scope, durable per-node active-session recency, and node-menu projection",
+		allowedImports:     []string{"internal/domain", "internal/sessioncreation", "internal/settingsport"},
+		maxProductionLines: 500,
 	},
 	"internal/telegramops": {
 		responsibility:     "persist a bounded atomic opaque Telegram operation ledger",
@@ -1669,8 +1693,18 @@ var packagePolicies = map[string]packagePolicy{
 		maxProductionLines: 500,
 	},
 	"internal/telegramsettings": {
-		responsibility:     "render and apply Telegram settings surfaces through neutral preferences ports",
+		responsibility:     "apply Telegram settings through neutral preferences ports",
 		allowedImports:     []string{"internal/domain", "internal/settingsport"},
+		maxProductionLines: 200,
+	},
+	"internal/telegramsettingsview": {
+		responsibility:     "render grouped Telegram settings surfaces through neutral preferences ports",
+		allowedImports:     []string{"internal/domain", "internal/settingsport"},
+		maxProductionLines: 200,
+	},
+	"internal/telegramstatus": {
+		responsibility:     "render read-only provider quota summaries for Telegram status surfaces",
+		allowedImports:     []string{"internal/domain"},
 		maxProductionLines: 200,
 	},
 	"internal/telegramui": {

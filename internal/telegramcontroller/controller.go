@@ -7,7 +7,11 @@ import (
 	"bria/internal/sessioncreation"
 	"bria/internal/sessionruntime"
 	"bria/internal/settingsport"
+	"bria/internal/telegramcreationview"
+	"bria/internal/telegramnodes"
 	"bria/internal/telegramsettings"
+	"bria/internal/telegramsettingsview"
+	"bria/internal/telegramstatus"
 	"bria/internal/turnprocessing"
 	"context"
 	"errors"
@@ -218,6 +222,8 @@ const (
 	SemanticMenuStatus                     SemanticActionKind = "menu_status"
 	SemanticMenuSettings                   SemanticActionKind = "menu_settings"
 	SemanticMenuBack                       SemanticActionKind = "menu_back"
+	SemanticMenuNodes                      SemanticActionKind = "menu_nodes"
+	SemanticSelectNode                     SemanticActionKind = "select_node"
 	SemanticCreateSelectCodex              SemanticActionKind = "create_select_codex"
 	SemanticCreateSelectClaude             SemanticActionKind = "create_select_claude"
 	SemanticCreateWorkdir                  SemanticActionKind = "create_workdir"
@@ -233,6 +239,7 @@ const (
 	SemanticCreateFresh                    SemanticActionKind = "create_fresh"
 	SemanticCreateCodex                    SemanticActionKind = "create_codex"
 	SemanticCreateClaude                   SemanticActionKind = "create_claude"
+	SemanticSettingsCategory               SemanticActionKind = "settings_category"
 	SemanticSettingsScreen                 SemanticActionKind = "settings_screen"
 	SemanticSettingsDetail                 SemanticActionKind = "settings_detail"
 	SemanticSettingsPageLimit              SemanticActionKind = "settings_page_limit"
@@ -313,17 +320,21 @@ type SemanticSurface struct {
 // or for the global active surface when sessionID is empty.
 func (controller *Controller) ProjectCurrent(ctx context.Context, sessionID domain.SessionID) (SemanticActionResult, error) {
 	if sessionID == "" {
-		controller.mu.Lock()
-		sessionID = controller.active
-		controller.mu.Unlock()
-		if sessionID == "" {
-			if loader, ok := controller.uiState.(ActiveSessionLoader); ok {
-				sessionID, _ = loader.LoadActiveSession(ctx)
-			}
+		if !controller.nodeAvailable(ctx, controller.currentNodeID()) {
+			controller.cancelCreateDraft()
+			return controller.nodeListSemanticResult(ctx)
 		}
+		var err error
+		sessionID, err = controller.nodes.EnsureActive(ctx, controller.currentNodeID())
+		if err != nil {
+			return SemanticActionResult{}, err
+		}
+		controller.mu.Lock()
+		controller.active = sessionID
+		controller.mu.Unlock()
 	}
 	if sessionID == "" {
-		return SemanticActionResult{Surface: mainMenuSurface("Bria готова. Нет активной сессии.")}, nil
+		return controller.sessionListSemanticResult(ctx)
 	}
 	card, err := controller.semanticCard(ctx, sessionID, false)
 	return SemanticActionResult{Card: &card}, err
@@ -379,7 +390,7 @@ func (controller *Controller) HandleSemanticMessage(ctx context.Context, update 
 		result.Surface = mainMenuSurface(decision.Status.Text)
 		return result, nil
 	case "/sessions":
-		return controller.sessionListSemanticResult(ctx)
+		return controller.openSessionsSemanticResult(ctx)
 	case "/status":
 		controller.mu.Lock()
 		active := controller.active
@@ -469,12 +480,12 @@ func (controller *Controller) HandleSemanticAction(ctx context.Context, action S
 }
 func isGlobalSemanticAction(kind SemanticActionKind) bool {
 	switch kind {
-	case SemanticMenuSessions, SemanticMenuNew, SemanticMenuArchive, SemanticMenuStatus,
+	case SemanticMenuSessions, SemanticMenuNew, SemanticMenuArchive, SemanticMenuStatus, SemanticMenuNodes, SemanticSelectNode,
 		SemanticMenuSettings, SemanticMenuBack, SemanticCreateSelectCodex, SemanticCreateSelectClaude,
 		SemanticCreateWorkdir, SemanticCreateConfirm, SemanticCreateCodex, SemanticCreateClaude,
 		SemanticCreateChoice, SemanticCreatePrevious, SemanticCreateFirst, SemanticCreateNext,
 		SemanticCreateUp, SemanticCreatePick, SemanticCreateDirectoryNew, SemanticCreateBack, SemanticCreateFresh,
-		SemanticSettingsScreen, SemanticSettingsDetail, SemanticSettingsPageLimit, SemanticSettingsContinueExisting,
+		SemanticSettingsCategory, SemanticSettingsScreen, SemanticSettingsDetail, SemanticSettingsPageLimit, SemanticSettingsContinueExisting,
 		SemanticSettingsTechnicalActions, SemanticSettingsBackgroundQuestions, SemanticSettingsBackgroundErrors,
 		SemanticSettingsArchiveRecommendations,
 		SemanticSettingsDefaultProvider, SemanticSettingsDefaultWorkdir, SemanticSettingsClearCreationDefaults,
@@ -489,9 +500,22 @@ func isGlobalSemanticAction(kind SemanticActionKind) bool {
 func (controller *Controller) handleGlobalSemanticAction(ctx context.Context, action SemanticAction) (SemanticActionResult, error) {
 	switch action.Kind {
 	case SemanticMenuSessions:
-		return controller.sessionListSemanticResult(ctx)
+		return controller.openSessionsSemanticResult(ctx)
+	case SemanticMenuNodes:
+		controller.cancelCreateDraft()
+		return controller.nodeListSemanticResult(ctx)
+	case SemanticMenuStatus:
+		controller.cancelCreateDraft()
+		return controller.statusSemanticResult(ctx)
+	case SemanticSelectNode:
+		return controller.selectNodeSemantic(ctx, action.Choice)
 	case SemanticMenuNew:
 		controller.setCreationPreferenceMode("")
+		if snapshot, open, err := controller.currentCreateSnapshotV2(ctx); err != nil {
+			return SemanticActionResult{}, err
+		} else if open {
+			return controller.advanceCreateV2(ctx, snapshot, 0)
+		}
 		return controller.beginNewSessionV2(ctx, action.UpdateID)
 	case SemanticCreateSelectCodex, SemanticCreateSelectClaude:
 		provider := domain.ProviderCodex
@@ -527,22 +551,11 @@ func (controller *Controller) handleGlobalSemanticAction(ctx context.Context, ac
 		return controller.confirmCreateDraft(ctx, action.UpdateID)
 	case SemanticMenuArchive:
 		return controller.archiveSemanticResult(ctx)
-	case SemanticMenuStatus:
-		controller.mu.Lock()
-		active := controller.active
-		controller.mu.Unlock()
-		if active == "" {
-			return SemanticActionResult{Surface: mainMenuSurface("Bria готова. Нет активной сессии.")}, nil
-		}
-		decision, err := controller.cardDecision(ctx, active, "")
-		if err != nil {
-			return SemanticActionResult{}, err
-		}
-		card, err := controller.semanticCard(ctx, active, false)
-		return SemanticActionResult{Decision: decision, Card: &card}, err
 	case SemanticMenuSettings:
 		controller.cancelCreateDraft()
 		return controller.settingsSemanticResult(ctx)
+	case SemanticSettingsCategory:
+		return controller.settingsCategorySemanticResult(ctx, telegramsettingsview.Category(action.Choice))
 	case SemanticSettingsDefaultProvider:
 		return controller.beginCreationPreferenceV2(ctx, creationPreferenceProvider)
 	case SemanticSettingsDefaultWorkdir:
@@ -566,10 +579,14 @@ func (controller *Controller) handleGlobalSemanticAction(ctx context.Context, ac
 		SemanticSettingsArchiveRecommendations,
 		SemanticSettingsLifetimeNever, SemanticSettingsLifetime6Hours, SemanticSettingsLifetime12Hours,
 		SemanticSettingsLifetime24Hours, SemanticSettingsLifetime48Hours, SemanticSettingsProviderCodex, SemanticSettingsProviderClaude:
-		if err := telegramsettings.Apply(ctx, controller.settings, controller.providerPreferences, string(action.Kind)); err != nil {
+		if err := telegramsettings.Apply(ctx, controller.settings, controller.scopedProviderPreferences(), string(action.Kind)); err != nil {
 			return SemanticActionResult{}, err
 		}
-		return controller.settingsSemanticResult(ctx)
+		category, ok := telegramsettingsview.CategoryForAction(string(action.Kind))
+		if !ok {
+			return SemanticActionResult{}, errors.New("settings action has no category")
+		}
+		return controller.settingsCategorySemanticResult(ctx, category)
 	case SemanticAuthorizeCodex, SemanticAuthorizeClaude:
 		provider := domain.ProviderCodex
 		if action.Kind == SemanticAuthorizeClaude {
@@ -615,47 +632,8 @@ func (controller *Controller) currentCreateDraftSurface(ctx context.Context) (*S
 	if !open {
 		return controller.newSessionSurface(ctx)
 	}
-	draft := snapshot.Draft
-	providerName := "не выбран"
-	if draft.Provider != "" {
-		providerName = authorizationProviderName(draft.Provider)
-	}
-	workdir := draft.Workdir
-	if workdir == "" {
-		workdir = "не выбрана"
-	}
-	lines := []string{
-		"Новая сессия",
-		"Компьютер: " + string(draft.ComputerID),
-		"Исполнитель: " + providerName,
-		"Рабочая папка: " + workdir,
-	}
-	if snapshot.ValidationError != "" {
-		lines = append(lines, "Ошибка: "+snapshot.ValidationError)
-	}
-	if snapshot.AwaitingWorkdir {
-		lines = append(lines, "Отправьте отдельным сообщением абсолютный путь к рабочей папке.")
-		return &SemanticSurface{Text: strings.Join(lines, "\n"), Rows: [][]SemanticButton{{{Label: "Меню", Action: SemanticMenuBack}}}}, nil
-	}
-
-	rows := make([][]SemanticButton, 0, 4)
-	if len(providers) > 1 {
-		buttons := make([]SemanticButton, 0, len(providers))
-		for _, provider := range providers {
-			action := SemanticCreateSelectCodex
-			if provider == domain.ProviderClaude {
-				action = SemanticCreateSelectClaude
-			}
-			buttons = append(buttons, SemanticButton{Label: authorizationProviderName(provider), Action: action})
-		}
-		rows = append(rows, buttons)
-	}
-	rows = append(rows, []SemanticButton{{Label: "Папка", Action: SemanticCreateWorkdir}})
-	if _, err := controller.createFlow.Confirm(providers); err == nil {
-		rows = append(rows, []SemanticButton{{Label: "Запустить", Action: SemanticCreateConfirm}})
-	}
-	rows = append(rows, []SemanticButton{{Label: "Меню", Action: SemanticMenuBack}})
-	return &SemanticSurface{Text: strings.Join(lines, "\n"), Rows: rows}, nil
+	view := telegramcreationview.RenderLegacy(snapshot, providers)
+	return semanticCreationSurface(view), nil
 }
 
 func (controller *Controller) selectCreateProvider(ctx context.Context, provider domain.Provider) error {
@@ -712,37 +690,11 @@ func (controller *Controller) cancelCreateDraft() {
 	controller.setCreationPreferenceMode("")
 }
 func (controller *Controller) availableProviders(ctx context.Context) ([]domain.Provider, error) {
-	known := []domain.Provider{domain.ProviderCodex, domain.ProviderClaude}
-	if controller.providerPreferences == nil {
-		return known, nil
-	}
-	preferences, err := controller.providerPreferences.Snapshot(ctx)
-	if err != nil {
-		return nil, err
-	}
-	available := make(map[domain.Provider]bool, len(preferences))
-	for _, preference := range preferences {
-		available[preference.Provider] = preference.Configured && preference.Enabled
-	}
-	result := make([]domain.Provider, 0, len(known))
-	for _, provider := range known {
-		if available[provider] {
-			result = append(result, provider)
-		}
-	}
-	return result, nil
+	return telegramnodes.AvailableProviders(ctx, controller.providerPreferences)
 }
-func (controller *Controller) providerEnabled(ctx context.Context, provider domain.Provider) (bool, error) {
-	providers, err := controller.availableProviders(ctx)
-	if err != nil {
-		return false, err
-	}
-	for _, available := range providers {
-		if available == provider {
-			return true, nil
-		}
-	}
-	return false, nil
+func (controller *Controller) providerEnabled(ctx context.Context, computerID domain.ComputerID, provider domain.Provider) (bool, error) {
+	return telegramnodes.ProviderEnabled(ctx, controller.creationEnvironment, controller.localComputerID,
+		controller.providerPreferences, computerID, provider)
 }
 func unavailableNewSessionSurface() *SemanticSurface {
 	return &SemanticSurface{Text: "Создание новой сессии недоступно: нет настроенного и включенного исполнителя.", Rows: [][]SemanticButton{{{Label: "Меню", Action: SemanticMenuBack}}}}
@@ -755,9 +707,13 @@ func (controller *Controller) sessionListSemanticResult(ctx context.Context) (Se
 	sort.Slice(sessions, func(i, j int) bool { return sessions[i].ID() < sessions[j].ID() })
 	var text strings.Builder
 	text.WriteString("Сессии")
+	currentNode := controller.currentNodeID()
 	rows := make([][]SemanticButton, 0, (len(sessions)+2)/3+2)
 	row := make([]SemanticButton, 0, 3)
 	for _, session := range sessions {
+		if session.ComputerID() != currentNode || session.Status() == domain.SessionArchived {
+			continue
+		}
 		fmt.Fprintf(&text, "\n%s %s %s", session.Provider(), shortID(session.ID()), session.Status())
 		row = append(row, SemanticButton{Label: string(session.Provider()) + " " + shortID(session.ID()), Action: SemanticSelect, SessionID: session.ID()})
 		if len(row) == 3 {
@@ -768,7 +724,11 @@ func (controller *Controller) sessionListSemanticResult(ctx context.Context) (Se
 	if len(row) > 0 {
 		rows = append(rows, row)
 	}
-	rows = append(rows, []SemanticButton{{Label: "Новая", Action: SemanticMenuNew}, {Label: "Меню", Action: SemanticMenuBack}})
+	rows = append(rows, []SemanticButton{
+		{Label: "Новое", Action: SemanticMenuNew},
+		{Label: "Ноды", Action: SemanticMenuNodes},
+		{Label: "≡ Меню", Action: SemanticMenuBack},
+	})
 	return SemanticActionResult{Surface: &SemanticSurface{Text: text.String(), Rows: rows}}, nil
 }
 func (controller *Controller) archiveSemanticResult(ctx context.Context) (SemanticActionResult, error) {
@@ -779,9 +739,10 @@ func (controller *Controller) archiveSemanticResult(ctx context.Context) (Semant
 	sort.Slice(sessions, func(i, j int) bool { return sessions[i].ID() < sessions[j].ID() })
 	var text strings.Builder
 	text.WriteString("Архив")
+	currentNode := controller.currentNodeID()
 	rows := make([][]SemanticButton, 0)
 	for _, session := range sessions {
-		if session.Status() != domain.SessionArchived {
+		if session.ComputerID() != currentNode || session.Status() != domain.SessionArchived {
 			continue
 		}
 		fmt.Fprintf(&text, "\n%s %s %s", session.Provider(), shortID(session.ID()), session.Workdir())
@@ -953,9 +914,12 @@ func validateSemanticAction(action SemanticAction) error {
 		if action.SessionID != "" || action.Page != 0 || action.FollowLatest || action.SessionSlot != 0 {
 			return errors.New("global semantic action must not contain a session or target fields")
 		}
-		if action.Kind == SemanticCreateChoice {
+		if action.Kind == SemanticCreateChoice || action.Kind == SemanticSettingsCategory || action.Kind == SemanticSelectNode {
 			if action.Choice <= 0 {
-				return errors.New("creation choice must be positive")
+				return errors.New("global choice must be positive")
+			}
+			if action.Kind == SemanticSettingsCategory && action.Choice > int(telegramsettingsview.CategoryProviders) {
+				return errors.New("settings category is invalid")
 			}
 		} else if action.Choice != 0 {
 			return errors.New("global semantic action must not contain a choice")
@@ -1015,6 +979,7 @@ type Options struct {
 	OutputFailures      OutputFailureRecorder
 	Recovered           []domain.Session
 	CreationEnvironment sessioncreation.Environment
+	Quotas              telegramstatus.Reader
 }
 type Controller struct {
 	ownerUserID            int64
@@ -1053,6 +1018,7 @@ type Controller struct {
 	closeDone              chan struct{}
 	closeErr               error
 	active                 domain.SessionID
+	nodes                  *telegramnodes.Scope
 	live                   map[domain.SessionID]domain.Session
 	pending                map[domain.SessionID]domain.Session
 	workers                map[domain.SessionID]*sessionWorker
@@ -1067,6 +1033,7 @@ type Controller struct {
 	pendingAuthorization   *AuthorizationChallenge
 	createFlow             *sessioncreation.Flow
 	creationEnvironment    sessioncreation.Environment
+	quotas                 telegramstatus.Reader
 	creationPreferenceMode string
 	creates                sync.WaitGroup
 	worker                 sync.WaitGroup
@@ -1118,6 +1085,11 @@ func New(
 		queueLimit = defaultQueueLimit
 	}
 	rootContext, cancelRoot := context.WithCancel(context.Background())
+	nodes, err := telegramnodes.New(localComputerID, sessions, options.UIState, options.CreationEnvironment)
+	if err != nil {
+		cancelRoot()
+		return nil, fmt.Errorf("create Telegram node scope: %w", err)
+	}
 	controller := &Controller{
 		ownerUserID: ownerUserID, ownerPrivateChatID: ownerPrivateChatID,
 		localComputerID: localComputerID, creator: creator, sessions: sessions,
@@ -1155,8 +1127,10 @@ func New(
 		deliveryFailures:    make(map[domain.SessionID]NotificationFailure),
 		promptIndexes:       make(map[domain.SessionID]map[string]int),
 		promptSessions:      make(map[string]domain.SessionID),
+		nodes:               nodes,
 		createFlow:          sessioncreation.New(),
 		creationEnvironment: options.CreationEnvironment,
+		quotas:              options.Quotas,
 	}
 	for _, session := range options.Recovered {
 		if session.Status() == domain.SessionReady {
@@ -1164,12 +1138,9 @@ func New(
 			controller.ensureWorkerLocked(session.ID())
 		}
 	}
-	if loader, ok := options.UIState.(ActiveSessionLoader); ok {
-		if active, err := loader.LoadActiveSession(context.Background()); err == nil {
-			if _, ok := controller.live[active]; ok {
-				controller.active = active
-			}
-		}
+	if err := controller.restoreNodeSelection(context.Background()); err != nil {
+		cancelRoot()
+		return nil, fmt.Errorf("restore selected node: %w", err)
 	}
 	return controller, nil
 }
@@ -1249,7 +1220,7 @@ func (controller *Controller) Handle(
 		return decision, nil
 	}
 	if provider, workdir, ok := parseNew(text); ok {
-		decision, err := controller.create(ctx, update.ID, controller.localComputerID, provider, workdir)
+		decision, err := controller.create(ctx, update.ID, controller.currentNodeID(), provider, workdir)
 		if errors.Is(err, errProviderUnavailable) {
 			return controller.status(unavailableNewSessionSurface().Text), nil
 		}
@@ -1599,6 +1570,9 @@ func (controller *Controller) cardDecision(ctx context.Context, sessionID domain
 		sort.Slice(sessions, func(i, j int) bool { return sessions[i].ID() < sessions[j].ID() })
 		row := []coordinator.KeyboardButton{}
 		for _, candidate := range sessions {
+			if candidate.ComputerID() != session.ComputerID() || candidate.Status() == domain.SessionArchived {
+				continue
+			}
 			label := string(candidate.Provider()) + " " + shortID(candidate.ID())
 			if candidate.ID() == sessionID {
 				label = "✓ " + label
@@ -1613,7 +1587,11 @@ func (controller *Controller) cardDecision(ctx context.Context, sessionID domain
 			keyboard = append(keyboard, row)
 		}
 	}
-	keyboard = append(keyboard, []coordinator.KeyboardButton{{Text: "+ Новая", CallbackData: "mm:new"}, {Text: "≡ Меню", CallbackData: "ft:more"}})
+	keyboard = append(keyboard, []coordinator.KeyboardButton{
+		{Text: "≡ Меню", CallbackData: "ft:more"},
+		{Text: "Ноды", CallbackData: "mm:status"},
+		{Text: "Новое", CallbackData: "mm:new"},
+	})
 	return coordinator.Decision{Kind: coordinator.DecisionStatus, Status: coordinator.Status{ConversationID: controller.ownerPrivateChatID, Text: header + pages[page-1]}, Keyboard: &keyboard}, nil
 }
 func (controller *Controller) semanticCard(ctx context.Context, sessionID domain.SessionID, makeActive bool) (SemanticCard, error) {
@@ -1648,6 +1626,9 @@ func (controller *Controller) semanticCard(ctx context.Context, sessionID domain
 	sort.Slice(sessions, func(i, j int) bool { return sessions[i].ID() < sessions[j].ID() })
 	selectable := make([]domain.SessionID, 0, len(sessions))
 	for _, candidate := range sessions {
+		if candidate.ComputerID() != session.ComputerID() || candidate.Status() == domain.SessionArchived {
+			continue
+		}
 		selectable = append(selectable, candidate.ID())
 	}
 	rowSizes := make([]int, 0, (len(selectable)+2)/3)
@@ -1812,8 +1793,9 @@ func (controller *Controller) archiveMenu(ctx context.Context) coordinator.Decis
 	b.WriteString("Архив\n")
 	sort.Slice(sessions, func(i, j int) bool { return sessions[i].ID() < sessions[j].ID() })
 	count := 0
+	currentNode := controller.currentNodeID()
 	for _, s := range sessions {
-		if s.Status() == domain.SessionArchived {
+		if s.ComputerID() == currentNode && s.Status() == domain.SessionArchived {
 			fmt.Fprintf(&b, "\n%s %s %s", s.Provider(), shortID(s.ID()), s.Workdir())
 			count++
 		}
@@ -1827,12 +1809,15 @@ func (controller *Controller) ResumeArchived(ctx context.Context, sessionID doma
 	if controller.asyncResumer != nil {
 		return controller.resumeArchivedAsync(ctx, sessionID)
 	}
-	if controller.archivedResumer == nil {
-		return coordinator.Decision{}, errors.New("archived session resumer is not configured")
-	}
 	archived, err := controller.sessions.Load(ctx, sessionID)
 	if err != nil {
 		return coordinator.Decision{}, fmt.Errorf("load archived session before resume: %w", err)
+	}
+	if archived.ComputerID() != controller.currentNodeID() {
+		return coordinator.Decision{}, errors.New("archived session does not belong to the selected node")
+	}
+	if controller.archivedResumer == nil {
+		return coordinator.Decision{}, errors.New("archived session resumer is not configured")
 	}
 	prior, ok := archived.Binding()
 	if archived.Status() != domain.SessionArchived || !ok {
@@ -1902,16 +1887,25 @@ func (controller *Controller) CloseSession(ctx context.Context, sessionID domain
 	if result.Session.Status() != domain.SessionArchived {
 		return coordinator.Decision{}, errors.New("confirmed close did not archive the session")
 	}
-	controller.applyClosedSession(result.Session)
+	if err := controller.applyClosedSession(ctx, result.Session); err != nil {
+		return coordinator.Decision{}, fmt.Errorf("persist closed node session: %w", err)
+	}
 	return controller.archiveMenu(ctx), nil
 }
-func (controller *Controller) applyClosedSession(session domain.Session) {
+func (controller *Controller) applyClosedSession(ctx context.Context, session domain.Session) error {
 	controller.mu.Lock()
-	defer controller.mu.Unlock()
 	delete(controller.live, session.ID())
-	if controller.active == session.ID() {
-		controller.active = ""
+	controller.mu.Unlock()
+	fallback, err := controller.nodes.Remove(ctx, session)
+	if err != nil {
+		return err
 	}
+	controller.mu.Lock()
+	if controller.currentNodeID() == session.ComputerID() {
+		controller.active = fallback
+	}
+	controller.mu.Unlock()
+	return nil
 }
 func shortID(id domain.SessionID) string {
 	s := string(id)
@@ -1999,6 +1993,7 @@ func (controller *Controller) createAsync(
 		return coordinator.Decision{}, errors.New("Telegram controller is closed")
 	}
 	controller.creates.Add(1)
+	previousActive := controller.nodes.Active(computerID)
 	controller.mu.Unlock()
 	beginContext, cancelBegin := context.WithCancel(ctx)
 	stopCancellation := context.AfterFunc(controller.rootContext, cancelBegin)
@@ -2022,7 +2017,7 @@ func (controller *Controller) createAsync(
 	controller.pending[pending.Session.ID()] = pending.Session
 	controller.active = pending.Session.ID()
 	controller.mu.Unlock()
-	go controller.awaitCreatedSession(intent, pending)
+	go controller.awaitCreatedSession(intent, pending, previousActive)
 	if err := controller.persistActive(ctx, pending.Session.ID()); err != nil {
 		return coordinator.Decision{}, fmt.Errorf("persist starting active Telegram session: %w", err)
 	}
@@ -2043,25 +2038,25 @@ func validatePendingCreate(pending PendingSessionStart, intent app.ConfirmedSess
 	}
 	return nil
 }
-func (controller *Controller) awaitCreatedSession(intent app.ConfirmedSessionIntent, pending PendingSessionStart) {
+func (controller *Controller) awaitCreatedSession(intent app.ConfirmedSessionIntent, pending PendingSessionStart, previousActive domain.SessionID) {
 	defer controller.creates.Done()
 	select {
 	case <-controller.rootContext.Done():
 		return
 	case outcome, ok := <-pending.Outcome:
 		if !ok {
-			controller.asyncStartFailed(pending.Session.ID(), "Запуск сессии завершился без подтверждённого результата.", "")
+			controller.asyncStartFailed(pending.Session.ID(), "Запуск сессии завершился без подтверждённого результата.", previousActive)
 			return
 		}
 		if outcome.Err != nil || !sameSessionIdentity(outcome.Session, pending.Session) {
-			controller.asyncStartFailed(pending.Session.ID(), "Не удалось подтвердить запуск сессии.", "")
+			controller.asyncStartFailed(pending.Session.ID(), "Не удалось подтвердить запуск сессии.", previousActive)
 			return
 		}
 		binding, hasBinding := outcome.Session.Binding()
 		switch outcome.Session.Status() {
 		case domain.SessionReady:
 			if !hasBinding || outcome.StartError != nil {
-				controller.asyncStartFailed(pending.Session.ID(), "Не удалось подтвердить запуск сессии.", "")
+				controller.asyncStartFailed(pending.Session.ID(), "Не удалось подтвердить запуск сессии.", previousActive)
 				return
 			}
 			controller.mu.Lock()
@@ -2077,14 +2072,14 @@ func (controller *Controller) awaitCreatedSession(intent app.ConfirmedSessionInt
 			controller.mu.Unlock()
 		case domain.SessionAwaitingRecovery:
 			if hasBinding || outcome.Replayed || outcome.StartError == nil {
-				controller.asyncStartFailed(pending.Session.ID(), "Не удалось подтвердить запуск сессии.", "")
+				controller.asyncStartFailed(pending.Session.ID(), "Не удалось подтвердить запуск сессии.", previousActive)
 				return
 			}
 			controller.mu.Lock()
 			controller.pending[outcome.Session.ID()] = outcome.Session
 			controller.mu.Unlock()
 		default:
-			controller.asyncStartFailed(pending.Session.ID(), "Не удалось подтвердить запуск сессии.", "")
+			controller.asyncStartFailed(pending.Session.ID(), "Не удалось подтвердить запуск сессии.", previousActive)
 		}
 	}
 }
@@ -2092,6 +2087,9 @@ func (controller *Controller) resumeArchivedAsync(ctx context.Context, sessionID
 	archived, err := controller.sessions.Load(ctx, sessionID)
 	if err != nil {
 		return coordinator.Decision{}, fmt.Errorf("load archived session before resume: %w", err)
+	}
+	if archived.ComputerID() != controller.currentNodeID() {
+		return coordinator.Decision{}, errors.New("archived session does not belong to the selected node")
 	}
 	prior, ok := archived.Binding()
 	if archived.Status() != domain.SessionArchived || !ok {
@@ -2172,11 +2170,17 @@ func (controller *Controller) awaitResumedSession(
 }
 func (controller *Controller) asyncStartFailed(sessionID domain.SessionID, text string, previousActive domain.SessionID) {
 	controller.mu.Lock()
+	failed := controller.pending[sessionID]
 	delete(controller.pending, sessionID)
 	if controller.active == sessionID {
 		controller.active = previousActive
 	}
+	nodeID := failed.ComputerID()
 	controller.mu.Unlock()
+	if nodeID != "" {
+		ctx := context.WithoutCancel(controller.rootContext)
+		_ = controller.nodes.RestoreActive(ctx, nodeID, previousActive)
+	}
 	controller.notify(context.WithoutCancel(controller.rootContext), Notification{
 		OperationID:    "session-start:" + string(sessionID),
 		ConversationID: controller.ownerPrivateChatID,
@@ -2200,7 +2204,7 @@ func (controller *Controller) create(
 	if updateID <= 0 {
 		return coordinator.Decision{}, errors.New("confirmed creation update id must be positive")
 	}
-	enabled, err := controller.providerEnabled(ctx, provider)
+	enabled, err := controller.providerEnabled(ctx, computerID, provider)
 	if err != nil {
 		return coordinator.Decision{}, err
 	}
@@ -2283,10 +2287,20 @@ func (controller *Controller) create(
 	return coordinator.Decision{}, errors.New("validated session status changed unexpectedly")
 }
 func (controller *Controller) persistActive(ctx context.Context, sessionID domain.SessionID) error {
-	if controller.uiState == nil {
-		return nil
+	controller.mu.Lock()
+	session, ok := controller.live[sessionID]
+	if !ok {
+		session, ok = controller.pending[sessionID]
 	}
-	return controller.uiState.SetActiveSession(ctx, sessionID)
+	controller.mu.Unlock()
+	if !ok {
+		var err error
+		session, err = controller.sessions.Load(ctx, sessionID)
+		if err != nil {
+			return fmt.Errorf("load active session for node scope: %w", err)
+		}
+	}
+	return controller.setCurrentNodeActive(ctx, session)
 }
 func (controller *Controller) use(
 	ctx context.Context,
@@ -2295,6 +2309,9 @@ func (controller *Controller) use(
 	session, err := controller.sessions.Load(ctx, sessionID)
 	if err != nil {
 		return coordinator.Decision{}, fmt.Errorf("load selected session: %w", err)
+	}
+	if session.ComputerID() != controller.currentNodeID() {
+		return coordinator.Decision{}, errors.New("session does not belong to the selected node")
 	}
 	controller.mu.Lock()
 	_, usable := controller.usableLocked(session)
@@ -2333,9 +2350,13 @@ func (controller *Controller) listSessions(ctx context.Context) (coordinator.Dec
 	controller.mu.Unlock()
 	var text strings.Builder
 	text.WriteString("Сессии\nВыберите сессию:")
+	currentNode := controller.currentNodeID()
 	keyboard := coordinator.KeyboardMarkup{}
 	row := []coordinator.KeyboardButton{}
 	for _, session := range sessions {
+		if session.ComputerID() != currentNode || session.Status() == domain.SessionArchived {
+			continue
+		}
 		marker := ""
 		if session.ID() == active {
 			marker = "✓ "
@@ -2803,7 +2824,10 @@ func (worker *sessionWorker) runTurnWithAcceptance(
 				worker.notifyTurnError(turn.messageID+":close-error", "Не удалось подтвердить закрытие сессии.")
 				return DurableInputFailed, accepted
 			}
-			worker.controller.applyClosedSession(closed.Session)
+			if err := worker.controller.applyClosedSession(finishContext, closed.Session); err != nil {
+				worker.notifyTurnError(turn.messageID+":close-ui-state", "Не удалось сохранить закрытие сессии.")
+				return DurableInputFailed, accepted
+			}
 		}
 	}
 	if err != nil || result.TerminalStatus != sessionruntime.StatusCompleted {

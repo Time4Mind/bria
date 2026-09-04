@@ -39,6 +39,25 @@ func TestStateValidateRejectsBrokenCardAndPreservesClone(t *testing.T) {
 	}
 }
 
+func TestStateValidatesAndClonesPerNodeSelection(t *testing.T) {
+	s := validState()
+	s.SelectedNode = "node-1"
+	s.ActiveSessions["node-1"] = s.ActiveSession
+	if err := s.Validate(); err != nil {
+		t.Fatalf("node-scoped state rejected: %v", err)
+	}
+	clone := s.Clone()
+	clone.ActiveSessions["node-1"] = "other"
+	if s.ActiveSessions["node-1"] != s.ActiveSession {
+		t.Fatal("clone mutation changed original node selection")
+	}
+	broken := s.Clone()
+	broken.ActiveSessions["node-1"] = "missing"
+	if err := broken.Validate(); err == nil {
+		t.Fatal("node active session without card accepted")
+	}
+}
+
 func TestMemoryStoreUpdateIsValidatedAndDurableWithinStore(t *testing.T) {
 	ctx := context.Background()
 	store := telegramstate.NewMemoryStore()

@@ -110,8 +110,23 @@ func (flow *Flow) CurrentV2(computers []Computer, defaults Defaults) (Snapshot, 
 			flow.currentDir = ""
 			flow.directories = nil
 			flow.recommendations = nil
-			flow.enterLocked(providerStep(flow.providers), true)
+			enabled := enabledProviders(flow.providers)
+			if len(enabled) == 1 {
+				flow.draft.Provider = enabled[0]
+				flow.draft.Workdir = strings.TrimSpace(defaults.Workdirs[flow.draft.ComputerID])
+				flow.enterLocked(StepDirectory, true)
+			} else {
+				flow.enterLocked(providerStep(flow.providers), true)
+			}
 			flow.errText = "выбранный бэкенд больше недоступен"
+		} else if flow.draft.Provider == "" && flow.step == StepProvider {
+			enabled := enabledProviders(flow.providers)
+			if len(enabled) == 1 {
+				flow.draft.Provider = enabled[0]
+				flow.draft.Workdir = strings.TrimSpace(defaults.Workdirs[flow.draft.ComputerID])
+				flow.enterLocked(StepDirectory, true)
+				flow.errText = ""
+			}
 		}
 	}
 	return flow.snapshotLocked(), true

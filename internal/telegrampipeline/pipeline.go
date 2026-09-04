@@ -28,7 +28,6 @@ var (
 type CallbackDecoder interface {
 	DecodeCallbackWithMetadata(string) (telegrambridge.DecodedCallback, error)
 }
-
 type CallbackPresentation struct {
 	SessionID            domain.SessionID
 	Carrier              telegramstate.Carrier
@@ -150,14 +149,7 @@ type AcceptedCallback struct {
 	ArtifactRetry        *ArtifactRetryBinding
 }
 
-func AcceptCallback(
-	ctx context.Context,
-	update coordinator.Update,
-	ownerUserID, ownerPrivateChatID int64,
-	cards CardStore,
-	registry CallbackRegistry,
-	decoder CallbackDecoder,
-) (AcceptedCallback, error) {
+func AcceptCallback(ctx context.Context, update coordinator.Update, ownerUserID, ownerPrivateChatID int64, cards CardStore, registry CallbackRegistry, decoder CallbackDecoder) (AcceptedCallback, error) {
 	return acceptCallback(ctx, update, ownerUserID, ownerPrivateChatID, cards, registry, decoder, false)
 }
 
@@ -469,7 +461,19 @@ func PlanAcceptedCallback(callback AcceptedCallback) (CallbackPlan, error) {
 		effect = EffectOpenArchive
 	case telegramui.ActionMenuStatus:
 		effect = EffectShowStatus
-	case telegramui.ActionMenuSettings:
+	case telegramui.ActionMenuNodes:
+		effect = EffectShowStatus
+	case telegramui.ActionSelectNode:
+		if callback.Target.Choice < 1 || callback.Target.Page != 0 || callback.Target.FollowLatest ||
+			callback.Target.SessionSlot != 0 || callback.Target.InteractionChoice != 0 {
+			return CallbackPlan{}, errors.New("node choice target is invalid")
+		}
+		effect = EffectShowStatus
+	case telegramui.ActionMenuSettings, telegramui.ActionSettingsCategory:
+		if callback.Action == telegramui.ActionSettingsCategory && (callback.Target.Choice < 1 || callback.Target.Page != 0 || callback.Target.FollowLatest ||
+			callback.Target.SessionSlot != 0 || callback.Target.InteractionChoice != 0) {
+			return CallbackPlan{}, errors.New("settings category target is invalid")
+		}
 		effect = EffectOpenSettings
 	case telegramui.ActionMenuBack:
 		effect = EffectOpenMenu
@@ -561,7 +565,9 @@ func PlanAcceptedCallback(callback AcceptedCallback) (CallbackPlan, error) {
 	default:
 		return CallbackPlan{}, fmt.Errorf("unsupported callback action %q", callback.Action)
 	}
-	if effect != EffectProjectPage && effect != EffectInteractionChoice && effect != EffectCreateChoice && callback.Target != (telegramui.ButtonTarget{}) {
+	if effect != EffectProjectPage && effect != EffectInteractionChoice && effect != EffectCreateChoice &&
+		callback.Action != telegramui.ActionSettingsCategory && callback.Action != telegramui.ActionSelectNode &&
+		callback.Target != (telegramui.ButtonTarget{}) {
 		return CallbackPlan{}, errors.New("non-page callback must not contain a target")
 	}
 	global := telegramui.IsGlobalAction(callback.Action)
@@ -802,7 +808,6 @@ type callbackClaimIdentity struct {
 	UpdateID        int64
 	CallbackQueryID string
 }
-
 type MemoryCallbackRegistry struct {
 	mu            sync.Mutex
 	now           func() time.Time

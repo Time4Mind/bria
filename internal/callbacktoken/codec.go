@@ -114,6 +114,9 @@ const (
 	ActionSettingsDefaultProvider              Action = 69
 	ActionSettingsDefaultWorkdir               Action = 70
 	ActionSettingsClearCreationDefaults        Action = 71
+	ActionSettingsCategory                     Action = 72
+	ActionMenuNodes                            Action = 73
+	ActionSelectNode                           Action = 74
 )
 
 // Fields is the semantic callback payload. SessionID identifies the selected
@@ -240,6 +243,7 @@ func validAction(action Action) bool {
 		ActionMenuSessions, ActionMenuNew, ActionMenuArchive, ActionMenuStatus,
 		ActionMenuSettings, ActionMenuBack, ActionCreateSelectCodex, ActionCreateSelectClaude,
 		ActionCreateWorkdir, ActionCreateConfirm, ActionCreateCodex, ActionCreateClaude,
+		ActionSettingsCategory, ActionMenuNodes, ActionSelectNode,
 		ActionSettingsScreen, ActionSettingsDetail, ActionSettingsPageLimit, ActionSettingsContinueExisting,
 		ActionSettingsTechnicalActions, ActionSettingsBackgroundQuestions, ActionSettingsBackgroundErrors,
 		ActionSettingsArchiveRecommendations,
@@ -271,9 +275,13 @@ func validTarget(action Action, target int) bool {
 		return target > 0 && target <= MaxTarget
 	case ActionCreateChoice:
 		return target > 0 && target <= MaxTarget
+	case ActionSettingsCategory:
+		return target > 0 && target <= MaxTarget
+	case ActionSelectNode:
+		return target > 0 && target <= MaxTarget
 	case ActionInteractionChoice:
 		return target > 0 && target <= MaxTarget
-	case ActionLatestPage, ActionSelectSession, ActionStop, ActionClose, ActionOptions, ActionScreen, ActionResume,
+	case ActionLatestPage, ActionSelectSession, ActionStop, ActionClose, ActionOptions, ActionScreen, ActionResume, ActionMenuNodes,
 		ActionMenuSessions, ActionMenuNew, ActionMenuArchive, ActionMenuStatus,
 		ActionMenuSettings, ActionMenuBack, ActionCreateSelectCodex, ActionCreateSelectClaude,
 		ActionCreateWorkdir, ActionCreateConfirm, ActionCreateCodex, ActionCreateClaude,
