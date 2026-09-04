@@ -25,7 +25,9 @@ check-policy:
 	$(GO_ENV) $(GO) run -mod=readonly ./scripts filenames
 
 check-format:
-	@diff="$$(git ls-files -z --cached --others --exclude-standard -- '*.go' | xargs -0 $(GO_ENV) $(GOFMT) -d)"; \
+	@diff="$$(git ls-files -z --cached --others --exclude-standard -- '*.go' | \
+		xargs -0 -r sh -c 'for file do test ! -f "$$file" || printf "%s\0" "$$file"; done' sh | \
+		xargs -0 -r $(GO_ENV) $(GOFMT) -d)"; \
 	if test -n "$$diff"; then \
 		printf '%s\n' "$$diff"; \
 		exit 1; \
@@ -62,8 +64,12 @@ check-full: check check-race build
 		*) printf '%s\n' 'ERROR: bria --help returned unexpected output' >&2; exit 1 ;; \
 	esac; \
 	case "$$help" in \
-		*'Owner-only private commands:'*'/new codex|claude /absolute/workdir'*) ;; \
+		*'Owner-only private commands:'*'/menu'*'/model'*'/effort'*) ;; \
 		*) printf '%s\n' 'ERROR: bria --help does not describe the supported runtime flow' >&2; exit 1 ;; \
+	esac; \
+	case "$$help" in \
+		*'/new'*) printf '%s\n' 'ERROR: bria --help exposes unsupported /new command' >&2; exit 1 ;; \
+		*) ;; \
 	esac; \
 	case "$$help" in \
 		*'bria run --config /absolute/path/to/config.json'*'bria check-config --config /absolute/path/to/config.json'*'bria check-telegram --config /absolute/path/to/config.json'*) ;; \

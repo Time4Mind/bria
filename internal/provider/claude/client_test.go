@@ -69,6 +69,32 @@ func TestSendUserWithIDRejectsSameTextReplayWithDifferentIdentity(t *testing.T) 
 	}
 }
 
+func TestSteerUserWithIDIsAcceptedInsideCurrentTurn(t *testing.T) {
+	transcript := strings.Join([]string{
+		`{"type":"system","subtype":"init","cwd":"/tmp","session_id":"one","claude_code_version":"2.1.181"}`,
+		`{"type":"user","message":{"role":"user","content":[{"type":"text","text":"root"}]},"session_id":"one","uuid":"root-id","isReplay":true}`,
+		`{"type":"user","message":{"role":"user","content":[{"type":"text","text":"follow-up"}]},"session_id":"one","uuid":"follow-up-id","isReplay":true}`,
+	}, "\n") + "\n"
+	var output bytes.Buffer
+	client := newClient(t, strings.NewReader(transcript), &output, claude.Options{})
+	if err := client.SendUserWithID("root", "root-id"); err != nil {
+		t.Fatal(err)
+	}
+	_ = nextEvent(t, client)
+	_ = nextEvent(t, client)
+	if err := client.SteerUserWithID("follow-up", "follow-up-id"); err != nil {
+		t.Fatalf("SteerUserWithID() error = %v", err)
+	}
+	event := nextEvent(t, client)
+	if event.Kind != claude.EventUserReplay || event.UserReplay == nil || event.UserReplay.MessageID != "follow-up-id" {
+		t.Fatalf("steer replay = %#v", event)
+	}
+	wantSuffix := `{"type":"user","uuid":"follow-up-id","message":{"role":"user","content":[{"type":"text","text":"follow-up"}]}}` + "\n"
+	if !strings.HasSuffix(output.String(), wantSuffix) {
+		t.Fatalf("wire = %q, want suffix %q", output.String(), wantSuffix)
+	}
+}
+
 func TestTypedPermissionControlRequestAndCorrelatedResponse(t *testing.T) {
 	transcript := strings.Join([]string{
 		`{"type":"system","subtype":"init","cwd":"/tmp","session_id":"one","claude_code_version":"2.1.181"}`,

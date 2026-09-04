@@ -32,10 +32,11 @@ const (
 type OutputPhase string
 
 const (
-	OutputPending   OutputPhase = "pending"
-	OutputConfirmed OutputPhase = "confirmed"
-	OutputFailed    OutputPhase = "failed"
-	OutputUnknown   OutputPhase = "unknown"
+	OutputPending    OutputPhase = "pending"
+	OutputConfirmed  OutputPhase = "confirmed"
+	OutputFailed     OutputPhase = "failed"
+	OutputUnknown    OutputPhase = "unknown"
+	OutputSuperseded OutputPhase = "superseded"
 )
 
 // Limits bounds both accepted writes and documents loaded from disk. Limits

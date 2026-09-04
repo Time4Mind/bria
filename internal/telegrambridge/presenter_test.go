@@ -101,6 +101,59 @@ func TestPresenterPreservesCanonicalRowsLabelsAndSignedSemanticCallbacks(t *test
 	}
 }
 
+func TestPresenterSignsAndDecodesEverySettingsAction(t *testing.T) {
+	t.Parallel()
+
+	now := time.Unix(1_800_000_000, 0).UTC()
+	presenter := mustPresenter(t, mustCallbackCodec(t, func() time.Time { return now }), func() time.Time { return now }, 15*time.Minute)
+	actions := []telegramui.Action{
+		telegramui.ActionSettingsScreen, telegramui.ActionSettingsDetail, telegramui.ActionSettingsPageLimit,
+		telegramui.ActionSettingsContinueExisting, telegramui.ActionSettingsTechnicalActions,
+		telegramui.ActionSettingsBackgroundQuestions, telegramui.ActionSettingsBackgroundErrors, telegramui.ActionSettingsArchiveRecommendations,
+		telegramui.ActionSettingsDefaultProvider, telegramui.ActionSettingsDefaultWorkdir, telegramui.ActionSettingsClearCreationDefaults,
+		telegramui.ActionSettingsLifetimeNever, telegramui.ActionSettingsLifetime6Hours,
+		telegramui.ActionSettingsLifetime12Hours, telegramui.ActionSettingsLifetime24Hours,
+		telegramui.ActionSettingsLifetime48Hours, telegramui.ActionSettingsProviderCodex,
+		telegramui.ActionSettingsProviderClaude,
+	}
+	rows := make([]telegramui.ButtonRow, len(actions))
+	for index, action := range actions {
+		rows[index] = telegramui.ButtonRow{{Action: action}}
+	}
+	markup, err := presenter.PresentKeyboard(telegramui.GlobalSurfaceID, nil, telegramui.CardKeyboard{Rows: rows})
+	if err != nil {
+		t.Fatalf("PresentKeyboard(settings): %v", err)
+	}
+	for index, action := range actions {
+		decoded, err := presenter.DecodeCallback(markup.InlineKeyboard[index][0].CallbackData)
+		if err != nil || decoded.Action != action {
+			t.Fatalf("settings action %q decoded as %#v, %v", action, decoded, err)
+		}
+	}
+}
+
+func TestPresenterPreservesDynamicCreationChoiceAndProviderLabels(t *testing.T) {
+	t.Parallel()
+	now := time.Unix(1_800_000_000, 0).UTC()
+	presenter := mustPresenter(t, mustCallbackCodec(t, func() time.Time { return now }), func() time.Time { return now }, 15*time.Minute)
+	keyboard := telegramui.CardKeyboard{Rows: []telegramui.ButtonRow{
+		{{Action: telegramui.ActionCreateChoice, Label: "/workspace", Target: telegramui.ButtonTarget{Choice: 3}}},
+		{{Action: telegramui.ActionCreateSelectCodex, Label: "Codex · включить"}},
+		{{Action: telegramui.ActionCreateFirst, Label: "2/5"}},
+	}}
+	markup, err := presenter.PresentKeyboard(telegramui.GlobalSurfaceID, nil, keyboard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := labels(markup.InlineKeyboard); !reflect.DeepEqual(got, [][]string{{"/workspace"}, {"Codex · включить"}, {"2/5"}}) {
+		t.Fatalf("dynamic creation labels = %#v", got)
+	}
+	decoded, err := presenter.DecodeCallback(markup.InlineKeyboard[0][0].CallbackData)
+	if err != nil || decoded.Action != telegramui.ActionCreateChoice || decoded.Target.Choice != 3 {
+		t.Fatalf("dynamic creation callback = (%#v, %v)", decoded, err)
+	}
+}
+
 func TestPresenterUsesCloseLabelForInactiveCard(t *testing.T) {
 	t.Parallel()
 
@@ -149,6 +202,8 @@ func TestPresenterSignsEveryGlobalSurfaceActionWithoutRawCallbackData(t *testing
 	actions := []telegramui.Action{
 		telegramui.ActionMenuSessions, telegramui.ActionMenuNew, telegramui.ActionMenuArchive,
 		telegramui.ActionMenuStatus, telegramui.ActionMenuSettings, telegramui.ActionMenuBack,
+		telegramui.ActionCreateSelectCodex, telegramui.ActionCreateSelectClaude,
+		telegramui.ActionCreateWorkdir, telegramui.ActionCreateConfirm,
 		telegramui.ActionCreateCodex, telegramui.ActionCreateClaude,
 		telegramui.ActionSettingsScreen, telegramui.ActionSettingsDetail,
 		telegramui.ActionAuthorizeCodex, telegramui.ActionAuthorizeClaude,

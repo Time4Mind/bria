@@ -47,6 +47,11 @@ func TestPreferencesMutationsPersistAndLocalReloadSharesOneFile(t *testing.T) {
 				t.Fatalf("detail=%q", got.CardDetail)
 			}
 		}},
+		{"page limit", func() error { return preferences.CycleCardPageLimit(context.Background()) }, func(t *testing.T, got settings.Settings) {
+			if got.CardPageLimit != 128 {
+				t.Fatalf("page limit=%d", got.CardPageLimit)
+			}
+		}},
 		{"technical", func() error { return preferences.ToggleTechnicalActions(context.Background()) }, func(t *testing.T, got settings.Settings) {
 			if got.ShowTechnicalActions {
 				t.Fatal("technical actions remained enabled")
@@ -60,6 +65,23 @@ func TestPreferencesMutationsPersistAndLocalReloadSharesOneFile(t *testing.T) {
 		{"errors", func() error { return preferences.ToggleBackgroundErrors(context.Background()) }, func(t *testing.T, got settings.Settings) {
 			if got.NotifyBackgroundErrors {
 				t.Fatal("errors remained enabled")
+			}
+		}},
+		{"archive recommendations", func() error { return preferences.ToggleArchiveRecommendations(context.Background()) }, func(t *testing.T, got settings.Settings) {
+			if !got.ArchiveRecommendations {
+				t.Fatal("archive recommendations remained disabled")
+			}
+		}},
+		{"default provider", func() error {
+			return preferences.SetDefaultProvider(context.Background(), "local", domain.ProviderClaude)
+		}, func(t *testing.T, got settings.Settings) {
+			if got.DefaultProviders["local"] != string(domain.ProviderClaude) {
+				t.Fatalf("default provider=%q", got.DefaultProviders["local"])
+			}
+		}},
+		{"default workdir", func() error { return preferences.SetDefaultWorkdir(context.Background(), "local", "/workspace") }, func(t *testing.T, got settings.Settings) {
+			if got.DefaultWorkdirs["local"] != "/workspace" {
+				t.Fatalf("default workdir=%q", got.DefaultWorkdirs["local"])
 			}
 		}},
 		{"lifetime", func() error { return preferences.SetSessionLifetime(context.Background(), "48h") }, func(t *testing.T, got settings.Settings) {
@@ -124,13 +146,14 @@ func TestPreferencesDriveTypedControllerAndDurableFile(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = controller.Close(context.Background()) })
 	result, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticMenuSettings})
-	if err != nil || result.Surface == nil || !strings.Contains(result.Surface.Text, "Срок жизни сессий: never") {
+	if err != nil || result.Surface == nil || !strings.Contains(result.Surface.Text, "Срок жизни сессий: never") || !strings.Contains(result.Surface.Text, "Лимит страниц: 64") {
 		t.Fatalf("settings surface = (%#v, %v)", result, err)
 	}
 	for _, action := range []telegramcontroller.SemanticActionKind{
 		telegramcontroller.SemanticSettingsContinueExisting, telegramcontroller.SemanticSettingsScreen,
-		telegramcontroller.SemanticSettingsDetail, telegramcontroller.SemanticSettingsTechnicalActions,
+		telegramcontroller.SemanticSettingsDetail, telegramcontroller.SemanticSettingsPageLimit, telegramcontroller.SemanticSettingsTechnicalActions,
 		telegramcontroller.SemanticSettingsBackgroundQuestions, telegramcontroller.SemanticSettingsBackgroundErrors,
+		telegramcontroller.SemanticSettingsArchiveRecommendations,
 		telegramcontroller.SemanticSettingsLifetime48Hours,
 	} {
 		if _, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: action}); err != nil {
@@ -142,7 +165,7 @@ func TestPreferencesDriveTypedControllerAndDurableFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	persisted, err := reopened.Load(context.Background())
-	if err != nil || persisted.ContinueExisting || !persisted.ScreenEnabled || persisted.CardDetail != settings.CardDetailCompact || persisted.ShowTechnicalActions || persisted.NotifyBackgroundQuestions || persisted.NotifyBackgroundErrors || persisted.SessionLifetime != settings.Lifetime48Hours {
+	if err != nil || persisted.ContinueExisting || !persisted.ScreenEnabled || persisted.CardDetail != settings.CardDetailCompact || persisted.CardPageLimit != 128 || persisted.ShowTechnicalActions || persisted.NotifyBackgroundQuestions || persisted.NotifyBackgroundErrors || !persisted.ArchiveRecommendations || persisted.SessionLifetime != settings.Lifetime48Hours {
 		t.Fatalf("durable controller settings = %+v, %v", persisted, err)
 	}
 }

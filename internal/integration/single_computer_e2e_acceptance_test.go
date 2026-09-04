@@ -299,7 +299,6 @@ func TestSingleComputerSyntheticTelegramCreateSubmitCloseAndExactResume(t *testi
 				ID: firstUpdateID + 1, Kind: coordinator.UpdateMessage, ActorID: ownerID,
 				ConversationID: chatID, ConversationKind: "private", Text: "first request",
 			})
-			sender.wait(t, "status:101")
 			notifier.waitFinal(t, sessionID, "answer: first request")
 			waitForReceipt(t, receiptPath, "synthetic-submit", 2*time.Second)
 
@@ -328,7 +327,6 @@ func TestSingleComputerSyntheticTelegramCreateSubmitCloseAndExactResume(t *testi
 				ID: firstUpdateID + 2, Kind: coordinator.UpdateMessage, ActorID: ownerID,
 				ConversationID: chatID, ConversationKind: "private", Text: "after resume",
 			})
-			sender.wait(t, "status:102")
 			notifier.waitFinal(t, sessionID, "answer: after resume")
 
 			if _, err := controller.CloseSession(context.Background(), sessionID); err != nil {

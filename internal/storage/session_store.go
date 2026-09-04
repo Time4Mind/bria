@@ -480,8 +480,45 @@ func (store *SessionStore) AppendCardHistory(ctx context.Context, sessionID doma
 		}
 		if len(card.History) >= 512 {
 			card.History = append([]string(nil), card.History[len(card.History)-511:]...)
+			if len(card.HistoryKeys) != 0 {
+				card.HistoryKeys = append([]string(nil), card.HistoryKeys[len(card.HistoryKeys)-511:]...)
+			}
 		}
 		card.History = append(card.History, item)
+		if len(card.HistoryKeys) != 0 {
+			card.HistoryKeys = append(card.HistoryKeys, "")
+		}
+		return state.SetCard(card)
+	})
+}
+
+// SetCardPrompt inserts or replaces one user prompt at its stable message ID.
+// The visible history remains plain text; the parallel key is presentation
+// metadata used only to update the three-state prompt marker.
+func (store *SessionStore) SetCardPrompt(ctx context.Context, sessionID domain.SessionID, messageID, item string) error {
+	if sessionID == "" || strings.TrimSpace(messageID) == "" || messageID != strings.TrimSpace(messageID) || item == "" {
+		return errors.New("session, prompt message, and history item are required")
+	}
+	return store.UpdateTelegramUI(ctx, func(state *telegramstate.State) error {
+		card, ok := state.Cards[sessionID]
+		if !ok {
+			card = telegramstate.Card{SessionID: sessionID, Page: telegramstate.Page{Current: 1, Total: 1, FollowLatest: true}}
+		}
+		if len(card.HistoryKeys) == 0 {
+			card.HistoryKeys = make([]string, len(card.History))
+		}
+		for index, key := range card.HistoryKeys {
+			if key == messageID {
+				card.History[index] = item
+				return state.SetCard(card)
+			}
+		}
+		if len(card.History) >= 512 {
+			card.History = append([]string(nil), card.History[len(card.History)-511:]...)
+			card.HistoryKeys = append([]string(nil), card.HistoryKeys[len(card.HistoryKeys)-511:]...)
+		}
+		card.History = append(card.History, item)
+		card.HistoryKeys = append(card.HistoryKeys, messageID)
 		return state.SetCard(card)
 	})
 }

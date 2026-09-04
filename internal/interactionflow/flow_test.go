@@ -43,11 +43,14 @@ func TestFlowPersistsBeforeSendAndReturnsOneExactlyCorrelatedQuestionResponse(t 
 	if delivery.SessionID != envelope.SessionID || delivery.MessageID != envelope.MessageID || delivery.ProviderRequestID != envelope.Request.ID {
 		t.Fatalf("delivery correlation = %#v", delivery)
 	}
-	if delivery.Surface.Keyboard.Rows[1][0].Target.InteractionChoice != 2 {
+	if delivery.Surface.Keyboard.Rows[0][1].Action != telegramui.ActionInteractionNext || strings.Contains(delivery.Surface.Text, "Другой") {
 		t.Fatalf("question keyboard = %#v", delivery.Surface.Keyboard)
 	}
 
-	result, err := flow.HandleCallback(context.Background(), interactionPlan(delivery.OperationID, "telegram-callback:11", telegramui.ActionInteractionChoice, 2))
+	if _, err := flow.HandleCallback(context.Background(), interactionPlan(delivery.OperationID, "telegram-callback:10", telegramui.ActionInteractionNext, 0)); err != nil {
+		t.Fatalf("navigate question: %v", err)
+	}
+	result, err := flow.HandleCallback(context.Background(), interactionPlan(delivery.OperationID, "telegram-callback:11", telegramui.ActionInteractionSubmit, 0))
 	if err != nil {
 		t.Fatalf("HandleCallback() error = %v", err)
 	}
@@ -91,7 +94,7 @@ func TestFlowProgressesMultipleQuestionsAndRecoversSameCallbackWithoutDoubleAdva
 		done <- response
 	}()
 	delivery := sender.wait(t)
-	firstPlan := interactionPlan(delivery.OperationID, "telegram-callback:21", telegramui.ActionInteractionChoice, 1)
+	firstPlan := interactionPlan(delivery.OperationID, "telegram-callback:21", telegramui.ActionInteractionSubmit, 0)
 	first, err := flow.HandleCallback(context.Background(), firstPlan)
 	if err != nil || first.Surface == nil || first.Terminal != nil {
 		t.Fatalf("first callback = %#v, err=%v", first, err)
@@ -100,7 +103,10 @@ func TestFlowProgressesMultipleQuestionsAndRecoversSameCallbackWithoutDoubleAdva
 	if err != nil || !reflect.DeepEqual(recovered, first) {
 		t.Fatalf("recovered callback = %#v, err=%v want %#v", recovered, err, first)
 	}
-	second, err := flow.HandleCallback(context.Background(), interactionPlan(delivery.OperationID, "telegram-callback:22", telegramui.ActionInteractionChoice, 2))
+	if _, err := flow.HandleCallback(context.Background(), interactionPlan(delivery.OperationID, "telegram-callback:22", telegramui.ActionInteractionNext, 0)); err != nil {
+		t.Fatalf("navigate second question: %v", err)
+	}
+	second, err := flow.HandleCallback(context.Background(), interactionPlan(delivery.OperationID, "telegram-callback:23", telegramui.ActionInteractionSubmit, 0))
 	if err != nil || second.Terminal == nil {
 		t.Fatalf("second callback = %#v, err=%v", second, err)
 	}
@@ -192,7 +198,7 @@ func TestFlowTimeoutIsDurableAndReturnsExplicitTypedCancellation(t *testing.T) {
 	}
 }
 
-func TestFlowMapsSignedApprovalOnlyToAdvertisedDecisionAndRejectsWrongCarrier(t *testing.T) {
+func TestFlowAutoApprovesWithoutTelegramDelivery(t *testing.T) {
 	t.Parallel()
 
 	store := interactionflow.NewMemoryStore()
@@ -214,24 +220,15 @@ func TestFlowMapsSignedApprovalOnlyToAdvertisedDecisionAndRejectsWrongCarrier(t 
 	}, runtimeprotocol.Limits{}); err != nil {
 		t.Fatalf("approval fixture is invalid: %v", err)
 	}
-	done := make(chan sessionruntime.InteractionResponse, 1)
-	go func() {
-		response, _ := flow.ResolveInteraction(context.Background(), envelope)
-		done <- response
-	}()
-	delivery := sender.wait(t)
-	wrong := interactionPlan(delivery.OperationID, "telegram-callback:31", telegramui.ActionInteractionAccept, 0)
-	wrong.Carrier.MessageID++
-	if _, err := flow.HandleCallback(context.Background(), wrong); !errors.Is(err, interactionflow.ErrStaleCallback) {
-		t.Fatalf("wrong carrier error = %v, want ErrStaleCallback", err)
+	response, err := flow.ResolveInteraction(context.Background(), envelope)
+	if err != nil {
+		t.Fatalf("ResolveInteraction() error = %v", err)
 	}
-	result, err := flow.HandleCallback(context.Background(), interactionPlan(delivery.OperationID, "telegram-callback:32", telegramui.ActionInteractionAccept, 0))
-	if err != nil || result.Terminal == nil {
-		t.Fatalf("approval callback = %#v, err=%v", result, err)
-	}
-	response := <-done
 	if response.Decision != runtimeprotocol.DecisionAccept || response.Outcome != runtimeprotocol.OutcomeAnswered {
 		t.Fatalf("approval response = %#v", response)
+	}
+	if sender.calls() != 0 {
+		t.Fatalf("approval rendered %d Telegram prompts, want none", sender.calls())
 	}
 }
 

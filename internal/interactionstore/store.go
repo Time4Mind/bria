@@ -52,6 +52,7 @@ type Operation struct {
 	Request               runtimeprotocol.InteractionRequest   `json:"request"`
 	Phase                 Phase                                `json:"phase"`
 	QuestionIndex         int                                  `json:"question_index,omitempty"`
+	SelectedChoice        int                                  `json:"selected_choice,omitempty"`
 	Answers               map[string][]string                  `json:"answers"`
 	Response              *runtimeprotocol.InteractionResponse `json:"response,omitempty"`
 	Resolution            string                               `json:"resolution,omitempty"`
@@ -433,7 +434,7 @@ func validateOperation(operation Operation) error {
 	}, runtimeprotocol.Limits{}); err != nil {
 		return ErrInvalidOperation
 	}
-	if operation.QuestionIndex < 0 || operation.QuestionIndex > len(operation.Request.Questions) {
+	if operation.QuestionIndex < 0 || operation.QuestionIndex > len(operation.Request.Questions) || operation.SelectedChoice < 0 {
 		return ErrInvalidOperation
 	}
 	if operation.Answers == nil || (operation.LastCallbackID != "" && !saneText(operation.LastCallbackID, 256)) {
@@ -450,8 +451,18 @@ func validateOperation(operation Operation) error {
 				return ErrInvalidOperation
 			}
 		}
-	} else if operation.QuestionIndex != 0 || len(operation.Answers) != 0 {
+	} else if operation.QuestionIndex != 0 || operation.SelectedChoice != 0 || len(operation.Answers) != 0 {
 		return ErrInvalidOperation
+	}
+	if operation.Request.Kind == runtimeprotocol.InteractionQuestion {
+		if operation.Phase == PhaseWaiting {
+			if operation.QuestionIndex >= len(operation.Request.Questions) || operation.SelectedChoice < 1 ||
+				operation.SelectedChoice > len(operation.Request.Questions[operation.QuestionIndex].Options) {
+				return ErrInvalidOperation
+			}
+		} else if operation.SelectedChoice != 0 {
+			return ErrInvalidOperation
+		}
 	}
 	switch operation.Phase {
 	case PhasePrepared, PhaseSendUnknown:
@@ -475,12 +486,12 @@ func validateOperation(operation Operation) error {
 			return ErrInvalidOperation
 		}
 	case PhaseResponseReady:
-		if operation.CarrierMessageID <= 0 || operation.Response == nil ||
+		if (operation.CarrierMessageID <= 0 && operation.Request.Kind == runtimeprotocol.InteractionQuestion) || operation.Response == nil ||
 			runtimeprotocol.ValidateResponse(operation.Request, *operation.Response, runtimeprotocol.Limits{}) != nil {
 			return ErrInvalidOperation
 		}
 	case PhaseProviderResponseUnknown, PhaseProviderResponseConfirmed:
-		if operation.CarrierMessageID <= 0 || (operation.SecretResponse == (operation.Response != nil)) {
+		if (operation.CarrierMessageID <= 0 && operation.Request.Kind == runtimeprotocol.InteractionQuestion) || (operation.SecretResponse == (operation.Response != nil)) {
 			return ErrInvalidOperation
 		}
 		if operation.Response != nil && runtimeprotocol.ValidateResponse(operation.Request, *operation.Response, runtimeprotocol.Limits{}) != nil {
@@ -507,7 +518,7 @@ func hasQuestionOption(question runtimeprotocol.Question, answer string) bool {
 func validTransition(current, next Phase) bool {
 	switch current {
 	case PhasePrepared:
-		return next == PhaseSendUnknown
+		return next == PhaseSendUnknown || next == PhaseResponseReady
 	case PhaseSendUnknown:
 		return next == PhaseWaiting
 	case PhaseWaiting:

@@ -141,12 +141,50 @@ func (flow *Flow) ResolveInteraction(ctx context.Context, envelope telegramcontr
 		return sessionruntime.InteractionResponse{}, ErrInvalidEnvelope
 	}
 	if operation.Phase == PhasePrepared {
-		operation, err = flow.deliverInitial(ctx, operation)
+		if isApproval(operation.Request.Kind) {
+			operation, err = flow.autoApprove(ctx, operation)
+		} else {
+			operation, err = flow.deliverInitial(ctx, operation)
+		}
 		if err != nil {
 			return sessionruntime.InteractionResponse{}, err
 		}
 	}
 	return flow.awaitResponse(ctx, operation)
+}
+
+func isApproval(kind runtimeprotocol.InteractionKind) bool {
+	return kind == runtimeprotocol.InteractionCommandApproval || kind == runtimeprotocol.InteractionFileApproval
+}
+
+func (flow *Flow) autoApprove(ctx context.Context, operation Operation) (Operation, error) {
+	decision := runtimeprotocol.DecisionAccept
+	if !containsDecision(operation.Request.Decisions, decision) {
+		decision = runtimeprotocol.DecisionAcceptForSession
+	}
+	if !containsDecision(operation.Request.Decisions, decision) {
+		return Operation{}, ErrInvalidEnvelope
+	}
+	response := runtimeprotocol.InteractionResponse{
+		ID: operation.ProviderRequestID, Outcome: runtimeprotocol.OutcomeAnswered, Decision: decision,
+	}
+	if runtimeprotocol.ValidateResponse(operation.Request, response, runtimeprotocol.Limits{}) != nil {
+		return Operation{}, ErrInvalidEnvelope
+	}
+	next := operation
+	next.Phase = PhaseResponseReady
+	next.Response = &response
+	next.Resolution = string(decision)
+	next.UpdatedAt = flow.now().UTC()
+	updated, changed, err := flow.store.CompareAndSwap(ctx, operation.ID, operation.Revision, next)
+	if err != nil {
+		return Operation{}, err
+	}
+	if !changed {
+		return Operation{}, ErrProviderResponseUnknown
+	}
+	flow.signal(operation.ID)
+	return updated, nil
 }
 
 func (flow *Flow) deliverInitial(ctx context.Context, operation Operation) (Operation, error) {
@@ -174,6 +212,9 @@ func (flow *Flow) deliverInitial(ctx context.Context, operation Operation) (Oper
 	}
 	waiting := fenced
 	waiting.Phase = PhaseWaiting
+	if waiting.Request.Kind == runtimeprotocol.InteractionQuestion {
+		waiting.SelectedChoice = 1
+	}
 	waiting.CarrierMessageID = receipt.CarrierMessageID
 	waiting.UpdatedAt = flow.now().UTC()
 	waiting, changed, err = flow.store.CompareAndSwap(context.WithoutCancel(ctx), fenced.ID, fenced.Revision, waiting)
@@ -256,6 +297,7 @@ func (flow *Flow) cancelWaiting(id, resolution string) (sessionruntime.Interacti
 		response := runtimeprotocol.InteractionResponse{ID: operation.ProviderRequestID, Outcome: runtimeprotocol.OutcomeCancelled}
 		next := operation
 		next.Phase = PhaseResponseReady
+		next.SelectedChoice = 0
 		next.Response = &response
 		next.Resolution = resolution
 		next.UpdatedAt = flow.now().UTC()
@@ -331,6 +373,50 @@ func (flow *Flow) HandleCallback(ctx context.Context, plan telegrampipeline.Call
 func applyCallback(operation Operation, plan telegrampipeline.CallbackPlan) (Operation, error) {
 	next := cloneOperation(operation)
 	switch plan.Action {
+	case telegramui.ActionInteractionPrevious, telegramui.ActionInteractionNext:
+		if operation.Request.Kind != runtimeprotocol.InteractionQuestion || operation.QuestionIndex >= len(operation.Request.Questions) {
+			return Operation{}, ErrInvalidCallback
+		}
+		count := len(operation.Request.Questions[operation.QuestionIndex].Options)
+		if count == 0 || operation.SelectedChoice < 1 || operation.SelectedChoice > count {
+			return Operation{}, ErrInvalidCallback
+		}
+		if plan.Action == telegramui.ActionInteractionPrevious {
+			next.SelectedChoice--
+			if next.SelectedChoice == 0 {
+				next.SelectedChoice = count
+			}
+		} else {
+			next.SelectedChoice++
+			if next.SelectedChoice > count {
+				next.SelectedChoice = 1
+			}
+		}
+	case telegramui.ActionInteractionSubmit:
+		if operation.Request.Kind != runtimeprotocol.InteractionQuestion || operation.QuestionIndex >= len(operation.Request.Questions) {
+			return Operation{}, ErrInvalidCallback
+		}
+		question := operation.Request.Questions[operation.QuestionIndex]
+		choice := operation.SelectedChoice
+		if choice < 1 || choice > len(question.Options) {
+			return Operation{}, ErrInvalidCallback
+		}
+		next.Answers[question.ID] = []string{question.Options[choice-1].Label}
+		next.QuestionIndex++
+		next.SelectedChoice = 0
+		if next.QuestionIndex == len(next.Request.Questions) {
+			response := runtimeprotocol.InteractionResponse{
+				ID: next.ProviderRequestID, Outcome: runtimeprotocol.OutcomeAnswered, Answers: cloneAnswers(next.Answers),
+			}
+			if runtimeprotocol.ValidateResponse(next.Request, response, runtimeprotocol.Limits{}) != nil {
+				return Operation{}, ErrInvalidCallback
+			}
+			next.Response = &response
+			next.Phase = PhaseResponseReady
+			next.Resolution = "answered"
+		} else {
+			next.SelectedChoice = 1
+		}
 	case telegramui.ActionInteractionChoice:
 		if operation.Request.Kind != runtimeprotocol.InteractionQuestion ||
 			plan.Interaction.ChoiceIndex != plan.Target.InteractionChoice || operation.QuestionIndex >= len(operation.Request.Questions) {
@@ -343,6 +429,7 @@ func applyCallback(operation Operation, plan telegrampipeline.CallbackPlan) (Ope
 		}
 		next.Answers[question.ID] = []string{question.Options[choice-1].Label}
 		next.QuestionIndex++
+		next.SelectedChoice = 0
 		if next.QuestionIndex == len(next.Request.Questions) {
 			response := runtimeprotocol.InteractionResponse{
 				ID: next.ProviderRequestID, Outcome: runtimeprotocol.OutcomeAnswered, Answers: cloneAnswers(next.Answers),
@@ -353,6 +440,8 @@ func applyCallback(operation Operation, plan telegrampipeline.CallbackPlan) (Ope
 			next.Response = &response
 			next.Phase = PhaseResponseReady
 			next.Resolution = "answered"
+		} else {
+			next.SelectedChoice = 1
 		}
 	case telegramui.ActionInteractionOther:
 		if operation.Request.Kind != runtimeprotocol.InteractionQuestion || operation.QuestionIndex >= len(operation.Request.Questions) {
@@ -363,6 +452,7 @@ func applyCallback(operation Operation, plan telegrampipeline.CallbackPlan) (Ope
 			return Operation{}, ErrInvalidCallback
 		}
 		next.Phase = PhaseWaitingText
+		next.SelectedChoice = 0
 		next.Resolution = "awaiting_other"
 	case telegramui.ActionInteractionAccept, telegramui.ActionInteractionDecline:
 		if operation.Request.Kind != runtimeprotocol.InteractionCommandApproval && operation.Request.Kind != runtimeprotocol.InteractionFileApproval {
@@ -389,6 +479,7 @@ func applyCallback(operation Operation, plan telegrampipeline.CallbackPlan) (Ope
 		}
 		next.Response = &response
 		next.Phase = PhaseResponseReady
+		next.SelectedChoice = 0
 		next.Resolution = "cancelled"
 	default:
 		return Operation{}, ErrInvalidCallback
@@ -499,19 +590,21 @@ func surfaceFor(operation Operation) telegramflow.SurfaceOutput {
 			builder.WriteString("\n\n")
 			builder.WriteString(question.Text)
 			for index, option := range question.Options {
-				fmt.Fprintf(&builder, "\n\n%d. %s", index+1, option.Label)
+				marker := "  "
+				if index+1 == operation.SelectedChoice {
+					marker = "❯ "
+				}
+				fmt.Fprintf(&builder, "\n\n%s%d. %s", marker, index+1, option.Label)
 				if option.Description != "" {
 					builder.WriteString(" - ")
 					builder.WriteString(option.Description)
 				}
-				keyboard.Rows = append(keyboard.Rows, telegramui.ButtonRow{{
-					Action: telegramui.ActionInteractionChoice,
-					Target: telegramui.ButtonTarget{InteractionChoice: index + 1},
-				}})
 			}
-			if question.IsOther && operation.QuestionIndex == len(operation.Request.Questions)-1 {
-				keyboard.Rows = append(keyboard.Rows, telegramui.ButtonRow{{Action: telegramui.ActionInteractionOther}})
-			}
+			keyboard.Rows = append(keyboard.Rows, telegramui.ButtonRow{
+				{Action: telegramui.ActionInteractionPrevious},
+				{Action: telegramui.ActionInteractionNext},
+				{Action: telegramui.ActionInteractionSubmit},
+			})
 			text = builder.String()
 		}
 	case runtimeprotocol.InteractionCommandApproval:

@@ -17,7 +17,7 @@ type Surface struct {
 }
 
 func Render(ctx context.Context, preferences settingsport.Preferences, providers settingsport.ProviderPreferences, queueLimit int) (Surface, error) {
-	current := settingsport.Snapshot{ContinueExisting: true, CardDetail: "standard", ShowTechnicalActions: true, NotifyBackgroundQuestions: true, NotifyBackgroundErrors: true, SessionLifetime: "never", QueueLimit: queueLimit, VoiceRecognition: "parakeet"}
+	current := settingsport.Snapshot{ContinueExisting: true, CardDetail: "standard", CardPageLimit: 64, ShowTechnicalActions: true, NotifyBackgroundQuestions: true, NotifyBackgroundErrors: true, SessionLifetime: "never", QueueLimit: queueLimit, VoiceRecognition: "parakeet"}
 	if preferences != nil {
 		var err error
 		current, err = preferences.Snapshot(ctx)
@@ -25,8 +25,14 @@ func Render(ctx context.Context, preferences settingsport.Preferences, providers
 			return Surface{}, err
 		}
 	}
-	rows := [][]Button{{{"Продолжение", "settings_continue_existing"}, {"Screen", "settings_screen"}}, {{"Детализация", "settings_detail"}, {"Тех. действия", "settings_technical_actions"}}, {{"Вопросы", "settings_background_questions"}, {"Ошибки", "settings_background_errors"}}, {{"Никогда", "settings_lifetime_never"}, {"6 ч", "settings_lifetime_6h"}, {"12 ч", "settings_lifetime_12h"}}, {{"24 ч", "settings_lifetime_24h"}, {"48 ч", "settings_lifetime_48h"}}}
+	rows := [][]Button{{{"Продолжение", "settings_continue_existing"}, {"Screen", "settings_screen"}}, {{"Детализация", "settings_detail"}, {"Страницы", "settings_page_limit"}}, {{"Тех. действия", "settings_technical_actions"}}, {{"Вопросы", "settings_background_questions"}, {"Ошибки", "settings_background_errors"}}, {{"Рекомендации архива", "settings_archive_recommendations"}}, {{"Никогда", "settings_lifetime_never"}, {"6 ч", "settings_lifetime_6h"}, {"12 ч", "settings_lifetime_12h"}}, {{"24 ч", "settings_lifetime_24h"}, {"48 ч", "settings_lifetime_48h"}}}
 	text := format(current)
+	if _, ok := preferences.(settingsport.CreationPreferences); ok {
+		rows = append(rows,
+			[]Button{{"Backend по умолчанию", "settings_default_provider"}},
+			[]Button{{"Папка по умолчанию", "settings_default_workdir"}, {"Сбросить defaults", "settings_clear_creation_defaults"}},
+		)
+	}
 	if providers != nil {
 		ps, err := providers.Snapshot(ctx)
 		if err != nil {
@@ -62,12 +68,20 @@ func Apply(ctx context.Context, preferences settingsport.Preferences, providers 
 		return preferences.ToggleScreen(ctx)
 	case "settings_detail":
 		return preferences.ToggleCardDetail(ctx)
+	case "settings_page_limit":
+		return preferences.CycleCardPageLimit(ctx)
 	case "settings_technical_actions":
 		return preferences.ToggleTechnicalActions(ctx)
 	case "settings_background_questions":
 		return preferences.ToggleBackgroundQuestions(ctx)
 	case "settings_background_errors":
 		return preferences.ToggleBackgroundErrors(ctx)
+	case "settings_archive_recommendations":
+		creation, ok := preferences.(settingsport.CreationPreferences)
+		if !ok {
+			return errors.New("session creation settings are not configured")
+		}
+		return creation.ToggleArchiveRecommendations(ctx)
 	case "settings_lifetime_never":
 		return preferences.SetSessionLifetime(ctx, "never")
 	case "settings_lifetime_6h":
@@ -83,7 +97,7 @@ func Apply(ctx context.Context, preferences settingsport.Preferences, providers 
 	}
 }
 func format(s settingsport.Snapshot) string {
-	return fmt.Sprintf("Настройки:\nПродолжать существующую: %t\nScreen: %t\nДетализация карточки: %s\nТехнические действия: %t\nФоновые вопросы: %t\nФоновые ошибки: %t\nСрок жизни сессий: %s\nОчередь: %d\nГолос: %s", s.ContinueExisting, s.ScreenEnabled, s.CardDetail, s.ShowTechnicalActions, s.NotifyBackgroundQuestions, s.NotifyBackgroundErrors, s.SessionLifetime, s.QueueLimit, s.VoiceRecognition)
+	return fmt.Sprintf("Настройки:\nПродолжать существующую: %t\nScreen: %t\nДетализация карточки: %s\nЛимит страниц: %d\nТехнические действия: %t\nФоновые вопросы: %t\nФоновые ошибки: %t\nРекомендации архива: %t\nСрок жизни сессий: %s\nОчередь: %d\nГолос: %s", s.ContinueExisting, s.ScreenEnabled, s.CardDetail, s.CardPageLimit, s.ShowTechnicalActions, s.NotifyBackgroundQuestions, s.NotifyBackgroundErrors, s.ArchiveRecommendations, s.SessionLifetime, s.QueueLimit, s.VoiceRecognition)
 }
 func providerSurface(ps []settingsport.ProviderPreference) ([][]Button, string) {
 	by := map[domain.Provider]settingsport.ProviderPreference{}

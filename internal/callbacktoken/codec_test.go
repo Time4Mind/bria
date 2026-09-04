@@ -92,6 +92,10 @@ func TestCodecSupportsEveryTelegramUIActionWithoutChangingExistingWireValues(t *
 		{"accepted turn retry possible duplicate", ActionAcceptedTurnRetryPossibleDuplicate, 34, 0},
 		{"accepted turn cancel", ActionAcceptedTurnCancel, 35, 0},
 		{"artifact retry", ActionArtifactRetry, 39, 0},
+		{"select create codex", ActionCreateSelectCodex, 40, 0},
+		{"select create claude", ActionCreateSelectClaude, 41, 0},
+		{"edit create workdir", ActionCreateWorkdir, 42, 0},
+		{"confirm create", ActionCreateConfirm, 43, 0},
 	}
 	for _, tc := range actions {
 		t.Run(tc.name, func(t *testing.T) {

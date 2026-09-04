@@ -13,8 +13,8 @@ import (
 const (
 	pollLimit          = 100
 	pollTimeoutSeconds = 20
-	defaultRetryDelay  = time.Second
-	maxRetryDelay      = 30 * time.Second
+	defaultRetryDelay  = 4 * time.Second
+	maxRetryDelay      = 15 * time.Second
 )
 
 var allowedUpdates = []string{"message", "callback_query"}
@@ -62,7 +62,7 @@ func (source *Source) Bootstrap(ctx context.Context) (int64, error) {
 		if !telegram.IsTransient(err) {
 			return 0, fmt.Errorf("bootstrap Telegram updates: %w", err)
 		}
-		if err := waitForRetry(ctx, retryDelay); err != nil {
+		if err := waitForRetry(ctx, retryDelayFor(err, retryDelay)); err != nil {
 			return 0, err
 		}
 		retryDelay = nextRetryDelay(retryDelay)
@@ -92,7 +92,7 @@ func (source *Source) Poll(ctx context.Context, nextUpdateID int64) ([]coordinat
 		if !telegram.IsTransient(err) {
 			return nil, fmt.Errorf("poll Telegram updates: %w", err)
 		}
-		if err := waitForRetry(ctx, retryDelay); err != nil {
+		if err := waitForRetry(ctx, retryDelayFor(err, retryDelay)); err != nil {
 			return nil, err
 		}
 		retryDelay = nextRetryDelay(retryDelay)
@@ -177,7 +177,20 @@ func largestPhoto(sizes []telegram.PhotoSize) telegram.PhotoSize {
 }
 
 type Sender struct {
-	client *telegram.Client
+	client           *telegram.Client
+	acknowledgements CallbackAcknowledgementRecorder
+}
+
+type CallbackAcknowledgementState string
+
+const (
+	CallbackAcknowledgementConfirmed CallbackAcknowledgementState = "confirmed"
+	CallbackAcknowledgementFailed    CallbackAcknowledgementState = "failed"
+)
+
+type CallbackAcknowledgementRecorder interface {
+	BeginCallbackAcknowledgement(context.Context, string, string) (bool, error)
+	CompleteCallbackAcknowledgement(context.Context, string, string, CallbackAcknowledgementState) error
 }
 
 var _ coordinator.Sender = (*Sender)(nil)
@@ -188,19 +201,27 @@ func NewSender(client *telegram.Client) (*Sender, error) {
 	}
 	return &Sender{client: client}, nil
 }
+
+func (sender *Sender) BindCallbackAcknowledgements(recorder CallbackAcknowledgementRecorder) error {
+	if sender == nil || recorder == nil {
+		return errors.New("Telegram callback acknowledgement recorder is required")
+	}
+	if sender.acknowledgements != nil {
+		return errors.New("Telegram callback acknowledgement recorder is already bound")
+	}
+	sender.acknowledgements = recorder
+	return nil
+}
 func (sender *Sender) SendStatus(
 	ctx context.Context,
-	_ string,
+	operationID string,
 	status coordinator.Status,
 ) (coordinator.Receipt, error) {
-	if status.CallbackQueryID != "" {
-		if err := sender.client.AnswerCallbackQuery(ctx, telegram.AnswerCallbackQueryRequest{CallbackQueryID: telegram.CallbackQueryID(status.CallbackQueryID)}); err != nil {
-			return coordinator.Receipt{}, fmt.Errorf("answer Telegram callback: %w", err)
-		}
-	}
+	sender.acknowledgeCallback(ctx, operationID, status.CallbackQueryID)
 	message, err := sender.client.SendMessage(ctx, telegram.SendMessageRequest{
-		ChatID: telegram.ChatID(status.ConversationID),
-		Text:   status.Text,
+		ChatID:   telegram.ChatID(status.ConversationID),
+		Text:     status.Text,
+		Priority: callbackPriority(status.CallbackQueryID),
 	})
 	if err != nil {
 		return coordinator.Receipt{}, fmt.Errorf("send Telegram status: %w", err)
@@ -213,21 +234,18 @@ func (sender *Sender) SendStatus(
 
 func (sender *Sender) SendStatusWithKeyboard(
 	ctx context.Context,
-	_ string,
+	operationID string,
 	status coordinator.Status,
 	keyboard *coordinator.KeyboardMarkup,
 ) (coordinator.Receipt, error) {
 	if keyboard == nil {
-		return sender.SendStatus(ctx, "", status)
+		return sender.SendStatus(ctx, operationID, status)
 	}
-	if status.CallbackQueryID != "" {
-		if err := sender.client.AnswerCallbackQuery(ctx, telegram.AnswerCallbackQueryRequest{CallbackQueryID: telegram.CallbackQueryID(status.CallbackQueryID)}); err != nil {
-			return coordinator.Receipt{}, fmt.Errorf("answer Telegram callback: %w", err)
-		}
-	}
+	sender.acknowledgeCallback(ctx, operationID, status.CallbackQueryID)
 	markup := coordinatorMarkup(keyboard)
 	message, err := sender.client.SendMessage(ctx, telegram.SendMessageRequest{
 		ChatID: telegram.ChatID(status.ConversationID), Text: status.Text, ReplyMarkup: markup,
+		Priority: callbackPriority(status.CallbackQueryID),
 	})
 	if err != nil {
 		return coordinator.Receipt{}, fmt.Errorf("send Telegram status with keyboard: %w", err)
@@ -240,21 +258,18 @@ func (sender *Sender) SendStatusWithKeyboard(
 
 func (sender *Sender) EditStatusWithKeyboard(
 	ctx context.Context,
-	_ string,
+	operationID string,
 	status coordinator.Status,
 	keyboard *coordinator.KeyboardMarkup,
 ) (coordinator.Receipt, error) {
 	if status.SourceMessageID <= 0 {
 		return coordinator.Receipt{}, errors.New("source message id is required for card edit")
 	}
-	if status.CallbackQueryID != "" {
-		if err := sender.client.AnswerCallbackQuery(ctx, telegram.AnswerCallbackQueryRequest{CallbackQueryID: telegram.CallbackQueryID(status.CallbackQueryID)}); err != nil {
-			return coordinator.Receipt{}, fmt.Errorf("answer Telegram callback: %w", err)
-		}
-	}
+	sender.acknowledgeCallback(ctx, operationID, status.CallbackQueryID)
 	markup := coordinatorMarkup(keyboard)
 	message, err := sender.client.EditMessageText(ctx, telegram.EditMessageTextRequest{
 		ChatID: telegram.ChatID(status.ConversationID), MessageID: telegram.MessageID(status.SourceMessageID), Text: status.Text, ReplyMarkup: markup,
+		Priority: callbackPriority(status.CallbackQueryID),
 	})
 	if err != nil {
 		var apiErr *telegram.APIError
@@ -268,6 +283,47 @@ func (sender *Sender) EditStatusWithKeyboard(
 	}
 	return coordinator.Receipt{MessageID: int64(message.MessageID)}, nil
 }
+
+func (sender *Sender) acknowledgeCallback(ctx context.Context, operationID, callbackQueryID string) {
+	if callbackQueryID == "" {
+		return
+	}
+	started := make(chan struct{})
+	// Callback acknowledgement is deliberately independent from the visible
+	// card transition: Telegram can reject an expired acknowledgement without
+	// delaying or invalidating the already accepted user action.
+	go func() {
+		if sender.acknowledgements != nil {
+			allowed, err := sender.acknowledgements.BeginCallbackAcknowledgement(context.WithoutCancel(ctx), operationID, callbackQueryID)
+			if err != nil || !allowed {
+				close(started)
+				return
+			}
+		}
+		acknowledgeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+		defer cancel()
+		err := sender.client.AnswerCallbackQuery(acknowledgeCtx, telegram.AnswerCallbackQueryRequest{
+			CallbackQueryID: telegram.CallbackQueryID(callbackQueryID),
+			Started:         started,
+		})
+		if sender.acknowledgements != nil {
+			state := CallbackAcknowledgementConfirmed
+			if err != nil {
+				state = CallbackAcknowledgementFailed
+			}
+			_ = sender.acknowledgements.CompleteCallbackAcknowledgement(context.WithoutCancel(ctx), operationID, callbackQueryID, state)
+		}
+	}()
+	<-started
+}
+
+func callbackPriority(callbackQueryID string) telegram.MutationPriority {
+	if callbackQueryID != "" {
+		return telegram.MutationInteractive
+	}
+	return telegram.MutationRoutine
+}
+
 func coordinatorMarkup(keyboard *coordinator.KeyboardMarkup) *telegram.InlineKeyboardMarkup {
 	if keyboard == nil {
 		return nil
@@ -343,7 +399,7 @@ func (readiness *Readiness) Ready(ctx context.Context, _ coordinator.Checkpoint)
 		if !readiness.retryTransient || !telegram.IsTransient(err) {
 			return fmt.Errorf("verify Telegram bot identity: %w", err)
 		}
-		if err := waitForRetry(ctx, retryDelay); err != nil {
+		if err := waitForRetry(ctx, retryDelayFor(err, retryDelay)); err != nil {
 			return err
 		}
 		retryDelay = nextRetryDelay(retryDelay)
@@ -361,15 +417,29 @@ func normalizeRetryDelay(options RetryOptions) (time.Duration, error) {
 		return defaultRetryDelay, nil
 	}
 	if options.Delay > maxRetryDelay {
-		return 0, errors.New("Telegram transient retry delay must not exceed thirty seconds")
+		return 0, errors.New("Telegram transient retry delay must not exceed fifteen seconds")
 	}
 	return options.Delay, nil
 }
 func nextRetryDelay(delay time.Duration) time.Duration {
-	if delay >= maxRetryDelay/2 {
+	switch {
+	case delay >= maxRetryDelay:
 		return maxRetryDelay
+	case delay >= 12*time.Second:
+		return maxRetryDelay
+	case delay >= 8*time.Second:
+		return 12 * time.Second
+	case delay > maxRetryDelay/2:
+		return maxRetryDelay
+	default:
+		return delay * 2
 	}
-	return delay * 2
+}
+func retryDelayFor(err error, fallback time.Duration) time.Duration {
+	if retryAfter, ok := telegram.RetryAfter(err); ok && retryAfter > fallback {
+		return retryAfter
+	}
+	return fallback
 }
 func waitForRetry(ctx context.Context, delay time.Duration) error {
 	timer := time.NewTimer(delay)

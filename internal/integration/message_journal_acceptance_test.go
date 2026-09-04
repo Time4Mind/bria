@@ -2,7 +2,6 @@ package integration_test
 
 import (
 	"context"
-	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -12,8 +11,8 @@ import (
 
 // TestMessageJournalSurvivesReopenWithoutReorderingOrRetryingUnknownDelivery
 // covers the durable hand-off contract at its public boundary. Input and
-// output share one per-session sequence, and an ambiguous external write must
-// remain blocked after process restart until a caller explicitly retries it.
+// output share one per-session sequence. An ambiguous external write is never
+// retried implicitly, while an independent later result remains deliverable.
 func TestMessageJournalSurvivesReopenWithoutReorderingOrRetryingUnknownDelivery(t *testing.T) {
 	t.Parallel()
 
@@ -75,8 +74,12 @@ func TestMessageJournalSurvivesReopenWithoutReorderingOrRetryingUnknownDelivery(
 		outputs[1].Sequence != 4 || outputs[1].Phase != messagejournal.OutputPending {
 		t.Fatalf("reopened outputs = %#v, want unknown operation-1 before pending operation-2", outputs)
 	}
-	if _, err := reopened.LeaseNextOutput(ctx, "session-1", "restart-worker", now.Add(2*time.Minute), time.Minute); !errors.Is(err, messagejournal.ErrNoAvailable) {
-		t.Fatalf("automatic lease after unknown = %v, want ErrNoAvailable", err)
+	later, err := reopened.LeaseNextOutput(ctx, "session-1", "restart-worker", now.Add(2*time.Minute), time.Minute)
+	if err != nil || later.OperationID != secondOutput.OperationID || later.Sequence != secondOutput.Sequence {
+		t.Fatalf("independent lease after unknown = (%#v, %v), want operation-2", later, err)
+	}
+	if _, err := reopened.ConfirmOutput(ctx, "session-1", secondOutput.OperationID, "restart-worker", "telegram:confirmed"); err != nil {
+		t.Fatalf("confirm independent later output: %v", err)
 	}
 
 	retried, err := reopened.RetryOutput(ctx, "session-1", firstOutput.OperationID)

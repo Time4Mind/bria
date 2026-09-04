@@ -42,14 +42,16 @@ var ErrExists = errors.New("Telegram operation already exists")
 type Namespace string
 
 const (
-	Callbacks Namespace = "operations"
-	Statuses  Namespace = "statuses"
+	Callbacks        Namespace = "operations"
+	Statuses         Namespace = "statuses"
+	Acknowledgements Namespace = "acknowledgements"
 )
 
 type Snapshot struct {
-	Version    int                        `json:"version"`
-	Operations map[string]json.RawMessage `json:"operations"`
-	Statuses   map[string]json.RawMessage `json:"statuses,omitempty"`
+	Version          int                        `json:"version"`
+	Operations       map[string]json.RawMessage `json:"operations"`
+	Statuses         map[string]json.RawMessage `json:"statuses,omitempty"`
+	Acknowledgements map[string]json.RawMessage `json:"acknowledgements,omitempty"`
 }
 
 type Store interface {
@@ -111,13 +113,16 @@ func OpenFile(path string) (*FileStore, error) {
 	if store.state.Statuses == nil {
 		store.state.Statuses = make(map[string]json.RawMessage)
 	}
+	if store.state.Acknowledgements == nil {
+		store.state.Acknowledgements = make(map[string]json.RawMessage)
+	}
 	return store, nil
 }
 
 func NewMemory() Store { return &memoryStore{state: emptySnapshot()} }
 
 func emptySnapshot() Snapshot {
-	return Snapshot{Version: Version, Operations: make(map[string]json.RawMessage), Statuses: make(map[string]json.RawMessage)}
+	return Snapshot{Version: Version, Operations: make(map[string]json.RawMessage), Statuses: make(map[string]json.RawMessage), Acknowledgements: make(map[string]json.RawMessage)}
 }
 
 func (store *FileStore) Load(ctx context.Context, namespace Namespace, id string) (json.RawMessage, bool, error) {
@@ -340,10 +345,15 @@ func rawSequence(raw json.RawMessage) uint64 {
 	}
 	return 0
 }
-func validNamespace(namespace Namespace) bool { return namespace == Callbacks || namespace == Statuses }
+func validNamespace(namespace Namespace) bool {
+	return namespace == Callbacks || namespace == Statuses || namespace == Acknowledgements
+}
 func namespaceMap(state Snapshot, namespace Namespace) map[string]json.RawMessage {
 	if namespace == Callbacks {
 		return state.Operations
+	}
+	if namespace == Acknowledgements {
+		return state.Acknowledgements
 	}
 	return state.Statuses
 }
@@ -356,6 +366,9 @@ func cloneSnapshot(state Snapshot) Snapshot {
 	}
 	for id, raw := range state.Statuses {
 		clone.Statuses[id] = cloneRaw(raw)
+	}
+	for id, raw := range state.Acknowledgements {
+		clone.Acknowledgements[id] = cloneRaw(raw)
 	}
 	return clone
 }
@@ -371,6 +384,11 @@ func validateSnapshot(state Snapshot) error {
 	for id, raw := range state.Statuses {
 		if id == "" || !json.Valid(raw) {
 			return errors.New("status operation record is invalid")
+		}
+	}
+	for id, raw := range state.Acknowledgements {
+		if id == "" || !json.Valid(raw) {
+			return errors.New("callback acknowledgement record is invalid")
 		}
 	}
 	return nil

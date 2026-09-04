@@ -29,6 +29,41 @@ type Submitter struct {
 	providers ProviderResolver
 }
 
+type CurrentRuntime interface {
+	Runtime
+	sessionruntime.CurrentTurnSubmitter
+}
+
+type CurrentSubmitter struct {
+	*Submitter
+	runtime CurrentRuntime
+}
+
+func NewCurrent(runtime CurrentRuntime, recorder *observability.Recorder, providers ProviderResolver) (*CurrentSubmitter, error) {
+	base, err := New(runtime, recorder, providers)
+	if err != nil {
+		return nil, err
+	}
+	return &CurrentSubmitter{Submitter: base, runtime: runtime}, nil
+}
+
+func (submitter *CurrentSubmitter) SubmitCurrentWithCallbacks(ctx context.Context, sessionID domain.SessionID, input sessionruntime.StructuredInput, callbacks sessionruntime.TurnCallbacks) error {
+	if submitter == nil || submitter.runtime == nil || submitter.Submitter == nil {
+		return ErrInvalidConfiguration
+	}
+	span, timer := submitter.start(ctx, sessionID, callbacks.MessageID)
+	if span == nil {
+		return submitter.runtime.SubmitCurrentWithCallbacks(ctx, sessionID, input, callbacks)
+	}
+	err := submitter.runtime.SubmitCurrentWithCallbacks(ctx, sessionID, input, timer.callbacks(callbacks))
+	if err == nil {
+		_ = span.Success(timer.measurements())
+	} else {
+		_ = span.Failure(errorCategory(err), timer.measurements())
+	}
+	return err
+}
+
 func New(runtime Runtime, recorder *observability.Recorder, providers ProviderResolver) (*Submitter, error) {
 	if runtime == nil || recorder == nil || providers == nil {
 		return nil, ErrInvalidConfiguration
@@ -60,6 +95,29 @@ type PreparedRuntime interface {
 type PreparedSubmitter struct {
 	*Submitter
 	runtime PreparedRuntime
+}
+
+type PreparedCurrentRuntime interface {
+	PreparedRuntime
+	sessionruntime.CurrentTurnSubmitter
+}
+
+type PreparedCurrentSubmitter struct {
+	*PreparedSubmitter
+	runtime PreparedCurrentRuntime
+}
+
+func NewPreparedCurrent(runtime PreparedCurrentRuntime, recorder *observability.Recorder, providers ProviderResolver) (*PreparedCurrentSubmitter, error) {
+	prepared, err := NewPrepared(runtime, recorder, providers)
+	if err != nil {
+		return nil, err
+	}
+	return &PreparedCurrentSubmitter{PreparedSubmitter: prepared, runtime: runtime}, nil
+}
+
+func (submitter *PreparedCurrentSubmitter) SubmitCurrentWithCallbacks(ctx context.Context, sessionID domain.SessionID, input sessionruntime.StructuredInput, callbacks sessionruntime.TurnCallbacks) error {
+	current := &CurrentSubmitter{Submitter: submitter.Submitter, runtime: submitter.runtime}
+	return current.SubmitCurrentWithCallbacks(ctx, sessionID, input, callbacks)
 }
 
 func NewPrepared(runtime PreparedRuntime, recorder *observability.Recorder, providers ProviderResolver) (*PreparedSubmitter, error) {
@@ -170,4 +228,7 @@ func errorCategory(err error) string {
 
 var _ sessionruntime.Submitter = (*Submitter)(nil)
 var _ sessionruntime.InteractiveSubmitter = (*Submitter)(nil)
+var _ sessionruntime.CurrentTurnSubmitter = (*CurrentSubmitter)(nil)
 var _ turnprocessing.PreparedTurnSubmitter = (*PreparedSubmitter)(nil)
+var _ sessionruntime.CurrentTurnSubmitter = (*PreparedCurrentSubmitter)(nil)
+var _ turnprocessing.PreparedTurnSubmitter = (*PreparedCurrentSubmitter)(nil)

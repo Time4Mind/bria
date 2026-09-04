@@ -783,6 +783,41 @@ func TestSessionStorePersistsBoundedCardHistory(t *testing.T) {
 	}
 }
 
+func TestSessionStoreReplacesPromptStatusWithoutDuplicatingText(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "state.json")
+	store, err := storage.OpenSessionStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session := mustStartingSession(t, "prompt-history-session", "prompt-history-intent")
+	if _, _, err := store.PutStartingIfAbsent(context.Background(), session); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetCardPrompt(context.Background(), session.ID(), "telegram-update:7", "🙋‍♂ Проверь проект"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetCardPrompt(context.Background(), session.ID(), "telegram-update:7", "👨‍💻 Проверь проект"); err != nil {
+		t.Fatal(err)
+	}
+	history, err := store.LoadCardHistory(context.Background(), session.ID())
+	if err != nil || !reflect.DeepEqual(history, []string{"👨‍💻 Проверь проект"}) {
+		t.Fatalf("history = %#v, err=%v", history, err)
+	}
+	reopened, err := storage.OpenSessionStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := reopened.LoadTelegramUI(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	card, ok := state.Card(session.ID())
+	if !ok || !reflect.DeepEqual(card.HistoryKeys, []string{"telegram-update:7"}) {
+		t.Fatalf("persisted prompt keys = %#v, found=%t", card.HistoryKeys, ok)
+	}
+}
+
 type putResult struct {
 	session  domain.Session
 	inserted bool

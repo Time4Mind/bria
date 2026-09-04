@@ -40,6 +40,16 @@ type BackgroundCompletionNotification struct {
 	ContainsFinal bool
 }
 
+// ProjectCardRefresh updates the current carrier without changing the user's
+// page selection. FollowLatest is already resolved by the semantic controller.
+func ProjectCardRefresh(input CardProjectionInput) (CarrierProjection, error) {
+	card, err := projectCard(input, input.View)
+	if err != nil {
+		return CarrierProjection{}, err
+	}
+	return CarrierProjection{Effect: EffectEditSameCarrier, Card: card}, nil
+}
+
 // ProjectPageNavigation requests an edit of the existing carrier after
 // resolving the page action against current content.
 func ProjectPageNavigation(input CardProjectionInput, action Action) (CarrierProjection, error) {

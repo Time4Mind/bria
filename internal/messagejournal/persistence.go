@@ -371,9 +371,9 @@ func validateSession(session sessionRecord, limits Limits) error {
 			if output.Lease != (leaseRecord{}) || strings.TrimSpace(output.Receipt) == "" || len(output.Receipt) > limits.MaxReceiptBytes {
 				return errors.New("confirmed output has invalid receipt or lease")
 			}
-		case OutputFailed, OutputUnknown:
+		case OutputFailed, OutputUnknown, OutputSuperseded:
 			if output.Lease != (leaseRecord{}) || output.Receipt != "" {
-				return errors.New("failed or unknown output has a receipt or lease")
+				return errors.New("terminal unconfirmed output has a receipt or lease")
 			}
 		default:
 			return errors.New("unsupported output phase")

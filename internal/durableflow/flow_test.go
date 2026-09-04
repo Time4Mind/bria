@@ -654,7 +654,7 @@ func TestConfirmedTransportWithPersistenceFailureIsSealedUnknown(t *testing.T) {
 	}
 }
 
-func TestUnknownOutputRequiresExplicitRetryAndKeepsOrderAfterReopen(t *testing.T) {
+func TestUnknownOutputIsNotRetriedAndDoesNotBlockLaterResultAfterReopen(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "journal.json")
 	journal := openJournal(t, path)
 	states := []durableflow.DeliveryResult{
@@ -680,8 +680,9 @@ func TestUnknownOutputRequiresExplicitRetryAndKeepsOrderAfterReopen(t *testing.T
 	}
 
 	reopened := newFlow(t, openJournal(t, path), nil, sender, time.Unix(111, 0))
-	if _, err := reopened.DeliverNextOutput(context.Background(), "session-a"); !errors.Is(err, messagejournal.ErrNoAvailable) {
-		t.Fatalf("delivery before explicit retry = %v, want ErrNoAvailable", err)
+	second, err := reopened.DeliverNextOutput(context.Background(), "session-a")
+	if err != nil || second.State != durableflow.DeliveryConfirmed || second.OperationID != "o2" || second.Sequence != 2 {
+		t.Fatalf("independent later delivery = %#v, %v", second, err)
 	}
 	if err := reopened.RetryOutput(context.Background(), "session-a", "o1"); err != nil {
 		t.Fatalf("RetryOutput() error = %v", err)
@@ -690,15 +691,11 @@ func TestUnknownOutputRequiresExplicitRetryAndKeepsOrderAfterReopen(t *testing.T
 	if err != nil || first.State != durableflow.DeliveryConfirmed || first.OperationID != "o1" || first.Sequence != 1 {
 		t.Fatalf("retried first delivery = %#v, %v", first, err)
 	}
-	second, err := reopened.DeliverNextOutput(context.Background(), "session-a")
-	if err != nil || second.State != durableflow.DeliveryConfirmed || second.OperationID != "o2" || second.Sequence != 2 {
-		t.Fatalf("ordered second delivery = %#v, %v", second, err)
-	}
-	if want := []string{"o1", "o1", "o2"}; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] || got[2] != want[2] {
+	if want := []string{"o1", "o2", "o1"}; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] || got[2] != want[2] {
 		t.Fatalf("sender order = %#v, want %#v", got, want)
 	}
 	outputs, err := openJournal(t, path).Outputs(context.Background(), "session-a")
-	if err != nil || outputs[0].Receipt != "telegram:1" || outputs[1].Receipt != "telegram:2" {
+	if err != nil || outputs[0].Receipt != "telegram:2" || outputs[1].Receipt != "telegram:1" {
 		t.Fatalf("confirmed outputs = %#v, %v", outputs, err)
 	}
 }

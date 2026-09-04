@@ -168,6 +168,13 @@ func RunAdapter(ctx context.Context, parentInput io.ReadCloser, parentOutput io.
 				}
 				turnRunning = true
 				go session.runTurn(runCtx, request)
+			case "steer":
+				if !turnRunning || len(queuedSubmits) != 0 {
+					return ErrAdapterProtocol
+				}
+				if err := session.steer(runCtx, request); err != nil {
+					return err
+				}
 			case "interrupt":
 				if err := session.interrupt(runCtx, request.RequestID); err != nil {
 					return err
@@ -438,7 +445,7 @@ func decodeAdapterRequest(line []byte) (adapterRequest, error) {
 		return adapterRequest{}, ErrAdapterProtocol
 	}
 	request := adapterRequest{Protocol: decoded.Protocol, Type: string(decoded.Type), RequestID: decoded.RequestID, MessageID: decoded.MessageID, Attachments: append([]runtimeprotocol.LocalAttachment(nil), decoded.Attachments...), InteractionResponse: decoded.InteractionResponse}
-	if decoded.Type == runtimeprotocol.TypeSubmit {
+	if decoded.Type == runtimeprotocol.TypeSubmit || decoded.Type == runtimeprotocol.TypeSteer {
 		request.Text = &decoded.Text
 	}
 	return request, nil
@@ -612,6 +619,41 @@ func (session *adapterSession) runTurn(ctx context.Context, request adapterReque
 	} else if fatal := fatalTurnError(err); fatal != nil {
 		turnResult = fatal
 	}
+}
+
+func (session *adapterSession) steer(ctx context.Context, request adapterRequest) error {
+	if request.Text == nil {
+		return ErrAdapterProtocol
+	}
+	images, err := verifiedLocalImages(ctx, request.Attachments)
+	if err != nil {
+		return ErrAdapterProtocol
+	}
+	session.mu.Lock()
+	if session.closing || session.active == nil || !session.active.accepted || session.active.turnID == "" || session.interaction != nil {
+		session.mu.Unlock()
+		return ErrAdapterProtocol
+	}
+	turnID := session.active.turnID
+	threadID := session.threadID
+	session.mu.Unlock()
+	var textInput []TextInput
+	if *request.Text != "" {
+		textInput = []TextInput{{Text: *request.Text}}
+	}
+	if _, err := session.client.SteerTurn(ctx, TurnSteerRequest{
+		ThreadID: threadID, ExpectedTurnID: turnID, MessageID: request.MessageID,
+		Input: textInput, LocalImages: images,
+	}); err != nil {
+		if errors.Is(err, ErrInvalidRequest) || errors.Is(err, ErrInvalidResponse) || errors.Is(err, ErrActiveTurnMismatch) || errors.Is(err, ErrNoActiveTurn) {
+			return ErrAdapterProtocol
+		}
+		return ErrAdapterTransport
+	}
+	if err := session.writeAccepted(request.RequestID, request.MessageID); err != nil {
+		return err
+	}
+	return nil
 }
 
 func verifiedLocalImages(ctx context.Context, attachments []runtimeprotocol.LocalAttachment) ([]LocalImageInput, error) {

@@ -28,11 +28,14 @@ func (p Preferences) Snapshot(ctx context.Context) (settingsport.Snapshot, error
 	}
 	return settingsport.Snapshot{
 		ContinueExisting: current.ContinueExisting, ScreenEnabled: current.ScreenEnabled,
-		CardDetail: string(current.CardDetail), ShowTechnicalActions: current.ShowTechnicalActions,
+		CardDetail: string(current.CardDetail), CardPageLimit: current.CardPageLimit, ShowTechnicalActions: current.ShowTechnicalActions,
 		NotifyBackgroundQuestions: current.NotifyBackgroundQuestions,
 		NotifyBackgroundErrors:    current.NotifyBackgroundErrors,
 		SessionLifetime:           string(current.SessionLifetime), QueueLimit: current.QueueLimit,
-		VoiceRecognition: string(current.VoiceRecognition),
+		VoiceRecognition:       string(current.VoiceRecognition),
+		ArchiveRecommendations: current.ArchiveRecommendations,
+		DefaultProviders:       providerDefaults(current.DefaultProviders),
+		DefaultWorkdirs:        workdirDefaults(current.DefaultWorkdirs),
 	}, nil
 }
 
@@ -51,6 +54,18 @@ func (p Preferences) ToggleCardDetail(ctx context.Context) error {
 		}
 	})
 }
+func (p Preferences) CycleCardPageLimit(ctx context.Context) error {
+	return p.update(ctx, func(current *settings.Settings) {
+		switch current.CardPageLimit {
+		case 32:
+			current.CardPageLimit = 64
+		case 64:
+			current.CardPageLimit = 128
+		default:
+			current.CardPageLimit = 32
+		}
+	})
+}
 func (p Preferences) ToggleTechnicalActions(ctx context.Context) error {
 	return p.update(ctx, func(current *settings.Settings) { current.ShowTechnicalActions = !current.ShowTechnicalActions })
 }
@@ -64,6 +79,47 @@ func (p Preferences) ToggleBackgroundErrors(ctx context.Context) error {
 }
 func (p Preferences) SetSessionLifetime(ctx context.Context, lifetime string) error {
 	return p.update(ctx, func(current *settings.Settings) { current.SessionLifetime = settings.SessionLifetime(lifetime) })
+}
+func (p Preferences) ToggleArchiveRecommendations(ctx context.Context) error {
+	return p.update(ctx, func(current *settings.Settings) { current.ArchiveRecommendations = !current.ArchiveRecommendations })
+}
+func (p Preferences) SetDefaultProvider(ctx context.Context, computerID domain.ComputerID, provider domain.Provider) error {
+	return p.update(ctx, func(current *settings.Settings) {
+		if current.DefaultProviders == nil {
+			current.DefaultProviders = map[string]string{}
+		}
+		current.DefaultProviders[string(computerID)] = string(provider)
+	})
+}
+func (p Preferences) ClearDefaultProvider(ctx context.Context, computerID domain.ComputerID) error {
+	return p.update(ctx, func(current *settings.Settings) { delete(current.DefaultProviders, string(computerID)) })
+}
+func (p Preferences) SetDefaultWorkdir(ctx context.Context, computerID domain.ComputerID, workdir string) error {
+	return p.update(ctx, func(current *settings.Settings) {
+		if current.DefaultWorkdirs == nil {
+			current.DefaultWorkdirs = map[string]string{}
+		}
+		current.DefaultWorkdirs[string(computerID)] = workdir
+	})
+}
+func (p Preferences) ClearDefaultWorkdir(ctx context.Context, computerID domain.ComputerID) error {
+	return p.update(ctx, func(current *settings.Settings) { delete(current.DefaultWorkdirs, string(computerID)) })
+}
+
+func providerDefaults(source map[string]string) map[domain.ComputerID]domain.Provider {
+	result := make(map[domain.ComputerID]domain.Provider, len(source))
+	for computerID, provider := range source {
+		result[domain.ComputerID(computerID)] = domain.Provider(provider)
+	}
+	return result
+}
+
+func workdirDefaults(source map[string]string) map[domain.ComputerID]string {
+	result := make(map[domain.ComputerID]string, len(source))
+	for computerID, workdir := range source {
+		result[domain.ComputerID(computerID)] = workdir
+	}
+	return result
 }
 func (p Preferences) update(ctx context.Context, mutate func(*settings.Settings)) error {
 	if p.Store == nil {

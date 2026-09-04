@@ -149,6 +149,12 @@ type Client struct {
 	turnFailure        FailureCode
 	closed             bool
 	pendingPermissions map[string]struct{}
+	pendingSteers      []pendingUserInput
+}
+
+type pendingUserInput struct {
+	hash      [sha256.Size]byte
+	messageID string
 }
 
 func NewClient(reader io.Reader, writer io.Writer, options Options) (*Client, error) {
@@ -232,6 +238,55 @@ func (client *Client) SendUserWithID(text, messageID string) error {
 		return ErrMalformedEvent
 	}
 	return client.sendUser(text, messageID)
+}
+
+// SteerUserWithID writes another user message while the same Claude stream
+// turn is active. Acceptance is the correlated replay returned by NextEvent.
+func (client *Client) SteerUserWithID(text, messageID string) error {
+	if !validUserMessageID(messageID) || !utf8.ValidString(text) {
+		return ErrMalformedEvent
+	}
+	client.writeMu.Lock()
+	defer client.writeMu.Unlock()
+	client.stateMu.Lock()
+	if client.closed {
+		client.stateMu.Unlock()
+		return ErrClientClosed
+	}
+	if !client.turnPending || client.phase != phaseTurn {
+		client.stateMu.Unlock()
+		return ErrTurnInProgress
+	}
+	pending := pendingUserInput{hash: sha256.Sum256([]byte(text)), messageID: messageID}
+	client.pendingSteers = append(client.pendingSteers, pending)
+	client.stateMu.Unlock()
+	envelope := userInputEnvelope{
+		Type: "user", UUID: messageID,
+		Message: messageInput{Role: "user", Content: []contentInput{{Type: "text", Text: text}}},
+	}
+	encoded, err := json.Marshal(envelope)
+	if err != nil {
+		client.rollbackSteer(messageID)
+		return ErrMalformedEvent
+	}
+	encoded = append(encoded, '\n')
+	if err := writeAll(client.writer, encoded); err != nil {
+		client.rollbackSteer(messageID)
+		_ = client.Close()
+		return ErrTransport
+	}
+	return nil
+}
+
+func (client *Client) rollbackSteer(messageID string) {
+	client.stateMu.Lock()
+	defer client.stateMu.Unlock()
+	for index := range client.pendingSteers {
+		if client.pendingSteers[index].messageID == messageID {
+			client.pendingSteers = append(client.pendingSteers[:index], client.pendingSteers[index+1:]...)
+			return
+		}
+	}
 }
 
 func (client *Client) sendUser(text, messageID string) error {
@@ -335,18 +390,26 @@ func (client *Client) NextEvent() (Event, error) {
 		client.sessionID = event.SessionID
 		client.phase = phaseReplay
 	case EventUserReplay:
-		if client.phase != phaseReplay || !client.turnPending {
+		if !client.turnPending {
 			return Event{}, ErrEventOutOfOrder
 		}
-		if sha256.Sum256([]byte(event.UserReplay.Text)) != client.pendingHash {
-			return Event{}, ErrReplayMismatch
+		if client.phase == phaseReplay {
+			if sha256.Sum256([]byte(event.UserReplay.Text)) != client.pendingHash ||
+				(client.pendingMessageID != "" && event.UserReplay.MessageID != client.pendingMessageID) {
+				return Event{}, ErrReplayMismatch
+			}
+			client.phase = phaseTurn
+		} else if client.phase == phaseTurn && len(client.pendingSteers) > 0 {
+			pending := client.pendingSteers[0]
+			if sha256.Sum256([]byte(event.UserReplay.Text)) != pending.hash || event.UserReplay.MessageID != pending.messageID {
+				return Event{}, ErrReplayMismatch
+			}
+			client.pendingSteers = append([]pendingUserInput(nil), client.pendingSteers[1:]...)
+		} else {
+			return Event{}, ErrEventOutOfOrder
 		}
-		if client.pendingMessageID != "" && event.UserReplay.MessageID != client.pendingMessageID {
-			return Event{}, ErrReplayMismatch
-		}
-		client.phase = phaseTurn
 	case EventInternalUser:
-		if client.phase != phaseTurn || !client.turnPending {
+		if client.phase != phaseTurn || !client.turnPending || len(client.pendingSteers) != 0 {
 			return Event{}, ErrEventOutOfOrder
 		}
 	case EventAssistant:
@@ -373,6 +436,7 @@ func (client *Client) NextEvent() (Event, error) {
 		client.turnPending = false
 		client.pendingHash = [sha256.Size]byte{}
 		client.pendingMessageID = ""
+		client.pendingSteers = nil
 		client.phase = phaseReplay
 	default:
 		return Event{}, ErrMalformedEvent

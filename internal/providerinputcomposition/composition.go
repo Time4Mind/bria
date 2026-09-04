@@ -45,11 +45,39 @@ type Submitter struct {
 	providers SessionProviderResolver
 }
 
+type CurrentRuntime interface {
+	Runtime
+	sessionruntime.CurrentTurnSubmitter
+}
+
+type CurrentSubmitter struct {
+	*Submitter
+	runtime CurrentRuntime
+}
+
 func New(runtime Runtime, resolver AttachmentResolver, providers SessionProviderResolver) (*Submitter, error) {
 	if runtime == nil || resolver == nil || providers == nil {
 		return nil, ErrInvalidConfiguration
 	}
 	return &Submitter{runtime: runtime, resolver: resolver, providers: providers}, nil
+}
+
+func NewCurrent(runtime CurrentRuntime, resolver AttachmentResolver, providers SessionProviderResolver) (*CurrentSubmitter, error) {
+	base, err := New(runtime, resolver, providers)
+	if err != nil {
+		return nil, err
+	}
+	return &CurrentSubmitter{Submitter: base, runtime: runtime}, nil
+}
+
+func (submitter *CurrentSubmitter) SubmitCurrentWithCallbacks(ctx context.Context, sessionID domain.SessionID, input sessionruntime.StructuredInput, callbacks sessionruntime.TurnCallbacks) error {
+	if submitter == nil || submitter.runtime == nil || submitter.Submitter == nil || ctx == nil || sessionID == "" || strings.TrimSpace(callbacks.MessageID) == "" {
+		return ErrInvalidConfiguration
+	}
+	if _, err := submitter.providerForSession(ctx, sessionID); err != nil {
+		return err
+	}
+	return submitter.runtime.SubmitCurrentWithCallbacks(ctx, sessionID, input, callbacks)
 }
 
 func (submitter *Submitter) Submit(ctx context.Context, sessionID domain.SessionID, text string) (sessionruntime.TurnResult, error) {
@@ -183,3 +211,5 @@ func verifyAttachment(ctx context.Context, path string, expected turnprocessing.
 
 var _ turnprocessing.PreparedTurnSubmitter = (*Submitter)(nil)
 var _ sessionruntime.InteractiveSubmitter = (*Submitter)(nil)
+var _ turnprocessing.PreparedTurnSubmitter = (*CurrentSubmitter)(nil)
+var _ sessionruntime.CurrentTurnSubmitter = (*CurrentSubmitter)(nil)

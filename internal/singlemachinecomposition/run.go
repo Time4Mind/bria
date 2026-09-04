@@ -21,6 +21,7 @@ import (
 	"bria/internal/recoveryruntime"
 	"bria/internal/runtimefactory"
 	"bria/internal/safelog"
+	"bria/internal/sessioncreation"
 	"bria/internal/sessionexpiry"
 	"bria/internal/sessionid"
 	"bria/internal/sessionruntime"
@@ -31,10 +32,12 @@ import (
 	"bria/internal/supervisioncomposition"
 	"bria/internal/telegram"
 	"bria/internal/telegrambridge"
+	"bria/internal/telegramcompletioncomposition"
 	"bria/internal/telegramcontroller"
 	"bria/internal/telegramflow"
 	"bria/internal/telegramnotify"
 	"bria/internal/telegrampipeline"
+	"bria/internal/telegrampromptcomposition"
 	"bria/internal/telegramrecoverycomposition"
 	"bria/internal/telegramruntimecomposition"
 	"bria/internal/turnruntimecomposition"
@@ -117,10 +120,6 @@ func (confirmedReadiness) Ready(context.Context, coordinator.Checkpoint) error {
 
 type unavailableProviderRuntime struct{}
 
-type replyRouteRecorder struct {
-	store *storage.TelegramReplyRouteStore
-}
-
 type expirySessionCloser struct {
 	closer *app.SessionCloser
 }
@@ -131,16 +130,6 @@ func (adapter expirySessionCloser) Close(ctx context.Context, id domain.SessionI
 	}
 	_, err := adapter.closer.Close(ctx, id)
 	return err
-}
-
-func (recorder replyRouteRecorder) RecordOutboundReceipt(ctx context.Context, receipt telegramnotify.OutboundReceipt) error {
-	if recorder.store == nil {
-		return errors.New("Telegram reply route store is required")
-	}
-	return recorder.store.RecordOutboundReceipt(ctx, storage.TelegramOutboundReceipt{
-		MessageID: receipt.MessageID,
-		SessionID: receipt.SessionID,
-	})
 }
 
 func (unavailableProviderRuntime) Start(context.Context, app.StartSessionRequest) (domain.ProviderBinding, error) {
@@ -187,11 +176,17 @@ func runTelegramController(
 		return fmt.Errorf("read callback key: %w", err)
 	}
 	defer clear(callbackKey)
+	telegramScheduler, err := telegram.OpenMutationScheduler(telegram.SchedulerOptions{
+		StatePath: configuration.StatePath + ".telegram-scheduler.json",
+	})
+	if err != nil {
+		return fmt.Errorf("open Telegram mutation scheduler: %w", err)
+	}
 
 	client, err := telegram.NewClient(
 		string(token),
 		dependencies.TelegramHTTP(),
-		telegram.Options{},
+		telegram.Options{Scheduler: telegramScheduler},
 	)
 	if err != nil {
 		return fmt.Errorf("create Telegram client: %w", err)
@@ -231,23 +226,17 @@ func runTelegramController(
 	if err != nil {
 		return fmt.Errorf("compose Bria settings: %w", err)
 	}
-	replyRoutes, err := storage.OpenTelegramReplyRouteStore(
-		configuration.StatePath+".telegram-reply-routes.json",
-		configuration.OwnerUserID,
-		configuration.PrivateChatID,
-	)
-	if err != nil {
-		return fmt.Errorf("open Telegram reply routes: %w", err)
-	}
 	partReceipts, err := telegramnotify.OpenFilePartReceiptStore(configuration.StatePath + ".telegram-notification-parts.json")
 	if err != nil {
 		return fmt.Errorf("open Telegram notification part receipts: %w", err)
 	}
-	notifier, err := telegramnotify.NewWithOptions(client, telegramnotify.Options{
-		ReceiptRecorder: replyRouteRecorder{store: replyRoutes}, PartReceipts: partReceipts,
-	})
+	notifier, err := telegramnotify.NewWithOptions(client, telegramnotify.Options{PartReceipts: partReceipts})
 	if err != nil {
 		return fmt.Errorf("create Telegram notifier: %w", err)
+	}
+	notificationRouter, err := telegramcompletioncomposition.NewRouter(notifier)
+	if err != nil {
+		return fmt.Errorf("create Telegram notification router: %w", err)
 	}
 	journalLimits := messagejournal.DefaultLimits()
 	journalLimits.MaxPendingInputsPerSession = effectiveSettings.QueueLimit
@@ -257,7 +246,7 @@ func runTelegramController(
 	}
 	clock := func() time.Time { return time.Now().UTC() }
 	flow, err := durableflow.New(journal, nil, durablecomposition.TelegramOutputSender{
-		OwnerPrivateChatID: configuration.PrivateChatID, Deliverer: notifier,
+		OwnerPrivateChatID: configuration.PrivateChatID, Deliverer: notificationRouter,
 	}, durableflow.Options{Owner: string(computerID), LeaseDuration: durableLeaseDuration, Now: clock})
 	if err != nil {
 		return fmt.Errorf("create durable message flow: %w", err)
@@ -266,6 +255,16 @@ func runTelegramController(
 	if err != nil {
 		return fmt.Errorf("open safe operational log: %w", err)
 	}
+	telegramScheduler.SetReporter(func(diagnostic telegram.SchedulerDiagnostic) {
+		_ = safeLogger.Write(safelog.Event{
+			Class: safelog.Service, Type: "telegram.mutation_delayed", ErrorCategory: diagnostic.ErrorClass,
+			Fields: map[string]string{
+				"method": diagnostic.Method, "retry_after": diagnostic.RetryAfter.String(),
+				"cooldown_until": diagnostic.CooldownUntil.UTC().Format(time.RFC3339Nano),
+				"queue_size":     fmt.Sprintf("%d", diagnostic.QueueSize), "oldest_age": diagnostic.OldestAge.String(),
+			},
+		})
+	})
 	inputWake := make(chan domain.SessionID, 256)
 	outputWake := make(chan domain.SessionID, 256)
 	inputCustody := durablecomposition.InputCustody{Flow: flow, Wake: inputWake}
@@ -393,6 +392,29 @@ func runTelegramController(
 			return fmt.Errorf("compose provider authorization: %w", err)
 		}
 	}
+	telegramPreferences := settingscomposition.Preferences{Store: preferences}
+	computerName := string(computerID)
+	if configuration.Computer != nil && configuration.Computer.Name != "" {
+		computerName = configuration.Computer.Name
+	}
+	creationEnvironment, err := sessioncreation.NewLocalEnvironment(computerID, computerName, nil, func(ctx context.Context) ([]sessioncreation.ProviderCapability, error) {
+		snapshot, snapshotErr := providerPreferences.Current(ctx)
+		if snapshotErr != nil {
+			return nil, snapshotErr
+		}
+		capabilities := snapshot.Config.ProviderCapabilities()
+		result := make([]sessioncreation.ProviderCapability, 0, len(capabilities))
+		for _, capability := range capabilities {
+			result = append(result, sessioncreation.ProviderCapability{
+				Provider: capability.Provider, Installed: capability.Configured,
+				Enabled: capability.Configured && capability.Enabled,
+			})
+		}
+		return result, nil
+	})
+	if err != nil {
+		return fmt.Errorf("compose session creation environment: %w", err)
+	}
 	handler, err := telegramcontroller.New(
 		configuration.OwnerUserID,
 		configuration.PrivateChatID,
@@ -403,11 +425,12 @@ func runTelegramController(
 		notifier,
 		telegramcontroller.Options{
 			QueueLimit: effectiveSettings.QueueLimit, Lifecycle: starter, UIState: state,
-			Settings: settings.NewTelegramPreferences(preferences), Providers: settingscomposition.ProviderPreferences{Store: providerPreferences}, ReplyRoutes: replyRoutes,
-			Stopper: turnStopper, ArchivedResumer: archivedResumer, SessionCloser: sessionCloser,
+			Settings: telegramPreferences, Providers: settingscomposition.ProviderPreferences{Store: providerPreferences},
+			CreationEnvironment: creationEnvironment,
+			Stopper:             turnStopper, ArchivedResumer: archivedResumer, SessionCloser: sessionCloser,
 			TurnLifecycle: turnLifecycle, DurableInput: inputCustody, DurableOutput: outputCustody,
 			InputPreparer: inputPreparer, Attachments: attachments, RuntimeEvents: runtimeEvents, Finals: finals,
-			Interactions: interactions.Flow(), InteractionText: interactions.Flow(), Authorization: authorization,
+			Interactions: interactions.Flow(), Authorization: authorization,
 			Recovered: recovery.Sessions,
 		},
 	)
@@ -446,6 +469,9 @@ func runTelegramController(
 	if err != nil {
 		return fmt.Errorf("open callback operation store: %w", err)
 	}
+	if err := transportSender.BindCallbackAcknowledgements(callbackOperations); err != nil {
+		return fmt.Errorf("bind callback acknowledgement store: %w", err)
+	}
 	controllerAdapter := telegramruntimecomposition.ControllerFlowAdapter{Controller: handler}
 	callbackRouter, err := interactioncomposition.NewCallbackRouter(controllerAdapter, interactions.Flow())
 	if err != nil {
@@ -473,6 +499,18 @@ func runTelegramController(
 	}
 	if err := recoveryExecutor.Bind(flowSender); err != nil {
 		return fmt.Errorf("bind Telegram recovery executor: %w", err)
+	}
+	if err := notificationRouter.BindFinals(telegramcompletioncomposition.CompletionDeliverer{
+		Controller: handler, Presenter: presenter, Sender: flowSender,
+		Cards: telegramruntimecomposition.SessionTelegramUIStore{State: state}, Preferences: telegramPreferences,
+		ConversationID: configuration.PrivateChatID,
+	}); err != nil {
+		return fmt.Errorf("bind Telegram completion delivery: %w", err)
+	}
+	if err := notificationRouter.BindPromptStatuses(telegrampromptcomposition.Deliverer{
+		Controller: handler, Cards: telegramruntimecomposition.SessionTelegramUIStore{State: state}, Presenter: presenter, Sender: flowSender,
+	}); err != nil {
+		return fmt.Errorf("bind Telegram prompt status delivery: %w", err)
 	}
 	durableReporter := func(component, eventType string) func(error) {
 		return func(reportErr error) {

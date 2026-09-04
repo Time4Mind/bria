@@ -3,6 +3,7 @@
 package telegram
 
 import (
+	"bria/internal/mutationscheduler"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -19,6 +20,24 @@ import (
 	"strings"
 	"time"
 )
+
+type MutationPriority = mutationscheduler.Priority
+
+const (
+	MutationRoutine     = mutationscheduler.Routine
+	MutationInteractive = mutationscheduler.Interactive
+)
+
+type MutationScheduler = mutationscheduler.MutationScheduler
+type SchedulerOptions = mutationscheduler.Options
+type SchedulerDiagnostic = mutationscheduler.Diagnostic
+type Mutation = mutationscheduler.Mutation
+type MutationOutcome = mutationscheduler.Outcome
+type MutationLease = mutationscheduler.Lease
+
+var OpenMutationScheduler = mutationscheduler.Open
+var ErrMutationStopped = mutationscheduler.ErrStopped
+var ErrMutationSuperseded = mutationscheduler.ErrSuperseded
 
 const (
 	officialBaseEndpoint    = "https://api.telegram.org"
@@ -136,6 +155,7 @@ type SendMessageRequest struct {
 	ChatID      ChatID                `json:"chat_id"`
 	Text        string                `json:"text"`
 	ReplyMarkup *InlineKeyboardMarkup `json:"reply_markup,omitempty"`
+	Priority    MutationPriority      `json:"-"`
 }
 
 type EditMessageTextRequest struct {
@@ -143,6 +163,7 @@ type EditMessageTextRequest struct {
 	MessageID   MessageID             `json:"message_id"`
 	Text        string                `json:"text"`
 	ReplyMarkup *InlineKeyboardMarkup `json:"reply_markup,omitempty"`
+	Priority    MutationPriority      `json:"-"`
 }
 
 type InlineKeyboardMarkup struct {
@@ -157,6 +178,7 @@ type InlineKeyboardButton struct {
 type AnswerCallbackQueryRequest struct {
 	CallbackQueryID CallbackQueryID `json:"callback_query_id"`
 	Text            string          `json:"text,omitempty"`
+	Started         chan<- struct{} `json:"-"`
 }
 
 type DeleteMessageRequest struct {
@@ -173,6 +195,7 @@ type SendDocumentRequest struct {
 	ContentType string
 	Content     []byte
 	Caption     string
+	Priority    MutationPriority
 }
 
 // SendPhotoRequest owns already-rendered image bytes. It deliberately carries
@@ -182,6 +205,7 @@ type SendPhotoRequest struct {
 	FileName    string
 	ContentType string
 	Content     []byte
+	Priority    MutationPriority
 }
 
 // PhotoReceipt is the exact Telegram message receipt for a rendered screen.
@@ -238,6 +262,7 @@ type Options struct {
 	MaxDownloadBytes int64
 	MaxUploadBytes   int64
 	RequestTimeout   time.Duration
+	Scheduler        *MutationScheduler
 }
 
 type Client struct {
@@ -248,6 +273,7 @@ type Client struct {
 	maxDownloadBytes int64
 	maxUploadBytes   int64
 	requestTimeout   time.Duration
+	scheduler        *MutationScheduler
 }
 
 type APIError struct {
@@ -255,6 +281,7 @@ type APIError struct {
 	HTTPStatus  int
 	ErrorCode   int
 	Description string
+	RetryAfter  time.Duration
 }
 
 func (err *APIError) Error() string {
@@ -319,6 +346,7 @@ func NewClient(
 		maxDownloadBytes: maxDownloadBytes,
 		maxUploadBytes:   maxUploadBytes,
 		requestTimeout:   requestTimeout,
+		scheduler:        options.Scheduler,
 	}, nil
 }
 
@@ -335,6 +363,11 @@ func (client *Client) GetMe(ctx context.Context) (User, error) {
 	}
 	if identity.ID <= 0 || !identity.IsBot {
 		return User{}, errors.New("Telegram getMe returned an invalid bot identity")
+	}
+	if client.scheduler != nil {
+		if err := client.scheduler.ConfirmAuthorization(); err != nil {
+			return User{}, fmt.Errorf("persist Telegram authorization recovery: %w", err)
+		}
 	}
 	return identity, nil
 }
@@ -480,11 +513,25 @@ func (client *Client) SendMessage(
 		return Message{}, fmt.Errorf("Telegram send reply markup: %w", err)
 	}
 	var message Message
-	if err := client.call(ctx, "sendMessage", request, &message); err != nil {
-		return Message{}, err
+	var err error
+	for {
+		err = client.call(ctx, "sendMessage", request, &message)
+		if err == nil || client.scheduler == nil || !isRateLimited(err) || ctx.Err() != nil {
+			break
+		}
+	}
+	if err != nil {
+		if errors.Is(err, ErrMutationStopped) {
+			return Message{}, err
+		}
+		var apiErr *APIError
+		if errors.As(err, &apiErr) && isDefinitiveDeliveryRejection(apiErr) {
+			return Message{}, err
+		}
+		return Message{}, fmt.Errorf("%w: %w", ErrDeliveryUnknown, err)
 	}
 	if err := validateMessage(message); err != nil {
-		return Message{}, fmt.Errorf("normalize Telegram sent message: %w", err)
+		return Message{}, fmt.Errorf("%w: Telegram sendMessage returned an invalid receipt", ErrDeliveryUnknown)
 	}
 	return message, nil
 }
@@ -550,12 +597,22 @@ func (client *Client) SendDocument(
 	}
 
 	var message Message
-	if err := client.callMultipart(ctx, "sendDocument", writer.FormDataContentType(), body.Bytes(), &message); err != nil {
-		var apiErr *APIError
-		if errors.As(err, &apiErr) && isDefinitiveDeliveryRejection(apiErr) {
-			return FileReceipt{}, err
+	var sendErr error
+	for {
+		sendErr = client.callMultipart(ctx, Mutation{Method: "sendDocument", ChatID: int64(request.ChatID), Priority: request.Priority, Heavy: true}, writer.FormDataContentType(), body.Bytes(), &message)
+		if sendErr == nil || client.scheduler == nil || !isRateLimited(sendErr) || ctx.Err() != nil {
+			break
 		}
-		return FileReceipt{}, fmt.Errorf("%w: %w", ErrDeliveryUnknown, err)
+	}
+	if sendErr != nil {
+		if errors.Is(sendErr, ErrMutationStopped) {
+			return FileReceipt{}, sendErr
+		}
+		var apiErr *APIError
+		if errors.As(sendErr, &apiErr) && isDefinitiveDeliveryRejection(apiErr) {
+			return FileReceipt{}, sendErr
+		}
+		return FileReceipt{}, fmt.Errorf("%w: %w", ErrDeliveryUnknown, sendErr)
 	}
 	if err := validateMessage(message); err != nil {
 		return FileReceipt{}, fmt.Errorf("%w: Telegram sendDocument returned an invalid message", ErrDeliveryUnknown)
@@ -619,12 +676,22 @@ func (client *Client) SendPhoto(ctx context.Context, request SendPhotoRequest) (
 		return PhotoReceipt{}, errors.New("encode Telegram sendPhoto request")
 	}
 	var message Message
-	if err := client.callMultipart(ctx, "sendPhoto", writer.FormDataContentType(), body.Bytes(), &message); err != nil {
-		var apiErr *APIError
-		if errors.As(err, &apiErr) && isDefinitiveDeliveryRejection(apiErr) {
-			return PhotoReceipt{}, err
+	var sendErr error
+	for {
+		sendErr = client.callMultipart(ctx, Mutation{Method: "sendPhoto", ChatID: int64(request.ChatID), Priority: request.Priority, Heavy: true}, writer.FormDataContentType(), body.Bytes(), &message)
+		if sendErr == nil || client.scheduler == nil || !isRateLimited(sendErr) || ctx.Err() != nil {
+			break
 		}
-		return PhotoReceipt{}, fmt.Errorf("%w: %w", ErrDeliveryUnknown, err)
+	}
+	if sendErr != nil {
+		if errors.Is(sendErr, ErrMutationStopped) {
+			return PhotoReceipt{}, sendErr
+		}
+		var apiErr *APIError
+		if errors.As(sendErr, &apiErr) && isDefinitiveDeliveryRejection(apiErr) {
+			return PhotoReceipt{}, sendErr
+		}
+		return PhotoReceipt{}, fmt.Errorf("%w: %w", ErrDeliveryUnknown, sendErr)
 	}
 	if err := validateMessage(message); err != nil || message.MessageID <= 0 || message.Chat.ID != request.ChatID || len(message.Photo) == 0 {
 		return PhotoReceipt{}, fmt.Errorf("%w: Telegram sendPhoto returned an invalid receipt", ErrDeliveryUnknown)
@@ -649,8 +716,20 @@ func (client *Client) EditMessageText(
 		return Message{}, fmt.Errorf("Telegram edit reply markup: %w", err)
 	}
 	var message Message
-	if err := client.call(ctx, "editMessageText", request, &message); err != nil {
-		return Message{}, err
+	for {
+		err := client.call(ctx, "editMessageText", request, &message)
+		if err == nil {
+			break
+		}
+		if errors.Is(err, ErrMutationSuperseded) {
+			return Message{MessageID: request.MessageID, Chat: Chat{ID: request.ChatID}}, nil
+		}
+		if isMessageNotModified(err) {
+			return Message{MessageID: request.MessageID, Chat: Chat{ID: request.ChatID}}, nil
+		}
+		if client.scheduler == nil || !retryIdempotentMutation(ctx, err) {
+			return Message{}, err
+		}
 	}
 	if err := validateMessage(message); err != nil {
 		return Message{}, fmt.Errorf("normalize Telegram edited message: %w", err)
@@ -688,8 +767,17 @@ func (client *Client) DeleteMessage(
 		return errors.New("Telegram delete message id is required")
 	}
 	var deleted bool
-	if err := client.call(ctx, "deleteMessage", request, &deleted); err != nil {
-		return err
+	for {
+		err := client.call(ctx, "deleteMessage", request, &deleted)
+		if err == nil {
+			break
+		}
+		if isMessageAlreadyAbsent(err) {
+			return nil
+		}
+		if client.scheduler == nil || !retryIdempotentMutation(ctx, err) {
+			return err
+		}
 	}
 	if !deleted {
 		return errors.New("Telegram message deletion was not accepted")
@@ -702,6 +790,9 @@ type apiEnvelope struct {
 	Result      json.RawMessage `json:"result"`
 	ErrorCode   int             `json:"error_code"`
 	Description string          `json:"description"`
+	Parameters  struct {
+		RetryAfter int64 `json:"retry_after"`
+	} `json:"parameters"`
 }
 
 var errResponseTooLarge = errors.New("Telegram response too large")
@@ -714,10 +805,25 @@ var ErrDeliveryUnknown = errors.New("Telegram delivery outcome is unknown")
 
 func IsDeliveryUnknown(err error) bool { return errors.Is(err, ErrDeliveryUnknown) }
 
+// RetryAfter returns Telegram's structured cooldown when an API rejection
+// carries ResponseParameters.retry_after. Descriptions are intentionally not
+// parsed because their wording is not a protocol contract.
+func RetryAfter(err error) (time.Duration, bool) {
+	var apiError *APIError
+	if !errors.As(err, &apiError) || apiError.RetryAfter <= 0 {
+		return 0, false
+	}
+	return apiError.RetryAfter, true
+}
+
 // ErrTransient marks a Telegram failure that is safe to retry because no
 // valid protocol response was received or Telegram explicitly requested a
 // later attempt. It never classifies authentication or polling conflicts.
 var ErrTransient = errors.New("transient Telegram failure")
+
+// ErrAmbiguousResponse marks a malformed Bot API response. Reads fail closed;
+// only operation-specific idempotent mutation code may retry it.
+var ErrAmbiguousResponse = errors.New("ambiguous Telegram response")
 
 // IsTransient reports whether a request can be retried without converting an
 // authentication, concurrent-poller, or protocol failure into a crash loop.
@@ -739,14 +845,57 @@ func IsTransient(err error) bool {
 		apiError.ErrorCode >= http.StatusInternalServerError
 }
 
+func (client *Client) acquireMutation(ctx context.Context, method string, payload any) (*MutationLease, error) {
+	mutation, ok := mutationFor(method, payload)
+	if !ok {
+		return nil, nil
+	}
+	return client.acquire(ctx, mutation)
+}
+
+func (client *Client) acquire(ctx context.Context, mutation Mutation) (*MutationLease, error) {
+	if client.scheduler == nil {
+		return nil, nil
+	}
+	return client.scheduler.Acquire(ctx, mutation)
+}
+
+func mutationFor(method string, payload any) (Mutation, bool) {
+	switch request := payload.(type) {
+	case SendMessageRequest:
+		return Mutation{Method: method, ChatID: int64(request.ChatID), Priority: request.Priority}, true
+	case EditMessageTextRequest:
+		return Mutation{Method: method, ChatID: int64(request.ChatID), CardID: int64(request.MessageID), Priority: request.Priority}, true
+	case AnswerCallbackQueryRequest:
+		return Mutation{Method: method, Priority: MutationInteractive}, true
+	case DeleteMessageRequest:
+		return Mutation{Method: method, ChatID: int64(request.ChatID)}, true
+	default:
+		return Mutation{}, false
+	}
+}
+
 func (client *Client) call(
 	ctx context.Context,
 	method string,
 	payload any,
 	result any,
-) error {
+) (returnErr error) {
 	if ctx == nil {
 		return errors.New("Telegram request context is required")
+	}
+	lease, err := client.acquireMutation(ctx, method, payload)
+	if err != nil {
+		signalMutationStarted(payload)
+		return err
+	}
+	signalMutationStarted(payload)
+	if lease != nil {
+		defer func() {
+			if persistErr := lease.Complete(mutationOutcome(returnErr)); persistErr != nil && returnErr == nil {
+				returnErr = fmt.Errorf("persist Telegram scheduler result: %w", persistErr)
+			}
+		}()
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -772,7 +921,7 @@ func (client *Client) call(
 		return safeRequestError(method, ctx, requestCtx, err)
 	}
 	if httpResponse == nil || httpResponse.Body == nil {
-		return fmt.Errorf("telegram %s returned no response", method)
+		return transientProtocolError(method, "returned no response")
 	}
 	defer httpResponse.Body.Close()
 
@@ -784,18 +933,20 @@ func (client *Client) call(
 			}
 			return fmt.Errorf("%w: telegram %s response could not be read", ErrTransient, method)
 		}
-		return fmt.Errorf(
-			"telegram %s response exceeded %d bytes",
-			method,
-			client.maxResponseBytes,
-		)
+		return fmt.Errorf("%w: telegram %s response exceeded %d bytes", ErrTransient, method, client.maxResponseBytes)
 	}
 	envelope, err := decodeEnvelope(responseBody)
 	if err != nil {
-		return fmt.Errorf("telegram %s returned an invalid JSON envelope", method)
+		if httpResponse.StatusCode < 200 || httpResponse.StatusCode >= 300 {
+			return &APIError{Method: method, HTTPStatus: httpResponse.StatusCode}
+		}
+		return transientProtocolError(method, "returned an invalid JSON envelope")
 	}
 	if envelope.OK == nil {
-		return fmt.Errorf("telegram %s response omitted ok", method)
+		if httpResponse.StatusCode < 200 || httpResponse.StatusCode >= 300 {
+			return &APIError{Method: method, HTTPStatus: httpResponse.StatusCode}
+		}
+		return transientProtocolError(method, "response omitted ok")
 	}
 	if !*envelope.OK || httpResponse.StatusCode < 200 || httpResponse.StatusCode >= 300 {
 		return &APIError{
@@ -803,27 +954,50 @@ func (client *Client) call(
 			HTTPStatus:  httpResponse.StatusCode,
 			ErrorCode:   envelope.ErrorCode,
 			Description: envelope.Description,
+			RetryAfter:  retryAfterDuration(envelope.Parameters.RetryAfter),
 		}
 	}
 	if len(envelope.Result) == 0 || bytes.Equal(bytes.TrimSpace(envelope.Result), []byte("null")) {
-		return fmt.Errorf("telegram %s response omitted result", method)
+		return transientProtocolError(method, "response omitted result")
 	}
 	if err := json.Unmarshal(envelope.Result, result); err != nil {
-		return fmt.Errorf("telegram %s returned an invalid result", method)
+		return transientProtocolError(method, "returned an invalid result")
+	}
+	if err := validateMutationResult(method, result); err != nil {
+		return transientProtocolError(method, "returned an invalid mutation receipt")
 	}
 	return nil
 }
 
+func signalMutationStarted(payload any) {
+	request, ok := payload.(AnswerCallbackQueryRequest)
+	if ok && request.Started != nil {
+		close(request.Started)
+	}
+}
+
 func (client *Client) callMultipart(
 	ctx context.Context,
-	method string,
+	mutation Mutation,
 	contentType string,
 	body []byte,
 	result any,
-) error {
+) (returnErr error) {
 	if ctx == nil {
 		return errors.New("Telegram request context is required")
 	}
+	lease, err := client.acquire(ctx, mutation)
+	if err != nil {
+		return err
+	}
+	if lease != nil {
+		defer func() {
+			if persistErr := lease.Complete(mutationOutcome(returnErr)); persistErr != nil && returnErr == nil {
+				returnErr = fmt.Errorf("persist Telegram scheduler result: %w", persistErr)
+			}
+		}()
+	}
+	method := mutation.Method
 	requestCtx, cancel := context.WithTimeout(ctx, client.requestTimeout)
 	defer cancel()
 	httpRequest, err := http.NewRequestWithContext(
@@ -844,7 +1018,7 @@ func (client *Client) callMultipart(
 		return safeRequestError(method, ctx, requestCtx, err)
 	}
 	if httpResponse == nil || httpResponse.Body == nil {
-		return fmt.Errorf("telegram %s returned no response", method)
+		return transientProtocolError(method, "returned no response")
 	}
 	defer httpResponse.Body.Close()
 
@@ -853,26 +1027,30 @@ func (client *Client) callMultipart(
 		if httpResponse.StatusCode < 200 || httpResponse.StatusCode >= 300 {
 			return &APIError{Method: method, HTTPStatus: httpResponse.StatusCode}
 		}
-		return fmt.Errorf("telegram %s response could not be read", method)
+		return transientProtocolError(method, "response could not be read")
 	}
 	envelope, err := decodeEnvelope(responseBody)
 	if err != nil || envelope.OK == nil {
 		if httpResponse.StatusCode < 200 || httpResponse.StatusCode >= 300 {
 			return &APIError{Method: method, HTTPStatus: httpResponse.StatusCode}
 		}
-		return fmt.Errorf("telegram %s returned an invalid JSON envelope", method)
+		return transientProtocolError(method, "returned an invalid JSON envelope")
 	}
 	if !*envelope.OK || httpResponse.StatusCode < 200 || httpResponse.StatusCode >= 300 {
 		return &APIError{
 			Method: method, HTTPStatus: httpResponse.StatusCode,
 			ErrorCode: envelope.ErrorCode, Description: envelope.Description,
+			RetryAfter: retryAfterDuration(envelope.Parameters.RetryAfter),
 		}
 	}
 	if len(envelope.Result) == 0 || bytes.Equal(bytes.TrimSpace(envelope.Result), []byte("null")) {
-		return fmt.Errorf("telegram %s response omitted result", method)
+		return transientProtocolError(method, "response omitted result")
 	}
 	if err := json.Unmarshal(envelope.Result, result); err != nil {
-		return fmt.Errorf("telegram %s returned an invalid result", method)
+		return transientProtocolError(method, "returned an invalid result")
+	}
+	if err := validateMutationResult(method, result); err != nil {
+		return transientProtocolError(method, "returned an invalid mutation receipt")
 	}
 	return nil
 }
@@ -940,6 +1118,14 @@ func isPermanentAPIStatus(status int) bool {
 		status == http.StatusConflict
 }
 
+func retryAfterDuration(seconds int64) time.Duration {
+	const maxSeconds = int64(^uint64(0)>>1) / int64(time.Second)
+	if seconds <= 0 || seconds > maxSeconds {
+		return 0
+	}
+	return time.Duration(seconds) * time.Second
+}
+
 func isDefinitiveDeliveryRejection(err *APIError) bool {
 	for _, status := range []int{err.HTTPStatus, err.ErrorCode} {
 		if status >= 400 && status < 500 && status != http.StatusRequestTimeout {
@@ -947,6 +1133,57 @@ func isDefinitiveDeliveryRejection(err *APIError) bool {
 		}
 	}
 	return false
+}
+
+func mutationOutcome(err error) MutationOutcome {
+	outcome := MutationOutcome{Err: err}
+	var apiError *APIError
+	if errors.As(err, &apiError) {
+		outcome.HTTPStatus = apiError.HTTPStatus
+		outcome.ErrorCode = apiError.ErrorCode
+		outcome.RetryAfter = apiError.RetryAfter
+	}
+	return outcome
+}
+
+func isStatus(apiError *APIError, status int) bool {
+	return apiError != nil && (apiError.HTTPStatus == status || apiError.ErrorCode == status)
+}
+
+func isRateLimited(err error) bool {
+	var apiError *APIError
+	return errors.As(err, &apiError) && isStatus(apiError, http.StatusTooManyRequests)
+}
+
+func retryIdempotentMutation(ctx context.Context, err error) bool {
+	if ctx.Err() != nil {
+		return false
+	}
+	var apiError *APIError
+	if !errors.As(err, &apiError) {
+		return IsTransient(err) || errors.Is(err, ErrAmbiguousResponse)
+	}
+	if isStatus(apiError, http.StatusUnauthorized) || isStatus(apiError, http.StatusForbidden) || isStatus(apiError, http.StatusConflict) {
+		return false
+	}
+	if apiError.HTTPStatus >= 400 && apiError.HTTPStatus < 500 && !isStatus(apiError, http.StatusRequestTimeout) && !isStatus(apiError, http.StatusTooManyRequests) {
+		return false
+	}
+	return true
+}
+
+func isMessageNotModified(err error) bool {
+	var apiError *APIError
+	return errors.As(err, &apiError) && strings.Contains(strings.ToLower(apiError.Description), "message is not modified")
+}
+
+func isMessageAlreadyAbsent(err error) bool {
+	var apiError *APIError
+	if !errors.As(err, &apiError) || !isStatus(apiError, http.StatusBadRequest) {
+		return false
+	}
+	description := strings.ToLower(apiError.Description)
+	return strings.Contains(description, "message to delete not found") || strings.Contains(description, "message not found")
 }
 
 func safeRequestError(
@@ -971,6 +1208,23 @@ func safeRequestError(
 		return fmt.Errorf("%w: telegram %s request failed", ErrTransient, method)
 	}
 	return fmt.Errorf("%w: telegram %s request failed", ErrTransient, method)
+}
+
+func transientProtocolError(method, detail string) error {
+	return fmt.Errorf("%w: telegram %s %s", ErrAmbiguousResponse, method, detail)
+}
+
+func validateMutationResult(method string, result any) error {
+	switch method {
+	case "sendMessage", "editMessageText", "sendDocument", "sendPhoto":
+		message, ok := result.(*Message)
+		if !ok {
+			return errors.New("Telegram mutation result type is invalid")
+		}
+		return validateMessage(*message)
+	default:
+		return nil
+	}
 }
 
 func readBounded(reader io.Reader, limit int64) ([]byte, error) {

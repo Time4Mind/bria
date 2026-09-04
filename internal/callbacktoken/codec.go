@@ -82,6 +82,38 @@ const (
 	ActionStatusRecoveryRetryPossibleDuplicate Action = 37
 	ActionStatusRecoveryCancel                 Action = 38
 	ActionArtifactRetry                        Action = 39
+	ActionCreateSelectCodex                    Action = 40
+	ActionCreateSelectClaude                   Action = 41
+	ActionCreateWorkdir                        Action = 42
+	ActionCreateConfirm                        Action = 43
+	ActionInteractionPrevious                  Action = 44
+	ActionInteractionNext                      Action = 45
+	ActionInteractionSubmit                    Action = 46
+	ActionSettingsPageLimit                    Action = 47
+	ActionSettingsContinueExisting             Action = 48
+	ActionSettingsTechnicalActions             Action = 49
+	ActionSettingsBackgroundQuestions          Action = 50
+	ActionSettingsBackgroundErrors             Action = 51
+	ActionSettingsLifetimeNever                Action = 52
+	ActionSettingsLifetime6Hours               Action = 53
+	ActionSettingsLifetime12Hours              Action = 54
+	ActionSettingsLifetime24Hours              Action = 55
+	ActionSettingsLifetime48Hours              Action = 56
+	ActionSettingsProviderCodex                Action = 57
+	ActionSettingsProviderClaude               Action = 58
+	ActionCreateChoice                         Action = 59
+	ActionCreatePrevious                       Action = 60
+	ActionCreateFirst                          Action = 61
+	ActionCreateNext                           Action = 62
+	ActionCreateUp                             Action = 63
+	ActionCreatePick                           Action = 64
+	ActionCreateDirectoryNew                   Action = 65
+	ActionCreateBack                           Action = 66
+	ActionCreateFresh                          Action = 67
+	ActionSettingsArchiveRecommendations       Action = 68
+	ActionSettingsDefaultProvider              Action = 69
+	ActionSettingsDefaultWorkdir               Action = 70
+	ActionSettingsClearCreationDefaults        Action = 71
 )
 
 // Fields is the semantic callback payload. SessionID identifies the selected
@@ -206,8 +238,18 @@ func validAction(action Action) bool {
 	case ActionPreviousPage, ActionNextPage, ActionLatestPage, ActionSelectSession,
 		ActionStop, ActionClose, ActionOptions, ActionScreen, ActionResume,
 		ActionMenuSessions, ActionMenuNew, ActionMenuArchive, ActionMenuStatus,
-		ActionMenuSettings, ActionMenuBack, ActionCreateCodex, ActionCreateClaude,
-		ActionSettingsScreen, ActionSettingsDetail, ActionAuthorizeCodex, ActionAuthorizeClaude:
+		ActionMenuSettings, ActionMenuBack, ActionCreateSelectCodex, ActionCreateSelectClaude,
+		ActionCreateWorkdir, ActionCreateConfirm, ActionCreateCodex, ActionCreateClaude,
+		ActionSettingsScreen, ActionSettingsDetail, ActionSettingsPageLimit, ActionSettingsContinueExisting,
+		ActionSettingsTechnicalActions, ActionSettingsBackgroundQuestions, ActionSettingsBackgroundErrors,
+		ActionSettingsArchiveRecommendations,
+		ActionSettingsDefaultProvider, ActionSettingsDefaultWorkdir, ActionSettingsClearCreationDefaults,
+		ActionSettingsLifetimeNever, ActionSettingsLifetime6Hours, ActionSettingsLifetime12Hours,
+		ActionSettingsLifetime24Hours, ActionSettingsLifetime48Hours,
+		ActionSettingsProviderCodex, ActionSettingsProviderClaude, ActionAuthorizeCodex, ActionAuthorizeClaude:
+		return true
+	case ActionCreateChoice, ActionCreatePrevious, ActionCreateFirst, ActionCreateNext,
+		ActionCreateUp, ActionCreatePick, ActionCreateDirectoryNew, ActionCreateBack, ActionCreateFresh:
 		return true
 	case ActionInteractionChoice, ActionInteractionAccept, ActionInteractionDecline, ActionInteractionCancel,
 		ActionOutboundConfirmDelivered, ActionOutboundRetryPossibleDuplicate,
@@ -215,6 +257,8 @@ func validAction(action Action) bool {
 		ActionCallbackSendConfirmed, ActionCallbackSendRetryPossibleDuplicate, ActionInteractionOther,
 		ActionAcceptedTurnAssumeCompleted, ActionAcceptedTurnRetryPossibleDuplicate, ActionAcceptedTurnCancel,
 		ActionStatusRecoveryAssumeDelivered, ActionStatusRecoveryRetryPossibleDuplicate, ActionStatusRecoveryCancel, ActionArtifactRetry:
+		return true
+	case ActionInteractionPrevious, ActionInteractionNext, ActionInteractionSubmit:
 		return true
 	default:
 		return false
@@ -225,12 +269,24 @@ func validTarget(action Action, target int) bool {
 	switch action {
 	case ActionPreviousPage, ActionNextPage:
 		return target > 0 && target <= MaxTarget
+	case ActionCreateChoice:
+		return target > 0 && target <= MaxTarget
 	case ActionInteractionChoice:
 		return target > 0 && target <= MaxTarget
 	case ActionLatestPage, ActionSelectSession, ActionStop, ActionClose, ActionOptions, ActionScreen, ActionResume,
 		ActionMenuSessions, ActionMenuNew, ActionMenuArchive, ActionMenuStatus,
-		ActionMenuSettings, ActionMenuBack, ActionCreateCodex, ActionCreateClaude,
-		ActionSettingsScreen, ActionSettingsDetail, ActionAuthorizeCodex, ActionAuthorizeClaude:
+		ActionMenuSettings, ActionMenuBack, ActionCreateSelectCodex, ActionCreateSelectClaude,
+		ActionCreateWorkdir, ActionCreateConfirm, ActionCreateCodex, ActionCreateClaude,
+		ActionSettingsScreen, ActionSettingsDetail, ActionSettingsPageLimit, ActionSettingsContinueExisting,
+		ActionSettingsTechnicalActions, ActionSettingsBackgroundQuestions, ActionSettingsBackgroundErrors,
+		ActionSettingsArchiveRecommendations,
+		ActionSettingsDefaultProvider, ActionSettingsDefaultWorkdir, ActionSettingsClearCreationDefaults,
+		ActionSettingsLifetimeNever, ActionSettingsLifetime6Hours, ActionSettingsLifetime12Hours,
+		ActionSettingsLifetime24Hours, ActionSettingsLifetime48Hours,
+		ActionSettingsProviderCodex, ActionSettingsProviderClaude, ActionAuthorizeCodex, ActionAuthorizeClaude:
+		return target == 0
+	case ActionCreatePrevious, ActionCreateFirst, ActionCreateNext,
+		ActionCreateUp, ActionCreatePick, ActionCreateDirectoryNew, ActionCreateBack, ActionCreateFresh:
 		return target == 0
 	case ActionInteractionAccept, ActionInteractionDecline, ActionInteractionCancel,
 		ActionOutboundConfirmDelivered, ActionOutboundRetryPossibleDuplicate,
@@ -238,6 +294,8 @@ func validTarget(action Action, target int) bool {
 		ActionCallbackSendConfirmed, ActionCallbackSendRetryPossibleDuplicate, ActionInteractionOther,
 		ActionAcceptedTurnAssumeCompleted, ActionAcceptedTurnRetryPossibleDuplicate, ActionAcceptedTurnCancel,
 		ActionStatusRecoveryAssumeDelivered, ActionStatusRecoveryRetryPossibleDuplicate, ActionStatusRecoveryCancel, ActionArtifactRetry:
+		return target == 0
+	case ActionInteractionPrevious, ActionInteractionNext, ActionInteractionSubmit:
 		return target == 0
 	default:
 		return false

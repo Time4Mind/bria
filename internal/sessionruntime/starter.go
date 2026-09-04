@@ -47,6 +47,7 @@ var (
 	_ app.SessionStarter   = (*Starter)(nil)
 	_ Submitter            = (*Starter)(nil)
 	_ InteractiveSubmitter = (*Starter)(nil)
+	_ CurrentTurnSubmitter = (*Starter)(nil)
 	_ TurnStopper          = (*Starter)(nil)
 	_ ProcessSupervisor    = (*Starter)(nil)
 )
@@ -125,6 +126,12 @@ type activeTurn struct {
 	interruptSent      bool
 	interruptConfirmed bool
 	terminalErr        error
+	steers             map[string]*steerWaiter
+}
+
+type steerWaiter struct {
+	messageID string
+	result    chan error
 }
 
 type wireMessage struct {
@@ -416,7 +423,7 @@ func (starter *Starter) submitWithCallbacks(ctx context.Context, sessionID domai
 		record.turnMu.Unlock()
 		return TurnResult{}, fmt.Errorf("%w: %q", ErrTurnInFlight, sessionID)
 	}
-	turn := &activeTurn{requestID: requestID, done: make(chan struct{})}
+	turn := &activeTurn{requestID: requestID, done: make(chan struct{}), steers: make(map[string]*steerWaiter)}
 	record.turn = turn
 	record.turnMu.Unlock()
 
@@ -441,11 +448,18 @@ func (starter *Starter) submitWithCallbacks(ctx context.Context, sessionID domai
 				starter.finishTurn(record, turn, false, errors.New("provider process exited during turn"))
 				return TurnResult{}, errors.New("provider process exited during turn")
 			}
-			if incoming.err != nil || incoming.message.RequestID != requestID {
+			if incoming.err != nil {
 				starter.killAndWait(record)
 				return TurnResult{}, fmt.Errorf("%w: invalid or uncorrelated response", ErrProtocol)
 			}
 			message := incoming.message
+			if message.RequestID != requestID {
+				if starter.acceptSteer(record, turn, message) {
+					continue
+				}
+				starter.killAndWait(record)
+				return TurnResult{}, fmt.Errorf("%w: invalid or uncorrelated response", ErrProtocol)
+			}
 			switch message.Type {
 			case "accepted":
 				if accepted || finalSeen || message.MessageID != callbacks.MessageID {
@@ -560,6 +574,85 @@ func (starter *Starter) submitWithCallbacks(ctx context.Context, sessionID domai
 			return TurnResult{}, ctx.Err()
 		}
 	}
+}
+
+// SubmitCurrentWithCallbacks writes one provider-neutral steer request and
+// returns only after the adapter echoes its durable message identity.
+func (starter *Starter) SubmitCurrentWithCallbacks(ctx context.Context, sessionID domain.SessionID, input StructuredInput, callbacks TurnCallbacks) error {
+	if strings.TrimSpace(string(sessionID)) == "" || !utf8.ValidString(input.Text) || len(input.Text) > starter.maxTextBytes ||
+		callbacks.MessageID == "" || callbacks.OnAccepted == nil {
+		return errors.New("current-turn input is invalid")
+	}
+	starter.mu.Lock()
+	record, ok := starter.processes[sessionID]
+	starter.mu.Unlock()
+	if !ok {
+		return fmt.Errorf("%w: %q", ErrSessionNotTracked, sessionID)
+	}
+	requestID := fmt.Sprintf("r-%d", starter.requestSequence.Add(1))
+	waiter := &steerWaiter{messageID: callbacks.MessageID, result: make(chan error, 1)}
+	record.turnMu.Lock()
+	turn := record.turn
+	if turn == nil {
+		record.turnMu.Unlock()
+		return fmt.Errorf("%w: %q", ErrNoTurnInFlight, sessionID)
+	}
+	turn.steers[requestID] = waiter
+	record.turnMu.Unlock()
+	input.Attachments = append([]LocalAttachment(nil), input.Attachments...)
+	if err := starter.writeContext(ctx, record, submitEnvelope{Protocol: ProtocolVersion, Type: "steer", RequestID: requestID, Text: input.Text, MessageID: callbacks.MessageID, Attachments: input.Attachments}); err != nil {
+		record.turnMu.Lock()
+		delete(turn.steers, requestID)
+		record.turnMu.Unlock()
+		return err
+	}
+	accepted := func(err error) error {
+		if err != nil {
+			return err
+		}
+		if err := callbacks.OnAccepted(callbacks.MessageID); err != nil {
+			return ErrEventHandler
+		}
+		return nil
+	}
+	select {
+	case err := <-waiter.result:
+		return accepted(err)
+	case <-turn.done:
+		select {
+		case err := <-waiter.result:
+			return accepted(err)
+		default:
+		}
+		return ErrNoTurnInFlight
+	case <-record.done:
+		select {
+		case err := <-waiter.result:
+			return accepted(err)
+		default:
+		}
+		return errors.New("provider process exited during current-turn input")
+	case <-ctx.Done():
+		record.turnMu.Lock()
+		delete(turn.steers, requestID)
+		record.turnMu.Unlock()
+		return ctx.Err()
+	}
+}
+
+func (starter *Starter) acceptSteer(record *processRecord, turn *activeTurn, message wireMessage) bool {
+	record.turnMu.Lock()
+	defer record.turnMu.Unlock()
+	if record.turn != turn {
+		return false
+	}
+	waiter := turn.steers[message.RequestID]
+	if waiter == nil || message.Type != "accepted" || message.MessageID != waiter.messageID {
+		return false
+	}
+	delete(turn.steers, message.RequestID)
+	waiter.result <- nil
+	return true
 }
 
 // StopCurrent requests interruption of the active turn and returns only after

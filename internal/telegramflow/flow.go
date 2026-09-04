@@ -241,6 +241,11 @@ func (handler *Handler) Handle(ctx context.Context, update coordinator.Update) (
 	} else if found {
 		return handler.resumeOperation(ctx, update, digest, existing)
 	}
+	if acknowledgements, ok := handler.operations.(CallbackAcknowledgementStore); ok {
+		if err := acknowledgements.CreateCallbackAcknowledgement(ctx, operationID, update.CallbackQueryID); err != nil {
+			return coordinator.Decision{}, fmt.Errorf("persist callback acknowledgement: %w", err)
+		}
+	}
 	accepted, err := telegrampipeline.AcceptCallbackForDurableOperation(
 		ctx,
 		update,
@@ -529,6 +534,30 @@ func PrepareCompletion(
 		}, nil
 	}
 	return prepareCard(operationID, conversationID, "", 0, card, presenter)
+}
+
+// PrepareCardRefresh creates one signed edit of the existing active card.
+func PrepareCardRefresh(
+	operationID string,
+	sessionID domain.SessionID,
+	conversationID int64,
+	sourceMessageID int64,
+	input telegramui.CardProjectionInput,
+	header string,
+	optionsExpanded bool,
+	selectableSessionIDs []domain.SessionID,
+	presenter *telegrambridge.Presenter,
+) (Prepared, error) {
+	projection, err := telegramui.ProjectCardRefresh(input)
+	if err != nil {
+		return Prepared{}, fmt.Errorf("project Telegram card refresh: %w", err)
+	}
+	card := CardOutput{
+		SessionID: sessionID, Header: header, Projection: projection,
+		OptionsExpanded:      optionsExpanded,
+		SelectableSessionIDs: append([]domain.SessionID(nil), selectableSessionIDs...),
+	}
+	return prepareCard(operationID, conversationID, "", sourceMessageID, card, presenter)
 }
 func PrepareInteraction(
 	operationID string,
@@ -1154,10 +1183,6 @@ func finalizePrepared(
 }
 func commitCard(ctx context.Context, uiState telegramstate.Store, output CardOutput, carrier telegramstate.Carrier) error {
 	projected := output.Projection.Card
-	history := make([]string, len(projected.Pages))
-	for index, page := range projected.Pages {
-		history[index] = page.Content
-	}
 	want := telegramstate.Card{
 		SessionID: output.SessionID,
 		Carrier:   carrier,
@@ -1168,9 +1193,21 @@ func commitCard(ctx context.Context, uiState telegramstate.Store, output CardOut
 			FollowLatest: projected.View.FollowLatest,
 		},
 		OptionsExpanded: output.OptionsExpanded,
-		History:         history,
 	}
 	if err := uiState.Update(ctx, func(state *telegramstate.State) error {
+		// Projection pages are transport output, not semantic conversation
+		// history. Preserve the independently maintained timeline and its prompt
+		// keys while updating only carrier and view state.
+		if current, ok := state.Card(output.SessionID); ok {
+			want.History = append([]string(nil), current.History...)
+			want.HistoryKeys = append([]string(nil), current.HistoryKeys...)
+		}
+		if len(want.History) == 0 {
+			want.History = make([]string, len(projected.Pages))
+			for index, page := range projected.Pages {
+				want.History[index] = page.Content
+			}
+		}
 		if output.MakeActive {
 			state.ActiveSession = output.SessionID
 		}

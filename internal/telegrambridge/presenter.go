@@ -484,7 +484,7 @@ func presentButton(button telegramui.Button) (string, callbacktoken.Action, int,
 		if indicator == nil || indicator.Current < 1 || indicator.Total < 1 ||
 			indicator.Current > indicator.Total || indicator.Total > callbacktoken.MaxTarget ||
 			button.Target.Page != indicator.Total || !button.Target.FollowLatest ||
-			button.Target.SessionSlot != 0 || button.Target.InteractionChoice != 0 {
+			button.Target.SessionSlot != 0 || button.Target.InteractionChoice != 0 || button.Target.Choice != 0 {
 			return "", 0, 0, errors.New("latest-page button requires a valid indicator and follow-latest target")
 		}
 		return strconv.Itoa(indicator.Current) + "/" + strconv.Itoa(indicator.Total),
@@ -511,14 +511,14 @@ func presentButton(button telegramui.Button) (string, callbacktoken.Action, int,
 		return "Screen", callbacktoken.ActionScreen, 0, nil
 	case telegramui.ActionResume:
 		if button.Target.Page != 0 || button.Target.FollowLatest || button.Target.SessionSlot < 0 ||
-			button.Target.SessionSlot > callbacktoken.MaxTarget || button.Target.InteractionChoice != 0 {
+			button.Target.SessionSlot > callbacktoken.MaxTarget || button.Target.InteractionChoice != 0 || button.Target.Choice != 0 {
 			return "", 0, 0, errors.New("resume button target is invalid")
 		}
 		return "Продолжить", callbacktoken.ActionResume, 0, nil
 	case telegramui.ActionMenuSessions:
 		return presentGlobalButton(button, "Сессии", callbacktoken.ActionMenuSessions)
 	case telegramui.ActionMenuNew:
-		return presentGlobalButton(button, "Новая", callbacktoken.ActionMenuNew)
+		return presentGlobalButton(button, "Новое", callbacktoken.ActionMenuNew)
 	case telegramui.ActionMenuArchive:
 		return presentGlobalButton(button, "Архив", callbacktoken.ActionMenuArchive)
 	case telegramui.ActionMenuStatus:
@@ -527,6 +527,45 @@ func presentButton(button telegramui.Button) (string, callbacktoken.Action, int,
 		return presentGlobalButton(button, "Настройки", callbacktoken.ActionMenuSettings)
 	case telegramui.ActionMenuBack:
 		return presentGlobalButton(button, "≡ Меню", callbacktoken.ActionMenuBack)
+	case telegramui.ActionCreateSelectCodex:
+		label := button.Label
+		if label == "" {
+			label = "Codex"
+		}
+		return presentGlobalButton(button, label, callbacktoken.ActionCreateSelectCodex)
+	case telegramui.ActionCreateSelectClaude:
+		label := button.Label
+		if label == "" {
+			label = "Claude"
+		}
+		return presentGlobalButton(button, label, callbacktoken.ActionCreateSelectClaude)
+	case telegramui.ActionCreateWorkdir:
+		return presentGlobalButton(button, "Рабочая папка", callbacktoken.ActionCreateWorkdir)
+	case telegramui.ActionCreateConfirm:
+		return presentGlobalButton(button, "Запустить", callbacktoken.ActionCreateConfirm)
+	case telegramui.ActionCreateChoice:
+		if button.Target.Choice < 1 || button.Target.Choice > callbacktoken.MaxTarget || button.Target.Page != 0 ||
+			button.Target.FollowLatest || button.Target.SessionSlot != 0 || button.Target.InteractionChoice != 0 ||
+			button.Indicator != nil || button.Label == "" {
+			return "", 0, 0, errors.New("creation choice button is invalid")
+		}
+		return button.Label, callbacktoken.ActionCreateChoice, button.Target.Choice, nil
+	case telegramui.ActionCreatePrevious:
+		return presentGlobalButton(button, "◀", callbacktoken.ActionCreatePrevious)
+	case telegramui.ActionCreateFirst:
+		return presentGlobalButton(button, button.Label, callbacktoken.ActionCreateFirst)
+	case telegramui.ActionCreateNext:
+		return presentGlobalButton(button, "▶", callbacktoken.ActionCreateNext)
+	case telegramui.ActionCreateUp:
+		return presentGlobalButton(button, "↑", callbacktoken.ActionCreateUp)
+	case telegramui.ActionCreatePick:
+		return presentGlobalButton(button, "Выбрать", callbacktoken.ActionCreatePick)
+	case telegramui.ActionCreateDirectoryNew:
+		return presentGlobalButton(button, "Создать папку", callbacktoken.ActionCreateDirectoryNew)
+	case telegramui.ActionCreateBack:
+		return presentGlobalButton(button, "Назад", callbacktoken.ActionCreateBack)
+	case telegramui.ActionCreateFresh:
+		return presentGlobalButton(button, "Новое", callbacktoken.ActionCreateFresh)
 	case telegramui.ActionCreateCodex:
 		return presentGlobalButton(button, "Codex", callbacktoken.ActionCreateCodex)
 	case telegramui.ActionCreateClaude:
@@ -535,13 +574,45 @@ func presentButton(button telegramui.Button) (string, callbacktoken.Action, int,
 		return presentGlobalButton(button, "Screen", callbacktoken.ActionSettingsScreen)
 	case telegramui.ActionSettingsDetail:
 		return presentGlobalButton(button, "Детализация", callbacktoken.ActionSettingsDetail)
+	case telegramui.ActionSettingsPageLimit:
+		return presentGlobalButton(button, "Страницы", callbacktoken.ActionSettingsPageLimit)
+	case telegramui.ActionSettingsContinueExisting:
+		return presentGlobalButton(button, "Продолжение", callbacktoken.ActionSettingsContinueExisting)
+	case telegramui.ActionSettingsTechnicalActions:
+		return presentGlobalButton(button, "Тех. действия", callbacktoken.ActionSettingsTechnicalActions)
+	case telegramui.ActionSettingsBackgroundQuestions:
+		return presentGlobalButton(button, "Вопросы", callbacktoken.ActionSettingsBackgroundQuestions)
+	case telegramui.ActionSettingsBackgroundErrors:
+		return presentGlobalButton(button, "Ошибки", callbacktoken.ActionSettingsBackgroundErrors)
+	case telegramui.ActionSettingsArchiveRecommendations:
+		return presentGlobalButton(button, "Рекомендации архива", callbacktoken.ActionSettingsArchiveRecommendations)
+	case telegramui.ActionSettingsDefaultProvider:
+		return presentGlobalButton(button, "Backend по умолчанию", callbacktoken.ActionSettingsDefaultProvider)
+	case telegramui.ActionSettingsDefaultWorkdir:
+		return presentGlobalButton(button, "Папка по умолчанию", callbacktoken.ActionSettingsDefaultWorkdir)
+	case telegramui.ActionSettingsClearCreationDefaults:
+		return presentGlobalButton(button, "Сбросить defaults", callbacktoken.ActionSettingsClearCreationDefaults)
+	case telegramui.ActionSettingsLifetimeNever:
+		return presentGlobalButton(button, "Никогда", callbacktoken.ActionSettingsLifetimeNever)
+	case telegramui.ActionSettingsLifetime6Hours:
+		return presentGlobalButton(button, "6 ч", callbacktoken.ActionSettingsLifetime6Hours)
+	case telegramui.ActionSettingsLifetime12Hours:
+		return presentGlobalButton(button, "12 ч", callbacktoken.ActionSettingsLifetime12Hours)
+	case telegramui.ActionSettingsLifetime24Hours:
+		return presentGlobalButton(button, "24 ч", callbacktoken.ActionSettingsLifetime24Hours)
+	case telegramui.ActionSettingsLifetime48Hours:
+		return presentGlobalButton(button, "48 ч", callbacktoken.ActionSettingsLifetime48Hours)
+	case telegramui.ActionSettingsProviderCodex:
+		return presentGlobalButton(button, "Codex", callbacktoken.ActionSettingsProviderCodex)
+	case telegramui.ActionSettingsProviderClaude:
+		return presentGlobalButton(button, "Claude", callbacktoken.ActionSettingsProviderClaude)
 	case telegramui.ActionAuthorizeCodex:
 		return presentGlobalButton(button, "Авторизовать Codex", callbacktoken.ActionAuthorizeCodex)
 	case telegramui.ActionAuthorizeClaude:
 		return presentGlobalButton(button, "Авторизовать Claude", callbacktoken.ActionAuthorizeClaude)
 	case telegramui.ActionInteractionChoice:
 		if button.Target.Page != 0 || button.Target.FollowLatest || button.Target.SessionSlot != 0 ||
-			button.Target.InteractionChoice < 1 || button.Target.InteractionChoice > callbacktoken.MaxTarget || button.Indicator != nil {
+			button.Target.InteractionChoice < 1 || button.Target.InteractionChoice > callbacktoken.MaxTarget || button.Target.Choice != 0 || button.Indicator != nil {
 			return "", 0, 0, errors.New("interaction choice button target is invalid")
 		}
 		return "Вариант " + strconv.Itoa(button.Target.InteractionChoice), callbacktoken.ActionInteractionChoice, button.Target.InteractionChoice, nil
@@ -550,9 +621,15 @@ func presentButton(button telegramui.Button) (string, callbacktoken.Action, int,
 	case telegramui.ActionInteractionDecline:
 		return presentGlobalButton(button, "Отклонить", callbacktoken.ActionInteractionDecline)
 	case telegramui.ActionInteractionCancel:
-		return presentGlobalButton(button, "Отмена", callbacktoken.ActionInteractionCancel)
+		return presentGlobalButton(button, "Esc", callbacktoken.ActionInteractionCancel)
 	case telegramui.ActionInteractionOther:
 		return presentGlobalButton(button, "Другой ответ", callbacktoken.ActionInteractionOther)
+	case telegramui.ActionInteractionPrevious:
+		return presentGlobalButton(button, "↑", callbacktoken.ActionInteractionPrevious)
+	case telegramui.ActionInteractionNext:
+		return presentGlobalButton(button, "↓", callbacktoken.ActionInteractionNext)
+	case telegramui.ActionInteractionSubmit:
+		return presentGlobalButton(button, "↵", callbacktoken.ActionInteractionSubmit)
 	case telegramui.ActionAcceptedTurnAssumeCompleted:
 		return presentGlobalButton(button, "Считать завершённым/учтённым", callbacktoken.ActionAcceptedTurnAssumeCompleted)
 	case telegramui.ActionAcceptedTurnRetryPossibleDuplicate:
@@ -581,7 +658,7 @@ func presentButton(button telegramui.Button) (string, callbacktoken.Action, int,
 		return presentGlobalButton(button, "Повторить неподтверждённые", callbacktoken.ActionArtifactRetry)
 	case telegramui.ActionSelectSession:
 		if button.Target.Page != 0 || button.Target.FollowLatest ||
-			button.Target.SessionSlot < 1 || button.Target.SessionSlot > callbacktoken.MaxTarget || button.Target.InteractionChoice != 0 {
+			button.Target.SessionSlot < 1 || button.Target.SessionSlot > callbacktoken.MaxTarget || button.Target.InteractionChoice != 0 || button.Target.Choice != 0 {
 			return "", 0, 0, errors.New("session button requires one positive session slot target")
 		}
 		return "Сессия " + strconv.Itoa(button.Target.SessionSlot),
@@ -598,7 +675,7 @@ func presentGlobalButton(button telegramui.Button, label string, action callback
 }
 func validPageTarget(target telegramui.ButtonTarget) bool {
 	return target.Page >= 1 && target.Page <= callbacktoken.MaxTarget &&
-		!target.FollowLatest && target.SessionSlot == 0 && target.InteractionChoice == 0
+		!target.FollowLatest && target.SessionSlot == 0 && target.InteractionChoice == 0 && target.Choice == 0
 }
 func decodeFields(fields callbacktoken.Fields) (telegramui.Action, telegramui.ButtonTarget, error) {
 	switch fields.Action {
@@ -632,6 +709,32 @@ func decodeFields(fields callbacktoken.Fields) (telegramui.Action, telegramui.Bu
 		return telegramui.ActionMenuSettings, telegramui.ButtonTarget{}, nil
 	case callbacktoken.ActionMenuBack:
 		return telegramui.ActionMenuBack, telegramui.ButtonTarget{}, nil
+	case callbacktoken.ActionCreateSelectCodex:
+		return telegramui.ActionCreateSelectCodex, telegramui.ButtonTarget{}, nil
+	case callbacktoken.ActionCreateSelectClaude:
+		return telegramui.ActionCreateSelectClaude, telegramui.ButtonTarget{}, nil
+	case callbacktoken.ActionCreateWorkdir:
+		return telegramui.ActionCreateWorkdir, telegramui.ButtonTarget{}, nil
+	case callbacktoken.ActionCreateConfirm:
+		return telegramui.ActionCreateConfirm, telegramui.ButtonTarget{}, nil
+	case callbacktoken.ActionCreateChoice:
+		return telegramui.ActionCreateChoice, telegramui.ButtonTarget{Choice: fields.Target}, nil
+	case callbacktoken.ActionCreatePrevious:
+		return telegramui.ActionCreatePrevious, telegramui.ButtonTarget{}, nil
+	case callbacktoken.ActionCreateFirst:
+		return telegramui.ActionCreateFirst, telegramui.ButtonTarget{}, nil
+	case callbacktoken.ActionCreateNext:
+		return telegramui.ActionCreateNext, telegramui.ButtonTarget{}, nil
+	case callbacktoken.ActionCreateUp:
+		return telegramui.ActionCreateUp, telegramui.ButtonTarget{}, nil
+	case callbacktoken.ActionCreatePick:
+		return telegramui.ActionCreatePick, telegramui.ButtonTarget{}, nil
+	case callbacktoken.ActionCreateDirectoryNew:
+		return telegramui.ActionCreateDirectoryNew, telegramui.ButtonTarget{}, nil
+	case callbacktoken.ActionCreateBack:
+		return telegramui.ActionCreateBack, telegramui.ButtonTarget{}, nil
+	case callbacktoken.ActionCreateFresh:
+		return telegramui.ActionCreateFresh, telegramui.ButtonTarget{}, nil
 	case callbacktoken.ActionCreateCodex:
 		return telegramui.ActionCreateCodex, telegramui.ButtonTarget{}, nil
 	case callbacktoken.ActionCreateClaude:
@@ -640,6 +743,38 @@ func decodeFields(fields callbacktoken.Fields) (telegramui.Action, telegramui.Bu
 		return telegramui.ActionSettingsScreen, telegramui.ButtonTarget{}, nil
 	case callbacktoken.ActionSettingsDetail:
 		return telegramui.ActionSettingsDetail, telegramui.ButtonTarget{}, nil
+	case callbacktoken.ActionSettingsPageLimit:
+		return telegramui.ActionSettingsPageLimit, telegramui.ButtonTarget{}, nil
+	case callbacktoken.ActionSettingsContinueExisting:
+		return telegramui.ActionSettingsContinueExisting, telegramui.ButtonTarget{}, nil
+	case callbacktoken.ActionSettingsTechnicalActions:
+		return telegramui.ActionSettingsTechnicalActions, telegramui.ButtonTarget{}, nil
+	case callbacktoken.ActionSettingsBackgroundQuestions:
+		return telegramui.ActionSettingsBackgroundQuestions, telegramui.ButtonTarget{}, nil
+	case callbacktoken.ActionSettingsBackgroundErrors:
+		return telegramui.ActionSettingsBackgroundErrors, telegramui.ButtonTarget{}, nil
+	case callbacktoken.ActionSettingsArchiveRecommendations:
+		return telegramui.ActionSettingsArchiveRecommendations, telegramui.ButtonTarget{}, nil
+	case callbacktoken.ActionSettingsDefaultProvider:
+		return telegramui.ActionSettingsDefaultProvider, telegramui.ButtonTarget{}, nil
+	case callbacktoken.ActionSettingsDefaultWorkdir:
+		return telegramui.ActionSettingsDefaultWorkdir, telegramui.ButtonTarget{}, nil
+	case callbacktoken.ActionSettingsClearCreationDefaults:
+		return telegramui.ActionSettingsClearCreationDefaults, telegramui.ButtonTarget{}, nil
+	case callbacktoken.ActionSettingsLifetimeNever:
+		return telegramui.ActionSettingsLifetimeNever, telegramui.ButtonTarget{}, nil
+	case callbacktoken.ActionSettingsLifetime6Hours:
+		return telegramui.ActionSettingsLifetime6Hours, telegramui.ButtonTarget{}, nil
+	case callbacktoken.ActionSettingsLifetime12Hours:
+		return telegramui.ActionSettingsLifetime12Hours, telegramui.ButtonTarget{}, nil
+	case callbacktoken.ActionSettingsLifetime24Hours:
+		return telegramui.ActionSettingsLifetime24Hours, telegramui.ButtonTarget{}, nil
+	case callbacktoken.ActionSettingsLifetime48Hours:
+		return telegramui.ActionSettingsLifetime48Hours, telegramui.ButtonTarget{}, nil
+	case callbacktoken.ActionSettingsProviderCodex:
+		return telegramui.ActionSettingsProviderCodex, telegramui.ButtonTarget{}, nil
+	case callbacktoken.ActionSettingsProviderClaude:
+		return telegramui.ActionSettingsProviderClaude, telegramui.ButtonTarget{}, nil
 	case callbacktoken.ActionAuthorizeCodex:
 		return telegramui.ActionAuthorizeCodex, telegramui.ButtonTarget{}, nil
 	case callbacktoken.ActionAuthorizeClaude:
@@ -654,6 +789,12 @@ func decodeFields(fields callbacktoken.Fields) (telegramui.Action, telegramui.Bu
 		return telegramui.ActionInteractionCancel, telegramui.ButtonTarget{}, nil
 	case callbacktoken.ActionInteractionOther:
 		return telegramui.ActionInteractionOther, telegramui.ButtonTarget{}, nil
+	case callbacktoken.ActionInteractionPrevious:
+		return telegramui.ActionInteractionPrevious, telegramui.ButtonTarget{}, nil
+	case callbacktoken.ActionInteractionNext:
+		return telegramui.ActionInteractionNext, telegramui.ButtonTarget{}, nil
+	case callbacktoken.ActionInteractionSubmit:
+		return telegramui.ActionInteractionSubmit, telegramui.ButtonTarget{}, nil
 	case callbacktoken.ActionAcceptedTurnAssumeCompleted:
 		return telegramui.ActionAcceptedTurnAssumeCompleted, telegramui.ButtonTarget{}, nil
 	case callbacktoken.ActionAcceptedTurnRetryPossibleDuplicate:

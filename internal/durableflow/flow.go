@@ -81,6 +81,7 @@ type Journal interface {
 	ConfirmOutput(context.Context, string, string, string, string) (messagejournal.Output, error)
 	MarkOutputFailed(context.Context, string, string, string) (messagejournal.Output, error)
 	MarkOutputUnknown(context.Context, string, string, string) (messagejournal.Output, error)
+	SupersedePendingOutputs(context.Context, string, string, []string) ([]messagejournal.Output, error)
 	RetryOutput(context.Context, string, string) (messagejournal.Output, error)
 }
 
@@ -561,6 +562,14 @@ func (flow *Flow) EnqueueOutput(ctx context.Context, sessionID, operationID, kin
 		OperationID: output.OperationID,
 		Sequence:    output.Sequence,
 	}, err
+}
+
+func (flow *Flow) SupersedePendingOutputs(ctx context.Context, sessionID, keepOperationID string, kinds []string) error {
+	if flow == nil || flow.journal == nil {
+		return ErrOutputSenderRequired
+	}
+	_, err := flow.journal.SupersedePendingOutputs(ctx, sessionID, keepOperationID, kinds)
+	return err
 }
 
 // DeliverNextOutput attempts only the oldest unresolved output. An invalid or

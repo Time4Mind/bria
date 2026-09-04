@@ -219,7 +219,7 @@ func (sender TelegramOutputSender) Deliver(ctx context.Context, output durablefl
 	}
 	kind := telegramcontroller.NotificationKind(output.Kind)
 	switch kind {
-	case telegramcontroller.NotificationCommentary, telegramcontroller.NotificationQuestion, telegramcontroller.NotificationFinal, telegramcontroller.NotificationError:
+	case telegramcontroller.NotificationCommentary, telegramcontroller.NotificationQuestion, telegramcontroller.NotificationFinal, telegramcontroller.NotificationError, telegramcontroller.NotificationPromptStatus:
 	default:
 		return result, errors.New("durable Telegram notification kind is unsupported")
 	}
@@ -229,7 +229,7 @@ func (sender TelegramOutputSender) Deliver(ctx context.Context, output durablefl
 	}
 	switch receipt.State {
 	case telegramnotify.DeliveryConfirmed:
-		if deliverErr != nil || len(receipt.Parts) == 0 {
+		if deliverErr != nil || len(receipt.Parts) == 0 && !receipt.Suppressed || len(receipt.Parts) > 0 && receipt.Suppressed {
 			return result, errors.Join(deliverErr, errors.New("confirmed Telegram delivery has no complete receipt"))
 		}
 		for _, part := range receipt.Parts {
@@ -237,7 +237,11 @@ func (sender TelegramOutputSender) Deliver(ctx context.Context, output durablefl
 				return result, errors.New("confirmed Telegram delivery has an invalid part receipt")
 			}
 		}
-		result.State, result.Receipt = durableflow.DeliveryConfirmed, "telegram:"+output.OperationID+":confirmed"
+		receiptSuffix := "confirmed"
+		if receipt.Suppressed {
+			receiptSuffix = "suppressed"
+		}
+		result.State, result.Receipt = durableflow.DeliveryConfirmed, "telegram:"+output.OperationID+":"+receiptSuffix
 		return result, nil
 	case telegramnotify.DeliveryFailed:
 		return durableflow.DeliveryResult{SessionID: output.SessionID, OperationID: output.OperationID, Sequence: output.Sequence, State: durableflow.DeliveryFailed}, nil
@@ -266,6 +270,11 @@ func (custody OutputCustody) AcceptOutput(ctx context.Context, output telegramco
 	if result.SessionID != output.SessionID || result.OperationID != output.OperationID || result.Sequence == 0 {
 		return telegramcontroller.OutputReceipt{}, durableflow.ErrInvalidDelivery
 	}
+	if kinds := coalescedStateKinds(output.Kind); len(kinds) > 0 {
+		if err := custody.Flow.SupersedePendingOutputs(ctx, string(output.SessionID), output.OperationID, kinds); err != nil {
+			return result, err
+		}
+	}
 	if custody.Wake != nil {
 		select {
 		case custody.Wake <- output.SessionID:
@@ -273,6 +282,16 @@ func (custody OutputCustody) AcceptOutput(ctx context.Context, output telegramco
 		}
 	}
 	return result, nil
+}
+
+func coalescedStateKinds(kind telegramcontroller.NotificationKind) []string {
+	switch kind {
+	case telegramcontroller.NotificationCommentary, telegramcontroller.NotificationPromptStatus,
+		telegramcontroller.NotificationFinal, telegramcontroller.NotificationError:
+		return []string{string(telegramcontroller.NotificationCommentary), string(telegramcontroller.NotificationPromptStatus)}
+	default:
+		return nil
+	}
 }
 
 type OutputDispatcher struct {

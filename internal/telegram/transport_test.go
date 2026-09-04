@@ -882,6 +882,39 @@ func TestClientRejectsNonSuccessStatusOrOKFalseIndependently(t *testing.T) {
 	}
 }
 
+func TestClientPreservesTelegramRetryAfter(t *testing.T) {
+	t.Parallel()
+
+	client := mustTestClient(t, "111112:test-only", httpClientFunc(func(*http.Request) (*http.Response, error) {
+		return jsonResponse(http.StatusTooManyRequests, `{"ok":false,"error_code":429,"description":"Too Many Requests","parameters":{"retry_after":7}}`), nil
+	}), telegram.Options{})
+
+	_, err := client.SendMessage(context.Background(), telegram.SendMessageRequest{ChatID: 3, Text: "safe"})
+	var apiError *telegram.APIError
+	if !errors.As(err, &apiError) {
+		t.Fatalf("SendMessage() error = %T, want *telegram.APIError", err)
+	}
+	if got, want := apiError.RetryAfter, 7*time.Second; got != want {
+		t.Fatalf("RetryAfter = %v, want %v", got, want)
+	}
+	if got, ok := telegram.RetryAfter(err); !ok || got != 7*time.Second {
+		t.Fatalf("RetryAfter(error) = %v, %v; want 7s, true", got, ok)
+	}
+}
+
+func TestClientClassifiesAmbiguousSendMessageAsDeliveryUnknown(t *testing.T) {
+	t.Parallel()
+
+	client := mustTestClient(t, "111113:test-only", httpClientFunc(func(*http.Request) (*http.Response, error) {
+		return nil, errors.New("connection reset after write")
+	}), telegram.Options{})
+
+	_, err := client.SendMessage(context.Background(), telegram.SendMessageRequest{ChatID: 3, Text: "safe"})
+	if !telegram.IsDeliveryUnknown(err) {
+		t.Fatalf("SendMessage() error = %v, want DeliveryUnknown", err)
+	}
+}
+
 func TestClientBoundsResponseLongPollAndContext(t *testing.T) {
 	const testToken = "222222:test-only"
 	t.Run("response body", func(t *testing.T) {

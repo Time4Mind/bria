@@ -44,6 +44,10 @@ type Card struct {
 	Page            Page             `json:"page"`
 	OptionsExpanded bool             `json:"options_expanded"`
 	History         []string         `json:"history,omitempty"`
+	// HistoryKeys is positionally aligned with History. Empty keys identify
+	// append-only provider output; a prompt message ID lets its visible status
+	// be replaced without duplicating the user's text.
+	HistoryKeys []string `json:"history_keys,omitempty"`
 }
 
 // State is the complete Telegram UI state for the configured owner chat.
@@ -62,6 +66,7 @@ func (s State) Clone() State {
 	clone.Version, clone.ActiveSession, clone.ScreenEnabled = s.Version, s.ActiveSession, s.ScreenEnabled
 	for id, card := range s.Cards {
 		card.History = append([]string(nil), card.History...)
+		card.HistoryKeys = append([]string(nil), card.HistoryKeys...)
 		clone.Cards[id] = card
 	}
 	return clone
@@ -86,6 +91,22 @@ func (s State) Validate() error {
 		}
 		if len(card.History) > 512 {
 			return fmt.Errorf("card %q history is too long", id)
+		}
+		if len(card.HistoryKeys) != 0 && len(card.HistoryKeys) != len(card.History) {
+			return fmt.Errorf("card %q history keys are not aligned", id)
+		}
+		seenKeys := make(map[string]struct{}, len(card.HistoryKeys))
+		for _, key := range card.HistoryKeys {
+			if key == "" {
+				continue
+			}
+			if strings.TrimSpace(key) != key || len(key) > maxAnchor || !utf8.ValidString(key) {
+				return fmt.Errorf("card %q history key is invalid", id)
+			}
+			if _, exists := seenKeys[key]; exists {
+				return fmt.Errorf("card %q history key is duplicated", id)
+			}
+			seenKeys[key] = struct{}{}
 		}
 		for _, item := range card.History {
 			if item == "" || !utf8.ValidString(item) || len(item) > 16384 {

@@ -130,6 +130,32 @@ func semanticActionFromPlan(plan telegrampipeline.CallbackPlan) (telegramcontrol
 		kind = telegramcontroller.SemanticMenuSettings
 	case telegramui.ActionMenuBack:
 		kind = telegramcontroller.SemanticMenuBack
+	case telegramui.ActionCreateSelectCodex:
+		kind = telegramcontroller.SemanticCreateSelectCodex
+	case telegramui.ActionCreateSelectClaude:
+		kind = telegramcontroller.SemanticCreateSelectClaude
+	case telegramui.ActionCreateWorkdir:
+		kind = telegramcontroller.SemanticCreateWorkdir
+	case telegramui.ActionCreateConfirm:
+		kind = telegramcontroller.SemanticCreateConfirm
+	case telegramui.ActionCreateChoice:
+		kind = telegramcontroller.SemanticCreateChoice
+	case telegramui.ActionCreatePrevious:
+		kind = telegramcontroller.SemanticCreatePrevious
+	case telegramui.ActionCreateFirst:
+		kind = telegramcontroller.SemanticCreateFirst
+	case telegramui.ActionCreateNext:
+		kind = telegramcontroller.SemanticCreateNext
+	case telegramui.ActionCreateUp:
+		kind = telegramcontroller.SemanticCreateUp
+	case telegramui.ActionCreatePick:
+		kind = telegramcontroller.SemanticCreatePick
+	case telegramui.ActionCreateDirectoryNew:
+		kind = telegramcontroller.SemanticCreateDirectoryNew
+	case telegramui.ActionCreateBack:
+		kind = telegramcontroller.SemanticCreateBack
+	case telegramui.ActionCreateFresh:
+		kind = telegramcontroller.SemanticCreateFresh
 	case telegramui.ActionCreateCodex:
 		kind = telegramcontroller.SemanticCreateCodex
 	case telegramui.ActionCreateClaude:
@@ -138,6 +164,38 @@ func semanticActionFromPlan(plan telegrampipeline.CallbackPlan) (telegramcontrol
 		kind = telegramcontroller.SemanticSettingsScreen
 	case telegramui.ActionSettingsDetail:
 		kind = telegramcontroller.SemanticSettingsDetail
+	case telegramui.ActionSettingsPageLimit:
+		kind = telegramcontroller.SemanticSettingsPageLimit
+	case telegramui.ActionSettingsContinueExisting:
+		kind = telegramcontroller.SemanticSettingsContinueExisting
+	case telegramui.ActionSettingsTechnicalActions:
+		kind = telegramcontroller.SemanticSettingsTechnicalActions
+	case telegramui.ActionSettingsBackgroundQuestions:
+		kind = telegramcontroller.SemanticSettingsBackgroundQuestions
+	case telegramui.ActionSettingsBackgroundErrors:
+		kind = telegramcontroller.SemanticSettingsBackgroundErrors
+	case telegramui.ActionSettingsArchiveRecommendations:
+		kind = telegramcontroller.SemanticSettingsArchiveRecommendations
+	case telegramui.ActionSettingsDefaultProvider:
+		kind = telegramcontroller.SemanticSettingsDefaultProvider
+	case telegramui.ActionSettingsDefaultWorkdir:
+		kind = telegramcontroller.SemanticSettingsDefaultWorkdir
+	case telegramui.ActionSettingsClearCreationDefaults:
+		kind = telegramcontroller.SemanticSettingsClearCreationDefaults
+	case telegramui.ActionSettingsLifetimeNever:
+		kind = telegramcontroller.SemanticSettingsLifetimeNever
+	case telegramui.ActionSettingsLifetime6Hours:
+		kind = telegramcontroller.SemanticSettingsLifetime6Hours
+	case telegramui.ActionSettingsLifetime12Hours:
+		kind = telegramcontroller.SemanticSettingsLifetime12Hours
+	case telegramui.ActionSettingsLifetime24Hours:
+		kind = telegramcontroller.SemanticSettingsLifetime24Hours
+	case telegramui.ActionSettingsLifetime48Hours:
+		kind = telegramcontroller.SemanticSettingsLifetime48Hours
+	case telegramui.ActionSettingsProviderCodex:
+		kind = telegramcontroller.SemanticSettingsProviderCodex
+	case telegramui.ActionSettingsProviderClaude:
+		kind = telegramcontroller.SemanticSettingsProviderClaude
 	case telegramui.ActionAuthorizeCodex:
 		kind = telegramcontroller.SemanticAuthorizeCodex
 	case telegramui.ActionAuthorizeClaude:
@@ -155,7 +213,7 @@ func semanticActionFromPlan(plan telegrampipeline.CallbackPlan) (telegramcontrol
 		}
 		sessionID = ""
 	}
-	return telegramcontroller.SemanticAction{Kind: kind, SessionID: sessionID, Page: plan.Target.Page, FollowLatest: plan.Target.FollowLatest, SessionSlot: plan.Target.SessionSlot, UpdateID: plan.UpdateID}, nil
+	return telegramcontroller.SemanticAction{Kind: kind, SessionID: sessionID, Page: plan.Target.Page, FollowLatest: plan.Target.FollowLatest, SessionSlot: plan.Target.SessionSlot, Choice: plan.Target.Choice, UpdateID: plan.UpdateID}, nil
 }
 
 func callbackEffectForAction(action telegramui.Action) telegrampipeline.CallbackEffect {
@@ -186,6 +244,21 @@ func callbackEffectForAction(action telegramui.Action) telegrampipeline.Callback
 		return telegrampipeline.EffectOpenSettings
 	case telegramui.ActionMenuBack:
 		return telegrampipeline.EffectOpenMenu
+	case telegramui.ActionCreateSelectCodex:
+		return telegrampipeline.EffectSelectCreateCodex
+	case telegramui.ActionCreateSelectClaude:
+		return telegrampipeline.EffectSelectCreateClaude
+	case telegramui.ActionCreateWorkdir:
+		return telegrampipeline.EffectEditCreateWorkdir
+	case telegramui.ActionCreateConfirm:
+		return telegrampipeline.EffectConfirmCreate
+	case telegramui.ActionCreateChoice:
+		return telegrampipeline.EffectCreateChoice
+	case telegramui.ActionCreatePrevious, telegramui.ActionCreateFirst, telegramui.ActionCreateNext:
+		return telegrampipeline.EffectNavigateCreate
+	case telegramui.ActionCreateUp, telegramui.ActionCreatePick, telegramui.ActionCreateDirectoryNew,
+		telegramui.ActionCreateBack, telegramui.ActionCreateFresh:
+		return telegrampipeline.EffectAdvanceCreate
 	case telegramui.ActionCreateCodex:
 		return telegrampipeline.EffectCreateCodex
 	case telegramui.ActionCreateClaude:
@@ -194,6 +267,15 @@ func callbackEffectForAction(action telegramui.Action) telegrampipeline.Callback
 		return telegrampipeline.EffectToggleSettingsScreen
 	case telegramui.ActionSettingsDetail:
 		return telegrampipeline.EffectToggleSettingsDetail
+	case telegramui.ActionSettingsPageLimit, telegramui.ActionSettingsContinueExisting,
+		telegramui.ActionSettingsTechnicalActions, telegramui.ActionSettingsBackgroundQuestions,
+		telegramui.ActionSettingsBackgroundErrors, telegramui.ActionSettingsLifetimeNever,
+		telegramui.ActionSettingsArchiveRecommendations,
+		telegramui.ActionSettingsDefaultProvider, telegramui.ActionSettingsDefaultWorkdir, telegramui.ActionSettingsClearCreationDefaults,
+		telegramui.ActionSettingsLifetime6Hours, telegramui.ActionSettingsLifetime12Hours,
+		telegramui.ActionSettingsLifetime24Hours, telegramui.ActionSettingsLifetime48Hours,
+		telegramui.ActionSettingsProviderCodex, telegramui.ActionSettingsProviderClaude:
+		return telegrampipeline.EffectChangeSettings
 	case telegramui.ActionAuthorizeCodex:
 		return telegrampipeline.EffectAuthorizeCodex
 	case telegramui.ActionAuthorizeClaude:
@@ -251,6 +333,14 @@ func projectSemanticSurface(surface telegramcontroller.SemanticSurface) (*telegr
 				return nil, err
 			}
 			button := telegramui.Button{Action: action}
+			switch action {
+			case telegramui.ActionCreateChoice, telegramui.ActionCreateFirst,
+				telegramui.ActionCreateSelectCodex, telegramui.ActionCreateSelectClaude:
+				button.Label = semantic.Label
+			}
+			if action == telegramui.ActionCreateChoice {
+				button.Target.Choice = semantic.Choice
+			}
 			if action == telegramui.ActionSelectSession || action == telegramui.ActionResume {
 				if semantic.SessionID == "" {
 					return nil, errors.New("selectable semantic surface action requires a session")
@@ -298,6 +388,32 @@ func telegramUIAction(action telegramcontroller.SemanticActionKind) (telegramui.
 		return telegramui.ActionMenuSettings, nil
 	case telegramcontroller.SemanticMenuBack:
 		return telegramui.ActionMenuBack, nil
+	case telegramcontroller.SemanticCreateSelectCodex:
+		return telegramui.ActionCreateSelectCodex, nil
+	case telegramcontroller.SemanticCreateSelectClaude:
+		return telegramui.ActionCreateSelectClaude, nil
+	case telegramcontroller.SemanticCreateWorkdir:
+		return telegramui.ActionCreateWorkdir, nil
+	case telegramcontroller.SemanticCreateConfirm:
+		return telegramui.ActionCreateConfirm, nil
+	case telegramcontroller.SemanticCreateChoice:
+		return telegramui.ActionCreateChoice, nil
+	case telegramcontroller.SemanticCreatePrevious:
+		return telegramui.ActionCreatePrevious, nil
+	case telegramcontroller.SemanticCreateFirst:
+		return telegramui.ActionCreateFirst, nil
+	case telegramcontroller.SemanticCreateNext:
+		return telegramui.ActionCreateNext, nil
+	case telegramcontroller.SemanticCreateUp:
+		return telegramui.ActionCreateUp, nil
+	case telegramcontroller.SemanticCreatePick:
+		return telegramui.ActionCreatePick, nil
+	case telegramcontroller.SemanticCreateDirectoryNew:
+		return telegramui.ActionCreateDirectoryNew, nil
+	case telegramcontroller.SemanticCreateBack:
+		return telegramui.ActionCreateBack, nil
+	case telegramcontroller.SemanticCreateFresh:
+		return telegramui.ActionCreateFresh, nil
 	case telegramcontroller.SemanticCreateCodex:
 		return telegramui.ActionCreateCodex, nil
 	case telegramcontroller.SemanticCreateClaude:
@@ -306,6 +422,38 @@ func telegramUIAction(action telegramcontroller.SemanticActionKind) (telegramui.
 		return telegramui.ActionSettingsScreen, nil
 	case telegramcontroller.SemanticSettingsDetail:
 		return telegramui.ActionSettingsDetail, nil
+	case telegramcontroller.SemanticSettingsPageLimit:
+		return telegramui.ActionSettingsPageLimit, nil
+	case telegramcontroller.SemanticSettingsContinueExisting:
+		return telegramui.ActionSettingsContinueExisting, nil
+	case telegramcontroller.SemanticSettingsTechnicalActions:
+		return telegramui.ActionSettingsTechnicalActions, nil
+	case telegramcontroller.SemanticSettingsBackgroundQuestions:
+		return telegramui.ActionSettingsBackgroundQuestions, nil
+	case telegramcontroller.SemanticSettingsBackgroundErrors:
+		return telegramui.ActionSettingsBackgroundErrors, nil
+	case telegramcontroller.SemanticSettingsArchiveRecommendations:
+		return telegramui.ActionSettingsArchiveRecommendations, nil
+	case telegramcontroller.SemanticSettingsDefaultProvider:
+		return telegramui.ActionSettingsDefaultProvider, nil
+	case telegramcontroller.SemanticSettingsDefaultWorkdir:
+		return telegramui.ActionSettingsDefaultWorkdir, nil
+	case telegramcontroller.SemanticSettingsClearCreationDefaults:
+		return telegramui.ActionSettingsClearCreationDefaults, nil
+	case telegramcontroller.SemanticSettingsLifetimeNever:
+		return telegramui.ActionSettingsLifetimeNever, nil
+	case telegramcontroller.SemanticSettingsLifetime6Hours:
+		return telegramui.ActionSettingsLifetime6Hours, nil
+	case telegramcontroller.SemanticSettingsLifetime12Hours:
+		return telegramui.ActionSettingsLifetime12Hours, nil
+	case telegramcontroller.SemanticSettingsLifetime24Hours:
+		return telegramui.ActionSettingsLifetime24Hours, nil
+	case telegramcontroller.SemanticSettingsLifetime48Hours:
+		return telegramui.ActionSettingsLifetime48Hours, nil
+	case telegramcontroller.SemanticSettingsProviderCodex:
+		return telegramui.ActionSettingsProviderCodex, nil
+	case telegramcontroller.SemanticSettingsProviderClaude:
+		return telegramui.ActionSettingsProviderClaude, nil
 	case telegramcontroller.SemanticAuthorizeCodex:
 		return telegramui.ActionAuthorizeCodex, nil
 	case telegramcontroller.SemanticAuthorizeClaude:

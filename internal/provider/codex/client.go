@@ -257,6 +257,14 @@ type TurnAccepted struct {
 	TurnID   string
 }
 
+type TurnSteerRequest struct {
+	ThreadID       string
+	ExpectedTurnID string
+	MessageID      string
+	Input          []TextInput
+	LocalImages    []LocalImageInput
+}
+
 type AgentFinal struct {
 	ItemID string
 	Text   string
@@ -952,6 +960,62 @@ func (client *Client) RequestInterrupt(ctx context.Context, threadID string, tur
 	}
 }
 
+// SteerTurn appends input to the exact active regular turn. StartTurn remains
+// the sole stream reader and dispatches this correlated response to the waiter.
+func (client *Client) SteerTurn(ctx context.Context, request TurnSteerRequest) (TurnAccepted, error) {
+	if !client.initialized.Load() {
+		return TurnAccepted{}, ErrNotInitialized
+	}
+	if request.ThreadID == "" || request.ExpectedTurnID == "" || len(request.Input)+len(request.LocalImages) == 0 ||
+		len(request.LocalImages) > 8 || !boundedExactText(request.MessageID, 1024, true) {
+		return TurnAccepted{}, ErrInvalidRequest
+	}
+	input := make([]wireUserInput, 0, len(request.Input)+len(request.LocalImages))
+	for _, item := range request.Input {
+		if item.Text == "" {
+			return TurnAccepted{}, ErrInvalidRequest
+		}
+		input = append(input, wireUserInput{Type: "text", Text: item.Text})
+	}
+	for _, local := range request.LocalImages {
+		if !filepath.IsAbs(local.Path) || !boundedExactText(local.Path, 16<<10, false) {
+			return TurnAccepted{}, ErrInvalidRequest
+		}
+		input = append(input, wireUserInput{Type: "localImage", Path: local.Path})
+	}
+	client.activeMu.RLock()
+	if client.activeThreadID != request.ThreadID || client.activeTurnID != request.ExpectedTurnID {
+		client.activeMu.RUnlock()
+		return TurnAccepted{}, ErrActiveTurnMismatch
+	}
+	id, waiter, err := client.sendRequestWithWaiter(ctx, "turn/steer", turnSteerParams{
+		ThreadID: request.ThreadID, ExpectedTurnID: request.ExpectedTurnID,
+		Input: input, ClientUserMessageID: request.MessageID,
+	})
+	client.activeMu.RUnlock()
+	if err != nil {
+		return TurnAccepted{}, err
+	}
+	select {
+	case result := <-waiter.result:
+		if result.err != nil {
+			return TurnAccepted{}, result.err
+		}
+		response, err := validateResponse("turn/steer", result.message)
+		if err != nil {
+			return TurnAccepted{}, err
+		}
+		var steered turnSteerResult
+		if decodeResult(response, &steered) != nil || steered.TurnID != request.ExpectedTurnID {
+			return TurnAccepted{}, ErrInvalidResponse
+		}
+		return TurnAccepted{ThreadID: request.ThreadID, TurnID: steered.TurnID}, nil
+	case <-ctx.Done():
+		client.abandonResponseWaiter(id)
+		return TurnAccepted{}, ctx.Err()
+	}
+}
+
 func (client *Client) setActiveTurn(threadID string, turnID string) {
 	client.activeMu.Lock()
 	defer client.activeMu.Unlock()
@@ -1356,6 +1420,17 @@ type turnStartResult struct {
 	Turn struct {
 		ID string `json:"id"`
 	} `json:"turn"`
+}
+
+type turnSteerParams struct {
+	ThreadID            string          `json:"threadId"`
+	ExpectedTurnID      string          `json:"expectedTurnId"`
+	Input               []wireUserInput `json:"input"`
+	ClientUserMessageID string          `json:"clientUserMessageId,omitempty"`
+}
+
+type turnSteerResult struct {
+	TurnID string `json:"turnId"`
 }
 
 type interruptParams struct {

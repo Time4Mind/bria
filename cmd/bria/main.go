@@ -18,10 +18,8 @@ import (
 	"bria/internal/sessionruntime"
 	"bria/internal/settings"
 	"bria/internal/singlemachinecomposition"
-	"bria/internal/storage"
 	"bria/internal/telegram"
 	"bria/internal/telegrambridge"
-	"bria/internal/telegramnotify"
 )
 
 var version = "dev"
@@ -187,11 +185,9 @@ func printHelp(stdout io.Writer) {
 	fmt.Fprint(stdout, `bria - Codex and Claude Telegram controller
 
 Owner-only private commands:
-  /status
-  /new codex|claude /absolute/workdir
-  /sessions
-  /use SESSION_ID
-  /stop
+  /menu
+  /model
+  /effort
 
 Current authorization limitations: OAuth/subscription login is not supported;
 the live provider authorization smoke test has not been run.
@@ -233,15 +229,4 @@ func clear(value []byte) {
 	for index := range value {
 		value[index] = 0
 	}
-}
-
-type replyRouteRecorder struct {
-	store *storage.TelegramReplyRouteStore
-}
-
-func (recorder replyRouteRecorder) RecordOutboundReceipt(ctx context.Context, receipt telegramnotify.OutboundReceipt) error {
-	if recorder.store == nil {
-		return errors.New("Telegram reply route store is required")
-	}
-	return recorder.store.RecordOutboundReceipt(ctx, storage.TelegramOutboundReceipt{MessageID: receipt.MessageID, SessionID: receipt.SessionID})
 }

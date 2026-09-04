@@ -90,6 +90,10 @@ func TestOpenWiresP4FinalsAndPreparedObservability(t *testing.T) {
 	if !ok {
 		t.Fatalf("instrumented submitter %T lost P4 prepared-input capability", bundle.Submitter)
 	}
+	current, ok := bundle.Submitter.(sessionruntime.CurrentTurnSubmitter)
+	if !ok {
+		t.Fatalf("instrumented submitter %T lost current-turn capability", bundle.Submitter)
+	}
 
 	const sessionID = domain.SessionID("11111111-1111-4111-8111-111111111111")
 	session, err := domain.NewStartingSessionAt(sessionID, "wiring", "wiring-computer", domain.ProviderCodex, work, time.Now().UTC(), domain.SessionLifetimeNever)
@@ -105,6 +109,12 @@ func TestOpenWiresP4FinalsAndPreparedObservability(t *testing.T) {
 	if runtime.preparedCalls != 1 {
 		t.Fatalf("prepared provider submissions = %d, want 1", runtime.preparedCalls)
 	}
+	if err := current.SubmitCurrentWithCallbacks(context.Background(), sessionID, sessionruntime.StructuredInput{Text: "follow-up"}, sessionruntime.TurnCallbacks{MessageID: "telegram-update:13"}); err != nil {
+		t.Fatalf("SubmitCurrentWithCallbacks() error = %v", err)
+	}
+	if runtime.currentCalls != 1 {
+		t.Fatalf("current-turn provider submissions = %d, want 1", runtime.currentCalls)
+	}
 	if err := bundle.Finals.ProcessFinal(context.Background(), turnprocessing.FinalObservation{
 		SessionID: sessionID, MessageID: "telegram-update:12", OperationID: "telegram-update:12:final", Text: "[final](file://" + artifactPath + ")",
 	}); err != nil {
@@ -114,7 +124,7 @@ func TestOpenWiresP4FinalsAndPreparedObservability(t *testing.T) {
 		t.Fatalf("final artifact documents = %d, want 1", documentCalls)
 	}
 	events, err := logger.Read(safelog.Service)
-	if err != nil || len(events) != 1 || events[0].Fields["operation"] != "provider.codex.submit" {
+	if err != nil || len(events) != 2 || events[0].Fields["operation"] != "provider.codex.submit" || events[1].Fields["operation"] != "provider.codex.submit" {
 		t.Fatalf("observability service events = %#v, %v", events, err)
 	}
 	serialized := events[0].EntityID + events[0].Fields["operation"] + events[0].Fields["total_ms"]
@@ -127,7 +137,16 @@ func TestOpenWiresP4FinalsAndPreparedObservability(t *testing.T) {
 
 type wiringRuntime struct {
 	preparedCalls int
+	currentCalls  int
 	final         string
+}
+
+func (runtime *wiringRuntime) SubmitCurrentWithCallbacks(_ context.Context, _ domain.SessionID, _ sessionruntime.StructuredInput, callbacks sessionruntime.TurnCallbacks) error {
+	runtime.currentCalls++
+	if callbacks.OnAccepted != nil {
+		return callbacks.OnAccepted(callbacks.MessageID)
+	}
+	return nil
 }
 
 func (runtime *wiringRuntime) Submit(context.Context, domain.SessionID, string) (sessionruntime.TurnResult, error) {

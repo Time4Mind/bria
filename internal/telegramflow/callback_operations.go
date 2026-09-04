@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"sync"
 )
 
 const (
@@ -88,6 +89,8 @@ type CallbackOperationStore interface {
 type FileCallbackOperationStore struct {
 	raw           *telegramops.FileStore
 	syncDirectory func(string) error
+	ackMu         sync.Mutex
+	freshAcks     map[string]bool
 }
 
 func OpenFileCallbackOperationStore(path string) (*FileCallbackOperationStore, error) {
@@ -95,7 +98,7 @@ func OpenFileCallbackOperationStore(path string) (*FileCallbackOperationStore, e
 	if err != nil {
 		return nil, fmt.Errorf("open callback operation store: %w", err)
 	}
-	store := &FileCallbackOperationStore{raw: raw}
+	store := &FileCallbackOperationStore{raw: raw, freshAcks: make(map[string]bool)}
 	snapshot, err := raw.Snapshot(context.Background())
 	if err != nil {
 		return nil, err
@@ -106,10 +109,14 @@ func OpenFileCallbackOperationStore(path string) (*FileCallbackOperationStore, e
 	return store, nil
 }
 
-type MemoryCallbackOperationStore struct{ raw telegramops.Store }
+type MemoryCallbackOperationStore struct {
+	raw       telegramops.Store
+	ackMu     sync.Mutex
+	freshAcks map[string]bool
+}
 
 func NewMemoryCallbackOperationStore() *MemoryCallbackOperationStore {
-	return &MemoryCallbackOperationStore{raw: telegramops.NewMemory()}
+	return &MemoryCallbackOperationStore{raw: telegramops.NewMemory(), freshAcks: make(map[string]bool)}
 }
 func (store *FileCallbackOperationStore) backend() telegramops.Store {
 	if store == nil {
@@ -449,6 +456,15 @@ func validateRawSnapshot(snapshot telegramops.Snapshot) error {
 	}
 	for _, raw := range snapshot.Statuses {
 		if _, err := decodeStatusOperation(raw); err != nil {
+			return err
+		}
+	}
+	for _, raw := range snapshot.Acknowledgements {
+		var acknowledgement CallbackAcknowledgement
+		if err := decodeStrict(raw, &acknowledgement); err != nil {
+			return err
+		}
+		if err := validateCallbackAcknowledgement(acknowledgement); err != nil {
 			return err
 		}
 	}

@@ -29,6 +29,9 @@ type DeliveryReceipt struct {
 	OperationID string
 	State       DeliveryState
 	Parts       []PartReceipt
+	// Suppressed confirms that policy intentionally performed no Telegram
+	// mutation, for example a background intermediate card projection.
+	Suppressed bool
 }
 
 // PartReceiptStore persists the confirmation set for a multi-page logical

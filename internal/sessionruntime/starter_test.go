@@ -522,6 +522,49 @@ func TestStarterRejectsOversizedTextBeforeAdapter(t *testing.T) {
 	}
 }
 
+func TestStarterSteersCurrentTurnAndReturnsBeforeRootFinal(t *testing.T) {
+	t.Parallel()
+	starter, request, binding := startHelper(t, "steer", sessionruntime.Options{})
+	rootDone := make(chan sessionruntime.TurnResult, 1)
+	rootErr := make(chan error, 1)
+	go func() {
+		result, err := starter.SubmitWithCallbacks(context.Background(), request.SessionID, "root", sessionruntime.TurnCallbacks{
+			MessageID: "message-root", OnAccepted: func(string) error { return nil },
+		})
+		rootDone <- result
+		rootErr <- err
+	}()
+	deadline := time.Now().Add(time.Second)
+	for {
+		err := starter.SubmitCurrentWithCallbacks(context.Background(), request.SessionID, sessionruntime.StructuredInput{Text: "follow-up"}, sessionruntime.TurnCallbacks{
+			MessageID: "message-follow-up", OnAccepted: func(messageID string) error {
+				if messageID != "message-follow-up" {
+					t.Fatalf("steer acceptance = %q", messageID)
+				}
+				return nil
+			},
+		})
+		if err == nil {
+			break
+		}
+		if !errors.Is(err, sessionruntime.ErrNoTurnInFlight) || time.Now().After(deadline) {
+			t.Fatalf("SubmitCurrentWithCallbacks() error = %v", err)
+		}
+		time.Sleep(time.Millisecond)
+	}
+	select {
+	case result := <-rootDone:
+		if err := <-rootErr; err != nil || result.Final != "done:root+follow-up" {
+			t.Fatalf("root result = (%#v, %v)", result, err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("root turn did not complete after steer")
+	}
+	if err := starter.Abort(context.Background(), request, binding); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestStarterRejectsNonProtocolReadinessAndCleansReservation(t *testing.T) {
 	t.Parallel()
 	workdir := t.TempDir()
@@ -1006,6 +1049,7 @@ func TestSessionRuntimeHelperProcess(t *testing.T) {
 	}
 
 	scanner := bufio.NewScanner(os.Stdin)
+	rootRequestID := ""
 	for scanner.Scan() {
 		var message parentMessage
 		if json.Unmarshal(scanner.Bytes(), &message) != nil || message.Protocol != 1 {
@@ -1030,6 +1074,12 @@ func TestSessionRuntimeHelperProcess(t *testing.T) {
 			emit(map[string]any{"protocol": 1, "type": "completed", "request_id": message.RequestID, "status": "interrupted", "error_code": "interrupted"})
 		case "submit":
 			switch mode {
+			case "steer":
+				if message.Text != "root" || rootRequestID != "" {
+					os.Exit(42)
+				}
+				rootRequestID = message.RequestID
+				emit(map[string]any{"protocol": 1, "type": "accepted", "request_id": message.RequestID, "message_id": message.MessageID})
 			case "structured":
 				if message.Text != "inspect" || message.MessageID != "telegram:photo:1" || len(message.Attachments) != 1 ||
 					!filepath.IsAbs(message.Attachments[0].Path) || filepath.Base(message.Attachments[0].Path) != "provider-photo.png" ||
@@ -1064,6 +1114,13 @@ func TestSessionRuntimeHelperProcess(t *testing.T) {
 			default:
 				success(message)
 			}
+		case "steer":
+			if mode != "steer" || rootRequestID == "" || message.Text != "follow-up" {
+				os.Exit(43)
+			}
+			emit(map[string]any{"protocol": 1, "type": "accepted", "request_id": message.RequestID, "message_id": message.MessageID})
+			emit(map[string]any{"protocol": 1, "type": "final", "request_id": rootRequestID, "text": "done:root+follow-up"})
+			emit(map[string]any{"protocol": 1, "type": "completed", "request_id": rootRequestID, "status": "completed"})
 		case "interaction_response":
 			if mode != "interaction" || message.RequestID == "" || message.InteractionResponse == nil ||
 				message.InteractionResponse.ID != "interaction-1" || message.InteractionResponse.Answers["choice"][0] != "First" {

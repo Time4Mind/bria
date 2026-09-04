@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -20,7 +21,6 @@ import (
 	"bria/internal/settings"
 	"bria/internal/storage"
 	"bria/internal/telegram"
-	"bria/internal/telegramnotify"
 )
 
 func TestRunHelp(t *testing.T) {
@@ -49,17 +49,20 @@ func TestRunHelp(t *testing.T) {
 			got := stdout.String()
 			for _, required := range []string{
 				"Codex and Claude Telegram controller",
-				"/status",
-				"/new",
-				"/sessions",
-				"/use",
-				"/stop",
+				"/menu",
+				"/model",
+				"/effort",
 				"bria run --config /absolute/path/to/config.json",
 				"bria check-config --config /absolute/path/to/config.json",
 				"bria check-telegram --config /absolute/path/to/config.json",
 			} {
 				if !strings.Contains(got, required) {
 					t.Errorf("stdout = %q, want it to contain %q", got, required)
+				}
+			}
+			for _, hidden := range []string{"/status", "/new", "/sessions", "/use", "/stop"} {
+				if strings.Contains(got, hidden) {
+					t.Errorf("stdout = %q, want command %q hidden", got, hidden)
 				}
 			}
 			if strings.Contains(got, "not implemented") || strings.Contains(got, "scaffold") {
@@ -536,56 +539,46 @@ func TestRunAppliesEffectiveQueueLimitToController(t *testing.T) {
 	runtime := &blockingProviderRuntime{entered: make(chan struct{}, 1)}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	calls := 0
+	polls := 0
 	dependencies := testCommandDependencies(t, &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
-		calls++
-		switch calls {
-		case 1:
+		switch request.URL.Path {
+		case "/bot123:queue-secret/getMe":
 			return telegramResponse(`{"ok":true,"result":{"id":600,"is_bot":true,"first_name":"Bria","username":"my_bria_bot"}}`), nil
-		case 2:
-			return telegramResponse(`{"ok":true,"result":[]}`), nil
-		case 3:
-			return telegramResponse(fmt.Sprintf(`{"ok":true,"result":[{"update_id":31,"message":{"message_id":32,"from":{"id":42,"is_bot":false,"first_name":"A"},"chat":{"id":42,"type":"private"},"text":%q}}]}`, "/new codex "+temporary)), nil
-		case 4:
-			return telegramResponse(`{"ok":true,"result":{"message_id":33,"from":{"id":600,"is_bot":true},"chat":{"id":42,"type":"private"},"text":"session"}}`), nil
-		case 5:
-			return telegramResponse(`{"ok":true,"result":[{"update_id":32,"message":{"message_id":34,"from":{"id":42,"is_bot":false,"first_name":"A"},"chat":{"id":42,"type":"private"},"text":"first"}}]}`), nil
-		case 6:
-			select {
-			case <-runtime.entered:
-			case <-time.After(time.Second):
-				t.Fatal("configured runtime did not start the first turn")
-			}
-			state, err := storage.OpenSessionStore(statePath)
-			if err != nil {
-				t.Fatal(err)
-			}
-			sessions, err := state.List(context.Background())
-			if err != nil {
-				t.Fatal(err)
-			}
-			if len(sessions) != 1 || sessions[0].Status() != domain.SessionRunning {
-				t.Fatalf("durable turn state = %#v, want one running session", sessions)
-			}
-			return telegramResponse(`{"ok":true,"result":{"message_id":35,"from":{"id":600,"is_bot":true},"chat":{"id":42,"type":"private"},"text":"accepted"}}`), nil
-		case 7:
-			return telegramResponse(`{"ok":true,"result":[{"update_id":33,"message":{"message_id":36,"from":{"id":42,"is_bot":false,"first_name":"A"},"chat":{"id":42,"type":"private"},"text":"second"}}]}`), nil
-		case 8:
-			return telegramResponse(`{"ok":true,"result":{"message_id":37,"from":{"id":600,"is_bot":true},"chat":{"id":42,"type":"private"},"text":"accepted"}}`), nil
-		case 9:
-			return telegramResponse(`{"ok":true,"result":[{"update_id":34,"message":{"message_id":38,"from":{"id":42,"is_bot":false,"first_name":"A"},"chat":{"id":42,"type":"private"},"text":"third"}}]}`), nil
-		case 10:
+		case "/bot123:queue-secret/sendMessage", "/bot123:queue-secret/editMessageText":
 			body := requestBody(t, request)
-			if !strings.Contains(body, "Не удалось надёжно сохранить запрос") || !strings.Contains(body, "не принят") {
-				t.Fatalf("third turn response = %q, want effective queue-limit rejection", body)
+			if strings.Contains(body, "🙅‍♂") {
+				cancel()
 			}
-			cancel()
-			return telegramResponse(`{"ok":true,"result":{"message_id":39,"from":{"id":600,"is_bot":true},"chat":{"id":42,"type":"private"},"text":"full"}}`), nil
+			return telegramResponse(`{"ok":true,"result":{"message_id":40,"from":{"id":600,"is_bot":true},"chat":{"id":42,"type":"private"},"text":"card"}}`), nil
+		case "/bot123:queue-secret/getUpdates":
+			polls++
+			switch polls {
+			case 1:
+				return telegramResponse(`{"ok":true,"result":[]}`), nil
+			case 2:
+				return telegramResponse(fmt.Sprintf(`{"ok":true,"result":[{"update_id":31,"message":{"message_id":32,"from":{"id":42,"is_bot":false,"first_name":"A"},"chat":{"id":42,"type":"private"},"text":%q}}]}`, "/new codex "+temporary)), nil
+			case 3:
+				return telegramResponse(`{"ok":true,"result":[{"update_id":32,"message":{"message_id":34,"from":{"id":42,"is_bot":false,"first_name":"A"},"chat":{"id":42,"type":"private"},"text":"first"}}]}`), nil
+			case 4:
+				select {
+				case <-runtime.entered:
+				case <-time.After(time.Second):
+					t.Fatal("configured runtime did not start the first turn")
+				}
+				return telegramResponse(`{"ok":true,"result":[{"update_id":33,"message":{"message_id":36,"from":{"id":42,"is_bot":false,"first_name":"A"},"chat":{"id":42,"type":"private"},"text":"second"}}]}`), nil
+			case 5:
+				return telegramResponse(`{"ok":true,"result":[{"update_id":34,"message":{"message_id":38,"from":{"id":42,"is_bot":false,"first_name":"A"},"chat":{"id":42,"type":"private"},"text":"third"}}]}`), nil
+			default:
+				select {
+				case <-ctx.Done():
+					return telegramResponse(`{"ok":true,"result":[]}`), nil
+				case <-time.After(2 * time.Second):
+					cancel()
+					return nil, errors.New("queue-limit status was not rendered")
+				}
+			}
 		default:
-			if ctx.Err() != nil && request.URL.Path == "/bot123:queue-secret/sendMessage" {
-				return telegramResponse(`{"ok":true,"result":{"message_id":40,"from":{"id":600,"is_bot":true},"chat":{"id":42,"type":"private"},"text":"closing"}}`), nil
-			}
-			t.Fatalf("unexpected request %d to %s", calls, request.URL.Redacted())
+			t.Fatalf("unexpected request to %s", request.URL.Redacted())
 			return nil, nil
 		}
 	})})
@@ -596,6 +589,27 @@ func TestRunAppliesEffectiveQueueLimitToController(t *testing.T) {
 	if code := runContextWithDependencies(ctx, []string{"run", "--config", configPath}, &stdout, &stderr, dependencies); code != 0 {
 		t.Fatalf("run exit code = %d, stderr = %q", code, stderr.String())
 	}
+	state, err := storage.OpenSessionStore(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessions, err := state.List(context.Background())
+	if err != nil || len(sessions) != 1 {
+		t.Fatalf("sessions = %#v, err=%v", sessions, err)
+	}
+	history, err := state.LoadCardHistory(context.Background(), sessions[0].ID())
+	if err != nil || !containsHistoryItem(history, "🙅‍♂ second") {
+		t.Fatalf("queue-limit card history = %#v, err=%v", history, err)
+	}
+}
+
+func containsHistoryItem(items []string, want string) bool {
+	for _, item := range items {
+		if item == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestLoadEffectiveSettingsRetainsLastGoodAfterInvalidLocalEdit(t *testing.T) {
@@ -648,29 +662,6 @@ func TestConfiguredComputerIDUsesVersionedStableIdentity(t *testing.T) {
 	}
 }
 
-func TestReplyRouteRecorderMakesConfirmedNotificationReplyResolvable(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "reply-routes.json")
-	store, err := storage.OpenTelegramReplyRouteStore(path, 42, 42)
-	if err != nil {
-		t.Fatal(err)
-	}
-	recorder := replyRouteRecorder{store: store}
-	want := domain.SessionID("00000000-0000-4000-8000-000000000001")
-	if err := recorder.RecordOutboundReceipt(context.Background(), telegramnotify.OutboundReceipt{
-		MessageID: 91,
-		SessionID: want,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	got, found, err := store.ResolveReply(context.Background(), 91)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !found || got != want {
-		t.Fatalf("ResolveReply(91) = (%q, %t), want (%q, true)", got, found, want)
-	}
-}
-
 func TestRunStatusFlowQuarantinesBacklogPersistsReceiptAndDoesNotReplay(t *testing.T) {
 	temporary := t.TempDir()
 	configPath, statePath := writeStatusConfig(t, temporary, "123:status-flow-secret")
@@ -687,8 +678,8 @@ func TestRunStatusFlowQuarantinesBacklogPersistsReceiptAndDoesNotReplay(t *testi
 	if code := runContextWithDependencies(ctx, []string{"run", "--config", configPath}, &stdout, &stderr, dependencies); code != 0 {
 		t.Fatalf("first run exit code = %d, want graceful cancellation after completed flow", code)
 	}
-	if transport.sendCalls != 2 {
-		t.Fatalf("sendMessage calls = %d, want 2", transport.sendCalls)
+	if transport.sendCalls != 1 {
+		t.Fatalf("Telegram status calls = %d, want 1", transport.sendCalls)
 	}
 	if !transport.signedKeyboard || transport.unsignedKeyboard {
 		t.Fatalf("/status keyboard signed=%t unsigned=%t, want signed-only callbacks", transport.signedKeyboard, transport.unsignedKeyboard)
@@ -712,11 +703,11 @@ func TestRunStatusFlowQuarantinesBacklogPersistsReceiptAndDoesNotReplay(t *testi
 		t.Fatalf("checkpoint = %#v, want confirmed offset 81 without a block", checkpoint)
 	}
 	if checkpoint.Checkpoint.Outbound == nil || checkpoint.Checkpoint.Outbound.Receipt == nil ||
-		checkpoint.Checkpoint.Outbound.Receipt.MessageID != 902 {
+		checkpoint.Checkpoint.Outbound.Receipt.MessageID != 901 {
 		if checkpoint.Checkpoint.Outbound != nil {
-			t.Fatalf("checkpoint outbound = %#v, want durable receipt 902", *checkpoint.Checkpoint.Outbound)
+			t.Fatalf("checkpoint outbound = %#v, want durable receipt 901", *checkpoint.Checkpoint.Outbound)
 		}
-		t.Fatalf("checkpoint = %#v, want durable receipt 902", checkpoint)
+		t.Fatalf("checkpoint = %#v, want durable receipt 901", checkpoint)
 	}
 
 	transport.restart = true
@@ -728,7 +719,7 @@ func TestRunStatusFlowQuarantinesBacklogPersistsReceiptAndDoesNotReplay(t *testi
 	if code := runContextWithDependencies(restartContext, []string{"run", "--config", configPath}, &stdout, &stderr, dependencies); code != 0 {
 		t.Fatalf("restart exit code = %d, want graceful cancellation", code)
 	}
-	if transport.sendCalls != 2 {
+	if transport.sendCalls != 1 {
 		t.Fatalf("sendMessage calls after restart = %d, want no replay", transport.sendCalls)
 	}
 	if transport.restartCalls != 2 {
@@ -898,46 +889,47 @@ func TestRunNeverExecutesUnsignedRawCallbackData(t *testing.T) {
 	configPath, _ := writeStatusConfig(t, temporary, "123:unsigned-callback-secret")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	calls := 0
+	var calls atomic.Int32
+	var polls atomic.Int32
 	mutationPath := ""
+	ackDone := make(chan struct{})
+	sendDone := make(chan struct{})
 	dependencies := testCommandDependencies(t, &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
-		calls++
-		switch calls {
-		case 1:
+		calls.Add(1)
+		switch {
+		case strings.HasSuffix(request.URL.Path, "/getMe"):
 			return telegramResponse(`{"ok":true,"result":{"id":600,"is_bot":true,"first_name":"Bria","username":"my_bria_bot"}}`), nil
-		case 2:
-			return telegramResponse(`{"ok":true,"result":[]}`), nil
-		case 3:
-			return telegramResponse(`{"ok":true,"result":[{"update_id":51,"callback_query":{"id":"callback-51","from":{"id":42,"is_bot":false,"first_name":"A"},"message":{"message_id":52,"from":{"id":600,"is_bot":true,"first_name":"Bria"},"chat":{"id":42,"type":"private"}},"data":"ft:stop"}}]}`), nil
-		case 4:
-			if request.URL.Path != "/bot123:unsigned-callback-secret/answerCallbackQuery" {
-				mutationPath = request.URL.Path
-				return telegramResponse(`{"ok":false,"error_code":400,"description":"unsafe callback mutation rejected"}`), nil
+		case strings.HasSuffix(request.URL.Path, "/getUpdates"):
+			switch polls.Add(1) {
+			case 1:
+				return telegramResponse(`{"ok":true,"result":[]}`), nil
+			case 2:
+				return telegramResponse(`{"ok":true,"result":[{"update_id":51,"callback_query":{"id":"callback-51","from":{"id":42,"is_bot":false,"first_name":"A"},"message":{"message_id":52,"from":{"id":600,"is_bot":true,"first_name":"Bria"},"chat":{"id":42,"type":"private"}},"data":"ft:stop"}}]}`), nil
+			case 3:
+				<-ackDone
+				<-sendDone
+				cancel()
+				return nil, context.Canceled
+			default:
+				t.Fatalf("unexpected getUpdates poll %d", polls.Load())
+				return nil, nil
 			}
+		case strings.HasSuffix(request.URL.Path, "/answerCallbackQuery"):
 			if body := requestBody(t, request); !strings.Contains(body, `"callback_query_id":"callback-51"`) {
 				t.Fatalf("answerCallbackQuery body = %q", body)
 			}
+			close(ackDone)
 			return telegramResponse(`{"ok":true,"result":true}`), nil
-		case 5:
-			if request.URL.Path != "/bot123:unsigned-callback-secret/sendMessage" {
-				mutationPath = request.URL.Path
-				return telegramResponse(`{"ok":false,"error_code":400,"description":"unsafe callback mutation rejected"}`), nil
-			}
+		case strings.HasSuffix(request.URL.Path, "/sendMessage"):
 			body := requestBody(t, request)
 			if !strings.Contains(body, "недействительна") || strings.Contains(body, "reply_markup") {
 				t.Fatalf("stale callback response = %q", body)
 			}
+			close(sendDone)
 			return telegramResponse(`{"ok":true,"result":{"message_id":53,"from":{"id":600,"is_bot":true},"chat":{"id":42,"type":"private"},"text":"stale"}}`), nil
-		case 6:
-			if request.URL.Path != "/bot123:unsigned-callback-secret/getUpdates" {
-				mutationPath = request.URL.Path
-				return telegramResponse(`{"ok":false,"error_code":400,"description":"unsafe callback mutation rejected"}`), nil
-			}
-			cancel()
-			return nil, context.Canceled
 		default:
-			t.Fatalf("unexpected request %d to %s", calls, request.URL.Redacted())
-			return nil, nil
+			mutationPath = request.URL.Path
+			return telegramResponse(`{"ok":false,"error_code":400,"description":"unsafe callback mutation rejected"}`), nil
 		}
 	})})
 
@@ -945,8 +937,8 @@ func TestRunNeverExecutesUnsignedRawCallbackData(t *testing.T) {
 	if code := runContextWithDependencies(ctx, []string{"run", "--config", configPath}, &stdout, &stderr, dependencies); code != 0 {
 		t.Fatalf("run exit code = %d, mutation = %q, stderr = %q", code, mutationPath, stderr.String())
 	}
-	if calls != 6 {
-		t.Fatalf("Telegram calls = %d, want identity, bootstrap, callback poll, safe stale response, resumed poll", calls)
+	if calls.Load() != 6 {
+		t.Fatalf("Telegram calls = %d, want identity, bootstrap, callback poll, callback ack, safe stale response, resumed poll", calls.Load())
 	}
 	if mutationPath != "" {
 		t.Fatalf("raw callback reached unsafe mutation endpoint %q", mutationPath)
@@ -1074,7 +1066,6 @@ func (transport *statusFlowTransport) RoundTrip(request *http.Request) (*http.Re
 			return nil, nil
 		}
 	}
-
 	transport.calls++
 	switch transport.calls {
 	case 1:
@@ -1135,14 +1126,8 @@ func (transport *statusFlowTransport) RoundTrip(request *http.Request) (*http.Re
 		}
 		return telegramResponse(`{"ok":true,"result":{"message_id":901,"from":{"id":600,"is_bot":true},"chat":{"id":42,"type":"private"},"text":"Bria works"}}`), nil
 	case 5:
-		transport.sendCalls++
-		if request.URL.Path != "/bot123:status-flow-secret/sendMessage" {
-			transport.t.Fatalf("fifth request path = %q, want sendMessage", request.URL.Path)
-		}
-		return telegramResponse(`{"ok":true,"result":{"message_id":902,"from":{"id":600,"is_bot":true},"chat":{"id":42,"type":"private"},"text":"No active session"}}`), nil
-	case 6:
 		if request.URL.Path != "/bot123:status-flow-secret/getUpdates" {
-			transport.t.Fatalf("sixth request path = %q, want getUpdates", request.URL.Path)
+			transport.t.Fatalf("fifth request path = %q, want getUpdates", request.URL.Path)
 		}
 		transport.cancel()
 		return nil, errors.New("stop initial test poll")
@@ -1371,15 +1356,22 @@ func (runtime *blockingProviderRuntime) SubmitWithCallbacks(
 	if callbacks.OnAccepted == nil || callbacks.MessageID == "" {
 		return sessionruntime.TurnResult{}, errors.New("durable acceptance callback is required")
 	}
-	if err := callbacks.OnAccepted(callbacks.MessageID); err != nil {
-		return sessionruntime.TurnResult{}, err
-	}
 	select {
 	case runtime.entered <- struct{}{}:
 	default:
 	}
 	<-ctx.Done()
 	return sessionruntime.TurnResult{}, ctx.Err()
+}
+
+func (runtime *blockingProviderRuntime) SubmitCurrentWithCallbacks(
+	ctx context.Context,
+	_ domain.SessionID,
+	_ sessionruntime.StructuredInput,
+	_ sessionruntime.TurnCallbacks,
+) error {
+	<-ctx.Done()
+	return ctx.Err()
 }
 
 func assertRuntimeFilesAbsent(t *testing.T, statePath string) {

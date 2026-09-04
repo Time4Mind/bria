@@ -420,6 +420,90 @@ func TestSenderNeverRetriesTransientSendFailure(t *testing.T) {
 	}
 }
 
+func TestSenderCallbackAcknowledgementFailureDoesNotBlockCardEdit(t *testing.T) {
+	t.Parallel()
+
+	ackRelease := make(chan struct{})
+	editReached := make(chan struct{})
+	ackCompleted := make(chan telegrambridge.CallbackAcknowledgementState, 1)
+	client := mustTelegramClient(t, func(request *http.Request) (*http.Response, error) {
+		switch {
+		case strings.HasSuffix(request.URL.Path, "/answerCallbackQuery"):
+			<-ackRelease
+			return response(http.StatusBadRequest, `{"ok":false,"error_code":400,"description":"query is too old"}`), nil
+		case strings.HasSuffix(request.URL.Path, "/editMessageText"):
+			close(editReached)
+			return response(http.StatusOK, `{"ok":true,"result":{"message_id":77,"from":{"id":600,"is_bot":true},"chat":{"id":42,"type":"private"},"text":"Page 2"}}`), nil
+		default:
+			t.Fatalf("unexpected Telegram method %q", request.URL.Path)
+			return nil, nil
+		}
+	})
+	sender, err := telegrambridge.NewSender(client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sender.BindCallbackAcknowledgements(callbackAcknowledgementRecorder{
+		begin: func(operationID, callbackQueryID string) (bool, error) {
+			if operationID != "status:92" || callbackQueryID != "callback-1" {
+				t.Fatalf("acknowledgement identity = %q/%q", operationID, callbackQueryID)
+			}
+			return true, nil
+		},
+		complete: func(_ string, _ string, state telegrambridge.CallbackAcknowledgementState) error {
+			ackCompleted <- state
+			return nil
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	receipt, err := sender.EditStatusWithKeyboard(context.Background(), "status:92", coordinator.Status{
+		ConversationID:  42,
+		Text:            "Page 2",
+		CallbackQueryID: "callback-1",
+		SourceMessageID: 77,
+	}, nil)
+	if err != nil {
+		t.Fatalf("EditStatusWithKeyboard() error = %v", err)
+	}
+	select {
+	case <-editReached:
+	default:
+		t.Fatal("visible card edit did not complete independently")
+	}
+	if receipt.MessageID != 77 {
+		t.Fatalf("receipt = %#v, want successful card edit", receipt)
+	}
+	select {
+	case state := <-ackCompleted:
+		t.Fatalf("acknowledgement completed before release with state %q", state)
+	default:
+	}
+	close(ackRelease)
+	select {
+	case state := <-ackCompleted:
+		if state != telegrambridge.CallbackAcknowledgementFailed {
+			t.Fatalf("acknowledgement state = %q, want failed", state)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("callback acknowledgement outcome was not persisted")
+	}
+}
+
+type callbackAcknowledgementRecorder struct {
+	begin    func(string, string) (bool, error)
+	complete func(string, string, telegrambridge.CallbackAcknowledgementState) error
+}
+
+func (recorder callbackAcknowledgementRecorder) BeginCallbackAcknowledgement(_ context.Context, operationID, callbackQueryID string) (bool, error) {
+	return recorder.begin(operationID, callbackQueryID)
+}
+
+func (recorder callbackAcknowledgementRecorder) CompleteCallbackAcknowledgement(_ context.Context, operationID, callbackQueryID string, state telegrambridge.CallbackAcknowledgementState) error {
+	return recorder.complete(operationID, callbackQueryID, state)
+}
+
 func TestSourceTransientRetryWaitHonorsContextCancellation(t *testing.T) {
 	t.Parallel()
 
@@ -428,7 +512,7 @@ func TestSourceTransientRetryWaitHonorsContextCancellation(t *testing.T) {
 		calls++
 		return nil, errors.New("temporary connection failure")
 	})
-	source, err := telegrambridge.NewSourceWithOptions(client, telegrambridge.RetryOptions{Delay: 30 * time.Second})
+	source, err := telegrambridge.NewSourceWithOptions(client, telegrambridge.RetryOptions{Delay: 15 * time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}

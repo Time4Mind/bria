@@ -241,7 +241,7 @@ func TestStructuredAttachmentRefsPersistAcrossReopenWithoutPaths(t *testing.T) {
 	}
 }
 
-func TestOutputJournalBlocksUnknownUntilExplicitRetryAndPersistsReceipts(t *testing.T) {
+func TestOutputJournalSkipsUnknownWithoutRetryingItAndPersistsReceipts(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "messages.json")
@@ -271,11 +271,15 @@ func TestOutputJournalBlocksUnknownUntilExplicitRetryAndPersistsReceipts(t *test
 	}
 
 	journal = openJournal(t, path, testLimits())
-	if _, err := journal.LeaseNextOutput(ctx, "session-a", "telegram", time.Unix(1000, 0), time.Minute); !errors.Is(err, messagejournal.ErrNoAvailable) {
-		t.Fatalf("automatic lease after unknown error = %v, want ErrNoAvailable", err)
+	leased, err = journal.LeaseNextOutput(ctx, "session-a", "telegram", time.Unix(1000, 0), time.Minute)
+	if err != nil || leased.OperationID != "operation-b" {
+		t.Fatalf("next independent lease after unknown = (%#v, %v)", leased, err)
+	}
+	if got, err := journal.MarkOutputFailed(ctx, "session-a", leased.OperationID, "telegram"); err != nil || got.Phase != messagejournal.OutputFailed {
+		t.Fatalf("MarkOutputFailed(second) = (%#v, %v)", got, err)
 	}
 	if got, err := journal.RetryOutput(ctx, "session-a", "operation-a"); err != nil || got.Phase != messagejournal.OutputPending {
-		t.Fatalf("explicit RetryOutput() = (%#v, %v)", got, err)
+		t.Fatalf("explicit RetryOutput(first) = (%#v, %v)", got, err)
 	}
 	leased, err = journal.LeaseNextOutput(ctx, "session-a", "telegram", time.Unix(1001, 0), time.Minute)
 	if err != nil || leased.OperationID != "operation-a" {
@@ -284,14 +288,6 @@ func TestOutputJournalBlocksUnknownUntilExplicitRetryAndPersistsReceipts(t *test
 	if got, err := journal.ConfirmOutput(ctx, "session-a", leased.OperationID, "telegram", "telegram-message-42"); err != nil || got.Phase != messagejournal.OutputConfirmed || got.Receipt != "telegram-message-42" {
 		t.Fatalf("ConfirmOutput() = (%#v, %v)", got, err)
 	}
-	leased, err = journal.LeaseNextOutput(ctx, "session-a", "telegram", time.Unix(1002, 0), time.Minute)
-	if err != nil || leased.OperationID != "operation-b" {
-		t.Fatalf("ordered second lease = (%#v, %v)", leased, err)
-	}
-	if got, err := journal.MarkOutputFailed(ctx, "session-a", leased.OperationID, "telegram"); err != nil || got.Phase != messagejournal.OutputFailed {
-		t.Fatalf("MarkOutputFailed() = (%#v, %v)", got, err)
-	}
-
 	reopened := openJournal(t, path, testLimits())
 	outputs, err := reopened.Outputs(ctx, "session-a")
 	if err != nil || len(outputs) != 2 || outputs[0].Receipt != "telegram-message-42" || outputs[1].Phase != messagejournal.OutputFailed {
@@ -303,6 +299,40 @@ func TestOutputJournalBlocksUnknownUntilExplicitRetryAndPersistsReceipts(t *test
 	leased, err = reopened.LeaseNextOutput(ctx, "session-a", "telegram-2", time.Unix(2000, 0), time.Minute)
 	if err != nil || leased.OperationID != "operation-b" || leased.Sequence != 2 {
 		t.Fatalf("retried failed output lease = (%#v, %v)", leased, err)
+	}
+}
+
+func TestOutputJournalSupersedesOnlyUnleasedPendingKinds(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	journal := openJournal(t, filepath.Join(t.TempDir(), "messages.json"), testLimits())
+	for _, output := range []struct{ id, kind string }{
+		{"commentary-1", "commentary"}, {"commentary-mid", "commentary"}, {"question-1", "question"}, {"commentary-2", "commentary"},
+	} {
+		if _, _, err := journal.EnqueueOutput(ctx, "session-a", output.id, output.kind, []byte(output.id)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	leased, err := journal.LeaseNextOutput(ctx, "session-a", "telegram", time.Unix(1, 0), time.Minute)
+	if err != nil || leased.OperationID != "commentary-1" {
+		t.Fatalf("leased first = (%#v, %v)", leased, err)
+	}
+	superseded, err := journal.SupersedePendingOutputs(ctx, "session-a", "commentary-2", []string{"commentary"})
+	if err != nil || len(superseded) != 1 || superseded[0].OperationID != "commentary-mid" || superseded[0].Phase != messagejournal.OutputSuperseded {
+		t.Fatalf("supersede with leased older = (%#v, %v)", superseded, err)
+	}
+	if _, _, err := journal.EnqueueOutput(ctx, "session-a", "commentary-3", "commentary", []byte("three")); err != nil {
+		t.Fatal(err)
+	}
+	if superseded, err := journal.SupersedePendingOutputs(ctx, "session-a", "commentary-2", []string{"commentary"}); err != nil || len(superseded) != 0 {
+		t.Fatalf("older keep superseded a newer state = (%#v, %v)", superseded, err)
+	}
+	if _, err := journal.MarkOutputUnknown(ctx, "session-a", leased.OperationID, "telegram"); err != nil {
+		t.Fatal(err)
+	}
+	leased, err = journal.LeaseNextOutput(ctx, "session-a", "telegram", time.Unix(2, 0), time.Minute)
+	if err != nil || leased.OperationID != "question-1" {
+		t.Fatalf("unrelated next lease = (%#v, %v)", leased, err)
 	}
 }
 

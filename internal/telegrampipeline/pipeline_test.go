@@ -415,6 +415,8 @@ func TestAcceptSessionSelectionBindsTargetToOwningCardCarrier(t *testing.T) {
 
 func TestCallbackClaimIsAtomic(t *testing.T) {
 	now := time.Unix(1_800_000_000, 0).UTC()
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
 	registry := telegrampipeline.NewMemoryCallbackRegistry(func() time.Time { return now })
 	presentation := telegrampipeline.CallbackPresentation{
 		SessionID: sessionID,
@@ -422,7 +424,7 @@ func TestCallbackClaimIsAtomic(t *testing.T) {
 		TokenIDs:  []string{"opaque-token-id"},
 		ExpiresAt: now.Add(time.Minute),
 	}
-	if err := registry.Replace(context.Background(), presentation); err != nil {
+	if err := registry.Replace(ctx, presentation); err != nil {
 		t.Fatal(err)
 	}
 	claim := telegrampipeline.CallbackClaim{
@@ -443,7 +445,7 @@ func TestCallbackClaimIsAtomic(t *testing.T) {
 			candidate := claim
 			candidate.UpdateID += int64(index)
 			candidate.CallbackQueryID += string(rune('a' + index))
-			result, err := registry.Claim(context.Background(), candidate)
+			result, err := registry.Claim(ctx, candidate)
 			if err != nil {
 				t.Errorf("Claim() error = %v", err)
 				return

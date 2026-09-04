@@ -55,6 +55,19 @@ func (r *preparedRuntime) SubmitPreparedWithCallbacks(ctx context.Context, id do
 	return r.SubmitWithCallbacks(ctx, id, in.Text, c)
 }
 
+type currentRuntime struct {
+	*runtime
+	current sessionruntime.StructuredInput
+}
+
+func (r *currentRuntime) SubmitCurrentWithCallbacks(_ context.Context, _ domain.SessionID, input sessionruntime.StructuredInput, callbacks sessionruntime.TurnCallbacks) error {
+	r.current = input
+	if callbacks.OnAccepted != nil {
+		return callbacks.OnAccepted(callbacks.MessageID)
+	}
+	return nil
+}
+
 type resolver struct {
 	provider domain.Provider
 	err      error
@@ -221,5 +234,25 @@ func TestPreparedWrapperIsExplicitAndPlainSubmitDoesNotLog(t *testing.T) {
 	}
 	if events, err := logger.Read(safelog.Service); err != nil || len(events) != 1 || events[0].Fields["operation"] != "provider.claude.submit" {
 		t.Fatalf("prepared event %#v, %v", events, err)
+	}
+}
+
+func TestCurrentTurnWrapperPreservesSteeringCapabilityAndCallbacks(t *testing.T) {
+	recorder, logger, _ := recorder(t)
+	base := &currentRuntime{runtime: &runtime{}}
+	submitter, err := observabilitycomposition.NewCurrent(base, recorder, codex)
+	if err != nil {
+		t.Fatal(err)
+	}
+	accepted := ""
+	input := sessionruntime.StructuredInput{Text: "follow-up"}
+	err = submitter.SubmitCurrentWithCallbacks(context.Background(), testSessionID, input, sessionruntime.TurnCallbacks{
+		MessageID: "m-current", OnAccepted: func(messageID string) error { accepted = messageID; return nil },
+	})
+	if err != nil || !reflect.DeepEqual(base.current, input) || accepted != "m-current" {
+		t.Fatalf("current turn = input %#v accepted %q err %v", base.current, accepted, err)
+	}
+	if events, err := logger.Read(safelog.Service); err != nil || len(events) != 1 || events[0].Result != "success" {
+		t.Fatalf("current turn events = %#v, %v", events, err)
 	}
 }

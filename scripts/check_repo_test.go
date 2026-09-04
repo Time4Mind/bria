@@ -460,7 +460,13 @@ func TestArchitectureCheckerRegistersCurrentCompositionBoundaries(t *testing.T) 
 			path:           "internal/telegramruntimecomposition",
 			responsibility: "project typed Telegram controller actions and reconcile durable delivery receipts",
 			imports:        []string{"internal/coordinator", "internal/domain", "internal/telegramcontroller", "internal/telegramflow", "internal/telegrampipeline", "internal/telegramrecoverycomposition", "internal/telegramstate", "internal/telegramui"},
-			limit:          500,
+			limit:          600,
+		},
+		{
+			path:           "internal/telegrampromptcomposition",
+			responsibility: "refresh the active Telegram card from durable user-prompt delivery state",
+			imports:        []string{"internal/coordinator", "internal/domain", "internal/telegrambridge", "internal/telegramcontroller", "internal/telegramflow", "internal/telegramnotify", "internal/telegramstate", "internal/telegramui"},
+			limit:          150,
 		},
 		{
 			path:           "internal/turnruntimecomposition",
@@ -472,7 +478,7 @@ func TestArchitectureCheckerRegistersCurrentCompositionBoundaries(t *testing.T) 
 			path:           "internal/singlemachinecomposition",
 			responsibility: "compose the single-computer Bria process",
 			imports: []string{
-				"internal/app", "internal/authcomposition", "internal/callbacktoken", "internal/claudestore", "internal/config", "internal/coordinator", "internal/domain", "internal/durablecomposition", "internal/durableflow", "internal/interactioncomposition", "internal/messagejournal", "internal/recoverycomposition", "internal/recoveryruntime", "internal/runtimefactory", "internal/safelog", "internal/sessionexpiry", "internal/sessionid", "internal/sessionruntime", "internal/sessionsupervisor", "internal/settings", "internal/settingscomposition", "internal/storage", "internal/supervisioncomposition", "internal/telegram", "internal/telegrambridge", "internal/telegramcontroller", "internal/telegramflow", "internal/telegramnotify", "internal/telegrampipeline", "internal/telegramrecoverycomposition", "internal/telegramruntimecomposition", "internal/turnruntimecomposition", "internal/workdir",
+				"internal/app", "internal/authcomposition", "internal/callbacktoken", "internal/claudestore", "internal/config", "internal/coordinator", "internal/domain", "internal/durablecomposition", "internal/durableflow", "internal/interactioncomposition", "internal/messagejournal", "internal/recoverycomposition", "internal/recoveryruntime", "internal/runtimefactory", "internal/safelog", "internal/sessioncreation", "internal/sessionexpiry", "internal/sessionid", "internal/sessionruntime", "internal/sessionsupervisor", "internal/settings", "internal/settingscomposition", "internal/storage", "internal/supervisioncomposition", "internal/telegram", "internal/telegrambridge", "internal/telegramcompletioncomposition", "internal/telegramcontroller", "internal/telegramflow", "internal/telegramnotify", "internal/telegrampipeline", "internal/telegrampromptcomposition", "internal/telegramrecoverycomposition", "internal/telegramruntimecomposition", "internal/turnruntimecomposition", "internal/workdir",
 			},
 			limit: 800,
 		},
@@ -725,8 +731,8 @@ func TestArchitectureCheckerCapsCoherentCustodyResponsibilities(t *testing.T) {
 		{path: "internal/mediaflow", limit: 350},
 		{path: "internal/messagejournal", limit: 1400},
 		{path: "internal/sessionsupervisor", limit: 450},
-		{path: "internal/telegramflow", limit: 2000},
-		{path: "internal/telegrampipeline", limit: 1500},
+		{path: "internal/telegramflow", limit: 2250},
+		{path: "internal/telegrampipeline", limit: 1550},
 	} {
 		pkg := testPackage(test.path)
 		pkg.ProductionLines = test.limit
@@ -866,6 +872,12 @@ func TestArchitectureCheckerRejectsTelegramProductDependencies(t *testing.T) {
 			checkGraph(graphWithEdge("internal/telegram", target)),
 			"Telegram transport imports Bria product package: internal/telegram -> "+target,
 		)
+	}
+}
+
+func TestArchitectureCheckerAllowsTelegramMutationSchedulerDependency(t *testing.T) {
+	if errors := checkGraph(graphWithEdge("internal/telegram", "internal/mutationscheduler")); len(errors) != 0 {
+		t.Fatalf("Telegram scheduler boundary errors = %v, want none", errors)
 	}
 }
 

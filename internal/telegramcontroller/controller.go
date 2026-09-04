@@ -4,6 +4,7 @@ import (
 	"bria/internal/app"
 	"bria/internal/coordinator"
 	"bria/internal/domain"
+	"bria/internal/sessioncreation"
 	"bria/internal/sessionruntime"
 	"bria/internal/settingsport"
 	"bria/internal/telegramsettings"
@@ -72,26 +73,16 @@ type CardHistoryStore interface {
 	AppendCardHistory(context.Context, domain.SessionID, string) error
 	LoadCardHistory(context.Context, domain.SessionID) ([]string, error)
 }
+type CardPromptStore interface {
+	SetCardPrompt(context.Context, domain.SessionID, string, string) error
+}
 type ActiveSessionLoader interface {
 	LoadActiveSession(context.Context) (domain.SessionID, error)
-}
-type ReplyRouteStore interface {
-	ResolveReply(context.Context, int64) (domain.SessionID, bool, error)
 }
 type Preferences = settingsport.Preferences
 type PreferenceSnapshot = settingsport.Snapshot
 type ProviderPreference = settingsport.ProviderPreference
 type ProviderPreferences = settingsport.ProviderPreferences
-type CreateDraft struct {
-	ComputerID domain.ComputerID
-	Provider   domain.Provider
-	Workdir    string
-	Confirmed  bool
-}
-type CreateDraftSelector interface {
-	PreviewCreateDraft(context.Context, domain.Provider) (CreateDraft, error)
-	ConfirmCreateDraft(context.Context, domain.Provider, int64) (CreateDraft, error)
-}
 type Lifecycle interface {
 	Abort(context.Context, app.StartSessionRequest, domain.ProviderBinding) error
 }
@@ -112,10 +103,11 @@ type TurnLifecycle interface {
 type NotificationKind string
 
 const (
-	NotificationCommentary NotificationKind = "commentary"
-	NotificationQuestion   NotificationKind = "question"
-	NotificationFinal      NotificationKind = "final"
-	NotificationError      NotificationKind = "error"
+	NotificationCommentary   NotificationKind = "commentary"
+	NotificationQuestion     NotificationKind = "question"
+	NotificationFinal        NotificationKind = "final"
+	NotificationError        NotificationKind = "error"
+	NotificationPromptStatus NotificationKind = "prompt_status"
 )
 
 type Notification struct {
@@ -211,38 +203,56 @@ type AuthorizationFlow interface {
 type SemanticActionKind string
 
 const (
-	SemanticPagePrevious                SemanticActionKind = "page_previous"
-	SemanticPageLatest                  SemanticActionKind = "page_latest"
-	SemanticPageNext                    SemanticActionKind = "page_next"
-	SemanticStop                        SemanticActionKind = "stop"
-	SemanticClose                       SemanticActionKind = "close"
-	SemanticOptions                     SemanticActionKind = "options"
-	SemanticScreen                      SemanticActionKind = "screen"
-	SemanticSelect                      SemanticActionKind = "select_session"
-	SemanticResume                      SemanticActionKind = "resume"
-	SemanticMenuSessions                SemanticActionKind = "menu_sessions"
-	SemanticMenuNew                     SemanticActionKind = "menu_new"
-	SemanticMenuArchive                 SemanticActionKind = "menu_archive"
-	SemanticMenuStatus                  SemanticActionKind = "menu_status"
-	SemanticMenuSettings                SemanticActionKind = "menu_settings"
-	SemanticMenuBack                    SemanticActionKind = "menu_back"
-	SemanticCreateCodex                 SemanticActionKind = "create_codex"
-	SemanticCreateClaude                SemanticActionKind = "create_claude"
-	SemanticSettingsScreen              SemanticActionKind = "settings_screen"
-	SemanticSettingsDetail              SemanticActionKind = "settings_detail"
-	SemanticSettingsContinueExisting    SemanticActionKind = "settings_continue_existing"
-	SemanticSettingsTechnicalActions    SemanticActionKind = "settings_technical_actions"
-	SemanticSettingsBackgroundQuestions SemanticActionKind = "settings_background_questions"
-	SemanticSettingsBackgroundErrors    SemanticActionKind = "settings_background_errors"
-	SemanticSettingsLifetimeNever       SemanticActionKind = "settings_lifetime_never"
-	SemanticSettingsLifetime6Hours      SemanticActionKind = "settings_lifetime_6h"
-	SemanticSettingsLifetime12Hours     SemanticActionKind = "settings_lifetime_12h"
-	SemanticSettingsLifetime24Hours     SemanticActionKind = "settings_lifetime_24h"
-	SemanticSettingsLifetime48Hours     SemanticActionKind = "settings_lifetime_48h"
-	SemanticSettingsProviderCodex       SemanticActionKind = "settings_provider_codex"
-	SemanticSettingsProviderClaude      SemanticActionKind = "settings_provider_claude"
-	SemanticAuthorizeCodex              SemanticActionKind = "authorize_codex"
-	SemanticAuthorizeClaude             SemanticActionKind = "authorize_claude"
+	SemanticPagePrevious                   SemanticActionKind = "page_previous"
+	SemanticPageLatest                     SemanticActionKind = "page_latest"
+	SemanticPageNext                       SemanticActionKind = "page_next"
+	SemanticStop                           SemanticActionKind = "stop"
+	SemanticClose                          SemanticActionKind = "close"
+	SemanticOptions                        SemanticActionKind = "options"
+	SemanticScreen                         SemanticActionKind = "screen"
+	SemanticSelect                         SemanticActionKind = "select_session"
+	SemanticResume                         SemanticActionKind = "resume"
+	SemanticMenuSessions                   SemanticActionKind = "menu_sessions"
+	SemanticMenuNew                        SemanticActionKind = "menu_new"
+	SemanticMenuArchive                    SemanticActionKind = "menu_archive"
+	SemanticMenuStatus                     SemanticActionKind = "menu_status"
+	SemanticMenuSettings                   SemanticActionKind = "menu_settings"
+	SemanticMenuBack                       SemanticActionKind = "menu_back"
+	SemanticCreateSelectCodex              SemanticActionKind = "create_select_codex"
+	SemanticCreateSelectClaude             SemanticActionKind = "create_select_claude"
+	SemanticCreateWorkdir                  SemanticActionKind = "create_workdir"
+	SemanticCreateConfirm                  SemanticActionKind = "create_confirm"
+	SemanticCreateChoice                   SemanticActionKind = "create_choice"
+	SemanticCreatePrevious                 SemanticActionKind = "create_previous"
+	SemanticCreateFirst                    SemanticActionKind = "create_first"
+	SemanticCreateNext                     SemanticActionKind = "create_next"
+	SemanticCreateUp                       SemanticActionKind = "create_up"
+	SemanticCreatePick                     SemanticActionKind = "create_pick"
+	SemanticCreateDirectoryNew             SemanticActionKind = "create_directory_new"
+	SemanticCreateBack                     SemanticActionKind = "create_back"
+	SemanticCreateFresh                    SemanticActionKind = "create_fresh"
+	SemanticCreateCodex                    SemanticActionKind = "create_codex"
+	SemanticCreateClaude                   SemanticActionKind = "create_claude"
+	SemanticSettingsScreen                 SemanticActionKind = "settings_screen"
+	SemanticSettingsDetail                 SemanticActionKind = "settings_detail"
+	SemanticSettingsPageLimit              SemanticActionKind = "settings_page_limit"
+	SemanticSettingsContinueExisting       SemanticActionKind = "settings_continue_existing"
+	SemanticSettingsTechnicalActions       SemanticActionKind = "settings_technical_actions"
+	SemanticSettingsBackgroundQuestions    SemanticActionKind = "settings_background_questions"
+	SemanticSettingsBackgroundErrors       SemanticActionKind = "settings_background_errors"
+	SemanticSettingsArchiveRecommendations SemanticActionKind = "settings_archive_recommendations"
+	SemanticSettingsDefaultProvider        SemanticActionKind = "settings_default_provider"
+	SemanticSettingsDefaultWorkdir         SemanticActionKind = "settings_default_workdir"
+	SemanticSettingsClearCreationDefaults  SemanticActionKind = "settings_clear_creation_defaults"
+	SemanticSettingsLifetimeNever          SemanticActionKind = "settings_lifetime_never"
+	SemanticSettingsLifetime6Hours         SemanticActionKind = "settings_lifetime_6h"
+	SemanticSettingsLifetime12Hours        SemanticActionKind = "settings_lifetime_12h"
+	SemanticSettingsLifetime24Hours        SemanticActionKind = "settings_lifetime_24h"
+	SemanticSettingsLifetime48Hours        SemanticActionKind = "settings_lifetime_48h"
+	SemanticSettingsProviderCodex          SemanticActionKind = "settings_provider_codex"
+	SemanticSettingsProviderClaude         SemanticActionKind = "settings_provider_claude"
+	SemanticAuthorizeCodex                 SemanticActionKind = "authorize_codex"
+	SemanticAuthorizeClaude                SemanticActionKind = "authorize_claude"
 )
 
 type SemanticAction struct {
@@ -251,6 +261,7 @@ type SemanticAction struct {
 	Page         int
 	FollowLatest bool
 	SessionSlot  int
+	Choice       int
 	UpdateID     int64
 }
 type SemanticCarrierEffect string
@@ -291,6 +302,7 @@ type SemanticButton struct {
 	Label     string
 	Action    SemanticActionKind
 	SessionID domain.SessionID
+	Choice    int
 }
 type SemanticSurface struct {
 	Text string
@@ -317,6 +329,19 @@ func (controller *Controller) ProjectCurrent(ctx context.Context, sessionID doma
 	return SemanticActionResult{Card: &card}, err
 }
 
+// ProjectCompletion returns the exact completed card and whether the session
+// is active at projection time. It performs no Telegram mutation.
+func (controller *Controller) ProjectCompletion(ctx context.Context, sessionID domain.SessionID) (SemanticCard, bool, error) {
+	if sessionID == "" {
+		return SemanticCard{}, false, errors.New("completion session is required")
+	}
+	controller.mu.Lock()
+	active := controller.active == sessionID
+	controller.mu.Unlock()
+	card, err := controller.semanticCard(ctx, sessionID, active)
+	return card, active, err
+}
+
 // HandleSemanticMessage is the unsigned-message ingress for signed UI
 // composition. It executes the message once and returns only neutral typed UI
 // data; callers must not forward Decision.Keyboard to Telegram.
@@ -324,11 +349,27 @@ func (controller *Controller) HandleSemanticMessage(ctx context.Context, update 
 	if update.Kind != coordinator.UpdateMessage {
 		return SemanticActionResult{}, errors.New("semantic message handler requires a message update")
 	}
+	createDraftRevision := controller.createFlow.Revision()
 	decision, err := controller.Handle(ctx, update)
 	if err != nil {
 		return SemanticActionResult{}, err
 	}
 	result := SemanticActionResult{Decision: decision}
+	createDraftChanged := controller.createFlow.Revision() != createDraftRevision
+	if createDraftChanged {
+		surface, surfaceErr := controller.currentCreateDraftSurfaceV2(ctx)
+		result.Surface = surface
+		return result, surfaceErr
+	}
+	messageID := "telegram-update:" + strconv.FormatInt(update.ID, 10)
+	controller.mu.Lock()
+	promptSession := controller.promptSessions[messageID]
+	controller.mu.Unlock()
+	if promptSession != "" {
+		card, cardErr := controller.semanticCard(ctx, promptSession, true)
+		result.Card = &card
+		return result, cardErr
+	}
 	if decision.Kind != coordinator.DecisionStatus {
 		return result, nil
 	}
@@ -429,9 +470,14 @@ func (controller *Controller) HandleSemanticAction(ctx context.Context, action S
 func isGlobalSemanticAction(kind SemanticActionKind) bool {
 	switch kind {
 	case SemanticMenuSessions, SemanticMenuNew, SemanticMenuArchive, SemanticMenuStatus,
-		SemanticMenuSettings, SemanticMenuBack, SemanticCreateCodex, SemanticCreateClaude,
-		SemanticSettingsScreen, SemanticSettingsDetail, SemanticSettingsContinueExisting,
+		SemanticMenuSettings, SemanticMenuBack, SemanticCreateSelectCodex, SemanticCreateSelectClaude,
+		SemanticCreateWorkdir, SemanticCreateConfirm, SemanticCreateCodex, SemanticCreateClaude,
+		SemanticCreateChoice, SemanticCreatePrevious, SemanticCreateFirst, SemanticCreateNext,
+		SemanticCreateUp, SemanticCreatePick, SemanticCreateDirectoryNew, SemanticCreateBack, SemanticCreateFresh,
+		SemanticSettingsScreen, SemanticSettingsDetail, SemanticSettingsPageLimit, SemanticSettingsContinueExisting,
 		SemanticSettingsTechnicalActions, SemanticSettingsBackgroundQuestions, SemanticSettingsBackgroundErrors,
+		SemanticSettingsArchiveRecommendations,
+		SemanticSettingsDefaultProvider, SemanticSettingsDefaultWorkdir, SemanticSettingsClearCreationDefaults,
 		SemanticSettingsLifetimeNever, SemanticSettingsLifetime6Hours, SemanticSettingsLifetime12Hours,
 		SemanticSettingsLifetime24Hours, SemanticSettingsLifetime48Hours,
 		SemanticSettingsProviderCodex, SemanticSettingsProviderClaude,
@@ -445,8 +491,40 @@ func (controller *Controller) handleGlobalSemanticAction(ctx context.Context, ac
 	case SemanticMenuSessions:
 		return controller.sessionListSemanticResult(ctx)
 	case SemanticMenuNew:
-		surface, err := controller.newSessionSurface(ctx)
+		controller.setCreationPreferenceMode("")
+		return controller.beginNewSessionV2(ctx, action.UpdateID)
+	case SemanticCreateSelectCodex, SemanticCreateSelectClaude:
+		provider := domain.ProviderCodex
+		if action.Kind == SemanticCreateSelectClaude {
+			provider = domain.ProviderClaude
+		}
+		if err := controller.selectCreateProviderV2(ctx, provider); err != nil {
+			if errors.Is(err, errProviderUnavailable) {
+				return SemanticActionResult{Surface: unavailableNewSessionSurface()}, nil
+			}
+			return SemanticActionResult{}, err
+		}
+		snapshot, _, err := controller.currentCreateSnapshotV2(ctx)
+		if err != nil {
+			return SemanticActionResult{}, err
+		}
+		if controller.currentCreationPreferenceMode() != "" {
+			return controller.advanceCreationPreferenceV2(ctx, snapshot)
+		}
+		return controller.advanceCreateV2(ctx, snapshot, action.UpdateID)
+	case SemanticCreateChoice:
+		return controller.handleCreateChoiceV2(ctx, action)
+	case SemanticCreatePrevious, SemanticCreateFirst, SemanticCreateNext, SemanticCreateUp,
+		SemanticCreatePick, SemanticCreateDirectoryNew, SemanticCreateBack, SemanticCreateFresh:
+		return controller.handleCreateNavigationV2(ctx, action)
+	case SemanticCreateWorkdir:
+		if err := controller.beginCreateWorkdir(ctx); err != nil {
+			return SemanticActionResult{}, err
+		}
+		surface, err := controller.currentCreateDraftSurface(ctx)
 		return SemanticActionResult{Surface: surface}, err
+	case SemanticCreateConfirm:
+		return controller.confirmCreateDraft(ctx, action.UpdateID)
 	case SemanticMenuArchive:
 		return controller.archiveSemanticResult(ctx)
 	case SemanticMenuStatus:
@@ -463,45 +541,29 @@ func (controller *Controller) handleGlobalSemanticAction(ctx context.Context, ac
 		card, err := controller.semanticCard(ctx, active, false)
 		return SemanticActionResult{Decision: decision, Card: &card}, err
 	case SemanticMenuSettings:
+		controller.cancelCreateDraft()
 		return controller.settingsSemanticResult(ctx)
+	case SemanticSettingsDefaultProvider:
+		return controller.beginCreationPreferenceV2(ctx, creationPreferenceProvider)
+	case SemanticSettingsDefaultWorkdir:
+		return controller.beginCreationPreferenceV2(ctx, creationPreferenceWorkdir)
+	case SemanticSettingsClearCreationDefaults:
+		return controller.clearCreationPreferencesV2(ctx)
 	case SemanticMenuBack:
+		controller.cancelCreateDraft()
 		return SemanticActionResult{Surface: mainMenuSurface("Меню")}, nil
 	case SemanticCreateCodex, SemanticCreateClaude:
 		provider := domain.ProviderCodex
 		if action.Kind == SemanticCreateClaude {
 			provider = domain.ProviderClaude
 		}
-		enabled, err := controller.providerEnabled(ctx, provider)
-		if err != nil {
-			return SemanticActionResult{}, err
-		}
-		if !enabled {
+		if err := controller.selectCreateProvider(ctx, provider); err != nil {
 			return SemanticActionResult{Surface: unavailableNewSessionSurface()}, nil
 		}
-		if controller.createDrafts == nil {
-			return SemanticActionResult{}, errors.New("confirmed session draft selector is not configured")
-		}
-		draft, err := controller.createDrafts.ConfirmCreateDraft(ctx, provider, action.UpdateID)
-		if err != nil {
-			return SemanticActionResult{}, fmt.Errorf("confirm session creation draft: %w", err)
-		}
-		if err := validateCreateDraft(draft, provider, true); err != nil {
-			return SemanticActionResult{}, err
-		}
-		decision, err := controller.create(ctx, action.UpdateID, draft.ComputerID, provider, draft.Workdir)
-		if errors.Is(err, errProviderUnavailable) {
-			return SemanticActionResult{Surface: unavailableNewSessionSurface()}, nil
-		}
-		if err != nil {
-			return SemanticActionResult{}, err
-		}
-		controller.mu.Lock()
-		active := controller.active
-		controller.mu.Unlock()
-		card, err := controller.semanticCard(ctx, active, true)
-		return SemanticActionResult{Decision: decision, Card: &card}, err
-	case SemanticSettingsScreen, SemanticSettingsDetail, SemanticSettingsContinueExisting, SemanticSettingsTechnicalActions,
+		return controller.confirmCreateDraft(ctx, action.UpdateID)
+	case SemanticSettingsScreen, SemanticSettingsDetail, SemanticSettingsPageLimit, SemanticSettingsContinueExisting, SemanticSettingsTechnicalActions,
 		SemanticSettingsBackgroundQuestions, SemanticSettingsBackgroundErrors,
+		SemanticSettingsArchiveRecommendations,
 		SemanticSettingsLifetimeNever, SemanticSettingsLifetime6Hours, SemanticSettingsLifetime12Hours,
 		SemanticSettingsLifetime24Hours, SemanticSettingsLifetime48Hours, SemanticSettingsProviderCodex, SemanticSettingsProviderClaude:
 		if err := telegramsettings.Apply(ctx, controller.settings, controller.providerPreferences, string(action.Kind)); err != nil {
@@ -520,15 +582,12 @@ func (controller *Controller) handleGlobalSemanticAction(ctx context.Context, ac
 }
 func mainMenuSurface(text string) *SemanticSurface {
 	return &SemanticSurface{Text: text, Rows: [][]SemanticButton{
-		{{Label: "Сессии", Action: SemanticMenuSessions}, {Label: "Новая", Action: SemanticMenuNew}},
+		{{Label: "Сессии", Action: SemanticMenuSessions}, {Label: "Новое", Action: SemanticMenuNew}},
 		{{Label: "Архив", Action: SemanticMenuArchive}, {Label: "Статус", Action: SemanticMenuStatus}},
 		{{Label: "Настройки", Action: SemanticMenuSettings}},
 	}}
 }
 func (controller *Controller) newSessionSurface(ctx context.Context) (*SemanticSurface, error) {
-	if controller.createDrafts == nil {
-		return &SemanticSurface{Text: "Создание сессии через Telegram не настроено.", Rows: [][]SemanticButton{{{Label: "Меню", Action: SemanticMenuBack}}}}, nil
-	}
 	providers, err := controller.availableProviders(ctx)
 	if err != nil {
 		return nil, err
@@ -536,24 +595,121 @@ func (controller *Controller) newSessionSurface(ctx context.Context) (*SemanticS
 	if len(providers) == 0 {
 		return unavailableNewSessionSurface(), nil
 	}
-	lines := []string{"Новая сессия", "Проверьте выбранный компьютер и рабочую папку перед подтверждением:"}
-	buttons := make([]SemanticButton, 0, len(providers))
-	for _, provider := range providers {
-		draft, err := controller.createDrafts.PreviewCreateDraft(ctx, provider)
-		if err != nil {
-			return nil, fmt.Errorf("load session creation draft: %w", err)
-		}
-		if err := validateCreateDraft(draft, provider, false); err != nil {
-			return nil, err
-		}
-		lines = append(lines, fmt.Sprintf("%s: компьютер %s, папка %s", authorizationProviderName(provider), draft.ComputerID, draft.Workdir))
-		action := SemanticCreateCodex
-		if provider == domain.ProviderClaude {
-			action = SemanticCreateClaude
-		}
-		buttons = append(buttons, SemanticButton{Label: authorizationProviderName(provider), Action: action})
+	sessions, err := controller.sessions.List(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list sessions for creation defaults: %w", err)
 	}
-	return &SemanticSurface{Text: strings.Join(lines, "\n"), Rows: [][]SemanticButton{buttons, {{Label: "Меню", Action: SemanticMenuBack}}}}, nil
+	controller.createFlow.Begin(controller.localComputerID, providers, sessions, "")
+	return controller.currentCreateDraftSurface(ctx)
+}
+
+func (controller *Controller) currentCreateDraftSurface(ctx context.Context) (*SemanticSurface, error) {
+	providers, err := controller.availableProviders(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if len(providers) == 0 {
+		return unavailableNewSessionSurface(), nil
+	}
+	snapshot, open := controller.createFlow.Current(providers)
+	if !open {
+		return controller.newSessionSurface(ctx)
+	}
+	draft := snapshot.Draft
+	providerName := "не выбран"
+	if draft.Provider != "" {
+		providerName = authorizationProviderName(draft.Provider)
+	}
+	workdir := draft.Workdir
+	if workdir == "" {
+		workdir = "не выбрана"
+	}
+	lines := []string{
+		"Новая сессия",
+		"Компьютер: " + string(draft.ComputerID),
+		"Исполнитель: " + providerName,
+		"Рабочая папка: " + workdir,
+	}
+	if snapshot.ValidationError != "" {
+		lines = append(lines, "Ошибка: "+snapshot.ValidationError)
+	}
+	if snapshot.AwaitingWorkdir {
+		lines = append(lines, "Отправьте отдельным сообщением абсолютный путь к рабочей папке.")
+		return &SemanticSurface{Text: strings.Join(lines, "\n"), Rows: [][]SemanticButton{{{Label: "Меню", Action: SemanticMenuBack}}}}, nil
+	}
+
+	rows := make([][]SemanticButton, 0, 4)
+	if len(providers) > 1 {
+		buttons := make([]SemanticButton, 0, len(providers))
+		for _, provider := range providers {
+			action := SemanticCreateSelectCodex
+			if provider == domain.ProviderClaude {
+				action = SemanticCreateSelectClaude
+			}
+			buttons = append(buttons, SemanticButton{Label: authorizationProviderName(provider), Action: action})
+		}
+		rows = append(rows, buttons)
+	}
+	rows = append(rows, []SemanticButton{{Label: "Папка", Action: SemanticCreateWorkdir}})
+	if _, err := controller.createFlow.Confirm(providers); err == nil {
+		rows = append(rows, []SemanticButton{{Label: "Запустить", Action: SemanticCreateConfirm}})
+	}
+	rows = append(rows, []SemanticButton{{Label: "Меню", Action: SemanticMenuBack}})
+	return &SemanticSurface{Text: strings.Join(lines, "\n"), Rows: rows}, nil
+}
+
+func (controller *Controller) selectCreateProvider(ctx context.Context, provider domain.Provider) error {
+	providers, err := controller.availableProviders(ctx)
+	if err != nil {
+		return err
+	}
+	if err := controller.createFlow.SelectProvider(provider, providers); err != nil {
+		return errProviderUnavailable
+	}
+	return nil
+}
+
+func (controller *Controller) beginCreateWorkdir(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return controller.createFlow.BeginWorkdir()
+}
+
+func (controller *Controller) consumeCreateDraftWorkdir(update coordinator.Update) (coordinator.Decision, bool) {
+	if !controller.createFlow.ConsumeWorkdir(update.Text, update.MediaKind != "" || update.Caption != "") {
+		return coordinator.Decision{}, false
+	}
+	return controller.status("Рабочая папка обработана."), true
+}
+
+func (controller *Controller) confirmCreateDraft(ctx context.Context, updateID int64) (SemanticActionResult, error) {
+	providers, err := controller.availableProviders(ctx)
+	if err != nil {
+		return SemanticActionResult{}, err
+	}
+	draft, err := controller.createFlow.Confirm(providers)
+	if err != nil {
+		return SemanticActionResult{}, err
+	}
+	decision, err := controller.create(ctx, updateID, draft.ComputerID, draft.Provider, draft.Workdir)
+	if errors.Is(err, errProviderUnavailable) {
+		return SemanticActionResult{Surface: unavailableNewSessionSurface()}, nil
+	}
+	if err != nil {
+		return SemanticActionResult{}, err
+	}
+	controller.cancelCreateDraft()
+	controller.mu.Lock()
+	active := controller.active
+	controller.mu.Unlock()
+	card, err := controller.semanticCard(ctx, active, true)
+	return SemanticActionResult{Decision: decision, Card: &card}, err
+}
+
+func (controller *Controller) cancelCreateDraft() {
+	controller.createFlow.Cancel()
+	controller.setCreationPreferenceMode("")
 }
 func (controller *Controller) availableProviders(ctx context.Context) ([]domain.Provider, error) {
 	known := []domain.Provider{domain.ProviderCodex, domain.ProviderClaude}
@@ -590,13 +746,6 @@ func (controller *Controller) providerEnabled(ctx context.Context, provider doma
 }
 func unavailableNewSessionSurface() *SemanticSurface {
 	return &SemanticSurface{Text: "Создание новой сессии недоступно: нет настроенного и включенного исполнителя.", Rows: [][]SemanticButton{{{Label: "Меню", Action: SemanticMenuBack}}}}
-}
-func validateCreateDraft(draft CreateDraft, provider domain.Provider, requireConfirmed bool) error {
-	if draft.ComputerID == "" || draft.Provider != provider || strings.TrimSpace(draft.Workdir) != draft.Workdir ||
-		!filepath.IsAbs(draft.Workdir) || (requireConfirmed && !draft.Confirmed) {
-		return errors.New("session creation draft is incomplete or not explicitly confirmed")
-	}
-	return nil
 }
 func (controller *Controller) sessionListSemanticResult(ctx context.Context) (SemanticActionResult, error) {
 	sessions, err := controller.sessions.List(ctx)
@@ -804,7 +953,14 @@ func validateSemanticAction(action SemanticAction) error {
 		if action.SessionID != "" || action.Page != 0 || action.FollowLatest || action.SessionSlot != 0 {
 			return errors.New("global semantic action must not contain a session or target fields")
 		}
-		if (action.Kind == SemanticCreateCodex || action.Kind == SemanticCreateClaude || action.Kind == SemanticAuthorizeCodex || action.Kind == SemanticAuthorizeClaude) && action.UpdateID <= 0 {
+		if action.Kind == SemanticCreateChoice {
+			if action.Choice <= 0 {
+				return errors.New("creation choice must be positive")
+			}
+		} else if action.Choice != 0 {
+			return errors.New("global semantic action must not contain a choice")
+		}
+		if (action.Kind == SemanticCreateConfirm || action.Kind == SemanticCreateCodex || action.Kind == SemanticCreateClaude || action.Kind == SemanticAuthorizeCodex || action.Kind == SemanticAuthorizeClaude) && action.UpdateID <= 0 {
 			return errors.New("side-effecting global action requires the claimed Telegram update id")
 		}
 		return nil
@@ -832,86 +988,89 @@ func validateSemanticAction(action SemanticAction) error {
 }
 
 type Options struct {
-	QueueLimit  int
-	Lifecycle   Lifecycle
-	UIState     ActiveSessionStore
-	Settings    Preferences
-	Providers   ProviderPreferences
-	ReplyRoutes ReplyRouteStore
-	Stopper     sessionruntime.TurnStopper
+	QueueLimit int
+	Lifecycle  Lifecycle
+	UIState    ActiveSessionStore
+	Settings   Preferences
+	Providers  ProviderPreferences
+	Stopper    sessionruntime.TurnStopper
 	// InputPreparer is required for downloadable voice/photo content. Document
 	// preparation additionally requires AllowDocumentInput because documents
 	// can carry arbitrary bytes.
-	InputPreparer      InputPreparer
-	AllowDocumentInput bool
-	DurableInput       DurableInputCustody
-	DurableOutput      DurableOutputCustody
-	Interactions       InteractionHandler
-	InteractionText    InteractionTextHandler
-	Authorization      AuthorizationFlow
-	CreateDrafts       CreateDraftSelector
-	Attachments        AttachmentCustody
-	RuntimeEvents      RuntimeEventObserver
-	Finals             FinalProcessor
-	AsyncCreator       AsyncSessionCreator
-	ArchivedResumer    ArchivedResumer
-	AsyncResumer       AsyncArchivedResumer
-	SessionCloser      SessionCloser
-	TurnLifecycle      TurnLifecycle
-	OutputFailures     OutputFailureRecorder
-	Recovered          []domain.Session
+	InputPreparer       InputPreparer
+	AllowDocumentInput  bool
+	DurableInput        DurableInputCustody
+	DurableOutput       DurableOutputCustody
+	Interactions        InteractionHandler
+	InteractionText     InteractionTextHandler
+	Authorization       AuthorizationFlow
+	Attachments         AttachmentCustody
+	RuntimeEvents       RuntimeEventObserver
+	Finals              FinalProcessor
+	AsyncCreator        AsyncSessionCreator
+	ArchivedResumer     ArchivedResumer
+	AsyncResumer        AsyncArchivedResumer
+	SessionCloser       SessionCloser
+	TurnLifecycle       TurnLifecycle
+	OutputFailures      OutputFailureRecorder
+	Recovered           []domain.Session
+	CreationEnvironment sessioncreation.Environment
 }
 type Controller struct {
-	ownerUserID          int64
-	ownerPrivateChatID   int64
-	localComputerID      domain.ComputerID
-	creator              SessionCreator
-	sessions             SessionStore
-	submitter            sessionruntime.Submitter
-	notifier             Notifier
-	lifecycle            Lifecycle
-	uiState              ActiveSessionStore
-	settings             Preferences
-	providerPreferences  ProviderPreferences
-	replyRoutes          ReplyRouteStore
-	stopper              sessionruntime.TurnStopper
-	inputPreparer        InputPreparer
-	allowDocumentInput   bool
-	durableInput         DurableInputCustody
-	durableOutput        DurableOutputCustody
-	interactions         InteractionHandler
-	interactionText      InteractionTextHandler
-	authorization        AuthorizationFlow
-	createDrafts         CreateDraftSelector
-	attachments          AttachmentCustody
-	runtimeEvents        RuntimeEventObserver
-	finals               FinalProcessor
-	asyncCreator         AsyncSessionCreator
-	archivedResumer      ArchivedResumer
-	asyncResumer         AsyncArchivedResumer
-	sessionCloser        SessionCloser
-	turnLifecycle        TurnLifecycle
-	outputFailures       OutputFailureRecorder
-	queueLimit           int
-	rootContext          context.Context
-	cancelRoot           context.CancelFunc
-	mu                   sync.Mutex
-	closed               bool
-	closeDone            chan struct{}
-	closeErr             error
-	active               domain.SessionID
-	live                 map[domain.SessionID]domain.Session
-	pending              map[domain.SessionID]domain.Session
-	workers              map[domain.SessionID]*sessionWorker
-	created              map[domain.SessionID]createdProcess
-	history              map[domain.SessionID][]string
-	page                 map[domain.SessionID]int
-	followLatest         map[domain.SessionID]bool
-	optionsExpanded      map[domain.SessionID]bool
-	deliveryFailures     map[domain.SessionID]NotificationFailure
-	pendingAuthorization *AuthorizationChallenge
-	creates              sync.WaitGroup
-	worker               sync.WaitGroup
+	ownerUserID            int64
+	ownerPrivateChatID     int64
+	localComputerID        domain.ComputerID
+	creator                SessionCreator
+	sessions               SessionStore
+	submitter              sessionruntime.Submitter
+	notifier               Notifier
+	lifecycle              Lifecycle
+	uiState                ActiveSessionStore
+	settings               Preferences
+	providerPreferences    ProviderPreferences
+	stopper                sessionruntime.TurnStopper
+	inputPreparer          InputPreparer
+	allowDocumentInput     bool
+	durableInput           DurableInputCustody
+	durableOutput          DurableOutputCustody
+	interactions           InteractionHandler
+	interactionText        InteractionTextHandler
+	authorization          AuthorizationFlow
+	attachments            AttachmentCustody
+	runtimeEvents          RuntimeEventObserver
+	finals                 FinalProcessor
+	asyncCreator           AsyncSessionCreator
+	archivedResumer        ArchivedResumer
+	asyncResumer           AsyncArchivedResumer
+	sessionCloser          SessionCloser
+	turnLifecycle          TurnLifecycle
+	outputFailures         OutputFailureRecorder
+	queueLimit             int
+	rootContext            context.Context
+	cancelRoot             context.CancelFunc
+	mu                     sync.Mutex
+	closed                 bool
+	closeDone              chan struct{}
+	closeErr               error
+	active                 domain.SessionID
+	live                   map[domain.SessionID]domain.Session
+	pending                map[domain.SessionID]domain.Session
+	workers                map[domain.SessionID]*sessionWorker
+	created                map[domain.SessionID]createdProcess
+	history                map[domain.SessionID][]string
+	page                   map[domain.SessionID]int
+	followLatest           map[domain.SessionID]bool
+	optionsExpanded        map[domain.SessionID]bool
+	deliveryFailures       map[domain.SessionID]NotificationFailure
+	promptIndexes          map[domain.SessionID]map[string]int
+	promptSessions         map[string]domain.SessionID
+	pendingAuthorization   *AuthorizationChallenge
+	createFlow             *sessioncreation.Flow
+	creationEnvironment    sessioncreation.Environment
+	creationPreferenceMode string
+	creates                sync.WaitGroup
+	worker                 sync.WaitGroup
+	durableWork            sync.WaitGroup
 }
 type createdProcess struct {
 	request app.StartSessionRequest
@@ -967,7 +1126,6 @@ func New(
 		uiState:             options.UIState,
 		settings:            options.Settings,
 		providerPreferences: options.Providers,
-		replyRoutes:         options.ReplyRoutes,
 		stopper:             options.Stopper,
 		inputPreparer:       options.InputPreparer,
 		allowDocumentInput:  options.AllowDocumentInput,
@@ -981,7 +1139,6 @@ func New(
 		asyncResumer:        options.AsyncResumer,
 		sessionCloser:       options.SessionCloser,
 		turnLifecycle:       options.TurnLifecycle,
-		createDrafts:        options.CreateDrafts,
 		attachments:         options.Attachments,
 		runtimeEvents:       options.RuntimeEvents,
 		finals:              options.Finals,
@@ -996,6 +1153,10 @@ func New(
 		followLatest:        make(map[domain.SessionID]bool),
 		optionsExpanded:     make(map[domain.SessionID]bool),
 		deliveryFailures:    make(map[domain.SessionID]NotificationFailure),
+		promptIndexes:       make(map[domain.SessionID]map[string]int),
+		promptSessions:      make(map[string]domain.SessionID),
+		createFlow:          sessioncreation.New(),
+		creationEnvironment: options.CreationEnvironment,
 	}
 	for _, session := range options.Recovered {
 		if session.Status() == domain.SessionReady {
@@ -1066,6 +1227,7 @@ func (controller *Controller) Handle(
 	text := strings.TrimSpace(update.Text)
 	switch text {
 	case "/menu":
+		controller.cancelCreateDraft()
 		return controller.menuStatus("Меню"), nil
 	case "/status":
 		return controller.mainSurface(ctx)
@@ -1080,6 +1242,12 @@ func (controller *Controller) Handle(
 	case "/stop":
 		return controller.stopCurrent(ctx), nil
 	}
+	if decision, handled := controller.consumeCreateDirectoryNameV2(ctx, update); handled {
+		return decision, nil
+	}
+	if decision, handled := controller.consumeCreateDraftWorkdir(update); handled {
+		return decision, nil
+	}
 	if provider, workdir, ok := parseNew(text); ok {
 		decision, err := controller.create(ctx, update.ID, controller.localComputerID, provider, workdir)
 		if errors.Is(err, errProviderUnavailable) {
@@ -1090,20 +1258,44 @@ func (controller *Controller) Handle(
 	if sessionID, ok := parseUse(text); ok {
 		return controller.use(ctx, sessionID)
 	}
+	controller.mu.Lock()
+	activeSession := controller.active
+	controller.mu.Unlock()
+	messageID := "telegram-update:" + strconv.FormatInt(update.ID, 10)
+	promptText := joinPromptParts(update.Text, update.Caption)
+	if promptText == "" {
+		promptText = mediaPromptLabel(update.MediaKind)
+	}
+	if update.MediaKind == "voice" {
+		controller.publishPromptState(ctx, activeSession, messageID, promptText, "🙋‍♂")
+	} else {
+		controller.setPromptState(ctx, activeSession, messageID, promptText, "🙋‍♂")
+	}
 	prepared, rejection := controller.prepareInput(ctx, update)
 	if rejection != "" {
-		return controller.status(rejection), nil
+		controller.setPromptState(ctx, activeSession, messageID, promptText, "🙅‍♂")
+		return coordinator.Decision{Kind: coordinator.DecisionSkip}, nil
 	}
-	if update.ReplyToMessageID > 0 && controller.replyRoutes != nil {
-		sessionID, found, err := controller.replyRoutes.ResolveReply(ctx, update.ReplyToMessageID)
-		if err != nil {
-			return coordinator.Decision{}, fmt.Errorf("resolve replied Telegram message: %w", err)
-		}
-		if found {
-			return controller.enqueueSession(ctx, update.ID, sessionID, prepared), nil
-		}
+	if strings.TrimSpace(prepared.Text) != "" {
+		promptText = prepared.Text
+		controller.setPromptState(ctx, activeSession, messageID, promptText, "🙋‍♂")
 	}
-	return controller.enqueue(ctx, update.ID, prepared), nil
+	return controller.enqueue(ctx, update.ID, update.SourceMessageID, prepared), nil
+}
+
+func mediaPromptLabel(kind string) string {
+	switch kind {
+	case "voice":
+		return "Голосовое сообщение"
+	case "photo":
+		return "Фотография"
+	case "video":
+		return "Видео"
+	case "document":
+		return "Документ"
+	default:
+		return "Сообщение"
+	}
 }
 func (controller *Controller) prepareInput(ctx context.Context, update coordinator.Update) (PreparedInput, string) {
 	base := joinPromptParts(update.Text, update.Caption)
@@ -1224,18 +1416,18 @@ func (controller *Controller) handleCallback(ctx context.Context, update coordin
 		if callbackText == "new:claude" {
 			provider = domain.ProviderClaude
 		}
-		enabled, err := controller.providerEnabled(ctx, provider)
+		if _, err := controller.newSessionSurface(ctx); err != nil {
+			return coordinator.Decision{}, err
+		}
+		if err := controller.selectCreateProvider(ctx, provider); err != nil {
+			return withCallbackID(controller.status(unavailableNewSessionSurface().Text), update), nil
+		}
+		providers, err := controller.availableProviders(ctx)
 		if err != nil {
 			return coordinator.Decision{}, err
 		}
-		if !enabled {
-			return withCallbackID(controller.status(unavailableNewSessionSurface().Text), update), nil
-		}
-		if controller.createDrafts == nil {
-			return withCallbackID(controller.status("Сначала выберите и подтвердите компьютер и рабочую папку."), update), nil
-		}
-		draft, err := controller.createDrafts.ConfirmCreateDraft(ctx, provider, update.ID)
-		if err != nil || validateCreateDraft(draft, provider, true) != nil {
+		draft, err := controller.createFlow.Confirm(providers)
+		if err != nil {
 			return withCallbackID(controller.status("Не удалось подтвердить компьютер и рабочую папку."), update), nil
 		}
 		decision, err := controller.create(ctx, update.ID, draft.ComputerID, provider, draft.Workdir)
@@ -1312,7 +1504,7 @@ func (controller *Controller) mainSurface(ctx context.Context) (coordinator.Deci
 	if active != "" {
 		return controller.cardDecision(ctx, active, "")
 	}
-	return controller.menuStatus("Bria готова. Нет активной сессии. Выберите «Новая» или создайте сессию командой /new."), nil
+	return controller.menuStatus("Bria готова. Нет активной сессии. Выберите «Новая» в меню."), nil
 }
 func (controller *Controller) cardNavigation(ctx context.Context, action string) (coordinator.Decision, error) {
 	controller.mu.Lock()
@@ -1341,25 +1533,14 @@ func (controller *Controller) cardDecision(ctx context.Context, sessionID domain
 			items, _ = historyStore.LoadCardHistory(ctx, sessionID)
 		}
 	}
-	const pageBytes = 3200
-	pages := []string{}
-	if len(items) == 0 {
-		pages = []string{"Пока нет сообщений исполнителя."}
-	} else {
-		current := ""
-		for _, item := range items {
-			if len(current) > 0 && len(current)+len(item)+1 > pageBytes {
-				pages = append(pages, current)
-				current = ""
-			}
-			if current != "" {
-				current += "\n"
-			}
-			current += item
-		}
-		if current != "" {
-			pages = append(pages, current)
-		}
+	pageLimit, err := controller.cardPageLimit(ctx)
+	if err != nil {
+		return coordinator.Decision{}, err
+	}
+	semanticPages := paginateSemanticHistory(items, pageLimit)
+	pages := make([]string, len(semanticPages))
+	for index := range semanticPages {
+		pages[index] = semanticPages[index].Content
 	}
 	controller.mu.Lock()
 	page := controller.page[sessionID]
@@ -1451,7 +1632,11 @@ func (controller *Controller) semanticCard(ctx context.Context, sessionID domain
 			items, _ = historyStore.LoadCardHistory(ctx, sessionID)
 		}
 	}
-	pages := paginateSemanticHistory(items)
+	pageLimit, err := controller.cardPageLimit(ctx)
+	if err != nil {
+		return SemanticCard{}, err
+	}
+	pages := paginateSemanticHistory(items, pageLimit)
 	if page < 1 || page > len(pages) {
 		page = len(pages)
 		followLatest = true
@@ -1493,30 +1678,88 @@ func (controller *Controller) semanticCard(ctx context.Context, sessionID domain
 		SessionRowSizes: rowSizes, MakeActive: makeActive,
 	}, nil
 }
-func paginateSemanticHistory(items []string) []SemanticContentPage {
+func (controller *Controller) cardPageLimit(ctx context.Context) (int, error) {
+	const defaultLimit = 64
+	if controller.settings == nil {
+		return defaultLimit, nil
+	}
+	snapshot, err := controller.settings.Snapshot(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("load card page limit: %w", err)
+	}
+	switch snapshot.CardPageLimit {
+	case 32, 64, 128:
+		return snapshot.CardPageLimit, nil
+	default:
+		return 0, errors.New("card page limit must be 32, 64, or 128")
+	}
+}
+
+func paginateSemanticHistory(items []string, maxPages int) []SemanticContentPage {
 	if len(items) == 0 {
 		return []SemanticContentPage{{Content: "Пока нет сообщений исполнителя.", Anchors: []string{"empty"}}}
 	}
 	const pageBytes = 3200
-	pages := make([]SemanticContentPage, 0, 1)
+	pages := make([]SemanticContentPage, 0, maxPages)
 	current := SemanticContentPage{}
-	for index, item := range items {
-		separator := ""
-		if current.Content != "" {
-			separator = "\n"
+	appendCurrent := func() {
+		if current.Content == "" {
+			return
 		}
-		if current.Content != "" && len(current.Content)+len(separator)+len(item) > pageBytes {
+		if len(pages) == maxPages {
+			copy(pages, pages[1:])
+			pages[len(pages)-1] = current
+		} else {
 			pages = append(pages, current)
-			current = SemanticContentPage{}
-			separator = ""
 		}
-		current.Content += separator + item
-		current.Anchors = append(current.Anchors, "history:"+strconv.Itoa(index+1))
+		current = SemanticContentPage{}
 	}
-	if current.Content != "" {
-		pages = append(pages, current)
+	for index, item := range items {
+		parts := splitSemanticItem(item, pageBytes)
+		for partIndex, part := range parts {
+			separator := ""
+			if current.Content != "" {
+				separator = "\n"
+			}
+			if current.Content != "" && len(current.Content)+len(separator)+len(part) > pageBytes {
+				appendCurrent()
+				separator = ""
+			}
+			current.Content += separator + part
+			anchor := "history:" + strconv.Itoa(index+1)
+			if len(parts) > 1 {
+				anchor += ":part:" + strconv.Itoa(partIndex+1)
+			}
+			current.Anchors = append(current.Anchors, anchor)
+			if len(current.Content) == pageBytes {
+				appendCurrent()
+			}
+		}
 	}
+	appendCurrent()
 	return pages
+}
+
+func splitSemanticItem(item string, maxBytes int) []string {
+	if len(item) <= maxBytes {
+		return []string{item}
+	}
+	parts := make([]string, 0, (len(item)+maxBytes-1)/maxBytes)
+	for len(item) > 0 {
+		end := maxBytes
+		if end > len(item) {
+			end = len(item)
+		}
+		for end > 0 && end < len(item) && item[end]&0xc0 == 0x80 {
+			end--
+		}
+		if end == 0 {
+			end = maxBytes
+		}
+		parts = append(parts, item[:end])
+		item = item[end:]
+	}
+	return parts
 }
 func (controller *Controller) settingsStatus(ctx context.Context) (coordinator.Decision, error) {
 	result, err := controller.settingsSemanticResult(ctx)
@@ -2119,13 +2362,14 @@ func (controller *Controller) listSessions(ctx context.Context) (coordinator.Dec
 	decision.Keyboard = &keyboard
 	return decision, nil
 }
-func (controller *Controller) enqueue(ctx context.Context, updateID int64, input PreparedInput) coordinator.Decision {
+func (controller *Controller) enqueue(ctx context.Context, updateID, sourceMessageID int64, input PreparedInput) coordinator.Decision {
 	controller.mu.Lock()
 	active := controller.active
 	controller.mu.Unlock()
-	return controller.enqueueSession(ctx, updateID, active, input)
+	return controller.enqueueSession(ctx, updateID, sourceMessageID, active, input)
 }
-func (controller *Controller) enqueueSession(ctx context.Context, updateID int64, sessionID domain.SessionID, input PreparedInput) coordinator.Decision {
+func (controller *Controller) enqueueSession(ctx context.Context, updateID, sourceMessageID int64, sessionID domain.SessionID, input PreparedInput) coordinator.Decision {
+	messageID := "telegram-update:" + strconv.FormatInt(updateID, 10)
 	controller.mu.Lock()
 	worker := controller.workers[sessionID]
 	session, live := controller.live[sessionID]
@@ -2134,16 +2378,18 @@ func (controller *Controller) enqueueSession(ctx context.Context, updateID int64
 	closed := controller.closed
 	controller.mu.Unlock()
 	if closed {
-		return controller.status("Bria завершает работу.")
+		controller.setPromptState(ctx, sessionID, messageID, input.Text, "🙅‍♂")
+		return coordinator.Decision{Kind: coordinator.DecisionSkip}
 	}
 	if controller.durableInput != nil {
 		if sessionID == "" || (!live || !usable) && (!isPending || !acceptsDurableInput(pending.Status())) {
-			return controller.status("Нет активной или запускаемой сессии для запроса.")
+			controller.setPromptState(ctx, sessionID, messageID, input.Text, "🙅‍♂")
+			return coordinator.Decision{Kind: coordinator.DecisionSkip}
 		}
 		if updateID <= 0 {
-			return controller.status("Не удалось определить сообщение для надёжного сохранения.")
+			controller.setPromptState(ctx, sessionID, messageID, input.Text, "🙅‍♂")
+			return coordinator.Decision{Kind: coordinator.DecisionSkip}
 		}
-		messageID := "telegram-update:" + strconv.FormatInt(updateID, 10)
 		receipt, err := controller.durableInput.Accept(ctx, SessionInput{
 			SessionID:   sessionID,
 			MessageID:   messageID,
@@ -2151,36 +2397,87 @@ func (controller *Controller) enqueueSession(ctx context.Context, updateID int64
 			Attachments: append([]AttachmentRef(nil), input.Attachments...),
 		})
 		if err != nil {
-			return controller.status("Не удалось надёжно сохранить запрос. Запрос не принят.")
+			controller.setPromptState(ctx, sessionID, messageID, input.Text, "🙅‍♂")
+			return coordinator.Decision{Kind: coordinator.DecisionSkip}
 		}
 		if receipt.SessionID != sessionID || receipt.MessageID != messageID || receipt.Sequence == 0 {
-			return controller.status("Не удалось подтвердить надёжное сохранение запроса. Запрос не принят.")
+			controller.setPromptState(ctx, sessionID, messageID, input.Text, "🙅‍♂")
+			return coordinator.Decision{Kind: coordinator.DecisionSkip}
 		}
-		// The durable journal is the sole source for this user entry. Mirroring
-		// it into the independently persisted card history here is not atomic:
-		// a replay after a crash would either duplicate the entry or leave a
-		// commit gap. Signed UI composition projects accepted inputs from the
-		// durable source keyed by MessageID/Sequence.
-		return controller.status("Запрос принят для сессии " + string(sessionID) + ".")
+		return coordinator.Decision{Kind: coordinator.DecisionSkip}
 	}
 	if len(input.Attachments) != 0 {
-		return controller.status("Вложения требуют надёжного журнала и не приняты.")
+		controller.setPromptState(ctx, sessionID, messageID, input.Text, "🙅‍♂")
+		return coordinator.Decision{Kind: coordinator.DecisionSkip}
 	}
 	if sessionID == "" || !live || !usable {
-		return controller.status("Нет активной сессии с запущенным процессом.")
+		controller.setPromptState(ctx, sessionID, messageID, input.Text, "🙅‍♂")
+		return coordinator.Decision{Kind: coordinator.DecisionSkip}
 	}
 	if worker == nil {
-		return controller.status("Нет активной сессии с запущенным процессом.")
+		controller.setPromptState(ctx, sessionID, messageID, input.Text, "🙅‍♂")
+		return coordinator.Decision{Kind: coordinator.DecisionSkip}
 	}
 	select {
-	case worker.queue <- queuedTurn{text: input.Text, messageID: "telegram-update:" + strconv.FormatInt(updateID, 10)}:
-		controller.appendUserHistory(sessionID, input.Text)
-		return controller.status("Запрос принят для сессии " + string(sessionID) + ".")
+	case worker.queue <- queuedTurn{text: input.Text, messageID: messageID}:
+		controller.setPromptState(ctx, sessionID, messageID, input.Text, "👨‍💻")
+		return coordinator.Decision{Kind: coordinator.DecisionSkip}
 	case <-controller.rootContext.Done():
-		return controller.status("Bria завершает работу.")
+		controller.setPromptState(ctx, sessionID, messageID, input.Text, "🙅‍♂")
+		return coordinator.Decision{Kind: coordinator.DecisionSkip}
 	default:
-		return controller.status("Очередь сессии " + string(sessionID) + " переполнена.")
+		controller.setPromptState(ctx, sessionID, messageID, input.Text, "🙅‍♂")
+		return coordinator.Decision{Kind: coordinator.DecisionSkip}
 	}
+}
+
+func (controller *Controller) setPromptState(ctx context.Context, sessionID domain.SessionID, messageID, text, emoji string) {
+	text = strings.TrimSpace(text)
+	if sessionID == "" || strings.TrimSpace(messageID) == "" || text == "" {
+		return
+	}
+	entry := emoji + " " + text
+	if store, ok := controller.uiState.(CardPromptStore); ok {
+		if err := store.SetCardPrompt(ctx, sessionID, messageID, entry); err == nil {
+			if historyStore, ok := controller.uiState.(CardHistoryStore); ok {
+				if history, err := historyStore.LoadCardHistory(ctx, sessionID); err == nil {
+					controller.mu.Lock()
+					controller.history[sessionID] = history
+					controller.promptSessions[messageID] = sessionID
+					controller.mu.Unlock()
+					return
+				}
+			}
+		}
+	}
+	controller.mu.Lock()
+	defer controller.mu.Unlock()
+	indexes := controller.promptIndexes[sessionID]
+	if indexes == nil {
+		indexes = make(map[string]int)
+		controller.promptIndexes[sessionID] = indexes
+	}
+	if index, ok := indexes[messageID]; ok && index >= 0 && index < len(controller.history[sessionID]) {
+		controller.history[sessionID][index] = entry
+	} else {
+		indexes[messageID] = len(controller.history[sessionID])
+		controller.history[sessionID] = append(controller.history[sessionID], entry)
+	}
+	controller.promptSessions[messageID] = sessionID
+}
+
+func (controller *Controller) publishPromptState(ctx context.Context, sessionID domain.SessionID, messageID, text, emoji string) {
+	controller.setPromptState(ctx, sessionID, messageID, text, emoji)
+	controller.mu.Lock()
+	delete(controller.promptSessions, messageID)
+	controller.mu.Unlock()
+	controller.notify(ctx, Notification{
+		OperationID:    messageID + ":prompt-status:" + emoji,
+		ConversationID: controller.ownerPrivateChatID,
+		SessionID:      sessionID,
+		Kind:           NotificationPromptStatus,
+		Text:           emoji,
+	})
 }
 func acceptsDurableInput(status domain.SessionStatus) bool {
 	switch status {
@@ -2212,14 +2509,17 @@ func (controller *Controller) ProcessDurableInput(
 	}
 	if _, ok := controller.submitter.(sessionruntime.InteractiveSubmitter); !ok {
 		if _, structured := controller.submitter.(PreparedTurnSubmitter); !structured {
+			controller.publishPromptState(ctx, input.SessionID, input.MessageID, string(input.Payload), "🙅‍♂")
 			return receipt, errors.New("provider does not expose exact durable acceptance")
 		}
 	}
 	if len(input.Attachments) != 0 {
 		if _, ok := controller.submitter.(PreparedTurnSubmitter); !ok {
+			controller.publishPromptState(ctx, input.SessionID, input.MessageID, string(input.Payload), "🙅‍♂")
 			return receipt, errors.New("provider does not support structured attachments")
 		}
 		if controller.attachments == nil {
+			controller.publishPromptState(ctx, input.SessionID, input.MessageID, string(input.Payload), "🙅‍♂")
 			return receipt, errors.New("attachment custody lifecycle is not configured")
 		}
 	}
@@ -2227,56 +2527,119 @@ func (controller *Controller) ProcessDurableInput(
 	worker := controller.workers[input.SessionID]
 	session, usable := controller.usableLocked(controller.live[input.SessionID])
 	closed := controller.closed
+	if !closed {
+		controller.durableWork.Add(1)
+	}
 	controller.mu.Unlock()
 	if closed {
+		controller.publishPromptState(ctx, input.SessionID, input.MessageID, string(input.Payload), "🙅‍♂")
 		return receipt, errors.New("Telegram controller is closed")
 	}
+	defer controller.durableWork.Done()
+	processContext, cancelProcess := context.WithCancel(ctx)
+	stopRootCancellation := context.AfterFunc(controller.rootContext, cancelProcess)
+	defer func() {
+		stopRootCancellation()
+		cancelProcess()
+	}()
+	ctx = processContext
 	if worker == nil || !usable || session.ID() != input.SessionID {
+		controller.publishPromptState(ctx, input.SessionID, input.MessageID, string(input.Payload), "🙅‍♂")
 		return receipt, errors.New("durable input session is not live")
 	}
 	binding, hasBinding := session.Binding()
 	if len(input.Attachments) != 0 && (!hasBinding || strings.TrimSpace(binding.SessionID) == "") {
+		controller.publishPromptState(ctx, input.SessionID, input.MessageID, string(input.Payload), "🙅‍♂")
 		return receipt, errors.New("attachment session has no exact provider binding")
 	}
 	if worker.hasActiveTurn() {
-		return receipt, errors.New("durable input session already has an active turn")
-	}
-	acceptedOnce := false
-	completion, accepted := worker.runTurnWithAcceptance(ctx, queuedTurn{
-		text: string(input.Payload), messageID: input.MessageID, attachments: append([]AttachmentRef(nil), input.Attachments...),
-	}, func(callbackCtx context.Context) error {
-		if acceptedOnce {
-			return errors.New("provider repeated durable acceptance")
+		steerer, ok := controller.submitter.(sessionruntime.CurrentTurnSubmitter)
+		if !ok {
+			controller.publishPromptState(ctx, input.SessionID, input.MessageID, string(input.Payload), "🙅‍♂")
+			return receipt, errors.New("provider does not support current-turn input")
 		}
-		acceptedOnce = true
-		if err := callbacks.OnAccepted(callbackCtx, DurableInputAcceptance{
-			SessionID: input.SessionID, MessageID: input.MessageID, Sequence: input.Sequence,
-		}); err != nil {
-			return err
+		if len(input.Attachments) != 0 {
+			controller.publishPromptState(ctx, input.SessionID, input.MessageID, string(input.Payload), "🙅‍♂")
+			return receipt, errors.New("current-turn attachments require turn-scoped custody")
 		}
-		return nil
-	})
-	receipt.Accepted = accepted
-	receipt.Completion = completion
-	if !accepted {
-		return receipt, errors.New("provider did not durably accept input")
+		accepted := false
+		err := steerer.SubmitCurrentWithCallbacks(ctx, input.SessionID, sessionruntime.StructuredInput{Text: string(input.Payload)}, sessionruntime.TurnCallbacks{
+			MessageID: input.MessageID,
+			OnAccepted: func(messageID string) error {
+				if accepted || messageID != input.MessageID {
+					return errors.New("provider returned invalid current-turn acceptance")
+				}
+				if err := callbacks.OnAccepted(ctx, DurableInputAcceptance{SessionID: input.SessionID, MessageID: input.MessageID, Sequence: input.Sequence}); err != nil {
+					return err
+				}
+				accepted = true
+				controller.publishPromptState(context.WithoutCancel(ctx), input.SessionID, input.MessageID, string(input.Payload), "👨‍💻")
+				return nil
+			},
+		})
+		receipt.Accepted = accepted
+		if err != nil || !accepted {
+			controller.publishPromptState(context.WithoutCancel(ctx), input.SessionID, input.MessageID, string(input.Payload), "🙅‍♂")
+			return receipt, errors.Join(err, errors.New("provider did not accept current-turn input"))
+		}
+		receipt.Completion = DurableInputSucceeded
+		return receipt, nil
 	}
-	if err := turnprocessing.CompleteAttachments(ctx, controller.attachments, turnprocessing.Request{
-		SessionID: input.SessionID, ProviderSessionID: binding.SessionID, MessageID: input.MessageID,
-		Input: PreparedInput{Text: string(input.Payload), Attachments: append([]AttachmentRef(nil), input.Attachments...)},
-	}); err != nil {
-		receipt.Completion = DurableInputFailed
-		return receipt, errors.New("complete attachment custody")
+	type turnResult struct {
+		completion DurableInputCompletion
+		accepted   bool
+		err        error
 	}
-	return receipt, nil
-}
-func (controller *Controller) appendUserHistory(sessionID domain.SessionID, text string) {
-	entry := "Вы: " + strings.TrimSpace(text)
-	controller.mu.Lock()
-	controller.history[sessionID] = append(controller.history[sessionID], entry)
-	controller.mu.Unlock()
-	if historyStore, ok := controller.uiState.(CardHistoryStore); ok {
-		_ = historyStore.AppendCardHistory(controller.rootContext, sessionID, entry)
+	acceptedSignal := make(chan struct{}, 1)
+	resultSignal := make(chan turnResult, 1)
+	controller.durableWork.Add(1)
+	go func() {
+		defer controller.durableWork.Done()
+		acceptedOnce := false
+		completion, accepted := worker.runTurnWithAcceptance(ctx, queuedTurn{
+			text: string(input.Payload), messageID: input.MessageID, attachments: append([]AttachmentRef(nil), input.Attachments...),
+		}, func(callbackCtx context.Context) error {
+			if acceptedOnce {
+				return errors.New("provider repeated durable acceptance")
+			}
+			acceptedOnce = true
+			if err := callbacks.OnAccepted(callbackCtx, DurableInputAcceptance{
+				SessionID: input.SessionID, MessageID: input.MessageID, Sequence: input.Sequence,
+			}); err != nil {
+				return err
+			}
+			controller.publishPromptState(context.WithoutCancel(callbackCtx), input.SessionID, input.MessageID, string(input.Payload), "👨‍💻")
+			acceptedSignal <- struct{}{}
+			return nil
+		})
+		var completionErr error
+		if accepted {
+			completionErr = turnprocessing.CompleteAttachments(context.WithoutCancel(ctx), controller.attachments, turnprocessing.Request{
+				SessionID: input.SessionID, ProviderSessionID: binding.SessionID, MessageID: input.MessageID,
+				Input: PreparedInput{Text: string(input.Payload), Attachments: append([]AttachmentRef(nil), input.Attachments...)},
+			})
+		}
+		resultSignal <- turnResult{completion: completion, accepted: accepted, err: completionErr}
+	}()
+	select {
+	case <-acceptedSignal:
+		receipt.Accepted = true
+		receipt.Completion = DurableInputSucceeded
+		return receipt, nil
+	case result := <-resultSignal:
+		receipt.Accepted = result.accepted
+		receipt.Completion = result.completion
+		if !result.accepted {
+			controller.publishPromptState(context.WithoutCancel(ctx), input.SessionID, input.MessageID, string(input.Payload), "🙅‍♂")
+			return receipt, errors.New("provider did not durably accept input")
+		}
+		if result.err != nil {
+			return receipt, errors.New("complete attachment custody")
+		}
+		return receipt, nil
+	case <-ctx.Done():
+		controller.publishPromptState(context.WithoutCancel(ctx), input.SessionID, input.MessageID, string(input.Payload), "🙅‍♂")
+		return receipt, ctx.Err()
 	}
 }
 func (controller *Controller) stopCurrent(ctx context.Context) coordinator.Decision {
@@ -2408,11 +2771,6 @@ func (worker *sessionWorker) runTurnWithAcceptance(
 			Input: PreparedInput{Text: turn.text, Attachments: append([]AttachmentRef(nil), turn.attachments...)},
 		}, turnprocessing.Callbacks{
 			MarkInputAccepted: onAccepted,
-			AfterAccepted: func() {
-				if onAccepted != nil {
-					worker.controller.appendUserHistory(worker.sessionID, turn.text)
-				}
-			},
 			OnEvent: func(event sessionruntime.TurnEvent) error {
 				eventIndex++
 				worker.emitTurnEvent(turn.messageID, eventIndex, event)
@@ -2646,6 +3004,7 @@ func (controller *Controller) closeWithin(ctx context.Context) error {
 	workersDone := make(chan struct{})
 	go func() {
 		controller.worker.Wait()
+		controller.durableWork.Wait()
 		close(workersDone)
 	}()
 	workersPending := true

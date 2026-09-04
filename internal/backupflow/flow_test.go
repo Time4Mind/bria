@@ -39,7 +39,7 @@ func TestProductionLayoutUsesCurrentStateSidecarsAndExplicitSemanticExports(t *t
 	root := t.TempDir()
 	sources := backupflow.ProductionSources{
 		StatePath:                     filepath.Join(root, "state", "sessions.json"),
-		SessionSidecarPaths:           []string{filepath.Join(root, "state", "sessions.json.telegram-reply-routes.json")},
+		SessionSidecarPaths:           []string{filepath.Join(root, "state", "sessions.json.sidecar.json")},
 		ComputerCatalogExportPath:     filepath.Join(root, "exports", "computers.json"),
 		UndeliveredMessagesExportPath: filepath.Join(root, "exports", "undelivered.json"),
 		TextHistoryExportPath:         filepath.Join(root, "exports", "text-history"),
@@ -69,7 +69,7 @@ func TestProductionLayoutUsesCurrentStateSidecarsAndExplicitSemanticExports(t *t
 		t.Fatalf("source root = %q, want %q", sourceRoot, root)
 	}
 	if layout.Settings != "state/sessions.json.settings.json" || layout.Sessions != "state/sessions.json" ||
-		!reflect.DeepEqual(layout.SessionSidecars, []string{"state/sessions.json.telegram-reply-routes.json"}) ||
+		!reflect.DeepEqual(layout.SessionSidecars, []string{"state/sessions.json.sidecar.json"}) ||
 		layout.UndeliveredMessages != "exports/undelivered.json" {
 		t.Fatalf("production layout = %#v", layout)
 	}

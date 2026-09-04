@@ -352,10 +352,18 @@ const (
 	EffectShowStatus                           CallbackEffect = "show_status"
 	EffectOpenSettings                         CallbackEffect = "open_settings"
 	EffectOpenMenu                             CallbackEffect = "open_menu"
+	EffectSelectCreateCodex                    CallbackEffect = "select_create_codex"
+	EffectSelectCreateClaude                   CallbackEffect = "select_create_claude"
+	EffectEditCreateWorkdir                    CallbackEffect = "edit_create_workdir"
+	EffectConfirmCreate                        CallbackEffect = "confirm_create"
+	EffectCreateChoice                         CallbackEffect = "create_choice"
+	EffectNavigateCreate                       CallbackEffect = "navigate_create"
+	EffectAdvanceCreate                        CallbackEffect = "advance_create"
 	EffectCreateCodex                          CallbackEffect = "create_codex"
 	EffectCreateClaude                         CallbackEffect = "create_claude"
 	EffectToggleSettingsScreen                 CallbackEffect = "toggle_settings_screen"
 	EffectToggleSettingsDetail                 CallbackEffect = "toggle_settings_detail"
+	EffectChangeSettings                       CallbackEffect = "change_settings"
 	EffectAuthorizeCodex                       CallbackEffect = "authorize_codex"
 	EffectAuthorizeClaude                      CallbackEffect = "authorize_claude"
 	EffectInteractionChoice                    CallbackEffect = "interaction_choice"
@@ -363,6 +371,9 @@ const (
 	EffectInteractionDecline                   CallbackEffect = "interaction_decline"
 	EffectInteractionCancel                    CallbackEffect = "interaction_cancel"
 	EffectInteractionOther                     CallbackEffect = "interaction_other"
+	EffectInteractionPrevious                  CallbackEffect = "interaction_previous"
+	EffectInteractionNext                      CallbackEffect = "interaction_next"
+	EffectInteractionSubmit                    CallbackEffect = "interaction_submit"
 	EffectOutboundConfirmDelivered             CallbackEffect = "outbound_confirm_delivered"
 	EffectOutboundRetryPossibleDuplicate       CallbackEffect = "outbound_retry_possible_duplicate"
 	EffectCallbackEffectConfirmed              CallbackEffect = "callback_effect_confirmed"
@@ -429,12 +440,12 @@ func PlanAcceptedCallback(callback AcceptedCallback) (CallbackPlan, error) {
 	var effect CallbackEffect
 	switch callback.Action {
 	case telegramui.ActionPagePrevious, telegramui.ActionPageNext:
-		if callback.Target.Page < 1 || callback.Target.FollowLatest || callback.Target.SessionSlot != 0 || callback.Target.InteractionChoice != 0 {
+		if callback.Target.Page < 1 || callback.Target.FollowLatest || callback.Target.SessionSlot != 0 || callback.Target.InteractionChoice != 0 || callback.Target.Choice != 0 {
 			return CallbackPlan{}, errors.New("page callback target is invalid")
 		}
 		effect = EffectProjectPage
 	case telegramui.ActionPageLatest:
-		if callback.Target.Page != 0 || !callback.Target.FollowLatest || callback.Target.SessionSlot != 0 || callback.Target.InteractionChoice != 0 {
+		if callback.Target.Page != 0 || !callback.Target.FollowLatest || callback.Target.SessionSlot != 0 || callback.Target.InteractionChoice != 0 || callback.Target.Choice != 0 {
 			return CallbackPlan{}, errors.New("latest-page callback target is invalid")
 		}
 		effect = EffectProjectPage
@@ -462,6 +473,25 @@ func PlanAcceptedCallback(callback AcceptedCallback) (CallbackPlan, error) {
 		effect = EffectOpenSettings
 	case telegramui.ActionMenuBack:
 		effect = EffectOpenMenu
+	case telegramui.ActionCreateSelectCodex:
+		effect = EffectSelectCreateCodex
+	case telegramui.ActionCreateSelectClaude:
+		effect = EffectSelectCreateClaude
+	case telegramui.ActionCreateWorkdir:
+		effect = EffectEditCreateWorkdir
+	case telegramui.ActionCreateConfirm:
+		effect = EffectConfirmCreate
+	case telegramui.ActionCreateChoice:
+		if callback.Target.Choice < 1 || callback.Target.Page != 0 || callback.Target.FollowLatest ||
+			callback.Target.SessionSlot != 0 || callback.Target.InteractionChoice != 0 {
+			return CallbackPlan{}, errors.New("creation choice target is invalid")
+		}
+		effect = EffectCreateChoice
+	case telegramui.ActionCreatePrevious, telegramui.ActionCreateFirst, telegramui.ActionCreateNext:
+		effect = EffectNavigateCreate
+	case telegramui.ActionCreateUp, telegramui.ActionCreatePick, telegramui.ActionCreateDirectoryNew,
+		telegramui.ActionCreateBack, telegramui.ActionCreateFresh:
+		effect = EffectAdvanceCreate
 	case telegramui.ActionCreateCodex:
 		effect = EffectCreateCodex
 	case telegramui.ActionCreateClaude:
@@ -470,12 +500,21 @@ func PlanAcceptedCallback(callback AcceptedCallback) (CallbackPlan, error) {
 		effect = EffectToggleSettingsScreen
 	case telegramui.ActionSettingsDetail:
 		effect = EffectToggleSettingsDetail
+	case telegramui.ActionSettingsPageLimit, telegramui.ActionSettingsContinueExisting,
+		telegramui.ActionSettingsTechnicalActions, telegramui.ActionSettingsBackgroundQuestions,
+		telegramui.ActionSettingsBackgroundErrors, telegramui.ActionSettingsArchiveRecommendations,
+		telegramui.ActionSettingsDefaultProvider, telegramui.ActionSettingsDefaultWorkdir, telegramui.ActionSettingsClearCreationDefaults,
+		telegramui.ActionSettingsLifetimeNever,
+		telegramui.ActionSettingsLifetime6Hours, telegramui.ActionSettingsLifetime12Hours,
+		telegramui.ActionSettingsLifetime24Hours, telegramui.ActionSettingsLifetime48Hours,
+		telegramui.ActionSettingsProviderCodex, telegramui.ActionSettingsProviderClaude:
+		effect = EffectChangeSettings
 	case telegramui.ActionAuthorizeCodex:
 		effect = EffectAuthorizeCodex
 	case telegramui.ActionAuthorizeClaude:
 		effect = EffectAuthorizeClaude
 	case telegramui.ActionInteractionChoice:
-		if callback.Target.Page != 0 || callback.Target.FollowLatest || callback.Target.SessionSlot != 0 || callback.Target.InteractionChoice < 1 {
+		if callback.Target.Page != 0 || callback.Target.FollowLatest || callback.Target.SessionSlot != 0 || callback.Target.InteractionChoice < 1 || callback.Target.Choice != 0 {
 			return CallbackPlan{}, errors.New("interaction choice target is invalid")
 		}
 		effect = EffectInteractionChoice
@@ -487,6 +526,12 @@ func PlanAcceptedCallback(callback AcceptedCallback) (CallbackPlan, error) {
 		effect = EffectInteractionCancel
 	case telegramui.ActionInteractionOther:
 		effect = EffectInteractionOther
+	case telegramui.ActionInteractionPrevious:
+		effect = EffectInteractionPrevious
+	case telegramui.ActionInteractionNext:
+		effect = EffectInteractionNext
+	case telegramui.ActionInteractionSubmit:
+		effect = EffectInteractionSubmit
 	case telegramui.ActionOutboundConfirmDelivered:
 		effect = EffectOutboundConfirmDelivered
 	case telegramui.ActionOutboundRetryPossibleDuplicate:
@@ -516,7 +561,7 @@ func PlanAcceptedCallback(callback AcceptedCallback) (CallbackPlan, error) {
 	default:
 		return CallbackPlan{}, fmt.Errorf("unsupported callback action %q", callback.Action)
 	}
-	if effect != EffectProjectPage && effect != EffectInteractionChoice && callback.Target != (telegramui.ButtonTarget{}) {
+	if effect != EffectProjectPage && effect != EffectInteractionChoice && effect != EffectCreateChoice && callback.Target != (telegramui.ButtonTarget{}) {
 		return CallbackPlan{}, errors.New("non-page callback must not contain a target")
 	}
 	global := telegramui.IsGlobalAction(callback.Action)

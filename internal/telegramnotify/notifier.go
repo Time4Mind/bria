@@ -134,6 +134,8 @@ func notificationKind(kind telegramcontroller.NotificationKind) (string, error) 
 		return "итог", nil
 	case telegramcontroller.NotificationError:
 		return "ошибка", nil
+	case telegramcontroller.NotificationPromptStatus:
+		return "статус запроса", nil
 	default:
 		return "", errors.New("unsupported Telegram notification kind")
 	}

@@ -114,7 +114,7 @@ func TestControllerLiveCardFlowCoversCreateSubmitAndCallback(t *testing.T) {
 		ID: 2, Kind: coordinator.UpdateMessage, ActorID: owner, ConversationID: chat,
 		ConversationKind: "private", Text: "Ответь OK",
 	})
-	if err != nil || accepted.Kind != coordinator.DecisionStatus || !strings.Contains(accepted.Status.Text, "принят") {
+	if err != nil || accepted.Kind != coordinator.DecisionSkip {
 		t.Fatalf("submit decision = %#v, err=%v", accepted, err)
 	}
 	select {

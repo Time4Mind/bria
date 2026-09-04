@@ -5,7 +5,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -15,17 +14,14 @@ import (
 	"bria/internal/coordinator"
 	"bria/internal/domain"
 	"bria/internal/sessionruntime"
-	"bria/internal/storage"
 	"bria/internal/telegram"
 	"bria/internal/telegrambridge"
 	"bria/internal/telegramcontroller"
-	"bria/internal/telegramnotify"
 )
 
 // TestTelegramReplyAndMediaSurviveTransportNormalization proves the input
-// metadata that routing and media processing consume at their shared public
-// boundary. It also proves a reply can target its origin session without
-// changing the user's active session.
+// metadata that media processing consumes at its public boundary. It also
+// proves reply metadata never overrides ordinary active-session routing.
 func TestTelegramReplyAndMediaSurviveTransportNormalization(t *testing.T) {
 	const owner = int64(42)
 	body := `{"ok":true,"result":[
@@ -77,46 +73,11 @@ func TestTelegramReplyAndMediaSurviveTransportNormalization(t *testing.T) {
 
 	active := mustIntegrationReadySession(t, "11111111-1111-4111-9111-111111111111", "intent-active", domain.ProviderCodex, "codex-active")
 	background := mustIntegrationReadySession(t, "22222222-2222-4222-9222-222222222222", "intent-background", domain.ProviderClaude, "claude-background")
-	routePath := filepath.Join(t.TempDir(), "telegram-reply-routes.json")
-	routes, err := storage.OpenTelegramReplyRouteStore(routePath, owner, owner)
-	if err != nil {
-		t.Fatalf("open durable reply routes: %v", err)
-	}
-	notificationClient, err := telegram.NewClient("123:acceptance-token", integrationHTTPFunc(func(request *http.Request) (*http.Response, error) {
-		if !strings.HasSuffix(request.URL.Path, "/sendMessage") {
-			return nil, errors.New("unexpected Telegram notification request")
-		}
-		return &http.Response{
-			StatusCode: http.StatusOK, Header: make(http.Header),
-			Body: io.NopCloser(strings.NewReader(`{"ok":true,"result":{"message_id":190,"from":{"id":600,"is_bot":true},"chat":{"id":42,"type":"private"},"text":"done"}}`)),
-		}, nil
-	}), telegram.Options{})
-	if err != nil {
-		t.Fatalf("create notification client: %v", err)
-	}
-	notifier, err := telegramnotify.NewWithOptions(notificationClient, telegramnotify.Options{
-		ReceiptRecorder: storageReceiptRecorder{store: routes},
-	})
-	if err != nil {
-		t.Fatalf("create receipt-recording notifier: %v", err)
-	}
-	if err := notifier.Notify(context.Background(), telegramcontroller.Notification{
-		ConversationID: owner, SessionID: background.ID(), Kind: telegramcontroller.NotificationFinal, Text: "background done",
-	}); err != nil {
-		t.Fatalf("deliver confirmed background final: %v", err)
-	}
-	routes, err = storage.OpenTelegramReplyRouteStore(routePath, owner, owner)
-	if err != nil {
-		t.Fatalf("reopen durable reply routes: %v", err)
-	}
 	submitter := &capturingSubmitter{calls: make(chan submittedTurn, 2)}
 	controller, err := telegramcontroller.New(
 		owner, owner, "local", staticCreator{session: active},
 		&integrationSessions{byID: map[domain.SessionID]domain.Session{active.ID(): active, background.ID(): background}},
-		submitter, discardNotifier{}, telegramcontroller.Options{
-			Recovered:   []domain.Session{active, background},
-			ReplyRoutes: routes,
-		},
+		submitter, discardNotifier{}, telegramcontroller.Options{Recovered: []domain.Session{active, background}},
 	)
 	if err != nil {
 		t.Fatalf("create Telegram controller: %v", err)
@@ -128,15 +89,15 @@ func TestTelegramReplyAndMediaSurviveTransportNormalization(t *testing.T) {
 	}); err != nil || decision.Kind != coordinator.DecisionStatus {
 		t.Fatalf("select active session = (%#v, %v)", decision, err)
 	}
-	if decision, err := controller.Handle(context.Background(), updates[0]); err != nil || decision.Kind != coordinator.DecisionStatus {
+	if decision, err := controller.Handle(context.Background(), updates[0]); err != nil || decision.Kind != coordinator.DecisionSkip {
 		t.Fatalf("route normalized reply = (%#v, %v)", decision, err)
 	}
-	assertSubmittedTurn(t, submitter.calls, submittedTurn{sessionID: background.ID(), text: "reply to background"})
+	assertSubmittedTurn(t, submitter.calls, submittedTurn{sessionID: active.ID(), text: "reply to background"})
 
 	if decision, err := controller.Handle(context.Background(), coordinator.Update{
 		ID: 106, Kind: coordinator.UpdateMessage, ActorID: owner, ConversationID: owner,
 		ConversationKind: "private", Text: "ordinary active turn",
-	}); err != nil || decision.Kind != coordinator.DecisionStatus {
+	}); err != nil || decision.Kind != coordinator.DecisionSkip {
 		t.Fatalf("submit ordinary active turn = (%#v, %v)", decision, err)
 	}
 	assertSubmittedTurn(t, submitter.calls, submittedTurn{sessionID: active.ID(), text: "ordinary active turn"})
@@ -193,7 +154,7 @@ func TestProductSurfacesExposeNoClearAction(t *testing.T) {
 		ID: 9, Kind: coordinator.UpdateMessage, ActorID: owner, ConversationID: owner,
 		ConversationKind: "private", Text: "/clear",
 	})
-	if err != nil || command.Kind != coordinator.DecisionStatus {
+	if err != nil || command.Kind != coordinator.DecisionSkip {
 		t.Fatalf("literal /clear prompt = (%#v, %v), want ordinary accepted input", command, err)
 	}
 	assertSubmittedTurn(t, submitter.calls, submittedTurn{sessionID: session.ID(), text: "/clear"})
@@ -229,22 +190,6 @@ type singleTelegramResponse struct {
 	mu    sync.Mutex
 	body  string
 	calls int
-}
-
-type integrationHTTPFunc func(*http.Request) (*http.Response, error)
-
-func (function integrationHTTPFunc) Do(request *http.Request) (*http.Response, error) {
-	return function(request)
-}
-
-type storageReceiptRecorder struct {
-	store *storage.TelegramReplyRouteStore
-}
-
-func (recorder storageReceiptRecorder) RecordOutboundReceipt(ctx context.Context, receipt telegramnotify.OutboundReceipt) error {
-	return recorder.store.RecordOutboundReceipt(ctx, storage.TelegramOutboundReceipt{
-		MessageID: receipt.MessageID, SessionID: receipt.SessionID,
-	})
 }
 
 func (client *singleTelegramResponse) Do(request *http.Request) (*http.Response, error) {

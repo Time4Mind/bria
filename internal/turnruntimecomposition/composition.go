@@ -127,6 +127,13 @@ func observeSubmitter(submitter sessionruntime.Submitter, logger *safelog.Logger
 	}
 	providers := sessionStoreProviderResolver{store: sessions}
 	if prepared, ok := submitter.(observabilitycomposition.PreparedRuntime); ok {
+		if current, ok := submitter.(observabilitycomposition.PreparedCurrentRuntime); ok {
+			wrapped, err := observabilitycomposition.NewPreparedCurrent(current, recorder, providers)
+			if err == nil {
+				return wrapped
+			}
+			return submitter
+		}
 		wrapped, err := observabilitycomposition.NewPrepared(prepared, recorder, providers)
 		if err == nil {
 			return wrapped
@@ -134,6 +141,13 @@ func observeSubmitter(submitter sessionruntime.Submitter, logger *safelog.Logger
 		return submitter
 	}
 	if runtime, ok := submitter.(observabilitycomposition.Runtime); ok {
+		if current, ok := submitter.(observabilitycomposition.CurrentRuntime); ok {
+			wrapped, err := observabilitycomposition.NewCurrent(current, recorder, providers)
+			if err == nil {
+				return wrapped
+			}
+			return submitter
+		}
 		wrapped, err := observabilitycomposition.New(runtime, recorder, providers)
 		if err == nil {
 			return wrapped

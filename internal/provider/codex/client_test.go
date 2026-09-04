@@ -701,6 +701,122 @@ func TestInterruptRequestUsesOfficialShape(t *testing.T) {
 	}
 }
 
+func TestSteerTurnUsesOfficialShapeInsideActiveTurn(t *testing.T) {
+	clientInput, serverOutput := io.Pipe()
+	serverInput, clientOutput := io.Pipe()
+	defer clientInput.Close()
+	defer serverInput.Close()
+	defer clientOutput.Close()
+	defer serverOutput.Close()
+
+	serverDone := make(chan error, 1)
+	go func() {
+		decoder := json.NewDecoder(serverInput)
+		encoder := json.NewEncoder(serverOutput)
+		var request struct {
+			ID     codex.RequestID `json:"id"`
+			Method string          `json:"method"`
+			Params json.RawMessage `json:"params"`
+		}
+		for _, response := range []any{
+			map[string]any{"id": 1, "result": map[string]any{"userAgent": "codex-cli/current"}},
+			map[string]any{"id": 2, "result": map[string]any{"thread": map[string]any{"id": "thread-1"}}},
+			map[string]any{"id": 3, "result": map[string]any{"turn": map[string]any{"id": "turn-1"}}},
+		} {
+			if err := decoder.Decode(&request); err != nil {
+				serverDone <- err
+				return
+			}
+			if err := encoder.Encode(response); err != nil {
+				serverDone <- err
+				return
+			}
+			if request.Method == "initialize" {
+				var initialized map[string]any
+				if err := decoder.Decode(&initialized); err != nil {
+					serverDone <- err
+					return
+				}
+			}
+		}
+		if err := decoder.Decode(&request); err != nil {
+			serverDone <- err
+			return
+		}
+		var params struct {
+			ThreadID            string `json:"threadId"`
+			ExpectedTurnID      string `json:"expectedTurnId"`
+			ClientUserMessageID string `json:"clientUserMessageId"`
+			Input               []struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			} `json:"input"`
+		}
+		if json.Unmarshal(request.Params, &params) != nil || request.ID != 4 || request.Method != "turn/steer" ||
+			params.ThreadID != "thread-1" || params.ExpectedTurnID != "turn-1" ||
+			params.ClientUserMessageID != "telegram-update:2" || len(params.Input) != 1 ||
+			params.Input[0].Type != "text" || params.Input[0].Text != "follow up" {
+			serverDone <- errors.New("unexpected turn/steer request")
+			return
+		}
+		if err := encoder.Encode(map[string]any{"id": 4, "result": map[string]any{"turnId": "turn-1"}}); err != nil {
+			serverDone <- err
+			return
+		}
+		if err := encoder.Encode(map[string]any{
+			"method": "item/completed",
+			"params": map[string]any{"threadId": "thread-1", "turnId": "turn-1", "item": map[string]any{
+				"type": "agentMessage", "id": "final-1", "text": "done", "phase": "final_answer",
+			}},
+		}); err != nil {
+			serverDone <- err
+			return
+		}
+		serverDone <- encoder.Encode(map[string]any{
+			"method": "turn/completed",
+			"params": map[string]any{"threadId": "thread-1", "turn": map[string]any{
+				"id": "turn-1", "status": "completed", "error": nil,
+			}},
+		})
+	}()
+
+	client, err := codex.NewClient(clientInput, clientOutput, codex.Options{
+		ClientInfo: codex.ClientInfo{Name: "bria", Version: "0.1.0"}, InputCloser: clientInput,
+	})
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+	if _, err := client.Initialize(context.Background()); err != nil {
+		t.Fatalf("Initialize() error = %v", err)
+	}
+	if _, err := client.StartThread(context.Background(), codex.ThreadStartRequest{Cwd: "/tmp/work"}); err != nil {
+		t.Fatalf("StartThread() error = %v", err)
+	}
+	accepted := make(chan struct{})
+	turnDone := make(chan error, 1)
+	go func() {
+		_, err := client.StartTurn(context.Background(), codex.TurnStartRequest{
+			ThreadID: "thread-1", MessageID: "telegram-update:1", Input: []codex.TextInput{{Text: "root"}},
+			OnAccepted: func(codex.TurnAccepted) error { close(accepted); return nil },
+		})
+		turnDone <- err
+	}()
+	<-accepted
+	steered, err := client.SteerTurn(context.Background(), codex.TurnSteerRequest{
+		ThreadID: "thread-1", ExpectedTurnID: "turn-1", MessageID: "telegram-update:2",
+		Input: []codex.TextInput{{Text: "follow up"}},
+	})
+	if err != nil || steered.ThreadID != "thread-1" || steered.TurnID != "turn-1" {
+		t.Fatalf("SteerTurn() = (%#v, %v)", steered, err)
+	}
+	if err := <-turnDone; err != nil {
+		t.Fatalf("StartTurn() error = %v", err)
+	}
+	if err := <-serverDone; err != nil {
+		t.Fatalf("fake server error = %v", err)
+	}
+}
+
 func TestInterruptBeforeInitializationIsRejectedWithoutWireWrite(t *testing.T) {
 	t.Parallel()
 

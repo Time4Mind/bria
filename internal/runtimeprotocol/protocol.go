@@ -34,6 +34,7 @@ type MessageType string
 
 const (
 	TypeSubmit                      MessageType = "submit"
+	TypeSteer                       MessageType = "steer"
 	TypeInterrupt                   MessageType = "interrupt"
 	TypeClose                       MessageType = "close"
 	TypeInteractionResponse         MessageType = "interaction_response"
@@ -307,7 +308,7 @@ func encodeLine(message any, max int) ([]byte, error) {
 
 func encodeParentLine(message ParentMessage, max int) ([]byte, error) {
 	switch message.Type {
-	case TypeSubmit:
+	case TypeSubmit, TypeSteer:
 		return encodeLine(struct {
 			Protocol    int               `json:"protocol"`
 			Type        MessageType       `json:"type"`
@@ -440,7 +441,7 @@ func fields(required []string, optional ...string) fieldRequirement {
 
 func parentFields(messageType MessageType) fieldRequirement {
 	switch messageType {
-	case TypeSubmit:
+	case TypeSubmit, TypeSteer:
 		return fields([]string{"protocol", "type", "request_id", "text"}, "message_id", "attachments")
 	case TypeInterrupt:
 		return fields([]string{"protocol", "type", "request_id"})
@@ -572,7 +573,7 @@ func validateParent(message ParentMessage, limits Limits) error {
 		return ErrProtocol
 	}
 	switch message.Type {
-	case TypeSubmit:
+	case TypeSubmit, TypeSteer:
 		if !validRequestID(message.RequestID) || !validText(message.Text, limits.MaxTextBytes) || !validOptionalOpaqueID(message.MessageID) ||
 			message.InteractionResponse != nil || validateAttachments(message.Attachments, limits.MaxTextBytes) != nil {
 			return ErrProtocol

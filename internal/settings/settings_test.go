@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"sync"
@@ -14,10 +15,10 @@ import (
 
 func TestDefaultsAreProductDefaults(t *testing.T) {
 	s := Default()
-	if !s.ContinueExisting || s.ScreenEnabled || !s.ShowTechnicalActions || !s.NotifyBackgroundQuestions || !s.NotifyBackgroundErrors {
+	if !s.ContinueExisting || s.ScreenEnabled || !s.ShowTechnicalActions || !s.NotifyBackgroundQuestions || !s.NotifyBackgroundErrors || s.ArchiveRecommendations {
 		t.Fatalf("unexpected boolean defaults: %+v", s)
 	}
-	if s.CardDetail != CardDetailStandard || s.SessionLifetime != LifetimeNever || s.VoiceRecognition != VoiceParakeet || s.QueueLimit != DefaultQueueLimit || s.RetryUndeliveredFiles {
+	if s.CardDetail != CardDetailStandard || s.CardPageLimit != DefaultCardPages || s.SessionLifetime != LifetimeNever || s.VoiceRecognition != VoiceParakeet || s.QueueLimit != DefaultQueueLimit || s.RetryUndeliveredFiles {
 		t.Fatalf("unexpected defaults: %+v", s)
 	}
 	if err := s.Validate(); err != nil {
@@ -28,6 +29,7 @@ func TestDefaultsAreProductDefaults(t *testing.T) {
 func TestValidateRejectsUnsupportedValues(t *testing.T) {
 	cases := []Settings{
 		func() Settings { s := Default(); s.CardDetail = "verbose"; return s }(),
+		func() Settings { s := Default(); s.CardPageLimit = 48; return s }(),
 		func() Settings { s := Default(); s.SessionLifetime = "3h"; return s }(),
 		func() Settings { s := Default(); s.VoiceRecognition = "cloud"; return s }(),
 		func() Settings { s := Default(); s.QueueLimit = 0; return s }(),
@@ -45,7 +47,7 @@ func TestFileStoreRoundTripAndAtomicPermissions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, err := store.Load(context.Background()); err != nil || got != Default() {
+	if got, err := store.Load(context.Background()); err != nil || !reflect.DeepEqual(got, Default()) {
 		t.Fatalf("initial load = %+v, %v", got, err)
 	}
 	if err := store.Update(context.Background(), func(s *Settings) error { s.ScreenEnabled = true; return nil }); err != nil {
@@ -78,7 +80,7 @@ func TestUpdateRejectsInvalidWithoutMutation(t *testing.T) {
 		t.Fatal("invalid update succeeded")
 	}
 	got, _ := store.Load(context.Background())
-	if got != Default() {
+	if !reflect.DeepEqual(got, Default()) {
 		t.Fatalf("invalid update mutated state: %+v", got)
 	}
 }
@@ -114,8 +116,14 @@ func TestDecodeRequiresOneStrictCompleteDocument(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Decode() error = %v", err)
 	}
-	if snapshot.Revision != 7 || snapshot.Settings != Default() {
+	if snapshot.Revision != 7 || !reflect.DeepEqual(snapshot.Settings, Default()) {
 		t.Fatalf("Decode() = %#v, want revision 7 and product defaults", snapshot)
+	}
+	v2 := strings.Replace(document, `"version": 1`, `"version": 2, "card_page_limit": 128`, 1)
+	v2Snapshot, err := Decode(strings.NewReader(v2))
+	if err != nil || v2Snapshot.Settings.Version != FormatVersion || v2Snapshot.Settings.CardPageLimit != 128 ||
+		v2Snapshot.Settings.ArchiveRecommendations || len(v2Snapshot.Settings.DefaultProviders) != 0 || len(v2Snapshot.Settings.DefaultWorkdirs) != 0 {
+		t.Fatalf("v2 migration = %#v, %v", v2Snapshot, err)
 	}
 
 	invalid := []struct {
@@ -127,6 +135,7 @@ func TestDecodeRequiresOneStrictCompleteDocument(t *testing.T) {
 		{name: "duplicate", document: strings.Replace(document, `  "queue_limit": 32,`, `  "queue_limit": 32, "queue_limit": 64,`, 1)},
 		{name: "trailing", document: document + `{}`},
 		{name: "zero revision", document: strings.Replace(document, `"revision": 7`, `"revision": 0`, 1)},
+		{name: "version three missing creation settings", document: strings.Replace(document, `"version": 1`, `"version": 3`, 1)},
 	}
 	for _, test := range invalid {
 		test := test
@@ -227,7 +236,7 @@ func TestFileStoreCASPersistsRevisionAndRejectsStaleWriter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if reread != committed {
+	if !reflect.DeepEqual(reread, committed) {
 		t.Fatalf("reopened snapshot = %#v, want %#v", reread, committed)
 	}
 }

@@ -369,6 +369,7 @@ type activeTurn struct {
 	accepted      bool
 	assistantSeen bool
 	permission    *PermissionRequest
+	steers        map[string]string
 }
 
 func (adapter *Adapter) runLoop(
@@ -405,6 +406,13 @@ func (adapter *Adapter) runLoop(
 		if active != nil && active.requestID == requestID {
 			return true
 		}
+		if active != nil {
+			for _, steerRequestID := range active.steers {
+				if steerRequestID == requestID {
+					return true
+				}
+			}
+		}
 		for _, pending := range queued {
 			if pending.requestID == requestID {
 				return true
@@ -413,7 +421,7 @@ func (adapter *Adapter) runLoop(
 		return false
 	}
 	startSubmit := func(command parentCommand) error {
-		active = &activeTurn{requestID: command.requestID, messageID: command.messageID}
+		active = &activeTurn{requestID: command.requestID, messageID: command.messageID, steers: make(map[string]string)}
 		var err error
 		if command.messageID == "" {
 			err = client.SendUser(command.text)
@@ -480,6 +488,18 @@ func (adapter *Adapter) runLoop(
 					_ = controller.stop()
 					return ErrAdapterTransport, true
 				}
+			case commandSteer:
+				if _, duplicate := completedRequests[result.command.requestID]; duplicate || isOutstanding(result.command.requestID) ||
+					active == nil || !active.accepted || active.permission != nil || result.command.messageID == "" {
+					return adapter.failCurrentAndStop(controller, active, ErrorProtocol)
+				}
+				if _, duplicate := active.steers[result.command.messageID]; duplicate {
+					return adapter.failCurrentAndStop(controller, active, ErrorProtocol)
+				}
+				if err := client.SteerUserWithID(result.command.text, result.command.messageID); err != nil {
+					return adapter.failCurrentAndStop(controller, active, ErrorTransport)
+				}
+				active.steers[result.command.messageID] = result.command.requestID
 			case commandInterrupt:
 				if _, alreadyCompleted := completedRequests[result.command.requestID]; alreadyCompleted {
 					continue
@@ -558,8 +578,19 @@ func (adapter *Adapter) runLoop(
 				}
 				initialized = true
 			case EventUserReplay:
-				if !initialized || active == nil || active.accepted {
+				if !initialized || active == nil {
 					return adapter.failCurrentAndStop(controller, active, ErrorProtocol)
+				}
+				if active.accepted {
+					requestID, ok := active.steers[event.UserReplay.MessageID]
+					if !ok {
+						return adapter.failCurrentAndStop(controller, active, ErrorProtocol)
+					}
+					if err := adapter.write(acceptedOutput{Protocol: AdapterProtocolVersion, Type: "accepted", RequestID: requestID, MessageID: event.UserReplay.MessageID}); err != nil {
+						return err, false
+					}
+					delete(active.steers, event.UserReplay.MessageID)
+					continue
 				}
 				if err := adapter.write(acceptedOutput{
 					Protocol:  AdapterProtocolVersion,
@@ -610,7 +641,7 @@ func (adapter *Adapter) runLoop(
 				}
 				active.permission = event.Permission
 			case EventResult:
-				if active == nil || !active.accepted || !active.assistantSeen || active.permission != nil || event.Result == nil {
+				if active == nil || !active.accepted || !active.assistantSeen || active.permission != nil || len(active.steers) != 0 || event.Result == nil {
 					return adapter.failCurrentAndStop(controller, active, ErrorProtocol)
 				}
 				if event.Result.FailureCode == FailureAuthentication {
@@ -769,6 +800,7 @@ type commandKind uint8
 
 const (
 	commandSubmit commandKind = iota + 1
+	commandSteer
 	commandInterrupt
 	commandClose
 	commandInteractionResponse
@@ -844,6 +876,11 @@ func decodeParentCommand(line []byte, maxTextBytes int) (parentCommand, error) {
 			return parentCommand{}, ErrAdapterProtocol
 		}
 		return parentCommand{kind: commandSubmit, requestID: decoded.RequestID, messageID: decoded.MessageID, text: decoded.Text}, nil
+	case runtimeprotocol.TypeSteer:
+		if len(decoded.Attachments) != 0 {
+			return parentCommand{}, ErrAdapterProtocol
+		}
+		return parentCommand{kind: commandSteer, requestID: decoded.RequestID, messageID: decoded.MessageID, text: decoded.Text}, nil
 	case runtimeprotocol.TypeInterrupt:
 		return parentCommand{kind: commandInterrupt, requestID: decoded.RequestID}, nil
 	case runtimeprotocol.TypeClose:

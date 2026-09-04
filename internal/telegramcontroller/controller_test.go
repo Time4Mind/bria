@@ -13,6 +13,7 @@ import (
 	"bria/internal/app"
 	"bria/internal/coordinator"
 	"bria/internal/domain"
+	"bria/internal/sessioncreation"
 	"bria/internal/sessionruntime"
 	"bria/internal/settingsport"
 	"bria/internal/telegramcontroller"
@@ -40,8 +41,8 @@ func TestRoutesOnlyOwnerPrivateMessagesAndUnknownSlashIsAPrompt(t *testing.T) {
 	}
 
 	decision, err = controller.Handle(context.Background(), message(3, "/unknown-command"))
-	if err != nil || decision.Kind != coordinator.DecisionStatus || !strings.Contains(decision.Status.Text, "активной сессии") {
-		t.Fatalf("unknown slash Handle() = (%#v, %v), want no-active prompt result", decision, err)
+	if err != nil || decision.Kind != coordinator.DecisionSkip {
+		t.Fatalf("unknown slash Handle() = (%#v, %v), want silent rejected prompt", decision, err)
 	}
 }
 
@@ -118,9 +119,7 @@ func TestCallbackCreationUsesUpdateIDAsIdempotencyIdentity(t *testing.T) {
 		got = intent
 		return app.CreateSessionResult{Session: sessionWithIntent(t, ready, intent.IntentID)}, nil
 	})
-	controller := newController(t, creator, &memorySessions{byID: map[domain.SessionID]domain.Session{ready.ID(): ready}}, submitterFunc(nil), notifierFunc(nil), telegramcontroller.Options{
-		CreateDrafts: createDraftSelectorFunc{workdir: "/tmp", computerID: "local"},
-	})
+	controller := newController(t, creator, &memorySessions{listed: []domain.Session{ready}, byID: map[domain.SessionID]domain.Session{ready.ID(): ready}}, submitterFunc(nil), notifierFunc(nil), telegramcontroller.Options{})
 	t.Cleanup(func() { _ = controller.Close(context.Background()) })
 
 	decision, err := controller.Handle(context.Background(), coordinator.Update{
@@ -196,7 +195,7 @@ func TestUnavailableSessionCannotBecomePersistedActive(t *testing.T) {
 	}
 }
 
-func TestReplyRoutesToOriginSessionWithoutChangingActiveSession(t *testing.T) {
+func TestReplyAlwaysRoutesToActiveSession(t *testing.T) {
 	workdirOne := t.TempDir()
 	workdirTwo := t.TempDir()
 	one := readySession(t, "11111111-1111-4111-9111-111111111111", domain.ProviderCodex, workdirOne, "provider-1", 1)
@@ -209,16 +208,9 @@ func TestReplyRoutesToOriginSessionWithoutChangingActiveSession(t *testing.T) {
 		submitted <- id
 		return sessionruntime.TurnResult{Final: "done", TerminalStatus: sessionruntime.StatusCompleted}, nil
 	})
-	routes := replyRouteStoreFunc(func(_ context.Context, messageID int64) (domain.SessionID, bool, error) {
-		if messageID != 500 {
-			t.Fatalf("ResolveReply(%d), want 500", messageID)
-		}
-		return two.ID(), true, nil
-	})
 	sessions := &memorySessions{byID: map[domain.SessionID]domain.Session{one.ID(): one, two.ID(): two}, listed: []domain.Session{one, two}}
 	controller := newController(t, creatorFunc(nil), sessions, submitter, notifierFunc(nil), telegramcontroller.Options{
-		Recovered:   []domain.Session{one, two},
-		ReplyRoutes: routes,
+		Recovered: []domain.Session{one, two},
 	})
 	t.Cleanup(func() { _ = controller.Close(context.Background()) })
 
@@ -226,11 +218,14 @@ func TestReplyRoutesToOriginSessionWithoutChangingActiveSession(t *testing.T) {
 	reply := message(21, "reply to background")
 	reply.SourceMessageID = 501
 	reply.ReplyToMessageID = 500
-	mustStatus(t, controller, reply)
+	decision, err := controller.Handle(context.Background(), reply)
+	if err != nil || decision.Kind != coordinator.DecisionSkip {
+		t.Fatalf("Handle(reply) = (%#v, %v), want silent acceptance", decision, err)
+	}
 	select {
 	case got := <-submitted:
-		if got != two.ID() {
-			t.Fatalf("reply submitted to %q, want origin %q", got, two.ID())
+		if got != one.ID() {
+			t.Fatalf("reply submitted to %q, want active %q", got, one.ID())
 		}
 	case <-time.After(time.Second):
 		t.Fatal("reply was not submitted")
@@ -300,6 +295,7 @@ type projectionUIState struct {
 	saved   []domain.SessionID
 	pages   []string
 	history map[domain.SessionID][]string
+	prompts map[domain.SessionID]map[string]int
 }
 
 type projectionUISnapshot struct {
@@ -321,35 +317,35 @@ func (s *projectionUIState) LoadCardHistory(_ context.Context, id domain.Session
 	return append([]string(nil), s.history[id]...), nil
 }
 
+func (s *projectionUIState) AppendCardHistory(_ context.Context, id domain.SessionID, item string) error {
+	if s.history == nil {
+		s.history = make(map[domain.SessionID][]string)
+	}
+	s.history[id] = append(s.history[id], item)
+	return nil
+}
+
+func (s *projectionUIState) SetCardPrompt(_ context.Context, id domain.SessionID, messageID, item string) error {
+	if s.history == nil {
+		s.history = make(map[domain.SessionID][]string)
+	}
+	if s.prompts == nil {
+		s.prompts = make(map[domain.SessionID]map[string]int)
+	}
+	if s.prompts[id] == nil {
+		s.prompts[id] = make(map[string]int)
+	}
+	if index, ok := s.prompts[id][messageID]; ok {
+		s.history[id][index] = item
+		return nil
+	}
+	s.prompts[id][messageID] = len(s.history[id])
+	s.history[id] = append(s.history[id], item)
+	return nil
+}
+
 func (s *projectionUIState) snapshot() projectionUISnapshot {
 	return projectionUISnapshot{Saved: append([]domain.SessionID(nil), s.saved...), Pages: append([]string(nil), s.pages...)}
-}
-
-type recordingDraftSelector struct {
-	computerID   domain.ComputerID
-	workdir      string
-	previewed    []domain.Provider
-	confirms     int
-	afterConfirm func()
-}
-
-func (s *recordingDraftSelector) PreviewCreateDraft(_ context.Context, provider domain.Provider) (telegramcontroller.CreateDraft, error) {
-	s.previewed = append(s.previewed, provider)
-	return telegramcontroller.CreateDraft{ComputerID: s.computerID, Provider: provider, Workdir: s.workdir}, nil
-}
-
-func (s *recordingDraftSelector) ConfirmCreateDraft(_ context.Context, provider domain.Provider, _ int64) (telegramcontroller.CreateDraft, error) {
-	s.confirms++
-	if s.afterConfirm != nil {
-		s.afterConfirm()
-	}
-	return telegramcontroller.CreateDraft{ComputerID: s.computerID, Provider: provider, Workdir: s.workdir, Confirmed: true}, nil
-}
-
-type replyRouteStoreFunc func(context.Context, int64) (domain.SessionID, bool, error)
-
-func (f replyRouteStoreFunc) ResolveReply(ctx context.Context, messageID int64) (domain.SessionID, bool, error) {
-	return f(ctx, messageID)
 }
 
 func (s *recordingActiveStore) SetActiveSession(_ context.Context, id domain.SessionID) error {
@@ -359,7 +355,7 @@ func (s *recordingActiveStore) SetActiveSession(_ context.Context, id domain.Ses
 
 func (p *testPreferences) Snapshot(context.Context) (telegramcontroller.PreferenceSnapshot, error) {
 	if p.settings.CardDetail == "" {
-		p.settings = settingsport.Snapshot{ContinueExisting: true, CardDetail: "standard", ShowTechnicalActions: true, NotifyBackgroundQuestions: true, NotifyBackgroundErrors: true, SessionLifetime: "never", QueueLimit: 32, VoiceRecognition: "parakeet"}
+		p.settings = settingsport.Snapshot{ContinueExisting: true, CardDetail: "standard", CardPageLimit: 64, ShowTechnicalActions: true, NotifyBackgroundQuestions: true, NotifyBackgroundErrors: true, SessionLifetime: "never", QueueLimit: 32, VoiceRecognition: "parakeet"}
 	}
 	return p.settings, nil
 }
@@ -382,6 +378,18 @@ func (p *testPreferences) ToggleCardDetail(context.Context) error {
 	}
 	return nil
 }
+func (p *testPreferences) CycleCardPageLimit(context.Context) error {
+	_, _ = p.Snapshot(context.Background())
+	switch p.settings.CardPageLimit {
+	case 32:
+		p.settings.CardPageLimit = 64
+	case 64:
+		p.settings.CardPageLimit = 128
+	default:
+		p.settings.CardPageLimit = 32
+	}
+	return nil
+}
 func (p *testPreferences) ToggleTechnicalActions(context.Context) error {
 	_, _ = p.Snapshot(context.Background())
 	p.settings.ShowTechnicalActions = !p.settings.ShowTechnicalActions
@@ -395,6 +403,35 @@ func (p *testPreferences) ToggleBackgroundQuestions(context.Context) error {
 func (p *testPreferences) ToggleBackgroundErrors(context.Context) error {
 	_, _ = p.Snapshot(context.Background())
 	p.settings.NotifyBackgroundErrors = !p.settings.NotifyBackgroundErrors
+	return nil
+}
+func (p *testPreferences) ToggleArchiveRecommendations(context.Context) error {
+	_, _ = p.Snapshot(context.Background())
+	p.settings.ArchiveRecommendations = !p.settings.ArchiveRecommendations
+	return nil
+}
+func (p *testPreferences) SetDefaultProvider(_ context.Context, computerID domain.ComputerID, provider domain.Provider) error {
+	_, _ = p.Snapshot(context.Background())
+	if p.settings.DefaultProviders == nil {
+		p.settings.DefaultProviders = map[domain.ComputerID]domain.Provider{}
+	}
+	p.settings.DefaultProviders[computerID] = provider
+	return nil
+}
+func (p *testPreferences) ClearDefaultProvider(_ context.Context, computerID domain.ComputerID) error {
+	delete(p.settings.DefaultProviders, computerID)
+	return nil
+}
+func (p *testPreferences) SetDefaultWorkdir(_ context.Context, computerID domain.ComputerID, workdir string) error {
+	_, _ = p.Snapshot(context.Background())
+	if p.settings.DefaultWorkdirs == nil {
+		p.settings.DefaultWorkdirs = map[domain.ComputerID]string{}
+	}
+	p.settings.DefaultWorkdirs[computerID] = workdir
+	return nil
+}
+func (p *testPreferences) ClearDefaultWorkdir(_ context.Context, computerID domain.ComputerID) error {
+	delete(p.settings.DefaultWorkdirs, computerID)
 	return nil
 }
 func (p *testPreferences) SetSessionLifetime(_ context.Context, lifetime string) error {
@@ -441,8 +478,8 @@ func TestNewSetsActiveAndWorkerEmitsOrderedTaggedNotifications(t *testing.T) {
 	}
 
 	decision, err = controller.Handle(context.Background(), message(11, "/unknown-is-prompt"))
-	if err != nil || decision.Kind != coordinator.DecisionStatus || !strings.Contains(decision.Status.Text, "принят") {
-		t.Fatalf("prompt Handle() = (%#v, %v), want immediate acceptance", decision, err)
+	if err != nil || decision.Kind != coordinator.DecisionSkip {
+		t.Fatalf("prompt Handle() = (%#v, %v), want silent immediate acceptance", decision, err)
 	}
 	wantKinds := []telegramcontroller.NotificationKind{
 		telegramcontroller.NotificationCommentary,
@@ -770,6 +807,60 @@ func TestVoiceAndPhotoUseInjectedPreparerWhileVideoNeverDoes(t *testing.T) {
 	}
 }
 
+func TestVoiceShowsQueuedCardStateBeforeRecognitionCompletes(t *testing.T) {
+	ready := readySession(t, "88888888-8888-4888-9888-888888888888", domain.ProviderCodex, t.TempDir(), "provider-8", 1)
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	notifications := make(chan telegramcontroller.Notification, 4)
+	preparer := inputPreparerFunc(func(_ context.Context, input telegramcontroller.IncomingInput) (string, error) {
+		if input.Kind != "voice" {
+			t.Fatalf("prepared kind = %q", input.Kind)
+		}
+		close(entered)
+		<-release
+		return "распознанный текст", nil
+	})
+	controller := newController(t, nil, &memorySessions{byID: map[domain.SessionID]domain.Session{ready.ID(): ready}}, submitterFunc(func(context.Context, domain.SessionID, string) (sessionruntime.TurnResult, error) {
+		return sessionruntime.TurnResult{TerminalStatus: sessionruntime.StatusCompleted}, nil
+	}), notifierFunc(func(_ context.Context, notification telegramcontroller.Notification) error {
+		notifications <- notification
+		return nil
+	}), telegramcontroller.Options{Recovered: []domain.Session{ready}, InputPreparer: preparer})
+	t.Cleanup(func() { _ = controller.Close(context.Background()) })
+	mustStatus(t, controller, message(46, "/use "+string(ready.ID())))
+	voice := message(47, "")
+	voice.MediaKind = "voice"
+	voice.MediaFileID = "voice-file"
+	voice.MediaDownloadAllowed = true
+	done := make(chan telegramcontroller.SemanticActionResult, 1)
+	go func() {
+		result, _ := controller.HandleSemanticMessage(context.Background(), voice)
+		done <- result
+	}()
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("voice recognition did not start")
+	}
+	select {
+	case notification := <-notifications:
+		if notification.Kind != telegramcontroller.NotificationPromptStatus || notification.Text != "🙋‍♂" {
+			t.Fatalf("recognition status = %#v", notification)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("queued status was not published before recognition completed")
+	}
+	close(release)
+	select {
+	case result := <-done:
+		if result.Card == nil || !strings.Contains(result.Card.Pages[0].Content, "👨‍💻 распознанный текст") {
+			t.Fatalf("recognized voice card = %#v", result.Card)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("voice handling did not finish")
+	}
+}
+
 func TestDocumentInputRequiresExplicitPolicyAndPreparer(t *testing.T) {
 	workdir := t.TempDir()
 	ready := readySession(t, "11111111-1111-4111-9111-111111111111", domain.ProviderCodex, workdir, "provider-1", 1)
@@ -793,8 +884,8 @@ func TestDocumentInputRequiresExplicitPolicyAndPreparer(t *testing.T) {
 	document.MediaFileID = "document-file"
 	document.MediaFileUniqueID = "document-unique"
 	decision := mustStatus(t, controller, document)
-	if !strings.Contains(decision.Status.Text, "документ") {
-		t.Fatalf("default document status = %q", decision.Status.Text)
+	if decision.Kind != coordinator.DecisionSkip {
+		t.Fatalf("default document decision = %#v", decision)
 	}
 	select {
 	case got := <-submitted:
@@ -889,8 +980,8 @@ func TestCloseSessionArchivesAndRemovesActiveSession(t *testing.T) {
 		t.Fatalf("CloseSession() = (%#v, %v)", decision, err)
 	}
 	decision = mustStatus(t, controller, message(53, "must not run"))
-	if !strings.Contains(decision.Status.Text, "Нет активной") {
-		t.Fatalf("post-close prompt status = %q", decision.Status.Text)
+	if decision.Kind != coordinator.DecisionSkip {
+		t.Fatalf("post-close prompt decision = %#v", decision)
 	}
 }
 
@@ -1101,6 +1192,60 @@ func TestProcessDurableInputCommitsExactAcceptanceBeforeEventsAndCompletion(t *t
 	}
 }
 
+func TestProcessDurableInputSteersFollowUpIntoCurrentTurnWithoutWaitingForFinal(t *testing.T) {
+	ready := readySession(t, "33333333-3333-4333-9333-333333333334", domain.ProviderCodex, t.TempDir(), "provider-3", 1)
+	releaseRoot := make(chan struct{})
+	rootFinished := make(chan struct{})
+	steered := make(chan string, 1)
+	submitter := &currentTurnSubmitter{
+		submit: func(_ context.Context, _ domain.SessionID, text string, callbacks sessionruntime.TurnCallbacks) (sessionruntime.TurnResult, error) {
+			if text != "root" {
+				t.Fatalf("root text = %q", text)
+			}
+			if err := callbacks.OnAccepted(callbacks.MessageID); err != nil {
+				return sessionruntime.TurnResult{}, err
+			}
+			<-releaseRoot
+			close(rootFinished)
+			return sessionruntime.TurnResult{TerminalStatus: sessionruntime.StatusCompleted, Final: "done"}, nil
+		},
+		steer: func(_ context.Context, _ domain.SessionID, input sessionruntime.StructuredInput, callbacks sessionruntime.TurnCallbacks) error {
+			steered <- input.Text
+			return callbacks.OnAccepted(callbacks.MessageID)
+		},
+	}
+	controller := newController(t, nil, &memorySessions{byID: map[domain.SessionID]domain.Session{ready.ID(): ready}}, submitter, nil,
+		telegramcontroller.Options{Recovered: []domain.Session{ready}})
+	t.Cleanup(func() { _ = controller.Close(context.Background()) })
+	callback := func(context.Context, telegramcontroller.DurableInputAcceptance) error { return nil }
+	first, err := controller.ProcessDurableInput(context.Background(), telegramcontroller.DurableLeasedInput{
+		SessionID: ready.ID(), MessageID: "telegram-update:401", Sequence: 1, Payload: []byte("root"),
+	}, telegramcontroller.DurableInputCallbacks{OnAccepted: callback})
+	if err != nil || !first.Accepted {
+		t.Fatalf("first input = (%#v, %v)", first, err)
+	}
+	select {
+	case <-rootFinished:
+		t.Fatal("root turn finished before follow-up")
+	default:
+	}
+	second, err := controller.ProcessDurableInput(context.Background(), telegramcontroller.DurableLeasedInput{
+		SessionID: ready.ID(), MessageID: "telegram-update:402", Sequence: 2, Payload: []byte("follow-up"),
+	}, telegramcontroller.DurableInputCallbacks{OnAccepted: callback})
+	if err != nil || !second.Accepted || second.Completion != telegramcontroller.DurableInputSucceeded {
+		t.Fatalf("current-turn input = (%#v, %v)", second, err)
+	}
+	if got := <-steered; got != "follow-up" {
+		t.Fatalf("steered text = %q", got)
+	}
+	close(releaseRoot)
+	select {
+	case <-rootFinished:
+	case <-time.After(time.Second):
+		t.Fatal("root turn did not finish")
+	}
+}
+
 func TestProcessDurableInputConfirmsExactProviderInteractionAcceptance(t *testing.T) {
 	workdir := t.TempDir()
 	ready := readySession(t, "11111111-1111-4111-9111-111111111112", domain.ProviderCodex, workdir, "provider-1", 1)
@@ -1250,8 +1395,8 @@ func TestQueueLimitRejectsOnlyExcessPendingTurn(t *testing.T) {
 	}
 	mustStatus(t, controller, message(42, "one pending"))
 	decision := mustStatus(t, controller, message(43, "excess"))
-	if !strings.Contains(decision.Status.Text, "переполнена") {
-		t.Fatalf("queue-limit status = %q", decision.Status.Text)
+	if decision.Kind != coordinator.DecisionSkip {
+		t.Fatalf("queue-limit decision = %#v", decision)
 	}
 	close(release)
 }
@@ -1279,8 +1424,8 @@ func TestDurableInputIsAcceptedBeforeAcknowledgementAndNotDuplicatedInMemory(t *
 	t.Cleanup(func() { _ = controller.Close(context.Background()) })
 	mustStatus(t, controller, message(70, "/use "+string(ready.ID())))
 	decision := mustStatus(t, controller, message(71, "durable prompt"))
-	if !strings.Contains(decision.Status.Text, "принят") {
-		t.Fatalf("ack = %q", decision.Status.Text)
+	if decision.Kind != coordinator.DecisionSkip {
+		t.Fatalf("ack = %#v, want silent acceptance", decision)
 	}
 	select {
 	case input := <-accepted:
@@ -1294,6 +1439,60 @@ func TestDurableInputIsAcceptedBeforeAcknowledgementAndNotDuplicatedInMemory(t *
 	case duplicate := <-submits:
 		t.Fatalf("durably accepted input was also submitted in-memory: %q", duplicate)
 	case <-time.After(20 * time.Millisecond):
+	}
+}
+
+func TestPromptStatusInActiveCardMovesFromQueuedToProviderAccepted(t *testing.T) {
+	ready := readySession(t, "77777777-7777-4777-9777-777777777777", domain.ProviderCodex, t.TempDir(), "provider-7", 1)
+	interactive := &interactiveSubmitter{submitWithCallbacks: func(_ context.Context, _ domain.SessionID, _ string, callbacks sessionruntime.TurnCallbacks) (sessionruntime.TurnResult, error) {
+		if err := callbacks.OnAccepted(callbacks.MessageID); err != nil {
+			return sessionruntime.TurnResult{}, err
+		}
+		return sessionruntime.TurnResult{TerminalStatus: sessionruntime.StatusCompleted, Final: "done"}, nil
+	}}
+	custody := durableInputFunc(func(_ context.Context, input telegramcontroller.SessionInput) (telegramcontroller.InputReceipt, error) {
+		return telegramcontroller.InputReceipt{Inserted: true, SessionID: input.SessionID, MessageID: input.MessageID, Sequence: 1}, nil
+	})
+	ui := &projectionUIState{history: make(map[domain.SessionID][]string)}
+	statusNotifications := make(chan telegramcontroller.Notification, 4)
+	controller := newController(t, nil, &memorySessions{byID: map[domain.SessionID]domain.Session{ready.ID(): ready}}, interactive,
+		notifierFunc(func(_ context.Context, notification telegramcontroller.Notification) error {
+			statusNotifications <- notification
+			return nil
+		}),
+		telegramcontroller.Options{
+			Recovered: []domain.Session{ready}, DurableInput: custody, UIState: ui,
+		})
+	t.Cleanup(func() { _ = controller.Close(context.Background()) })
+	mustStatus(t, controller, message(89, "/use "+string(ready.ID())))
+	update := message(90, "prompt")
+	update.SourceMessageID = 900
+	queued, err := controller.HandleSemanticMessage(context.Background(), update)
+	if err != nil || queued.Card == nil || !strings.Contains(queued.Card.Pages[0].Content, "🙋‍♂ prompt") {
+		t.Fatalf("queued card = (%#v, %v)", queued, err)
+	}
+	if _, err := controller.ProcessDurableInput(context.Background(), telegramcontroller.DurableLeasedInput{
+		SessionID: ready.ID(), MessageID: "telegram-update:90", Sequence: 1, Payload: []byte("prompt"),
+	}, telegramcontroller.DurableInputCallbacks{OnAccepted: func(context.Context, telegramcontroller.DurableInputAcceptance) error { return nil }}); err != nil {
+		t.Fatal(err)
+	}
+	accepted, err := controller.ProjectCurrent(context.Background(), ready.ID())
+	if err != nil || accepted.Card == nil {
+		t.Fatalf("accepted card = (%#v, %v)", accepted, err)
+	}
+	content := accepted.Card.Pages[0].Content
+	if strings.Contains(content, "🙋‍♂") || strings.Count(content, "prompt") != 1 || !strings.Contains(content, "👨‍💻 prompt") {
+		t.Fatalf("accepted prompt card content = %q", content)
+	}
+	foundStatus := false
+	for len(statusNotifications) > 0 {
+		notification := <-statusNotifications
+		if notification.Kind == telegramcontroller.NotificationPromptStatus && notification.Text == "👨‍💻" {
+			foundStatus = true
+		}
+	}
+	if !foundStatus {
+		t.Fatal("provider acceptance did not request an active-card refresh")
 	}
 }
 
@@ -1317,9 +1516,10 @@ func TestDurableInputFailureIsNotAcknowledgedOrSubmitted(t *testing.T) {
 	)
 	t.Cleanup(func() { _ = controller.Close(context.Background()) })
 	mustStatus(t, controller, message(72, "/use "+string(ready.ID())))
-	decision := mustStatus(t, controller, message(73, "must remain unaccepted"))
-	if strings.Contains(decision.Status.Text, "Запрос принят для") || strings.Contains(decision.Status.Text, "token-secret") || !strings.Contains(decision.Status.Text, "сохранить") {
-		t.Fatalf("failed custody status = %q", decision.Status.Text)
+	result, err := controller.HandleSemanticMessage(context.Background(), message(73, "must remain unaccepted"))
+	if err != nil || result.Decision.Kind != coordinator.DecisionSkip || result.Card == nil ||
+		!strings.Contains(result.Card.Pages[0].Content, "🙅‍♂ must remain unaccepted") {
+		t.Fatalf("failed custody card = (%#v, %v)", result, err)
 	}
 	select {
 	case duplicate := <-submits:
@@ -1369,8 +1569,8 @@ func TestMessageDuringAsyncStartingEntersDurableCustodyBeforeProviderReady(t *te
 		t.Fatalf("starting decision = %q", decision.Status.Text)
 	}
 	decision = mustStatus(t, controller, message(81, "queued while starting"))
-	if !strings.Contains(decision.Status.Text, "принят") {
-		t.Fatalf("starting input decision = %q", decision.Status.Text)
+	if decision.Kind != coordinator.DecisionSkip {
+		t.Fatalf("starting input decision = %#v, want silent acceptance", decision)
 	}
 	select {
 	case input := <-accepted:
@@ -1560,15 +1760,20 @@ func TestSemanticActionRejectsMissingOrUnexpectedTargetFields(t *testing.T) {
 }
 
 func TestGlobalSemanticActionsExposeOnlyTypedSurfacesAndStableCreateIdentity(t *testing.T) {
-	ready := readySession(t, "11111111-1111-4111-9111-111111111111", domain.ProviderCodex, "/tmp", "provider-1", 1)
+	workdir := t.TempDir()
+	ready := readySession(t, "11111111-1111-4111-9111-111111111111", domain.ProviderCodex, workdir, "provider-1", 1)
 	var intent app.ConfirmedSessionIntent
+	sessions := newLockedSessions(ready)
 	controller := newController(t,
 		creatorFunc(func(_ context.Context, got app.ConfirmedSessionIntent) (app.CreateSessionResult, error) {
 			intent = got
-			return app.CreateSessionResult{Session: sessionWithIntent(t, ready, got.IntentID)}, nil
+			created := sessionWithIntent(t, ready, got.IntentID)
+			sessions.Set(created)
+			return app.CreateSessionResult{Session: created}, nil
 		}),
-		newLockedSessions(ready), submitterFunc(nil), notifierFunc(nil),
-		telegramcontroller.Options{Settings: &testPreferences{}, CreateDrafts: createDraftSelectorFunc{workdir: "/tmp", computerID: "local"}},
+		sessions, submitterFunc(nil), notifierFunc(nil),
+		telegramcontroller.Options{Settings: &testPreferences{}, CreationEnvironment: localCreationEnvironment(t, workdir,
+			sessioncreation.ProviderCapability{Provider: domain.ProviderCodex, Installed: true, Enabled: true})},
 	)
 	t.Cleanup(func() { _ = controller.Close(context.Background()) })
 	for _, kind := range []telegramcontroller.SemanticActionKind{
@@ -1586,7 +1791,13 @@ func TestGlobalSemanticActionsExposeOnlyTypedSurfacesAndStableCreateIdentity(t *
 			t.Fatalf("global action %q = (%#v, %v), want typed surface", kind, result, err)
 		}
 	}
-	result, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticCreateCodex, UpdateID: 777})
+	if _, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticMenuNew, UpdateID: 775}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticCreateChoice, Choice: 1, UpdateID: 776}); err != nil {
+		t.Fatal(err)
+	}
+	result, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticCreatePick, UpdateID: 777})
 	if err != nil || result.Card == nil || intent.IntentID != "telegram-update:777" {
 		t.Fatalf("semantic create = (%#v, %v), intent=%#v", result, err, intent)
 	}
@@ -1599,30 +1810,92 @@ func TestSemanticCreateUsesOnlyExplicitConfirmedAbsoluteDraft(t *testing.T) {
 	workdir := t.TempDir()
 	ready := readySession(t, "44444444-4444-4444-9444-444444444444", domain.ProviderCodex, workdir, "provider-4", 1)
 	var intent app.ConfirmedSessionIntent
+	sessions := newLockedSessions(ready)
 	controller := newController(t, creatorFunc(func(_ context.Context, got app.ConfirmedSessionIntent) (app.CreateSessionResult, error) {
 		intent = got
-		return app.CreateSessionResult{Session: sessionWithIntent(t, ready, got.IntentID)}, nil
-	}), newLockedSessions(ready), submitterFunc(nil), notifierFunc(nil), telegramcontroller.Options{
-		CreateDrafts: createDraftSelectorFunc{computerID: "local", workdir: workdir},
-	})
+		created := sessionWithIntent(t, ready, got.IntentID)
+		sessions.Set(created)
+		return app.CreateSessionResult{Session: created}, nil
+	}), sessions, submitterFunc(nil), notifierFunc(nil), telegramcontroller.Options{CreationEnvironment: localCreationEnvironment(t, workdir,
+		sessioncreation.ProviderCapability{Provider: domain.ProviderCodex, Installed: true, Enabled: true})})
 	t.Cleanup(func() { _ = controller.Close(context.Background()) })
-	preview, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticMenuNew})
-	if err != nil || preview.Surface == nil || !strings.Contains(preview.Surface.Text, workdir) || strings.Contains(preview.Surface.Text, "по умолчанию: /tmp") {
+	preview, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticMenuNew, UpdateID: 399})
+	if err != nil || preview.Surface == nil || preview.Surface.Rows[0][0].Label != workdir {
 		t.Fatalf("draft preview = (%#v, %v)", preview, err)
 	}
-	if _, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticCreateCodex, UpdateID: 401}); err != nil {
+	if _, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticCreateChoice, Choice: 1, UpdateID: 400}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticCreatePick, UpdateID: 401}); err != nil {
 		t.Fatal(err)
 	}
 	if intent.Workdir != workdir || intent.ComputerID != "local" || intent.Provider != domain.ProviderCodex {
 		t.Fatalf("confirmed intent = %#v", intent)
 	}
+}
 
-	invalid := newController(t, creatorFunc(nil), &memorySessions{}, submitterFunc(nil), notifierFunc(nil), telegramcontroller.Options{
-		CreateDrafts: createDraftSelectorFunc{computerID: "local", workdir: "relative/path"},
-	})
-	t.Cleanup(func() { _ = invalid.Close(context.Background()) })
-	if _, err := invalid.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticCreateCodex, UpdateID: 402}); err == nil {
-		t.Fatal("semantic create accepted relative workdir")
+func TestSemanticNewSessionDoesNotRequireInjectedDraftSelector(t *testing.T) {
+	workdir := t.TempDir()
+	ready := readySession(t, "55555555-5555-4555-9555-555555555555", domain.ProviderCodex, workdir, "provider-5", 1)
+	var intent app.ConfirmedSessionIntent
+	sessions := &memorySessions{}
+	providers := &testProviderPreferences{values: map[domain.Provider]telegramcontroller.ProviderPreference{
+		domain.ProviderCodex: {Provider: domain.ProviderCodex, Configured: true, Enabled: true},
+	}}
+	controller := newController(t, creatorFunc(func(_ context.Context, got app.ConfirmedSessionIntent) (app.CreateSessionResult, error) {
+		intent = got
+		created := sessionWithIntent(t, ready, got.IntentID)
+		sessions.byID = map[domain.SessionID]domain.Session{created.ID(): created}
+		return app.CreateSessionResult{Session: created}, nil
+	}), sessions, submitterFunc(nil), notifierFunc(nil), telegramcontroller.Options{Providers: providers, CreationEnvironment: localCreationEnvironment(t, workdir,
+		sessioncreation.ProviderCapability{Provider: domain.ProviderCodex, Installed: true, Enabled: true})})
+	t.Cleanup(func() { _ = controller.Close(context.Background()) })
+
+	result, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticMenuNew})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Surface == nil || strings.Contains(result.Surface.Text, "не настроено") || result.Surface.Rows[0][0].Label != workdir {
+		t.Fatalf("new-session surface = %#v, want directory roots after skipping sole computer and backend", result.Surface)
+	}
+	if hasSemanticAction(result.Surface.Rows, telegramcontroller.SemanticCreateSelectCodex) || hasSemanticAction(result.Surface.Rows, telegramcontroller.SemanticCreatePick) {
+		t.Fatalf("new-session actions = %#v, want root selection first", result.Surface.Rows)
+	}
+	selected, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticCreateChoice, Choice: 1, UpdateID: 501})
+	if err != nil || selected.Surface == nil || !hasSemanticAction(selected.Surface.Rows, telegramcontroller.SemanticCreatePick) {
+		t.Fatalf("selected root = (%#v, %v)", selected, err)
+	}
+	created, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticCreatePick, UpdateID: 502})
+	if err != nil || created.Card == nil {
+		t.Fatalf("immediate creation = (%#v, %v)", created, err)
+	}
+	if intent.IntentID != "telegram-update:502" || intent.ComputerID != "local" || intent.Provider != domain.ProviderCodex || intent.Workdir != workdir {
+		t.Fatalf("confirmed intent = %#v", intent)
+	}
+	if _, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticCreateChoice, Choice: 1, UpdateID: 503}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSemanticNewSessionDoesNotInferDefaultsFromPreviousSessions(t *testing.T) {
+	workdir := t.TempDir()
+	last := readySession(t, "66666666-6666-4666-a666-666666666666", domain.ProviderClaude, workdir, "provider-6", 1)
+	providers := &testProviderPreferences{values: map[domain.Provider]telegramcontroller.ProviderPreference{
+		domain.ProviderCodex:  {Provider: domain.ProviderCodex, Configured: true, Enabled: true},
+		domain.ProviderClaude: {Provider: domain.ProviderClaude, Configured: true, Enabled: true},
+	}}
+	controller := newController(t, creatorFunc(nil), newLockedSessions(last), submitterFunc(nil), notifierFunc(nil), telegramcontroller.Options{Providers: providers, CreationEnvironment: localCreationEnvironment(t, workdir,
+		sessioncreation.ProviderCapability{Provider: domain.ProviderCodex, Installed: true, Enabled: true},
+		sessioncreation.ProviderCapability{Provider: domain.ProviderClaude, Installed: true, Enabled: true})})
+	t.Cleanup(func() { _ = controller.Close(context.Background()) })
+
+	initial, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticMenuNew})
+	if err != nil || initial.Surface == nil || !strings.Contains(initial.Surface.Text, "Выберите бэкенд") || !hasSemanticAction(initial.Surface.Rows, telegramcontroller.SemanticCreateSelectCodex) || !hasSemanticAction(initial.Surface.Rows, telegramcontroller.SemanticCreateSelectClaude) {
+		t.Fatalf("provider choice = (%#v, %v)", initial, err)
+	}
+	changed, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticCreateSelectCodex})
+	if err != nil || changed.Surface == nil || changed.Surface.Rows[0][0].Label != workdir {
+		t.Fatalf("changed provider draft = (%#v, %v)", changed, err)
 	}
 }
 
@@ -1659,13 +1932,14 @@ func TestNewSessionAvailabilityFollowsLiveProviderSnapshot(t *testing.T) {
 		domain.ProviderCodex:  {Provider: domain.ProviderCodex, Configured: true, Enabled: true},
 		domain.ProviderClaude: {Provider: domain.ProviderClaude, Configured: true, Enabled: false},
 	}}
-	drafts := &recordingDraftSelector{computerID: "local", workdir: t.TempDir()}
-	controller := newController(t, creatorFunc(nil), &memorySessions{}, submitterFunc(nil), notifierFunc(nil), telegramcontroller.Options{Providers: providers, CreateDrafts: drafts})
+	workdir := t.TempDir()
+	ready := readySession(t, "77777777-7777-4777-a777-777777777777", domain.ProviderCodex, workdir, "provider-7", 1)
+	controller := newController(t, creatorFunc(nil), newLockedSessions(ready), submitterFunc(nil), notifierFunc(nil), telegramcontroller.Options{Providers: providers})
 	t.Cleanup(func() { _ = controller.Close(context.Background()) })
 
 	first, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticMenuNew})
-	if err != nil || first.Surface == nil || !hasSemanticAction(first.Surface.Rows, telegramcontroller.SemanticCreateCodex) || hasSemanticAction(first.Surface.Rows, telegramcontroller.SemanticCreateClaude) || !reflect.DeepEqual(drafts.previewed, []domain.Provider{domain.ProviderCodex}) {
-		t.Fatalf("one-enabled new surface = (%#v, %v), previews=%v", first, err, drafts.previewed)
+	if err != nil || first.Surface == nil || !strings.Contains(first.Surface.Text, "Выберите корень") || hasSemanticAction(first.Surface.Rows, telegramcontroller.SemanticCreateSelectCodex) || hasSemanticAction(first.Surface.Rows, telegramcontroller.SemanticCreateSelectClaude) {
+		t.Fatalf("one-enabled new surface = (%#v, %v)", first, err)
 	}
 	legacy, err := controller.Handle(context.Background(), coordinator.Update{ID: 301, Kind: coordinator.UpdateCallback, ActorID: ownerID, ConversationID: chatID, ConversationKind: "private", CallbackQueryID: "new-menu", SourceMessageID: 1, Text: "menu:new"})
 	if err != nil || legacy.Keyboard == nil || len(*legacy.Keyboard) != 2 || len((*legacy.Keyboard)[0]) != 1 || (*legacy.Keyboard)[0][0].CallbackData != "new:codex" {
@@ -1674,14 +1948,14 @@ func TestNewSessionAvailabilityFollowsLiveProviderSnapshot(t *testing.T) {
 
 	providers.values[domain.ProviderCodex] = telegramcontroller.ProviderPreference{Provider: domain.ProviderCodex, Configured: true, Enabled: false}
 	none, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticMenuNew})
-	if err != nil || none.Surface == nil || hasSemanticAction(none.Surface.Rows, telegramcontroller.SemanticCreateCodex) || hasSemanticAction(none.Surface.Rows, telegramcontroller.SemanticCreateClaude) || !strings.Contains(none.Surface.Text, "недоступно") {
-		t.Fatalf("zero-enabled new surface = (%#v, %v)", none, err)
+	if err != nil || none.Surface == nil || !hasSemanticAction(none.Surface.Rows, telegramcontroller.SemanticCreateSelectCodex) || !hasSemanticAction(none.Surface.Rows, telegramcontroller.SemanticCreateSelectClaude) || !strings.Contains(none.Surface.Text, "Выберите бэкенд") {
+		t.Fatalf("zero-enabled installed providers = (%#v, %v)", none, err)
 	}
 
 	providers.values[domain.ProviderClaude] = telegramcontroller.ProviderPreference{Provider: domain.ProviderClaude, Configured: true, Enabled: true}
 	reenabled, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticMenuNew})
-	if err != nil || reenabled.Surface == nil || hasSemanticAction(reenabled.Surface.Rows, telegramcontroller.SemanticCreateCodex) || !hasSemanticAction(reenabled.Surface.Rows, telegramcontroller.SemanticCreateClaude) || !reflect.DeepEqual(drafts.previewed, []domain.Provider{domain.ProviderCodex, domain.ProviderClaude}) {
-		t.Fatalf("re-enabled new surface = (%#v, %v), previews=%v", reenabled, err, drafts.previewed)
+	if err != nil || reenabled.Surface == nil || !strings.Contains(reenabled.Surface.Text, "Выберите корень") || hasSemanticAction(reenabled.Surface.Rows, telegramcontroller.SemanticCreateSelectCodex) || hasSemanticAction(reenabled.Surface.Rows, telegramcontroller.SemanticCreateSelectClaude) {
+		t.Fatalf("re-enabled new surface = (%#v, %v)", reenabled, err)
 	}
 }
 
@@ -1690,13 +1964,13 @@ func TestDisabledProviderBlocksStaleNewConfirmAndTextCreate(t *testing.T) {
 		domain.ProviderCodex:  {Provider: domain.ProviderCodex, Configured: true, Enabled: true},
 		domain.ProviderClaude: {Provider: domain.ProviderClaude, Configured: true, Enabled: false},
 	}}
-	drafts := &recordingDraftSelector{computerID: "local", workdir: t.TempDir()}
+	workdir := t.TempDir()
 	var creates int
-	ready := readySession(t, "33333333-3333-4333-9333-333333333333", domain.ProviderCodex, drafts.workdir, "provider-3", 1)
+	ready := readySession(t, "33333333-3333-4333-9333-333333333333", domain.ProviderCodex, workdir, "provider-3", 1)
 	controller := newController(t, creatorFunc(func(_ context.Context, intent app.ConfirmedSessionIntent) (app.CreateSessionResult, error) {
 		creates++
 		return app.CreateSessionResult{Session: sessionWithIntent(t, ready, intent.IntentID)}, nil
-	}), newLockedSessions(ready), submitterFunc(nil), notifierFunc(nil), telegramcontroller.Options{Providers: providers, CreateDrafts: drafts})
+	}), newLockedSessions(ready), submitterFunc(nil), notifierFunc(nil), telegramcontroller.Options{Providers: providers})
 	t.Cleanup(func() { _ = controller.Close(context.Background()) })
 
 	if _, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticMenuNew}); err != nil {
@@ -1704,24 +1978,15 @@ func TestDisabledProviderBlocksStaleNewConfirmAndTextCreate(t *testing.T) {
 	}
 	providers.values[domain.ProviderCodex] = telegramcontroller.ProviderPreference{Provider: domain.ProviderCodex, Configured: true, Enabled: false}
 	stale, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticCreateCodex, UpdateID: 310})
-	if err != nil || stale.Surface == nil || !strings.Contains(stale.Surface.Text, "недоступно") || drafts.confirms != 0 || creates != 0 {
-		t.Fatalf("stale semantic create = (%#v, %v), confirms=%d creates=%d", stale, err, drafts.confirms, creates)
+	if err != nil || stale.Surface == nil || !strings.Contains(stale.Surface.Text, "недоступно") || creates != 0 {
+		t.Fatalf("stale semantic create = (%#v, %v), creates=%d", stale, err, creates)
 	}
-	if decision := mustStatus(t, controller, message(311, "/new codex "+drafts.workdir)); !strings.Contains(decision.Status.Text, "недоступно") || creates != 0 {
+	if decision := mustStatus(t, controller, message(311, "/new codex "+workdir)); !strings.Contains(decision.Status.Text, "недоступно") || creates != 0 {
 		t.Fatalf("disabled /new = %#v, creates=%d", decision, creates)
 	}
 	callback, err := controller.Handle(context.Background(), coordinator.Update{ID: 312, Kind: coordinator.UpdateCallback, ActorID: ownerID, ConversationID: chatID, ConversationKind: "private", CallbackQueryID: "stale-new", SourceMessageID: 1, Text: "new:codex"})
-	if err != nil || !strings.Contains(callback.Status.Text, "недоступно") || drafts.confirms != 0 || creates != 0 {
-		t.Fatalf("disabled callback create = (%#v, %v), confirms=%d creates=%d", callback, err, drafts.confirms, creates)
-	}
-
-	providers.values[domain.ProviderCodex] = telegramcontroller.ProviderPreference{Provider: domain.ProviderCodex, Configured: true, Enabled: true}
-	drafts.afterConfirm = func() {
-		providers.values[domain.ProviderCodex] = telegramcontroller.ProviderPreference{Provider: domain.ProviderCodex, Configured: true, Enabled: false}
-	}
-	confirmed, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticCreateCodex, UpdateID: 313})
-	if err != nil || confirmed.Surface == nil || !strings.Contains(confirmed.Surface.Text, "недоступно") || creates != 0 || drafts.confirms != 1 {
-		t.Fatalf("disabled-after-confirm create = (%#v, %v), confirms=%d creates=%d", confirmed, err, drafts.confirms, creates)
+	if err != nil || !strings.Contains(callback.Status.Text, "недоступно") || creates != 0 {
+		t.Fatalf("disabled callback create = (%#v, %v), creates=%d", callback, err, creates)
 	}
 }
 
@@ -2059,7 +2324,7 @@ func TestPersistedReadySessionIsNotUsableAfterControllerRestart(t *testing.T) {
 		t.Fatalf("use persisted-ready status = %q", decision.Status.Text)
 	}
 	decision = mustStatus(t, controller, message(51, "do not submit"))
-	if !strings.Contains(decision.Status.Text, "активной сессии") || submits != 0 {
+	if decision.Kind != coordinator.DecisionSkip || submits != 0 {
 		t.Fatalf("prompt after unusable /use = %#v, submits=%d", decision, submits)
 	}
 	decision = mustStatus(t, controller, message(52, "/sessions"))
@@ -2435,8 +2700,8 @@ func newController(
 func mustStatus(t *testing.T, controller *telegramcontroller.Controller, update coordinator.Update) coordinator.Decision {
 	t.Helper()
 	decision, err := controller.Handle(context.Background(), update)
-	if err != nil || decision.Kind != coordinator.DecisionStatus || decision.Status.ConversationID != chatID {
-		t.Fatalf("Handle(%q) = (%#v, %v), want status", update.Text, decision, err)
+	if err != nil || (decision.Kind != coordinator.DecisionSkip && (decision.Kind != coordinator.DecisionStatus || decision.Status.ConversationID != chatID)) {
+		t.Fatalf("Handle(%q) = (%#v, %v), want status or silent prompt acceptance", update.Text, decision, err)
 	}
 	return decision
 }
@@ -2539,6 +2804,23 @@ type interactiveSubmitter struct {
 	submitWithCallbacks func(context.Context, domain.SessionID, string, sessionruntime.TurnCallbacks) (sessionruntime.TurnResult, error)
 }
 
+type currentTurnSubmitter struct {
+	submit func(context.Context, domain.SessionID, string, sessionruntime.TurnCallbacks) (sessionruntime.TurnResult, error)
+	steer  func(context.Context, domain.SessionID, sessionruntime.StructuredInput, sessionruntime.TurnCallbacks) error
+}
+
+func (submitter *currentTurnSubmitter) Submit(context.Context, domain.SessionID, string) (sessionruntime.TurnResult, error) {
+	return sessionruntime.TurnResult{}, errors.New("plain submit must not be used")
+}
+
+func (submitter *currentTurnSubmitter) SubmitWithCallbacks(ctx context.Context, id domain.SessionID, text string, callbacks sessionruntime.TurnCallbacks) (sessionruntime.TurnResult, error) {
+	return submitter.submit(ctx, id, text, callbacks)
+}
+
+func (submitter *currentTurnSubmitter) SubmitCurrentWithCallbacks(ctx context.Context, id domain.SessionID, input sessionruntime.StructuredInput, callbacks sessionruntime.TurnCallbacks) error {
+	return submitter.steer(ctx, id, input, callbacks)
+}
+
 func (submitter *interactiveSubmitter) Submit(context.Context, domain.SessionID, string) (sessionruntime.TurnResult, error) {
 	submitter.plainCalls++
 	return sessionruntime.TurnResult{}, errors.New("plain submit must not be used")
@@ -2606,19 +2888,6 @@ func (flow authorizationFlowFunc) ConsumeAuthorizationMessage(ctx context.Contex
 		return telegramcontroller.AuthorizationMessageBinding{}, nil
 	}
 	return flow.consume(ctx, request)
-}
-
-type createDraftSelectorFunc struct {
-	computerID domain.ComputerID
-	workdir    string
-}
-
-func (selector createDraftSelectorFunc) PreviewCreateDraft(_ context.Context, provider domain.Provider) (telegramcontroller.CreateDraft, error) {
-	return telegramcontroller.CreateDraft{ComputerID: selector.computerID, Provider: provider, Workdir: selector.workdir}, nil
-}
-
-func (selector createDraftSelectorFunc) ConfirmCreateDraft(_ context.Context, provider domain.Provider, _ int64) (telegramcontroller.CreateDraft, error) {
-	return telegramcontroller.CreateDraft{ComputerID: selector.computerID, Provider: provider, Workdir: selector.workdir, Confirmed: true}, nil
 }
 
 func (flow authorizationFlowFunc) PendingAuthorizations(ctx context.Context, request telegramcontroller.AuthorizationPendingLookup) ([]telegramcontroller.PendingAuthorization, error) {

@@ -78,7 +78,12 @@ func Open(options Options) (*Bundle, bool, error) {
 	if err != nil {
 		return nil, true, fmt.Errorf("compose media inputs: %w", err)
 	}
-	submitter, err := providerinputcomposition.New(options.Runtime, media.Photos, sessionProviders{store: options.Sessions})
+	var submitter sessionruntime.Submitter
+	if current, ok := options.Runtime.(providerinputcomposition.CurrentRuntime); ok {
+		submitter, err = providerinputcomposition.NewCurrent(current, media.Photos, sessionProviders{store: options.Sessions})
+	} else {
+		submitter, err = providerinputcomposition.New(options.Runtime, media.Photos, sessionProviders{store: options.Sessions})
+	}
 	if err != nil {
 		return nil, true, fmt.Errorf("compose attachment provider router: %w", err)
 	}

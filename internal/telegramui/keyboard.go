@@ -27,10 +27,39 @@ const (
 	ActionMenuStatus                           Action = "menu_status"
 	ActionMenuSettings                         Action = "menu_settings"
 	ActionMenuBack                             Action = "menu_back"
+	ActionCreateSelectCodex                    Action = "create_select_codex"
+	ActionCreateSelectClaude                   Action = "create_select_claude"
+	ActionCreateWorkdir                        Action = "create_workdir"
+	ActionCreateConfirm                        Action = "create_confirm"
+	ActionCreateChoice                         Action = "create_choice"
+	ActionCreatePrevious                       Action = "create_previous"
+	ActionCreateFirst                          Action = "create_first"
+	ActionCreateNext                           Action = "create_next"
+	ActionCreateUp                             Action = "create_up"
+	ActionCreatePick                           Action = "create_pick"
+	ActionCreateDirectoryNew                   Action = "create_directory_new"
+	ActionCreateBack                           Action = "create_back"
+	ActionCreateFresh                          Action = "create_fresh"
 	ActionCreateCodex                          Action = "create_codex"
 	ActionCreateClaude                         Action = "create_claude"
 	ActionSettingsScreen                       Action = "settings_screen"
 	ActionSettingsDetail                       Action = "settings_detail"
+	ActionSettingsPageLimit                    Action = "settings_page_limit"
+	ActionSettingsContinueExisting             Action = "settings_continue_existing"
+	ActionSettingsTechnicalActions             Action = "settings_technical_actions"
+	ActionSettingsBackgroundQuestions          Action = "settings_background_questions"
+	ActionSettingsBackgroundErrors             Action = "settings_background_errors"
+	ActionSettingsArchiveRecommendations       Action = "settings_archive_recommendations"
+	ActionSettingsDefaultProvider              Action = "settings_default_provider"
+	ActionSettingsDefaultWorkdir               Action = "settings_default_workdir"
+	ActionSettingsClearCreationDefaults        Action = "settings_clear_creation_defaults"
+	ActionSettingsLifetimeNever                Action = "settings_lifetime_never"
+	ActionSettingsLifetime6Hours               Action = "settings_lifetime_6h"
+	ActionSettingsLifetime12Hours              Action = "settings_lifetime_12h"
+	ActionSettingsLifetime24Hours              Action = "settings_lifetime_24h"
+	ActionSettingsLifetime48Hours              Action = "settings_lifetime_48h"
+	ActionSettingsProviderCodex                Action = "settings_provider_codex"
+	ActionSettingsProviderClaude               Action = "settings_provider_claude"
 	ActionAuthorizeCodex                       Action = "authorize_codex"
 	ActionAuthorizeClaude                      Action = "authorize_claude"
 	ActionInteractionChoice                    Action = "interaction_choice"
@@ -44,6 +73,9 @@ const (
 	ActionCallbackSendConfirmed                Action = "callback_send_confirmed"
 	ActionCallbackSendRetryPossibleDuplicate   Action = "callback_send_retry_possible_duplicate"
 	ActionInteractionOther                     Action = "interaction_other"
+	ActionInteractionPrevious                  Action = "interaction_previous"
+	ActionInteractionNext                      Action = "interaction_next"
+	ActionInteractionSubmit                    Action = "interaction_submit"
 	ActionAcceptedTurnAssumeCompleted          Action = "accepted_turn_assume_completed"
 	ActionAcceptedTurnRetryPossibleDuplicate   Action = "accepted_turn_retry_possible_duplicate"
 	ActionAcceptedTurnCancel                   Action = "accepted_turn_cancel"
@@ -56,8 +88,17 @@ const (
 func IsGlobalAction(action Action) bool {
 	switch action {
 	case ActionMenuSessions, ActionMenuNew, ActionMenuArchive, ActionMenuStatus,
-		ActionMenuSettings, ActionMenuBack, ActionCreateCodex, ActionCreateClaude,
-		ActionSettingsScreen, ActionSettingsDetail, ActionAuthorizeCodex, ActionAuthorizeClaude:
+		ActionMenuSettings, ActionMenuBack, ActionCreateSelectCodex, ActionCreateSelectClaude,
+		ActionCreateWorkdir, ActionCreateConfirm, ActionCreateCodex, ActionCreateClaude,
+		ActionCreateChoice, ActionCreatePrevious, ActionCreateFirst, ActionCreateNext,
+		ActionCreateUp, ActionCreatePick, ActionCreateDirectoryNew, ActionCreateBack, ActionCreateFresh,
+		ActionSettingsScreen, ActionSettingsDetail, ActionSettingsPageLimit, ActionSettingsContinueExisting,
+		ActionSettingsTechnicalActions, ActionSettingsBackgroundQuestions, ActionSettingsBackgroundErrors,
+		ActionSettingsArchiveRecommendations,
+		ActionSettingsDefaultProvider, ActionSettingsDefaultWorkdir, ActionSettingsClearCreationDefaults,
+		ActionSettingsLifetimeNever, ActionSettingsLifetime6Hours, ActionSettingsLifetime12Hours,
+		ActionSettingsLifetime24Hours, ActionSettingsLifetime48Hours,
+		ActionSettingsProviderCodex, ActionSettingsProviderClaude, ActionAuthorizeCodex, ActionAuthorizeClaude:
 		// Outbound resolution is also an owner-only global surface, but its
 		// exact operation/update identity is bound server-side by the presenter.
 		return true
@@ -93,7 +134,8 @@ func IsOutboundResolutionAction(action Action) bool {
 
 func IsInteractionAction(action Action) bool {
 	switch action {
-	case ActionInteractionChoice, ActionInteractionAccept, ActionInteractionDecline, ActionInteractionCancel, ActionInteractionOther:
+	case ActionInteractionChoice, ActionInteractionAccept, ActionInteractionDecline, ActionInteractionCancel, ActionInteractionOther,
+		ActionInteractionPrevious, ActionInteractionNext, ActionInteractionSubmit:
 		return true
 	default:
 		return false
@@ -126,6 +168,7 @@ type ButtonTarget struct {
 	FollowLatest      bool
 	SessionSlot       int
 	InteractionChoice int
+	Choice            int
 }
 
 // PageIndicator supplies numeric content for the copy layer's center button.
@@ -140,6 +183,7 @@ type Button struct {
 	Action    Action
 	Target    ButtonTarget
 	Indicator *PageIndicator
+	Label     string
 }
 
 type ButtonRow []Button

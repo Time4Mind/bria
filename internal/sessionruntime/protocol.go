@@ -148,6 +148,12 @@ type StructuredSubmitter interface {
 	SubmitStructuredWithCallbacks(context.Context, domain.SessionID, StructuredInput, TurnCallbacks) (TurnResult, error)
 }
 
+// CurrentTurnSubmitter adds input to the exact regular turn already in flight
+// and returns after the provider confirms that input, never after turn final.
+type CurrentTurnSubmitter interface {
+	SubmitCurrentWithCallbacks(context.Context, domain.SessionID, StructuredInput, TurnCallbacks) error
+}
+
 // TurnStopper confirms the active provider turn reached its correlated
 // interrupted terminal before returning success.
 type TurnStopper interface {

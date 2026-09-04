@@ -114,10 +114,10 @@ func (journal *Journal) LeaseNextOutput(
 			switch record.Phase {
 			case OutputConfirmed:
 				continue
-			case OutputFailed, OutputUnknown:
-				// Later operations cannot overtake an unresolved write. In
-				// particular, Unknown is never changed or retried here.
-				return ErrNoAvailable
+			case OutputFailed, OutputUnknown, OutputSuperseded:
+				// Terminal unconfirmed writes are never replayed implicitly,
+				// but they do not block independent later state/results.
+				continue
 			case OutputPending:
 				if record.Lease.Owner != "" && now.UnixNano() < record.Lease.UntilUnix {
 					return ErrNoAvailable
@@ -131,6 +131,67 @@ func (journal *Journal) LeaseNextOutput(
 		}
 		return ErrNoAvailable
 	})
+	return result, err
+}
+
+// SupersedePendingOutputs retains durable history while collapsing unleased
+// intermediate projections to the newest complete state. A leased write is
+// never changed because its external outcome may already be in flight.
+func (journal *Journal) SupersedePendingOutputs(ctx context.Context, sessionID, keepOperationID string, kinds []string) ([]Output, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := validateOpaqueID(sessionID, journal.limits.MaxIDBytes, "session id"); err != nil {
+		return nil, err
+	}
+	if err := validateOpaqueID(keepOperationID, journal.limits.MaxIDBytes, "operation id"); err != nil {
+		return nil, err
+	}
+	wanted := make(map[string]bool, len(kinds))
+	for _, kind := range kinds {
+		if strings.TrimSpace(kind) == "" || kind != strings.TrimSpace(kind) || len(kind) > journal.limits.MaxKindBytes {
+			return nil, errors.New("output kind is invalid")
+		}
+		wanted[kind] = true
+	}
+	if len(wanted) == 0 {
+		return []Output{}, nil
+	}
+	var result []Output
+	err := journal.mutate(func(loaded *document) error {
+		session, err := sessionAt(loaded, sessionID, false, journal.limits)
+		if err != nil {
+			return err
+		}
+		var keepSequence uint64
+		for index := range session.Outputs {
+			if session.Outputs[index].OperationID == keepOperationID {
+				keepSequence = session.Outputs[index].Sequence
+				break
+			}
+		}
+		if keepSequence == 0 {
+			return ErrNotFound
+		}
+		for index := range session.Outputs {
+			record := &session.Outputs[index]
+			if record.OperationID == keepOperationID {
+				continue
+			}
+			if record.Sequence >= keepSequence || record.Phase != OutputPending || record.Lease.Owner != "" || !wanted[record.Kind] {
+				continue
+			}
+			record.Phase = OutputSuperseded
+			result = append(result, outputFromRecord(sessionID, *record))
+		}
+		if len(result) == 0 {
+			return errNoMutation
+		}
+		return nil
+	})
+	if errors.Is(err, errNoMutation) {
+		return result, nil
+	}
 	return result, err
 }
 
