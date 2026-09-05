@@ -127,6 +127,7 @@ type Sender struct {
 	operations CallbackOperationStore
 	pending    *pendingStore
 	observer   TraceObserver
+	delivery   sync.Mutex
 }
 type UnknownCallbackOperation struct {
 	OwnerUserID        int64
@@ -920,6 +921,26 @@ func (sender *Sender) deliverStatusOperation(ctx context.Context, operation Stat
 		}
 		sender.trace(context.WithoutCancel(ctx), TraceEvent{Stage: "delivery.durable", OperationID: operation.ID, Result: result, Error: errorText, Duration: time.Since(started)})
 	}()
+	sender.delivery.Lock()
+	defer sender.delivery.Unlock()
+	current, found, err := sender.operations.LoadStatus(ctx, operation.ID)
+	if err != nil {
+		return coordinator.Receipt{}, err
+	}
+	if !found {
+		return coordinator.Receipt{}, errors.New("durable status disappeared before delivery")
+	}
+	switch current.Phase {
+	case StatusReceiptConfirmed, StatusCommitted:
+		if current.Receipt <= 0 {
+			return coordinator.Receipt{}, errors.New("confirmed durable status has invalid receipt")
+		}
+		return coordinator.Receipt{MessageID: current.Receipt}, nil
+	case StatusQueued:
+		operation = current
+	default:
+		return coordinator.Receipt{}, fmt.Errorf("durable status is not deliverable from phase %s", current.Phase)
+	}
 	unknown := operation
 	unknown.Phase = StatusSendUnknown
 	changed, err := sender.operations.CompareAndSwapStatus(ctx, operation.ID, StatusQueued, unknown)

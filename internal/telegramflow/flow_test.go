@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -846,6 +847,61 @@ type sender struct {
 	sends            int
 	edits            int
 	acknowledgements int
+}
+
+type barrierOperationStore struct {
+	telegramflow.CallbackOperationStore
+	mu      sync.Mutex
+	waiters int
+	ready   chan struct{}
+}
+
+func (store *barrierOperationStore) ListQueuedStatuses(ctx context.Context, limit int) ([]telegramflow.StatusOperation, error) {
+	items, err := store.CallbackOperationStore.ListQueuedStatuses(ctx, limit)
+	if err != nil {
+		return nil, err
+	}
+	store.mu.Lock()
+	store.waiters++
+	if store.waiters == 2 {
+		close(store.ready)
+	}
+	store.mu.Unlock()
+	<-store.ready
+	return items, nil
+}
+
+func TestConcurrentDurableDeliveryClaimsOneTelegramMutation(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0).UTC()
+	baseOperations := telegramflow.NewMemoryCallbackOperationStore()
+	operation := telegramflow.StatusOperation{
+		ID: "status:race", Sequence: 1, Status: coordinator.Status{ConversationID: 42, Text: "screen"}, Phase: telegramflow.StatusQueued,
+	}
+	if _, _, err := baseOperations.EnqueueStatus(context.Background(), operation); err != nil {
+		t.Fatal(err)
+	}
+	operations := &barrierOperationStore{CallbackOperationStore: baseOperations, ready: make(chan struct{})}
+	transport := &sender{receipt: coordinator.Receipt{MessageID: 701}}
+	_, outbound, err := telegramflow.New(telegramflow.Config{
+		OwnerUserID: 7, OwnerPrivateChatID: 42, Presenter: newPresenter(t, now),
+		CallbackRegistry: telegrampipeline.NewMemoryCallbackRegistry(func() time.Time { return now }), UIState: telegramstate.NewMemoryStore(),
+		MessageUI: semanticMessageHandler{}, Callbacks: &callbackExecutor{}, Operations: operations, Sender: transport,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	errorsSeen := make(chan error, 2)
+	for range 2 {
+		go func() { errorsSeen <- outbound.DeliverPendingStatuses(context.Background(), 1) }()
+	}
+	for range 2 {
+		if err := <-errorsSeen; err != nil {
+			t.Fatalf("concurrent delivery error = %v", err)
+		}
+	}
+	if transport.sends != 1 {
+		t.Fatalf("Telegram sends = %d, want exactly one", transport.sends)
+	}
 }
 
 type failNextUpdateStore struct {
