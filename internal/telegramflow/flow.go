@@ -300,6 +300,11 @@ func (handler *Handler) Handle(ctx context.Context, update coordinator.Update) (
 			return coordinator.Decision{}, fmt.Errorf("persist callback acknowledgement: %w", err)
 		}
 	}
+	if handler.acknowledger != nil {
+		stageStarted = time.Now()
+		handler.acknowledger.AcknowledgeCallback(ctx, operationID, update.CallbackQueryID)
+		handler.trace(ctx, completedTrace("callback.ack.start", operationID, update, "", "", stageStarted, nil))
+	}
 	stageStarted = time.Now()
 	accepted, err := telegrampipeline.AcceptCallbackForDurableOperation(
 		ctx,
@@ -313,9 +318,6 @@ func (handler *Handler) Handle(ctx context.Context, update coordinator.Update) (
 	handler.trace(ctx, completedTrace("callback.accept", operationID, update, "", "", stageStarted, err))
 	if err != nil {
 		if recoverableCallbackError(err) {
-			if handler.acknowledger != nil {
-				handler.acknowledger.AcknowledgeCallback(ctx, operationID, update.CallbackQueryID)
-			}
 			return coordinator.Decision{Kind: coordinator.DecisionSkip}, nil
 		}
 		return coordinator.Decision{}, err

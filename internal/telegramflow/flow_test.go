@@ -592,8 +592,8 @@ func TestAcceptedTurnRecoveryCallbackIsOneTimeAndCarriesExactGeneration(t *testi
 	replay.ID++
 	replay.CallbackQueryID = "turn-recovery-replay"
 	replayed, err := handler.Handle(context.Background(), replay)
-	if err != nil || replayed.Kind != coordinator.DecisionSkip || executor.calls != 1 || base.acknowledgements != 1 {
-		t.Fatalf("second callback = %#v, %v, calls=%d, acknowledgements=%d; want one-time silent acknowledgement", replayed, err, executor.calls, base.acknowledgements)
+	if err != nil || replayed.Kind != coordinator.DecisionSkip || executor.calls != 1 || base.acknowledgements != 2 {
+		t.Fatalf("second callback = %#v, %v, calls=%d, acknowledgement attempts=%d; want early acknowledgement and one stale replay acknowledgement", replayed, err, executor.calls, base.acknowledgements)
 	}
 }
 

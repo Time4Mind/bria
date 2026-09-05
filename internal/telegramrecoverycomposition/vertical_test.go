@@ -289,7 +289,7 @@ func TestSignedStatusRecoverySurvivesReopenAndRejectsSecondClick(t *testing.T) {
 	replay.ID++
 	replay.CallbackQueryID = "status-recovery-replay"
 	replayed, err := handler.Handle(context.Background(), replay)
-	if err != nil || replayed.Kind != coordinator.DecisionSkip || len(projector.requests) != 1 || transport.acknowledged != 1 {
+	if err != nil || replayed.Kind != coordinator.DecisionSkip || len(projector.requests) != 1 || transport.acknowledged != 2 {
 		t.Fatalf("replayed status recovery = %#v, %v, projections=%d", replayed, err, len(projector.requests))
 	}
 	reopenedOperations, err := telegramflow.OpenFileCallbackOperationStore(operationsPath)
