@@ -4,6 +4,7 @@
 package durableflow
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -38,6 +39,9 @@ const (
 )
 
 type InputProcessCallbacks struct {
+	// OnPrepared replaces only the payload of the exact leased pending input.
+	// It is used for deterministic pre-provider transformations.
+	OnPrepared func(context.Context, ProviderInput) error
 	// OnAccepted is the only path that may transition the leased input to
 	// accepted. The receipt must be the exact tuple supplied to Process.
 	OnAccepted func(context.Context, HandoffResult) error
@@ -68,6 +72,7 @@ type Journal interface {
 	EnqueueInputWithAttachments(context.Context, string, string, []byte, []messagejournal.AttachmentRef) (messagejournal.Input, bool, error)
 	Inputs(context.Context, string) ([]messagejournal.Input, error)
 	LeaseNextInput(context.Context, string, string, time.Time, time.Duration) (messagejournal.Input, error)
+	ReplaceLeasedInputPayload(context.Context, string, string, string, uint64, []byte) (messagejournal.Input, error)
 	MarkInputAccepted(context.Context, string, string, string) (messagejournal.Input, error)
 	ReleaseInputLease(context.Context, string, string, string) (messagejournal.Input, error)
 	MarkInputDeliveryFailed(context.Context, string, string, string) (messagejournal.Input, error)
@@ -335,7 +340,17 @@ func (flow *Flow) ProcessNextInput(ctx context.Context, sessionID string, proces
 	request := ProviderInput{SessionID: input.SessionID, MessageID: input.MessageID, Sequence: input.Sequence, Payload: append([]byte(nil), input.Payload...), Attachments: cloneAttachmentRefs(input.Attachments)}
 	result := InputProcessResult{SessionID: input.SessionID, MessageID: input.MessageID, Sequence: input.Sequence, State: InputProcessUnknown}
 	accepted := false
-	callbacks := InputProcessCallbacks{OnAccepted: func(callbackCtx context.Context, receipt HandoffResult) error {
+	callbacks := InputProcessCallbacks{OnPrepared: func(callbackCtx context.Context, prepared ProviderInput) error {
+		if prepared.SessionID != input.SessionID || prepared.MessageID != input.MessageID || prepared.Sequence != input.Sequence {
+			return ErrInvalidHandoff
+		}
+		persisted, persistErr := flow.journal.ReplaceLeasedInputPayload(callbackCtx, input.SessionID, input.MessageID, flow.owner, input.Sequence, prepared.Payload)
+		if persistErr != nil || persisted.Sequence != input.Sequence || !bytes.Equal(persisted.Payload, prepared.Payload) {
+			return errors.Join(ErrInvalidHandoff, persistErr)
+		}
+		input.Payload = append([]byte(nil), prepared.Payload...)
+		return nil
+	}, OnAccepted: func(callbackCtx context.Context, receipt HandoffResult) error {
 		if accepted || receipt.SessionID != input.SessionID || receipt.MessageID != input.MessageID || receipt.Sequence != input.Sequence || receipt.State != HandoffAccepted {
 			return ErrInvalidHandoff
 		}

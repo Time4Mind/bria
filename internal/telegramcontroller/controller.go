@@ -4,6 +4,7 @@ import (
 	"bria/internal/app"
 	"bria/internal/coordinator"
 	"bria/internal/domain"
+	"bria/internal/promptpreprocess"
 	"bria/internal/sessioncreation"
 	"bria/internal/sessionruntime"
 	"bria/internal/settingsport"
@@ -21,6 +22,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 	"unicode/utf8"
 )
 
@@ -207,59 +209,62 @@ type AuthorizationFlow interface {
 type SemanticActionKind string
 
 const (
-	SemanticPagePrevious                   SemanticActionKind = "page_previous"
-	SemanticPageLatest                     SemanticActionKind = "page_latest"
-	SemanticPageNext                       SemanticActionKind = "page_next"
-	SemanticStop                           SemanticActionKind = "stop"
-	SemanticClose                          SemanticActionKind = "close"
-	SemanticOptions                        SemanticActionKind = "options"
-	SemanticScreen                         SemanticActionKind = "screen"
-	SemanticSelect                         SemanticActionKind = "select_session"
-	SemanticResume                         SemanticActionKind = "resume"
-	SemanticMenuSessions                   SemanticActionKind = "menu_sessions"
-	SemanticMenuNew                        SemanticActionKind = "menu_new"
-	SemanticMenuArchive                    SemanticActionKind = "menu_archive"
-	SemanticMenuStatus                     SemanticActionKind = "menu_status"
-	SemanticMenuSettings                   SemanticActionKind = "menu_settings"
-	SemanticMenuBack                       SemanticActionKind = "menu_back"
-	SemanticMenuNodes                      SemanticActionKind = "menu_nodes"
-	SemanticSelectNode                     SemanticActionKind = "select_node"
-	SemanticCreateSelectCodex              SemanticActionKind = "create_select_codex"
-	SemanticCreateSelectClaude             SemanticActionKind = "create_select_claude"
-	SemanticCreateWorkdir                  SemanticActionKind = "create_workdir"
-	SemanticCreateConfirm                  SemanticActionKind = "create_confirm"
-	SemanticCreateChoice                   SemanticActionKind = "create_choice"
-	SemanticCreatePrevious                 SemanticActionKind = "create_previous"
-	SemanticCreateFirst                    SemanticActionKind = "create_first"
-	SemanticCreateNext                     SemanticActionKind = "create_next"
-	SemanticCreateUp                       SemanticActionKind = "create_up"
-	SemanticCreatePick                     SemanticActionKind = "create_pick"
-	SemanticCreateDirectoryNew             SemanticActionKind = "create_directory_new"
-	SemanticCreateBack                     SemanticActionKind = "create_back"
-	SemanticCreateFresh                    SemanticActionKind = "create_fresh"
-	SemanticCreateCodex                    SemanticActionKind = "create_codex"
-	SemanticCreateClaude                   SemanticActionKind = "create_claude"
-	SemanticSettingsCategory               SemanticActionKind = "settings_category"
-	SemanticSettingsScreen                 SemanticActionKind = "settings_screen"
-	SemanticSettingsDetail                 SemanticActionKind = "settings_detail"
-	SemanticSettingsPageLimit              SemanticActionKind = "settings_page_limit"
-	SemanticSettingsContinueExisting       SemanticActionKind = "settings_continue_existing"
-	SemanticSettingsTechnicalActions       SemanticActionKind = "settings_technical_actions"
-	SemanticSettingsBackgroundQuestions    SemanticActionKind = "settings_background_questions"
-	SemanticSettingsBackgroundErrors       SemanticActionKind = "settings_background_errors"
-	SemanticSettingsArchiveRecommendations SemanticActionKind = "settings_archive_recommendations"
-	SemanticSettingsDefaultProvider        SemanticActionKind = "settings_default_provider"
-	SemanticSettingsDefaultWorkdir         SemanticActionKind = "settings_default_workdir"
-	SemanticSettingsClearCreationDefaults  SemanticActionKind = "settings_clear_creation_defaults"
-	SemanticSettingsLifetimeNever          SemanticActionKind = "settings_lifetime_never"
-	SemanticSettingsLifetime6Hours         SemanticActionKind = "settings_lifetime_6h"
-	SemanticSettingsLifetime12Hours        SemanticActionKind = "settings_lifetime_12h"
-	SemanticSettingsLifetime24Hours        SemanticActionKind = "settings_lifetime_24h"
-	SemanticSettingsLifetime48Hours        SemanticActionKind = "settings_lifetime_48h"
-	SemanticSettingsProviderCodex          SemanticActionKind = "settings_provider_codex"
-	SemanticSettingsProviderClaude         SemanticActionKind = "settings_provider_claude"
-	SemanticAuthorizeCodex                 SemanticActionKind = "authorize_codex"
-	SemanticAuthorizeClaude                SemanticActionKind = "authorize_claude"
+	SemanticPagePrevious                     SemanticActionKind = "page_previous"
+	SemanticPageLatest                       SemanticActionKind = "page_latest"
+	SemanticPageNext                         SemanticActionKind = "page_next"
+	SemanticStop                             SemanticActionKind = "stop"
+	SemanticClose                            SemanticActionKind = "close"
+	SemanticOptions                          SemanticActionKind = "options"
+	SemanticScreen                           SemanticActionKind = "screen"
+	SemanticSelect                           SemanticActionKind = "select_session"
+	SemanticResume                           SemanticActionKind = "resume"
+	SemanticMenuSessions                     SemanticActionKind = "menu_sessions"
+	SemanticMenuNew                          SemanticActionKind = "menu_new"
+	SemanticMenuArchive                      SemanticActionKind = "menu_archive"
+	SemanticMenuStatus                       SemanticActionKind = "menu_status"
+	SemanticMenuSettings                     SemanticActionKind = "menu_settings"
+	SemanticMenuBack                         SemanticActionKind = "menu_back"
+	SemanticMenuNodes                        SemanticActionKind = "menu_nodes"
+	SemanticSelectNode                       SemanticActionKind = "select_node"
+	SemanticCreateSelectCodex                SemanticActionKind = "create_select_codex"
+	SemanticCreateSelectClaude               SemanticActionKind = "create_select_claude"
+	SemanticCreateWorkdir                    SemanticActionKind = "create_workdir"
+	SemanticCreateConfirm                    SemanticActionKind = "create_confirm"
+	SemanticCreateChoice                     SemanticActionKind = "create_choice"
+	SemanticCreatePrevious                   SemanticActionKind = "create_previous"
+	SemanticCreateFirst                      SemanticActionKind = "create_first"
+	SemanticCreateNext                       SemanticActionKind = "create_next"
+	SemanticCreateUp                         SemanticActionKind = "create_up"
+	SemanticCreatePick                       SemanticActionKind = "create_pick"
+	SemanticCreateDirectoryNew               SemanticActionKind = "create_directory_new"
+	SemanticCreateBack                       SemanticActionKind = "create_back"
+	SemanticCreateFresh                      SemanticActionKind = "create_fresh"
+	SemanticCreateCodex                      SemanticActionKind = "create_codex"
+	SemanticCreateClaude                     SemanticActionKind = "create_claude"
+	SemanticSettingsCategory                 SemanticActionKind = "settings_category"
+	SemanticSettingsScreen                   SemanticActionKind = "settings_screen"
+	SemanticSettingsDetail                   SemanticActionKind = "settings_detail"
+	SemanticSettingsPageLimit                SemanticActionKind = "settings_page_limit"
+	SemanticSettingsContinueExisting         SemanticActionKind = "settings_continue_existing"
+	SemanticSettingsTechnicalActions         SemanticActionKind = "settings_technical_actions"
+	SemanticSettingsBackgroundQuestions      SemanticActionKind = "settings_background_questions"
+	SemanticSettingsBackgroundErrors         SemanticActionKind = "settings_background_errors"
+	SemanticSettingsArchiveRecommendations   SemanticActionKind = "settings_archive_recommendations"
+	SemanticSettingsDefaultProvider          SemanticActionKind = "settings_default_provider"
+	SemanticSettingsDefaultWorkdir           SemanticActionKind = "settings_default_workdir"
+	SemanticSettingsClearCreationDefaults    SemanticActionKind = "settings_clear_creation_defaults"
+	SemanticSettingsLifetimeNever            SemanticActionKind = "settings_lifetime_never"
+	SemanticSettingsLifetime6Hours           SemanticActionKind = "settings_lifetime_6h"
+	SemanticSettingsLifetime12Hours          SemanticActionKind = "settings_lifetime_12h"
+	SemanticSettingsLifetime24Hours          SemanticActionKind = "settings_lifetime_24h"
+	SemanticSettingsLifetime48Hours          SemanticActionKind = "settings_lifetime_48h"
+	SemanticSettingsProviderCodex            SemanticActionKind = "settings_provider_codex"
+	SemanticSettingsProviderClaude           SemanticActionKind = "settings_provider_claude"
+	SemanticSettingsPreprocessing            SemanticActionKind = "settings_preprocessing"
+	SemanticSettingsPreprocessingInstruction SemanticActionKind = "settings_preprocessing_instruction"
+	SemanticSettingsPreprocessingReset       SemanticActionKind = "settings_preprocessing_reset"
+	SemanticAuthorizeCodex                   SemanticActionKind = "authorize_codex"
+	SemanticAuthorizeClaude                  SemanticActionKind = "authorize_claude"
 )
 
 type SemanticAction struct {
@@ -430,6 +435,11 @@ func (controller *Controller) HandleSemanticAction(ctx context.Context, action S
 	if err := validateSemanticAction(action); err != nil {
 		return SemanticActionResult{}, err
 	}
+	if action.Kind != SemanticSettingsPreprocessingInstruction {
+		controller.mu.Lock()
+		controller.preprocessingInstructionPending = false
+		controller.mu.Unlock()
+	}
 	if isGlobalSemanticAction(action.Kind) {
 		return controller.handleGlobalSemanticAction(ctx, action)
 	}
@@ -492,6 +502,7 @@ func isGlobalSemanticAction(kind SemanticActionKind) bool {
 		SemanticSettingsLifetimeNever, SemanticSettingsLifetime6Hours, SemanticSettingsLifetime12Hours,
 		SemanticSettingsLifetime24Hours, SemanticSettingsLifetime48Hours,
 		SemanticSettingsProviderCodex, SemanticSettingsProviderClaude,
+		SemanticSettingsPreprocessing, SemanticSettingsPreprocessingInstruction, SemanticSettingsPreprocessingReset,
 		SemanticAuthorizeCodex, SemanticAuthorizeClaude:
 		return true
 	}
@@ -586,7 +597,27 @@ func (controller *Controller) handleGlobalSemanticAction(ctx context.Context, ac
 		if !ok {
 			return SemanticActionResult{}, errors.New("settings action has no category")
 		}
+		if action.Kind == SemanticSettingsProviderCodex || action.Kind == SemanticSettingsProviderClaude {
+			controller.invalidatePreprocessor()
+		}
 		return controller.settingsCategorySemanticResult(ctx, category)
+	case SemanticSettingsPreprocessingInstruction:
+		if _, ok := controller.settings.(settingsport.PreprocessingPreferences); !ok {
+			return SemanticActionResult{}, errors.New("preprocessing settings are not configured")
+		}
+		controller.mu.Lock()
+		controller.preprocessingInstructionPending = true
+		controller.mu.Unlock()
+		return SemanticActionResult{Surface: &SemanticSurface{
+			Text: "Отправьте новую инструкцию препроцессинга одним текстовым сообщением.",
+			Rows: [][]SemanticButton{{{Label: "Отмена", Action: SemanticMenuSettings}}},
+		}}, nil
+	case SemanticSettingsPreprocessing, SemanticSettingsPreprocessingReset:
+		if err := telegramsettings.Apply(ctx, controller.settings, controller.scopedProviderPreferences(), string(action.Kind)); err != nil {
+			return SemanticActionResult{}, err
+		}
+		controller.invalidatePreprocessor()
+		return controller.settingsCategorySemanticResult(ctx, telegramsettingsview.CategoryPreprocessing)
 	case SemanticAuthorizeCodex, SemanticAuthorizeClaude:
 		provider := domain.ProviderCodex
 		if action.Kind == SemanticAuthorizeClaude {
@@ -810,6 +841,7 @@ func (controller *Controller) submitAuthorization(ctx context.Context, update co
 		controller.pendingAuthorization = nil
 	}
 	controller.mu.Unlock()
+	controller.invalidatePreprocessor()
 	return controller.status(authorizationProviderName(challenge.Provider) + " авторизован. Сообщение с секретом удалено."), nil
 }
 func authorizationProviderName(provider domain.Provider) string {
@@ -843,6 +875,7 @@ func (controller *Controller) consumeAuthorizationMessage(ctx context.Context, u
 		if binding.Provider != domain.ProviderCodex && binding.Provider != domain.ProviderClaude {
 			return coordinator.Decision{}, true, errors.New("authorization tombstone has invalid provider")
 		}
+		controller.invalidatePreprocessor()
 		return controller.status(authorizationProviderName(binding.Provider) + " авторизован. Сообщение с секретом удалено."), true, nil
 	}
 	return controller.status("Авторизация не подтверждена. Сообщение с секретом удалено."), true, nil
@@ -961,83 +994,90 @@ type Options struct {
 	// InputPreparer is required for downloadable voice/photo content. Document
 	// preparation additionally requires AllowDocumentInput because documents
 	// can carry arbitrary bytes.
-	InputPreparer       InputPreparer
-	AllowDocumentInput  bool
-	DurableInput        DurableInputCustody
-	DurableOutput       DurableOutputCustody
-	Interactions        InteractionHandler
-	InteractionText     InteractionTextHandler
-	Authorization       AuthorizationFlow
-	Attachments         AttachmentCustody
-	RuntimeEvents       RuntimeEventObserver
-	Finals              FinalProcessor
-	AsyncCreator        AsyncSessionCreator
-	ArchivedResumer     ArchivedResumer
-	AsyncResumer        AsyncArchivedResumer
-	SessionCloser       SessionCloser
-	TurnLifecycle       TurnLifecycle
-	OutputFailures      OutputFailureRecorder
-	Recovered           []domain.Session
-	CreationEnvironment sessioncreation.Environment
-	Quotas              telegramstatus.Reader
+	InputPreparer         InputPreparer
+	AllowDocumentInput    bool
+	DurableInput          DurableInputCustody
+	DurableOutput         DurableOutputCustody
+	Interactions          InteractionHandler
+	InteractionText       InteractionTextHandler
+	Authorization         AuthorizationFlow
+	Attachments           AttachmentCustody
+	RuntimeEvents         RuntimeEventObserver
+	Finals                FinalProcessor
+	AsyncCreator          AsyncSessionCreator
+	ArchivedResumer       ArchivedResumer
+	AsyncResumer          AsyncArchivedResumer
+	SessionCloser         SessionCloser
+	TurnLifecycle         TurnLifecycle
+	OutputFailures        OutputFailureRecorder
+	Recovered             []domain.Session
+	CreationEnvironment   sessioncreation.Environment
+	Quotas                telegramstatus.Reader
+	Preprocessor          promptpreprocess.Processor
+	PreprocessingObserver promptpreprocess.Observer
+	PreprocessingTimeout  time.Duration
 }
 type Controller struct {
-	ownerUserID            int64
-	ownerPrivateChatID     int64
-	localComputerID        domain.ComputerID
-	creator                SessionCreator
-	sessions               SessionStore
-	submitter              sessionruntime.Submitter
-	notifier               Notifier
-	lifecycle              Lifecycle
-	uiState                ActiveSessionStore
-	settings               Preferences
-	providerPreferences    ProviderPreferences
-	stopper                sessionruntime.TurnStopper
-	inputPreparer          InputPreparer
-	allowDocumentInput     bool
-	durableInput           DurableInputCustody
-	durableOutput          DurableOutputCustody
-	interactions           InteractionHandler
-	interactionText        InteractionTextHandler
-	authorization          AuthorizationFlow
-	attachments            AttachmentCustody
-	runtimeEvents          RuntimeEventObserver
-	finals                 FinalProcessor
-	asyncCreator           AsyncSessionCreator
-	archivedResumer        ArchivedResumer
-	asyncResumer           AsyncArchivedResumer
-	sessionCloser          SessionCloser
-	turnLifecycle          TurnLifecycle
-	outputFailures         OutputFailureRecorder
-	queueLimit             int
-	rootContext            context.Context
-	cancelRoot             context.CancelFunc
-	mu                     sync.Mutex
-	closed                 bool
-	closeDone              chan struct{}
-	closeErr               error
-	active                 domain.SessionID
-	nodes                  *telegramnodes.Scope
-	live                   map[domain.SessionID]domain.Session
-	pending                map[domain.SessionID]domain.Session
-	workers                map[domain.SessionID]*sessionWorker
-	created                map[domain.SessionID]createdProcess
-	history                map[domain.SessionID][]string
-	page                   map[domain.SessionID]int
-	followLatest           map[domain.SessionID]bool
-	optionsExpanded        map[domain.SessionID]bool
-	deliveryFailures       map[domain.SessionID]NotificationFailure
-	promptIndexes          map[domain.SessionID]map[string]int
-	promptSessions         map[string]domain.SessionID
-	pendingAuthorization   *AuthorizationChallenge
-	createFlow             *sessioncreation.Flow
-	creationEnvironment    sessioncreation.Environment
-	quotas                 telegramstatus.Reader
-	creationPreferenceMode string
-	creates                sync.WaitGroup
-	worker                 sync.WaitGroup
-	durableWork            sync.WaitGroup
+	ownerUserID                     int64
+	ownerPrivateChatID              int64
+	localComputerID                 domain.ComputerID
+	creator                         SessionCreator
+	sessions                        SessionStore
+	submitter                       sessionruntime.Submitter
+	notifier                        Notifier
+	lifecycle                       Lifecycle
+	uiState                         ActiveSessionStore
+	settings                        Preferences
+	providerPreferences             ProviderPreferences
+	stopper                         sessionruntime.TurnStopper
+	inputPreparer                   InputPreparer
+	allowDocumentInput              bool
+	durableInput                    DurableInputCustody
+	durableOutput                   DurableOutputCustody
+	interactions                    InteractionHandler
+	interactionText                 InteractionTextHandler
+	authorization                   AuthorizationFlow
+	attachments                     AttachmentCustody
+	runtimeEvents                   RuntimeEventObserver
+	finals                          FinalProcessor
+	asyncCreator                    AsyncSessionCreator
+	archivedResumer                 ArchivedResumer
+	asyncResumer                    AsyncArchivedResumer
+	sessionCloser                   SessionCloser
+	turnLifecycle                   TurnLifecycle
+	outputFailures                  OutputFailureRecorder
+	queueLimit                      int
+	rootContext                     context.Context
+	cancelRoot                      context.CancelFunc
+	mu                              sync.Mutex
+	closed                          bool
+	closeDone                       chan struct{}
+	closeErr                        error
+	active                          domain.SessionID
+	nodes                           *telegramnodes.Scope
+	live                            map[domain.SessionID]domain.Session
+	pending                         map[domain.SessionID]domain.Session
+	workers                         map[domain.SessionID]*sessionWorker
+	created                         map[domain.SessionID]createdProcess
+	history                         map[domain.SessionID][]string
+	page                            map[domain.SessionID]int
+	followLatest                    map[domain.SessionID]bool
+	optionsExpanded                 map[domain.SessionID]bool
+	deliveryFailures                map[domain.SessionID]NotificationFailure
+	promptIndexes                   map[domain.SessionID]map[string]int
+	promptSessions                  map[string]domain.SessionID
+	pendingAuthorization            *AuthorizationChallenge
+	createFlow                      *sessioncreation.Flow
+	creationEnvironment             sessioncreation.Environment
+	quotas                          telegramstatus.Reader
+	preprocessor                    promptpreprocess.Processor
+	preprocessingObserver           promptpreprocess.Observer
+	preprocessingTimeout            time.Duration
+	preprocessingInstructionPending bool
+	creationPreferenceMode          string
+	creates                         sync.WaitGroup
+	worker                          sync.WaitGroup
+	durableWork                     sync.WaitGroup
 }
 type createdProcess struct {
 	request app.StartSessionRequest
@@ -1080,9 +1120,16 @@ func New(
 	if options.QueueLimit < 0 {
 		return nil, errors.New("per-session queue limit must not be negative")
 	}
+	if options.PreprocessingTimeout < 0 {
+		return nil, errors.New("preprocessing timeout must not be negative")
+	}
 	queueLimit := options.QueueLimit
 	if queueLimit == 0 {
 		queueLimit = defaultQueueLimit
+	}
+	preprocessingTimeout := options.PreprocessingTimeout
+	if preprocessingTimeout == 0 {
+		preprocessingTimeout = 5 * time.Second
 	}
 	rootContext, cancelRoot := context.WithCancel(context.Background())
 	nodes, err := telegramnodes.New(localComputerID, sessions, options.UIState, options.CreationEnvironment)
@@ -1095,42 +1142,45 @@ func New(
 		localComputerID: localComputerID, creator: creator, sessions: sessions,
 		submitter: submitter, notifier: notifier, lifecycle: options.Lifecycle,
 		queueLimit: queueLimit, rootContext: rootContext, cancelRoot: cancelRoot,
-		uiState:             options.UIState,
-		settings:            options.Settings,
-		providerPreferences: options.Providers,
-		stopper:             options.Stopper,
-		inputPreparer:       options.InputPreparer,
-		allowDocumentInput:  options.AllowDocumentInput,
-		durableInput:        options.DurableInput,
-		durableOutput:       options.DurableOutput,
-		interactions:        options.Interactions,
-		interactionText:     options.InteractionText,
-		authorization:       options.Authorization,
-		asyncCreator:        options.AsyncCreator,
-		archivedResumer:     options.ArchivedResumer,
-		asyncResumer:        options.AsyncResumer,
-		sessionCloser:       options.SessionCloser,
-		turnLifecycle:       options.TurnLifecycle,
-		attachments:         options.Attachments,
-		runtimeEvents:       options.RuntimeEvents,
-		finals:              options.Finals,
-		outputFailures:      options.OutputFailures,
-		closeDone:           make(chan struct{}),
-		live:                make(map[domain.SessionID]domain.Session),
-		pending:             make(map[domain.SessionID]domain.Session),
-		workers:             make(map[domain.SessionID]*sessionWorker),
-		created:             make(map[domain.SessionID]createdProcess),
-		history:             make(map[domain.SessionID][]string),
-		page:                make(map[domain.SessionID]int),
-		followLatest:        make(map[domain.SessionID]bool),
-		optionsExpanded:     make(map[domain.SessionID]bool),
-		deliveryFailures:    make(map[domain.SessionID]NotificationFailure),
-		promptIndexes:       make(map[domain.SessionID]map[string]int),
-		promptSessions:      make(map[string]domain.SessionID),
-		nodes:               nodes,
-		createFlow:          sessioncreation.New(),
-		creationEnvironment: options.CreationEnvironment,
-		quotas:              options.Quotas,
+		uiState:               options.UIState,
+		settings:              options.Settings,
+		providerPreferences:   options.Providers,
+		stopper:               options.Stopper,
+		inputPreparer:         options.InputPreparer,
+		allowDocumentInput:    options.AllowDocumentInput,
+		durableInput:          options.DurableInput,
+		durableOutput:         options.DurableOutput,
+		interactions:          options.Interactions,
+		interactionText:       options.InteractionText,
+		authorization:         options.Authorization,
+		asyncCreator:          options.AsyncCreator,
+		archivedResumer:       options.ArchivedResumer,
+		asyncResumer:          options.AsyncResumer,
+		sessionCloser:         options.SessionCloser,
+		turnLifecycle:         options.TurnLifecycle,
+		attachments:           options.Attachments,
+		runtimeEvents:         options.RuntimeEvents,
+		finals:                options.Finals,
+		outputFailures:        options.OutputFailures,
+		closeDone:             make(chan struct{}),
+		live:                  make(map[domain.SessionID]domain.Session),
+		pending:               make(map[domain.SessionID]domain.Session),
+		workers:               make(map[domain.SessionID]*sessionWorker),
+		created:               make(map[domain.SessionID]createdProcess),
+		history:               make(map[domain.SessionID][]string),
+		page:                  make(map[domain.SessionID]int),
+		followLatest:          make(map[domain.SessionID]bool),
+		optionsExpanded:       make(map[domain.SessionID]bool),
+		deliveryFailures:      make(map[domain.SessionID]NotificationFailure),
+		promptIndexes:         make(map[domain.SessionID]map[string]int),
+		promptSessions:        make(map[string]domain.SessionID),
+		nodes:                 nodes,
+		createFlow:            sessioncreation.New(),
+		creationEnvironment:   options.CreationEnvironment,
+		quotas:                options.Quotas,
+		preprocessor:          options.Preprocessor,
+		preprocessingObserver: options.PreprocessingObserver,
+		preprocessingTimeout:  preprocessingTimeout,
 	}
 	for _, session := range options.Recovered {
 		if session.Status() == domain.SessionReady {
@@ -1154,6 +1204,9 @@ func (controller *Controller) Handle(
 		return coordinator.Decision{Kind: coordinator.DecisionSkip}, nil
 	}
 	if update.Kind == coordinator.UpdateCallback {
+		controller.mu.Lock()
+		controller.preprocessingInstructionPending = false
+		controller.mu.Unlock()
 		return controller.handleCallback(ctx, update)
 	}
 	if update.Kind != coordinator.UpdateMessage {
@@ -1194,6 +1247,9 @@ func (controller *Controller) Handle(
 		if result.Handled {
 			return controller.interactionTextDecision(result)
 		}
+	}
+	if decision, handled, err := controller.consumePreprocessingInstruction(ctx, update); handled {
+		return decision, err
 	}
 	text := strings.TrimSpace(update.Text)
 	switch text {
@@ -1251,7 +1307,8 @@ func (controller *Controller) Handle(
 		promptText = prepared.Text
 		controller.setPromptState(ctx, activeSession, messageID, promptText, "🙋‍♂")
 	}
-	return controller.enqueue(ctx, update.ID, update.SourceMessageID, prepared), nil
+	payload := controller.preprocessingPayload(ctx, prepared.Text)
+	return controller.enqueue(ctx, update.ID, update.SourceMessageID, prepared, payload), nil
 }
 
 func mediaPromptLabel(kind string) string {
@@ -1266,6 +1323,110 @@ func mediaPromptLabel(kind string) string {
 		return "Документ"
 	default:
 		return "Сообщение"
+	}
+}
+
+func (controller *Controller) consumePreprocessingInstruction(ctx context.Context, update coordinator.Update) (coordinator.Decision, bool, error) {
+	controller.mu.Lock()
+	pending := controller.preprocessingInstructionPending
+	controller.mu.Unlock()
+	if !pending {
+		return coordinator.Decision{}, false, nil
+	}
+	if update.MediaKind != "" || update.Caption != "" || strings.TrimSpace(update.Text) == "" {
+		return controller.status("Инструкция должна быть одним непустым текстовым сообщением."), true, nil
+	}
+	preferences, ok := controller.settings.(settingsport.PreprocessingPreferences)
+	if !ok {
+		return coordinator.Decision{}, true, errors.New("preprocessing settings are not configured")
+	}
+	if err := preferences.SetPreprocessingInstruction(ctx, strings.TrimSpace(update.Text)); err != nil {
+		return coordinator.Decision{}, true, fmt.Errorf("save preprocessing instruction: %w", err)
+	}
+	controller.mu.Lock()
+	controller.preprocessingInstructionPending = false
+	controller.mu.Unlock()
+	controller.invalidatePreprocessor()
+	return controller.status("Инструкция препроцессинга сохранена."), true, nil
+}
+
+func (controller *Controller) preprocessingPayload(ctx context.Context, text string) []byte {
+	text = strings.TrimSpace(text)
+	if text == "" || controller.settings == nil {
+		return []byte(text)
+	}
+	snapshot, err := controller.settings.Snapshot(ctx)
+	if err != nil || !snapshot.PreprocessingEnabled || promptpreprocess.Bypass(text) {
+		return []byte(text)
+	}
+	payload, err := promptpreprocess.Encode(snapshot.PreprocessingInstruction, text)
+	if err != nil {
+		return []byte(text)
+	}
+	return payload
+}
+
+func (controller *Controller) processPreprocessing(ctx context.Context, session domain.Session, messageID string, payload []byte) (string, bool, []byte) {
+	state, err := promptpreprocess.DecodeState(payload)
+	if err != nil {
+		controller.observePreprocessingFailure(ctx, session, messageID, promptpreprocess.Result{}, "decode", "invalid_input", err)
+		return strings.TrimSpace(string(payload)), true, nil
+	}
+	if !state.Enabled {
+		return strings.TrimSpace(state.Original), false, nil
+	}
+	if state.Prepared {
+		return state.Processed, state.Failed, nil
+	}
+	if controller.preprocessor == nil {
+		err = errors.New("preprocessor is unavailable")
+		controller.observePreprocessingFailure(ctx, session, messageID, promptpreprocess.Result{}, "select", "unavailable", err)
+		prepared, _ := promptpreprocess.MarkPrepared(payload, state.Original, true)
+		return state.Original, true, prepared
+	}
+	preprocessContext, cancel := context.WithTimeout(ctx, controller.preprocessingTimeout)
+	result, processErr := controller.preprocessor.Process(preprocessContext, promptpreprocess.Request{
+		ComputerID: session.ComputerID(), SessionID: session.ID(), MessageID: messageID,
+		Instruction: state.Instruction, Text: state.Original,
+	})
+	cancel()
+	var validationErr error
+	if processErr == nil {
+		validationErr = promptpreprocess.ValidateResult(state.Original, result.Text)
+		processErr = validationErr
+	}
+	if processErr != nil {
+		category := "provider"
+		stage := "invoke"
+		if errors.Is(processErr, context.DeadlineExceeded) || errors.Is(preprocessContext.Err(), context.DeadlineExceeded) {
+			category = "timeout"
+		} else if validationErr != nil {
+			category = "invalid_output"
+			stage = "validate"
+		}
+		controller.observePreprocessingFailure(ctx, session, messageID, result, stage, category, processErr)
+		prepared, _ := promptpreprocess.MarkPrepared(payload, state.Original, true)
+		return state.Original, true, prepared
+	}
+	cleaned := strings.TrimSpace(result.Text)
+	prepared, _ := promptpreprocess.MarkPrepared(payload, cleaned, false)
+	return cleaned, false, prepared
+}
+
+func (controller *Controller) observePreprocessingFailure(ctx context.Context, session domain.Session, messageID string, result promptpreprocess.Result, stage, category string, processErr error) {
+	if controller.preprocessingObserver == nil {
+		return
+	}
+	_ = controller.preprocessingObserver.ObservePreprocessing(context.WithoutCancel(ctx), promptpreprocess.Observation{
+		ComputerID: session.ComputerID(), SessionID: session.ID(), MessageID: messageID,
+		Provider: result.Provider, Model: result.Model, Stage: stage, Category: category,
+		Attempts: 1, Error: processErr.Error(),
+	})
+}
+
+func (controller *Controller) invalidatePreprocessor() {
+	if invalidator, ok := controller.preprocessor.(promptpreprocess.Invalidator); ok {
+		invalidator.Invalidate(controller.currentNodeID())
 	}
 }
 func (controller *Controller) prepareInput(ctx context.Context, update coordinator.Update) (PreparedInput, string) {
@@ -2383,14 +2544,17 @@ func (controller *Controller) listSessions(ctx context.Context) (coordinator.Dec
 	decision.Keyboard = &keyboard
 	return decision, nil
 }
-func (controller *Controller) enqueue(ctx context.Context, updateID, sourceMessageID int64, input PreparedInput) coordinator.Decision {
+func (controller *Controller) enqueue(ctx context.Context, updateID, sourceMessageID int64, input PreparedInput, payload []byte) coordinator.Decision {
 	controller.mu.Lock()
 	active := controller.active
 	controller.mu.Unlock()
-	return controller.enqueueSession(ctx, updateID, sourceMessageID, active, input)
+	return controller.enqueueSession(ctx, updateID, sourceMessageID, active, input, payload)
 }
-func (controller *Controller) enqueueSession(ctx context.Context, updateID, sourceMessageID int64, sessionID domain.SessionID, input PreparedInput) coordinator.Decision {
+func (controller *Controller) enqueueSession(ctx context.Context, updateID, sourceMessageID int64, sessionID domain.SessionID, input PreparedInput, payload []byte) coordinator.Decision {
 	messageID := "telegram-update:" + strconv.FormatInt(updateID, 10)
+	if len(payload) == 0 {
+		payload = []byte(input.Text)
+	}
 	controller.mu.Lock()
 	worker := controller.workers[sessionID]
 	session, live := controller.live[sessionID]
@@ -2414,7 +2578,7 @@ func (controller *Controller) enqueueSession(ctx context.Context, updateID, sour
 		receipt, err := controller.durableInput.Accept(ctx, SessionInput{
 			SessionID:   sessionID,
 			MessageID:   messageID,
-			Payload:     []byte(input.Text),
+			Payload:     append([]byte(nil), payload...),
 			Attachments: append([]AttachmentRef(nil), input.Attachments...),
 		})
 		if err != nil {
@@ -2439,15 +2603,20 @@ func (controller *Controller) enqueueSession(ctx context.Context, updateID, sour
 		controller.setPromptState(ctx, sessionID, messageID, input.Text, "🙅‍♂")
 		return coordinator.Decision{Kind: coordinator.DecisionSkip}
 	}
+	processed, preprocessingFailed, _ := controller.processPreprocessing(ctx, session, messageID, payload)
+	input.Text = processed
+	if state, decodeErr := promptpreprocess.DecodeState(payload); decodeErr == nil && state.Enabled {
+		controller.publishPreprocessingState(ctx, sessionID, messageID, input.Text, preprocessingFailed)
+	}
 	select {
 	case worker.queue <- queuedTurn{text: input.Text, messageID: messageID}:
-		controller.setPromptState(ctx, sessionID, messageID, input.Text, "👨‍💻")
+		controller.setProcessedPromptState(ctx, sessionID, messageID, input.Text, "👨‍💻", preprocessingFailed)
 		return coordinator.Decision{Kind: coordinator.DecisionSkip}
 	case <-controller.rootContext.Done():
-		controller.setPromptState(ctx, sessionID, messageID, input.Text, "🙅‍♂")
+		controller.setProcessedPromptState(ctx, sessionID, messageID, input.Text, "🙅‍♂", preprocessingFailed)
 		return coordinator.Decision{Kind: coordinator.DecisionSkip}
 	default:
-		controller.setPromptState(ctx, sessionID, messageID, input.Text, "🙅‍♂")
+		controller.setProcessedPromptState(ctx, sessionID, messageID, input.Text, "🙅‍♂", preprocessingFailed)
 		return coordinator.Decision{Kind: coordinator.DecisionSkip}
 	}
 }
@@ -2457,7 +2626,23 @@ func (controller *Controller) setPromptState(ctx context.Context, sessionID doma
 	if sessionID == "" || strings.TrimSpace(messageID) == "" || text == "" {
 		return
 	}
-	entry := emoji + " " + text
+	controller.setPromptEntry(ctx, sessionID, messageID, emoji+" "+text)
+}
+
+func (controller *Controller) setProcessedPromptState(ctx context.Context, sessionID domain.SessionID, messageID, text, emoji string, preprocessingFailed bool) {
+	text = strings.TrimSpace(text)
+	if !preprocessingFailed {
+		controller.setPromptState(ctx, sessionID, messageID, text, emoji)
+		return
+	}
+	controller.setPromptEntry(ctx, sessionID, messageID, "❌ Ошибка препроцессинга\n"+emoji+" "+text)
+}
+
+func (controller *Controller) setPromptEntry(ctx context.Context, sessionID domain.SessionID, messageID, entry string) {
+	entry = strings.TrimSpace(entry)
+	if sessionID == "" || strings.TrimSpace(messageID) == "" || entry == "" {
+		return
+	}
 	if store, ok := controller.uiState.(CardPromptStore); ok {
 		if err := store.SetCardPrompt(ctx, sessionID, messageID, entry); err == nil {
 			if historyStore, ok := controller.uiState.(CardHistoryStore); ok {
@@ -2488,7 +2673,22 @@ func (controller *Controller) setPromptState(ctx context.Context, sessionID doma
 }
 
 func (controller *Controller) publishPromptState(ctx context.Context, sessionID domain.SessionID, messageID, text, emoji string) {
-	controller.setPromptState(ctx, sessionID, messageID, text, emoji)
+	controller.publishProcessedPromptState(ctx, sessionID, messageID, text, emoji, false)
+}
+
+func (controller *Controller) publishPreprocessingState(ctx context.Context, sessionID domain.SessionID, messageID, text string, failed bool) {
+	controller.setProcessedPromptState(ctx, sessionID, messageID, text, "🙋‍♂", failed)
+	controller.notify(ctx, Notification{
+		OperationID:    messageID + ":prompt-status:preprocessed",
+		ConversationID: controller.ownerPrivateChatID,
+		SessionID:      sessionID,
+		Kind:           NotificationPromptStatus,
+		Text:           "🙋‍♂",
+	})
+}
+
+func (controller *Controller) publishProcessedPromptState(ctx context.Context, sessionID domain.SessionID, messageID, text, emoji string, preprocessingFailed bool) {
+	controller.setProcessedPromptState(ctx, sessionID, messageID, text, emoji, preprocessingFailed)
 	controller.mu.Lock()
 	delete(controller.promptSessions, messageID)
 	controller.mu.Unlock()
@@ -2520,9 +2720,10 @@ func (controller *Controller) ProcessDurableInput(
 	receipt := DurableInputProcessReceipt{
 		SessionID: input.SessionID, MessageID: input.MessageID, Sequence: input.Sequence,
 	}
-	prepared := PreparedInput{Text: string(input.Payload), Attachments: append([]AttachmentRef(nil), input.Attachments...)}
+	_, promptText, preprocessingEnabled, decodeErr := promptpreprocess.Decode(input.Payload)
+	prepared := PreparedInput{Text: promptText, Attachments: append([]AttachmentRef(nil), input.Attachments...)}
 	if input.SessionID == "" || strings.TrimSpace(input.MessageID) == "" || input.Sequence == 0 ||
-		!utf8.Valid(input.Payload) || validatePreparedInput(prepared) != nil {
+		!utf8.Valid(input.Payload) || decodeErr != nil || validatePreparedInput(prepared) != nil {
 		return receipt, errors.New("durable leased input is invalid")
 	}
 	if callbacks.OnAccepted == nil {
@@ -2530,17 +2731,17 @@ func (controller *Controller) ProcessDurableInput(
 	}
 	if _, ok := controller.submitter.(sessionruntime.InteractiveSubmitter); !ok {
 		if _, structured := controller.submitter.(PreparedTurnSubmitter); !structured {
-			controller.publishPromptState(ctx, input.SessionID, input.MessageID, string(input.Payload), "🙅‍♂")
+			controller.publishPromptState(ctx, input.SessionID, input.MessageID, promptText, "🙅‍♂")
 			return receipt, errors.New("provider does not expose exact durable acceptance")
 		}
 	}
 	if len(input.Attachments) != 0 {
 		if _, ok := controller.submitter.(PreparedTurnSubmitter); !ok {
-			controller.publishPromptState(ctx, input.SessionID, input.MessageID, string(input.Payload), "🙅‍♂")
+			controller.publishPromptState(ctx, input.SessionID, input.MessageID, promptText, "🙅‍♂")
 			return receipt, errors.New("provider does not support structured attachments")
 		}
 		if controller.attachments == nil {
-			controller.publishPromptState(ctx, input.SessionID, input.MessageID, string(input.Payload), "🙅‍♂")
+			controller.publishPromptState(ctx, input.SessionID, input.MessageID, promptText, "🙅‍♂")
 			return receipt, errors.New("attachment custody lifecycle is not configured")
 		}
 	}
@@ -2553,7 +2754,7 @@ func (controller *Controller) ProcessDurableInput(
 	}
 	controller.mu.Unlock()
 	if closed {
-		controller.publishPromptState(ctx, input.SessionID, input.MessageID, string(input.Payload), "🙅‍♂")
+		controller.publishPromptState(ctx, input.SessionID, input.MessageID, promptText, "🙅‍♂")
 		return receipt, errors.New("Telegram controller is closed")
 	}
 	defer controller.durableWork.Done()
@@ -2565,26 +2766,43 @@ func (controller *Controller) ProcessDurableInput(
 	}()
 	ctx = processContext
 	if worker == nil || !usable || session.ID() != input.SessionID {
-		controller.publishPromptState(ctx, input.SessionID, input.MessageID, string(input.Payload), "🙅‍♂")
+		controller.publishPromptState(ctx, input.SessionID, input.MessageID, promptText, "🙅‍♂")
 		return receipt, errors.New("durable input session is not live")
+	}
+	promptText, preprocessingFailed, preparedPayload := controller.processPreprocessing(ctx, session, input.MessageID, input.Payload)
+	if len(preparedPayload) != 0 {
+		if callbacks.OnPrepared == nil {
+			controller.publishProcessedPromptState(ctx, input.SessionID, input.MessageID, promptText, "🙅‍♂", preprocessingFailed)
+			return receipt, errors.New("durable preprocessing callback is required")
+		}
+		if err := callbacks.OnPrepared(ctx, DurableInputPreparation{
+			SessionID: input.SessionID, MessageID: input.MessageID, Sequence: input.Sequence,
+			Payload: append([]byte(nil), preparedPayload...),
+		}); err != nil {
+			controller.publishProcessedPromptState(ctx, input.SessionID, input.MessageID, promptText, "🙅‍♂", preprocessingFailed)
+			return receipt, fmt.Errorf("persist durable preprocessing result: %w", err)
+		}
+	}
+	if preprocessingEnabled {
+		controller.publishPreprocessingState(ctx, input.SessionID, input.MessageID, promptText, preprocessingFailed)
 	}
 	binding, hasBinding := session.Binding()
 	if len(input.Attachments) != 0 && (!hasBinding || strings.TrimSpace(binding.SessionID) == "") {
-		controller.publishPromptState(ctx, input.SessionID, input.MessageID, string(input.Payload), "🙅‍♂")
+		controller.publishProcessedPromptState(ctx, input.SessionID, input.MessageID, promptText, "🙅‍♂", preprocessingFailed)
 		return receipt, errors.New("attachment session has no exact provider binding")
 	}
 	if worker.hasActiveTurn() {
 		steerer, ok := controller.submitter.(sessionruntime.CurrentTurnSubmitter)
 		if !ok {
-			controller.publishPromptState(ctx, input.SessionID, input.MessageID, string(input.Payload), "🙅‍♂")
+			controller.publishProcessedPromptState(ctx, input.SessionID, input.MessageID, promptText, "🙅‍♂", preprocessingFailed)
 			return receipt, errors.New("provider does not support current-turn input")
 		}
 		if len(input.Attachments) != 0 {
-			controller.publishPromptState(ctx, input.SessionID, input.MessageID, string(input.Payload), "🙅‍♂")
+			controller.publishProcessedPromptState(ctx, input.SessionID, input.MessageID, promptText, "🙅‍♂", preprocessingFailed)
 			return receipt, errors.New("current-turn attachments require turn-scoped custody")
 		}
 		accepted := false
-		err := steerer.SubmitCurrentWithCallbacks(ctx, input.SessionID, sessionruntime.StructuredInput{Text: string(input.Payload)}, sessionruntime.TurnCallbacks{
+		err := steerer.SubmitCurrentWithCallbacks(ctx, input.SessionID, sessionruntime.StructuredInput{Text: promptText}, sessionruntime.TurnCallbacks{
 			MessageID: input.MessageID,
 			OnAccepted: func(messageID string) error {
 				if accepted || messageID != input.MessageID {
@@ -2594,13 +2812,13 @@ func (controller *Controller) ProcessDurableInput(
 					return err
 				}
 				accepted = true
-				controller.publishPromptState(context.WithoutCancel(ctx), input.SessionID, input.MessageID, string(input.Payload), "👨‍💻")
+				controller.publishProcessedPromptState(context.WithoutCancel(ctx), input.SessionID, input.MessageID, promptText, "👨‍💻", preprocessingFailed)
 				return nil
 			},
 		})
 		receipt.Accepted = accepted
 		if err != nil || !accepted {
-			controller.publishPromptState(context.WithoutCancel(ctx), input.SessionID, input.MessageID, string(input.Payload), "🙅‍♂")
+			controller.publishProcessedPromptState(context.WithoutCancel(ctx), input.SessionID, input.MessageID, promptText, "🙅‍♂", preprocessingFailed)
 			return receipt, errors.Join(err, errors.New("provider did not accept current-turn input"))
 		}
 		receipt.Completion = DurableInputSucceeded
@@ -2622,7 +2840,7 @@ func (controller *Controller) ProcessDurableInput(
 		defer cancelTurn()
 		acceptedOnce := false
 		completion, accepted := worker.runTurnWithAcceptance(turnContext, queuedTurn{
-			text: string(input.Payload), messageID: input.MessageID, attachments: append([]AttachmentRef(nil), input.Attachments...),
+			text: promptText, messageID: input.MessageID, attachments: append([]AttachmentRef(nil), input.Attachments...),
 		}, func(callbackCtx context.Context) error {
 			if acceptedOnce {
 				return errors.New("provider repeated durable acceptance")
@@ -2633,7 +2851,7 @@ func (controller *Controller) ProcessDurableInput(
 			}); err != nil {
 				return err
 			}
-			controller.publishPromptState(context.WithoutCancel(callbackCtx), input.SessionID, input.MessageID, string(input.Payload), "👨‍💻")
+			controller.publishProcessedPromptState(context.WithoutCancel(callbackCtx), input.SessionID, input.MessageID, promptText, "👨‍💻", preprocessingFailed)
 			acceptedSignal <- struct{}{}
 			return nil
 		})
@@ -2641,7 +2859,7 @@ func (controller *Controller) ProcessDurableInput(
 		if accepted {
 			completionErr = turnprocessing.CompleteAttachments(context.WithoutCancel(turnContext), controller.attachments, turnprocessing.Request{
 				SessionID: input.SessionID, ProviderSessionID: binding.SessionID, MessageID: input.MessageID,
-				Input: PreparedInput{Text: string(input.Payload), Attachments: append([]AttachmentRef(nil), input.Attachments...)},
+				Input: PreparedInput{Text: promptText, Attachments: append([]AttachmentRef(nil), input.Attachments...)},
 			})
 		}
 		resultSignal <- turnResult{completion: completion, accepted: accepted, err: completionErr}
@@ -2655,7 +2873,7 @@ func (controller *Controller) ProcessDurableInput(
 		receipt.Accepted = result.accepted
 		receipt.Completion = result.completion
 		if !result.accepted {
-			controller.publishPromptState(context.WithoutCancel(ctx), input.SessionID, input.MessageID, string(input.Payload), "🙅‍♂")
+			controller.publishProcessedPromptState(context.WithoutCancel(ctx), input.SessionID, input.MessageID, promptText, "🙅‍♂", preprocessingFailed)
 			return receipt, errors.New("provider did not durably accept input")
 		}
 		if result.err != nil {
@@ -2664,7 +2882,7 @@ func (controller *Controller) ProcessDurableInput(
 		return receipt, nil
 	case <-ctx.Done():
 		cancelTurn()
-		controller.publishPromptState(context.WithoutCancel(ctx), input.SessionID, input.MessageID, string(input.Payload), "🙅‍♂")
+		controller.publishProcessedPromptState(context.WithoutCancel(ctx), input.SessionID, input.MessageID, promptText, "🙅‍♂", preprocessingFailed)
 		return receipt, ctx.Err()
 	}
 }

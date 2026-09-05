@@ -281,10 +281,10 @@ func TestSemanticSettingsCategoriesNavigateAndKeepMutationsInsideTheirGroup(t *t
 	t.Cleanup(func() { _ = controller.Close(context.Background()) })
 
 	root, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticMenuSettings})
-	if err != nil || root.Surface == nil || len(root.Surface.Rows) != 8 {
+	if err != nil || root.Surface == nil || len(root.Surface.Rows) != 9 {
 		t.Fatalf("settings root = (%#v, %v)", root, err)
 	}
-	for index, row := range root.Surface.Rows[:7] {
+	for index, row := range root.Surface.Rows[:8] {
 		if len(row) != 1 || row[0].Action != telegramcontroller.SemanticSettingsCategory || row[0].Choice != index+1 {
 			t.Fatalf("settings category row %d = %#v", index, row)
 		}
@@ -439,6 +439,16 @@ func (p *testPreferences) ToggleBackgroundErrors(context.Context) error {
 func (p *testPreferences) ToggleArchiveRecommendations(context.Context) error {
 	_, _ = p.Snapshot(context.Background())
 	p.settings.ArchiveRecommendations = !p.settings.ArchiveRecommendations
+	return nil
+}
+func (p *testPreferences) TogglePreprocessing(context.Context) error {
+	_, _ = p.Snapshot(context.Background())
+	p.settings.PreprocessingEnabled = !p.settings.PreprocessingEnabled
+	return nil
+}
+func (p *testPreferences) SetPreprocessingInstruction(_ context.Context, instruction string) error {
+	_, _ = p.Snapshot(context.Background())
+	p.settings.PreprocessingInstruction = instruction
 	return nil
 }
 func (p *testPreferences) SetDefaultProvider(_ context.Context, computerID domain.ComputerID, provider domain.Provider) error {

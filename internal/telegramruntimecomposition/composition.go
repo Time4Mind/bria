@@ -202,6 +202,12 @@ func semanticActionFromPlan(plan telegrampipeline.CallbackPlan) (telegramcontrol
 		kind = telegramcontroller.SemanticSettingsProviderCodex
 	case telegramui.ActionSettingsProviderClaude:
 		kind = telegramcontroller.SemanticSettingsProviderClaude
+	case telegramui.ActionSettingsPreprocessing:
+		kind = telegramcontroller.SemanticSettingsPreprocessing
+	case telegramui.ActionSettingsPreprocessingInstruction:
+		kind = telegramcontroller.SemanticSettingsPreprocessingInstruction
+	case telegramui.ActionSettingsPreprocessingReset:
+		kind = telegramcontroller.SemanticSettingsPreprocessingReset
 	case telegramui.ActionAuthorizeCodex:
 		kind = telegramcontroller.SemanticAuthorizeCodex
 	case telegramui.ActionAuthorizeClaude:
@@ -471,6 +477,12 @@ func telegramUIAction(action telegramcontroller.SemanticActionKind) (telegramui.
 		return telegramui.ActionSettingsProviderCodex, nil
 	case telegramcontroller.SemanticSettingsProviderClaude:
 		return telegramui.ActionSettingsProviderClaude, nil
+	case telegramcontroller.SemanticSettingsPreprocessing:
+		return telegramui.ActionSettingsPreprocessing, nil
+	case telegramcontroller.SemanticSettingsPreprocessingInstruction:
+		return telegramui.ActionSettingsPreprocessingInstruction, nil
+	case telegramcontroller.SemanticSettingsPreprocessingReset:
+		return telegramui.ActionSettingsPreprocessingReset, nil
 	case telegramcontroller.SemanticAuthorizeCodex:
 		return telegramui.ActionAuthorizeCodex, nil
 	case telegramcontroller.SemanticAuthorizeClaude:

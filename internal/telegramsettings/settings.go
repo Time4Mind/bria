@@ -44,6 +44,18 @@ func Apply(ctx context.Context, preferences settingsport.Preferences, providers 
 			return errors.New("session creation settings are not configured")
 		}
 		return creation.ToggleArchiveRecommendations(ctx)
+	case "settings_preprocessing":
+		preprocessing, ok := preferences.(settingsport.PreprocessingPreferences)
+		if !ok {
+			return errors.New("preprocessing settings are not configured")
+		}
+		return preprocessing.TogglePreprocessing(ctx)
+	case "settings_preprocessing_reset":
+		preprocessing, ok := preferences.(settingsport.PreprocessingPreferences)
+		if !ok {
+			return errors.New("preprocessing settings are not configured")
+		}
+		return preprocessing.SetPreprocessingInstruction(ctx, "")
 	case "settings_lifetime_never", "settings_lifetime_6h", "settings_lifetime_12h", "settings_lifetime_24h", "settings_lifetime_48h":
 		return preferences.SetSessionLifetime(ctx, strings.TrimPrefix(action, "settings_lifetime_"))
 	default:

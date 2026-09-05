@@ -9,6 +9,7 @@ import (
 	"bria/internal/domain"
 	"bria/internal/sessioncreation"
 	"bria/internal/telegramcontroller"
+	"bria/internal/telegramsettingsview"
 	"bria/internal/telegramstatus"
 )
 
@@ -371,7 +372,7 @@ func TestProviderSettingsReadAndToggleOnlySelectedNode(t *testing.T) {
 		t.Fatal(err)
 	}
 	settings, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{
-		Kind: telegramcontroller.SemanticSettingsCategory, Choice: 7,
+		Kind: telegramcontroller.SemanticSettingsCategory, Choice: int(telegramsettingsview.CategoryProviders),
 	})
 	if err != nil || settings.Surface == nil || !strings.Contains(settings.Surface.Text, "claude: выключен, настроен") ||
 		!strings.Contains(settings.Surface.Text, "codex: выключен, не настроен") {

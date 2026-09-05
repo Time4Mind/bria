@@ -38,7 +38,15 @@ func (processor *ControllerInputProcessor) Process(ctx context.Context, input du
 	receipt, processErr := processor.processor.ProcessDurableInput(ctx, telegramcontroller.DurableLeasedInput{
 		SessionID: domain.SessionID(input.SessionID), MessageID: input.MessageID, Sequence: input.Sequence,
 		Payload: append([]byte(nil), input.Payload...), Attachments: attachmentsFromJournal(input.Attachments),
-	}, telegramcontroller.DurableInputCallbacks{OnAccepted: func(callbackCtx context.Context, acceptance telegramcontroller.DurableInputAcceptance) error {
+	}, telegramcontroller.DurableInputCallbacks{OnPrepared: func(callbackCtx context.Context, preparation telegramcontroller.DurableInputPreparation) error {
+		if preparation.SessionID != domain.SessionID(input.SessionID) || preparation.MessageID != input.MessageID || preparation.Sequence != input.Sequence {
+			return durableflow.ErrInvalidHandoff
+		}
+		return callbacks.OnPrepared(callbackCtx, durableflow.ProviderInput{
+			SessionID: input.SessionID, MessageID: input.MessageID, Sequence: input.Sequence,
+			Payload: append([]byte(nil), preparation.Payload...), Attachments: cloneControllerAttachments(input.Attachments),
+		})
+	}, OnAccepted: func(callbackCtx context.Context, acceptance telegramcontroller.DurableInputAcceptance) error {
 		if acceptance.SessionID != domain.SessionID(input.SessionID) || acceptance.MessageID != input.MessageID || acceptance.Sequence != input.Sequence {
 			return durableflow.ErrInvalidHandoff
 		}
@@ -59,6 +67,12 @@ func (processor *ControllerInputProcessor) Process(ctx context.Context, input du
 		return result, errors.New("durable processor returned an invalid completion")
 	}
 	return result, nil
+}
+
+func cloneControllerAttachments(source []messagejournal.AttachmentRef) []messagejournal.AttachmentRef {
+	result := make([]messagejournal.AttachmentRef, len(source))
+	copy(result, source)
+	return result
 }
 
 type InputCustody struct {

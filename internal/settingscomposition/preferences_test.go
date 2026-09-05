@@ -18,6 +18,7 @@ import (
 	"bria/internal/settings"
 	"bria/internal/settingscomposition"
 	"bria/internal/telegramcontroller"
+	"bria/internal/telegramsettingsview"
 )
 
 func TestPreferencesMutationsPersistAndLocalReloadSharesOneFile(t *testing.T) {
@@ -70,6 +71,16 @@ func TestPreferencesMutationsPersistAndLocalReloadSharesOneFile(t *testing.T) {
 		{"archive recommendations", func() error { return preferences.ToggleArchiveRecommendations(context.Background()) }, func(t *testing.T, got settings.Settings) {
 			if !got.ArchiveRecommendations {
 				t.Fatal("archive recommendations remained disabled")
+			}
+		}},
+		{"preprocessing", func() error { return preferences.TogglePreprocessing(context.Background()) }, func(t *testing.T, got settings.Settings) {
+			if !got.PreprocessingEnabled {
+				t.Fatal("preprocessing remained disabled")
+			}
+		}},
+		{"preprocessing instruction", func() error { return preferences.SetPreprocessingInstruction(context.Background(), "clean speech") }, func(t *testing.T, got settings.Settings) {
+			if got.PreprocessingInstruction != "clean speech" {
+				t.Fatalf("preprocessing instruction=%q", got.PreprocessingInstruction)
 			}
 		}},
 		{"default provider", func() error {
@@ -145,7 +156,7 @@ func TestPreferencesDriveTypedControllerAndDurableFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = controller.Close(context.Background()) })
-	result, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticSettingsCategory, Choice: 4})
+	result, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticSettingsCategory, Choice: int(telegramsettingsview.CategoryArchive)})
 	if err != nil || result.Surface == nil || !strings.Contains(result.Surface.Text, "Срок жизни сессий: never") {
 		t.Fatalf("archive settings surface = (%#v, %v)", result, err)
 	}
@@ -158,18 +169,22 @@ func TestPreferencesDriveTypedControllerAndDurableFile(t *testing.T) {
 		telegramcontroller.SemanticSettingsDetail, telegramcontroller.SemanticSettingsPageLimit, telegramcontroller.SemanticSettingsTechnicalActions,
 		telegramcontroller.SemanticSettingsBackgroundQuestions, telegramcontroller.SemanticSettingsBackgroundErrors,
 		telegramcontroller.SemanticSettingsArchiveRecommendations,
+		telegramcontroller.SemanticSettingsPreprocessing,
 		telegramcontroller.SemanticSettingsLifetime48Hours,
 	} {
 		if _, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: action}); err != nil {
 			t.Fatalf("typed action %q: %v", action, err)
 		}
 	}
+	if err := (settingscomposition.Preferences{Store: store}).SetPreprocessingInstruction(context.Background(), "clean speech"); err != nil {
+		t.Fatal(err)
+	}
 	reopened, err := settings.OpenFileStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	persisted, err := reopened.Load(context.Background())
-	if err != nil || persisted.ContinueExisting || !persisted.ScreenEnabled || persisted.CardDetail != settings.CardDetailCompact || persisted.CardPageLimit != 128 || persisted.ShowTechnicalActions || persisted.NotifyBackgroundQuestions || persisted.NotifyBackgroundErrors || !persisted.ArchiveRecommendations || persisted.SessionLifetime != settings.Lifetime48Hours {
+	if err != nil || persisted.ContinueExisting || !persisted.ScreenEnabled || persisted.CardDetail != settings.CardDetailCompact || persisted.CardPageLimit != 128 || persisted.ShowTechnicalActions || persisted.NotifyBackgroundQuestions || persisted.NotifyBackgroundErrors || !persisted.ArchiveRecommendations || !persisted.PreprocessingEnabled || persisted.PreprocessingInstruction != "clean speech" || persisted.SessionLifetime != settings.Lifetime48Hours {
 		t.Fatalf("durable controller settings = %+v, %v", persisted, err)
 	}
 }

@@ -173,6 +173,28 @@ func (journal *Journal) MarkInputAccepted(ctx context.Context, sessionID, messag
 	})
 }
 
+// ReplaceLeasedInputPayload durably records a deterministic preparation result
+// before any provider hand-off. Identity, order, attachments, phase, and lease
+// remain unchanged.
+func (journal *Journal) ReplaceLeasedInputPayload(ctx context.Context, sessionID, messageID, owner string, sequence uint64, payload []byte) (Input, error) {
+	if len(payload) > journal.limits.MaxPayloadBytes {
+		return Input{}, fmt.Errorf("input payload exceeds %d bytes", journal.limits.MaxPayloadBytes)
+	}
+	return journal.transitionInput(ctx, sessionID, messageID, func(record *inputRecord) error {
+		if record.Phase != InputPending || record.Sequence != sequence {
+			return ErrInvalidTransition
+		}
+		if record.Lease.Owner != owner || owner == "" {
+			return ErrLeaseOwner
+		}
+		if bytes.Equal(record.Payload, payload) {
+			return errNoMutation
+		}
+		record.Payload = append([]byte(nil), payload...)
+		return nil
+	})
+}
+
 // ReleaseInputLease returns an unaccepted input to the head of its ordered
 // lane. Dispatchers use it when Submit definitively reports that no provider
 // hand-off began (for example, an executor is temporarily not ready).

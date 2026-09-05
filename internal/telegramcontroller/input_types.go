@@ -14,6 +14,7 @@ type SessionInput = turnprocessing.SessionInput
 type InputReceipt = turnprocessing.InputReceipt
 type DurableLeasedInput = turnprocessing.DurableLeasedInput
 type DurableInputAcceptance = turnprocessing.DurableInputAcceptance
+type DurableInputPreparation = turnprocessing.DurableInputPreparation
 type DurableInputCompletion = turnprocessing.DurableInputCompletion
 
 const (

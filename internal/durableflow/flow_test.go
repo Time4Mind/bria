@@ -177,6 +177,32 @@ func TestProcessNextInputPersistsAcceptanceInsideCallbackBeforeTerminal(t *testi
 	}
 }
 
+func TestProcessNextInputPersistsPreparationBeforeAcceptance(t *testing.T) {
+	journal := openJournal(t, filepath.Join(t.TempDir(), "journal.json"))
+	flow := newFlow(t, journal, nil, nil, time.Unix(10, 0))
+	if _, err := flow.EnqueueInput(context.Background(), "session-a", "message-a", []byte("raw")); err != nil {
+		t.Fatal(err)
+	}
+	processor := inputProcessorFunc(func(ctx context.Context, input durableflow.ProviderInput, callbacks durableflow.InputProcessCallbacks) (durableflow.InputProcessResult, error) {
+		prepared := input
+		prepared.Payload = []byte("cleaned")
+		if err := callbacks.OnPrepared(ctx, prepared); err != nil {
+			return durableflow.InputProcessResult{}, err
+		}
+		inputs, err := journal.Inputs(ctx, input.SessionID)
+		if err != nil || len(inputs) != 1 || string(inputs[0].Payload) != "cleaned" || inputs[0].Phase != messagejournal.InputPending {
+			t.Fatalf("prepared state = (%#v, %v)", inputs, err)
+		}
+		if err := callbacks.OnAccepted(ctx, handoffReceipt(input, durableflow.HandoffAccepted)); err != nil {
+			return durableflow.InputProcessResult{}, err
+		}
+		return durableflow.InputProcessResult{SessionID: input.SessionID, MessageID: input.MessageID, Sequence: input.Sequence, State: durableflow.InputProcessCompleted}, nil
+	})
+	if result, err := flow.ProcessNextInput(context.Background(), "session-a", processor); err != nil || result.State != durableflow.InputProcessCompleted {
+		t.Fatalf("ProcessNextInput() = (%#v, %v)", result, err)
+	}
+}
+
 func TestProcessNextInputSealsCrashAfterAcceptanceAsUnknown(t *testing.T) {
 	journal := openJournal(t, filepath.Join(t.TempDir(), "journal.json"))
 	flow := newFlow(t, journal, nil, nil, time.Unix(10, 0))

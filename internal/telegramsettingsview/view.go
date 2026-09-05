@@ -17,6 +17,7 @@ const (
 	CategoryCard Category = iota + 1
 	CategorySessionButtons
 	CategoryVoice
+	CategoryPreprocessing
 	CategoryArchive
 	CategoryNotifications
 	CategoryCreation
@@ -37,6 +38,7 @@ func Render() Surface {
 		{{Label: "🧾 Содержимое карточки", Action: "settings_category", Choice: int(CategoryCard)}},
 		{{Label: "🎛 Кнопки сессии", Action: "settings_category", Choice: int(CategorySessionButtons)}},
 		{{Label: "🎙 Распознавание речи", Action: "settings_category", Choice: int(CategoryVoice)}},
+		{{Label: "✨ Препроцессинг", Action: "settings_category", Choice: int(CategoryPreprocessing)}},
 		{{Label: "🗄 Сессии и архив", Action: "settings_category", Choice: int(CategoryArchive)}},
 		{{Label: "🔔 Уведомления", Action: "settings_category", Choice: int(CategoryNotifications)}},
 		{{Label: "🛠 Создание сессии", Action: "settings_category", Choice: int(CategoryCreation)}},
@@ -61,6 +63,14 @@ func RenderCategory(ctx context.Context, preferences settingsport.Preferences, p
 		rows = onePerRow(Button{Label: "Screen", Action: "settings_screen"})
 	case CategoryVoice:
 		text = "🎙 Распознавание речи\n\nДвижок: " + current.VoiceRecognition
+	case CategoryPreprocessing:
+		text = "✨ Препроцессинг\n\nСостояние: " + state(current.PreprocessingEnabled, false)
+		if current.PreprocessingInstruction == "" {
+			text += "\nИнструкция: встроенная"
+		} else {
+			text += "\nИнструкция: пользовательская"
+		}
+		rows = onePerRow(Button{Label: "Включить / выключить", Action: "settings_preprocessing"}, Button{Label: "Изменить инструкцию", Action: "settings_preprocessing_instruction"}, Button{Label: "Вернуть встроенную", Action: "settings_preprocessing_reset"})
 	case CategoryArchive:
 		text = fmt.Sprintf("🗄 Сессии и архив\n\nПродолжать существующую: %s\nРекомендации архива: %s\nСрок жизни сессий: %s\nОчередь: %d", state(current.ContinueExisting, false), state(current.ArchiveRecommendations, true), current.SessionLifetime, current.QueueLimit)
 		rows = onePerRow(Button{Label: "Продолжение", Action: "settings_continue_existing"}, Button{Label: "Рекомендации архива", Action: "settings_archive_recommendations"})
@@ -98,6 +108,8 @@ func CategoryForAction(action string) (Category, bool) {
 		return CategoryCard, true
 	case "settings_screen":
 		return CategorySessionButtons, true
+	case "settings_preprocessing", "settings_preprocessing_instruction", "settings_preprocessing_reset":
+		return CategoryPreprocessing, true
 	case "settings_continue_existing", "settings_archive_recommendations", "settings_lifetime_never", "settings_lifetime_6h", "settings_lifetime_12h", "settings_lifetime_24h", "settings_lifetime_48h":
 		return CategoryArchive, true
 	case "settings_background_questions", "settings_background_errors":

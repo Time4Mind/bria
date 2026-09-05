@@ -73,6 +73,12 @@ type DurableInputAcceptance struct {
 	MessageID string
 	Sequence  uint64
 }
+type DurableInputPreparation struct {
+	SessionID domain.SessionID
+	MessageID string
+	Sequence  uint64
+	Payload   []byte
+}
 type DurableInputCompletion string
 
 const (
@@ -81,6 +87,7 @@ const (
 )
 
 type DurableInputCallbacks struct {
+	OnPrepared func(context.Context, DurableInputPreparation) error
 	OnAccepted func(context.Context, DurableInputAcceptance) error
 }
 type DurableInputProcessReceipt struct {

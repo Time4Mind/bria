@@ -22,6 +22,8 @@ type Snapshot struct {
 	ArchiveRecommendations    bool
 	DefaultProviders          map[domain.ComputerID]domain.Provider
 	DefaultWorkdirs           map[domain.ComputerID]string
+	PreprocessingEnabled      bool
+	PreprocessingInstruction  string
 }
 
 type Preferences interface {
@@ -44,6 +46,11 @@ type CreationPreferences interface {
 	ClearDefaultProvider(context.Context, domain.ComputerID) error
 	SetDefaultWorkdir(context.Context, domain.ComputerID, string) error
 	ClearDefaultWorkdir(context.Context, domain.ComputerID) error
+}
+
+type PreprocessingPreferences interface {
+	TogglePreprocessing(context.Context) error
+	SetPreprocessingInstruction(context.Context, string) error
 }
 
 type ProviderPreference struct {

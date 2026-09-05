@@ -1077,7 +1077,7 @@ var sessionRuntimeAllowedImports = []string{
 }
 
 var telegramControllerAllowedImports = []string{
-	"internal/app", "internal/coordinator", "internal/domain", "internal/sessioncreation", "internal/sessionruntime", "internal/settingsport", "internal/telegramcreationview", "internal/telegramnodes", "internal/telegramsettings", "internal/telegramsettingsview", "internal/telegramstatus", "internal/turnprocessing",
+	"internal/app", "internal/coordinator", "internal/domain", "internal/promptpreprocess", "internal/sessioncreation", "internal/sessionruntime", "internal/settingsport", "internal/telegramcreationview", "internal/telegramnodes", "internal/telegramsettings", "internal/telegramsettingsview", "internal/telegramstatus", "internal/turnprocessing",
 }
 
 var telegramBridgeAllowedImports = []string{
@@ -1469,6 +1469,16 @@ var packagePolicies = map[string]packagePolicy{
 		allowedImports:     []string{"internal/claudequota", "internal/config", "internal/domain", "internal/processenv", "internal/processgroup", "internal/telegramstatus"},
 		maxProductionLines: 300,
 	},
+	"internal/promptpreprocess": {
+		responsibility:     "define stateless prompt rewriting and its durable pre-provider envelope",
+		allowedImports:     []string{"internal/domain"},
+		maxProductionLines: 250,
+	},
+	"internal/promptpreprocesscommand": {
+		responsibility:     "run isolated one-shot prompt rewriting through the cheapest enabled local provider",
+		allowedImports:     []string{"internal/config", "internal/domain", "internal/processenv", "internal/processgroup", "internal/promptpreprocess"},
+		maxProductionLines: 450,
+	},
 	"internal/p4runtimecomposition": {
 		responsibility: "compose opt-in P4 media and Screen runtime adapters",
 		allowedImports: []string{
@@ -1497,9 +1507,9 @@ var packagePolicies = map[string]packagePolicy{
 	"internal/singlemachinecomposition": {
 		responsibility: "compose the single-computer Bria process",
 		allowedImports: []string{
-			"internal/app", "internal/authcomposition", "internal/callbacktoken", "internal/claudestore", "internal/config", "internal/coordinator", "internal/domain", "internal/durablecomposition", "internal/durableflow", "internal/interactioncomposition", "internal/messagejournal", "internal/processenv", "internal/providerquota", "internal/recoverycomposition", "internal/recoveryruntime", "internal/runtimefactory", "internal/safelog", "internal/sessioncreation", "internal/sessionexpiry", "internal/sessionid", "internal/sessionruntime", "internal/sessionsupervisor", "internal/settings", "internal/settingscomposition", "internal/storage", "internal/supervisioncomposition", "internal/telegram", "internal/telegrambridge", "internal/telegramcompletioncomposition", "internal/telegramcontroller", "internal/telegramflow", "internal/telegramnotify", "internal/telegrampipeline", "internal/telegrampromptcomposition", "internal/telegramrecoverycomposition", "internal/telegramruntimecomposition", "internal/turnruntimecomposition", "internal/workdir",
+			"internal/app", "internal/authcomposition", "internal/callbacktoken", "internal/claudestore", "internal/config", "internal/coordinator", "internal/domain", "internal/durablecomposition", "internal/durableflow", "internal/interactioncomposition", "internal/messagejournal", "internal/processenv", "internal/promptpreprocess", "internal/promptpreprocesscommand", "internal/providerquota", "internal/recoverycomposition", "internal/recoveryruntime", "internal/runtimefactory", "internal/safelog", "internal/sessioncreation", "internal/sessionexpiry", "internal/sessionid", "internal/sessionruntime", "internal/sessionsupervisor", "internal/settings", "internal/settingscomposition", "internal/storage", "internal/supervisioncomposition", "internal/telegram", "internal/telegrambridge", "internal/telegramcompletioncomposition", "internal/telegramcontroller", "internal/telegramflow", "internal/telegramnotify", "internal/telegrampipeline", "internal/telegrampromptcomposition", "internal/telegramrecoverycomposition", "internal/telegramruntimecomposition", "internal/turnruntimecomposition", "internal/workdir",
 		},
-		maxProductionLines: 800,
+		maxProductionLines: 850,
 	},
 	"internal/secretfile": {
 		responsibility:     "pass a bounded secret file to a callback with guaranteed transient zeroization",
@@ -1559,7 +1569,7 @@ var packagePolicies = map[string]packagePolicy{
 	"internal/settings": {
 		responsibility:     "persist and validate user settings",
 		allowedImports:     []string{"internal/settingsport"},
-		maxProductionLines: 750,
+		maxProductionLines: 800,
 	},
 	"internal/settingscomposition": {
 		responsibility:     "compose neutral Telegram settings ports with canonical local settings and configuration stores",
@@ -1640,9 +1650,9 @@ var packagePolicies = map[string]packagePolicy{
 	"internal/telegramcontroller": {
 		responsibility: "coordinate Telegram session interactions",
 		allowedImports: []string{
-			"internal/app", "internal/coordinator", "internal/domain", "internal/sessioncreation", "internal/sessionruntime", "internal/settingsport", "internal/telegramcreationview", "internal/telegramnodes", "internal/telegramsettings", "internal/telegramsettingsview", "internal/telegramstatus", "internal/turnprocessing",
+			"internal/app", "internal/coordinator", "internal/domain", "internal/promptpreprocess", "internal/sessioncreation", "internal/sessionruntime", "internal/settingsport", "internal/telegramcreationview", "internal/telegramnodes", "internal/telegramsettings", "internal/telegramsettingsview", "internal/telegramstatus", "internal/turnprocessing",
 		},
-		maxProductionLines: 3900,
+		maxProductionLines: 4200,
 	},
 	"internal/telegramflow": {
 		responsibility: "join Telegram callback, presentation, and durable card boundaries",

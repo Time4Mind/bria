@@ -32,10 +32,12 @@ func (p Preferences) Snapshot(ctx context.Context) (settingsport.Snapshot, error
 		NotifyBackgroundQuestions: current.NotifyBackgroundQuestions,
 		NotifyBackgroundErrors:    current.NotifyBackgroundErrors,
 		SessionLifetime:           string(current.SessionLifetime), QueueLimit: current.QueueLimit,
-		VoiceRecognition:       string(current.VoiceRecognition),
-		ArchiveRecommendations: current.ArchiveRecommendations,
-		DefaultProviders:       providerDefaults(current.DefaultProviders),
-		DefaultWorkdirs:        workdirDefaults(current.DefaultWorkdirs),
+		VoiceRecognition:         string(current.VoiceRecognition),
+		ArchiveRecommendations:   current.ArchiveRecommendations,
+		DefaultProviders:         providerDefaults(current.DefaultProviders),
+		DefaultWorkdirs:          workdirDefaults(current.DefaultWorkdirs),
+		PreprocessingEnabled:     current.PreprocessingEnabled,
+		PreprocessingInstruction: current.PreprocessingInstruction,
 	}, nil
 }
 
@@ -82,6 +84,12 @@ func (p Preferences) SetSessionLifetime(ctx context.Context, lifetime string) er
 }
 func (p Preferences) ToggleArchiveRecommendations(ctx context.Context) error {
 	return p.update(ctx, func(current *settings.Settings) { current.ArchiveRecommendations = !current.ArchiveRecommendations })
+}
+func (p Preferences) TogglePreprocessing(ctx context.Context) error {
+	return p.update(ctx, func(current *settings.Settings) { current.PreprocessingEnabled = !current.PreprocessingEnabled })
+}
+func (p Preferences) SetPreprocessingInstruction(ctx context.Context, instruction string) error {
+	return p.update(ctx, func(current *settings.Settings) { current.PreprocessingInstruction = instruction })
 }
 func (p Preferences) SetDefaultProvider(ctx context.Context, computerID domain.ComputerID, provider domain.Provider) error {
 	return p.update(ctx, func(current *settings.Settings) {

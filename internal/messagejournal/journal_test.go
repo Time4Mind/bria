@@ -213,6 +213,27 @@ func TestPendingInputLeaseCanBeReleasedWithoutChangingOrder(t *testing.T) {
 	}
 }
 
+func TestLeasedInputPayloadCanBePreparedBeforeAcceptance(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "journal.json")
+	journal := openJournal(t, path, messagejournal.DefaultLimits())
+	input, _, err := journal.EnqueueInput(context.Background(), "session-a", "message-a", []byte("raw"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := journal.LeaseNextInput(context.Background(), "session-a", "worker-a", time.Unix(1, 0), time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	prepared, err := journal.ReplaceLeasedInputPayload(context.Background(), "session-a", "message-a", "worker-a", input.Sequence, []byte("prepared"))
+	if err != nil || string(prepared.Payload) != "prepared" || prepared.Phase != messagejournal.InputPending || prepared.Lease.Owner != "worker-a" {
+		t.Fatalf("ReplaceLeasedInputPayload() = (%#v, %v)", prepared, err)
+	}
+	reopened := openJournal(t, path, messagejournal.DefaultLimits())
+	inputs, err := reopened.Inputs(context.Background(), "session-a")
+	if err != nil || len(inputs) != 1 || string(inputs[0].Payload) != "prepared" {
+		t.Fatalf("reopened inputs = (%#v, %v)", inputs, err)
+	}
+}
+
 func TestStructuredAttachmentRefsPersistAcrossReopenWithoutPaths(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "journal.json")
 	journal := openJournal(t, path, messagejournal.DefaultLimits())

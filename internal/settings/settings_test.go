@@ -15,7 +15,7 @@ import (
 
 func TestDefaultsAreProductDefaults(t *testing.T) {
 	s := Default()
-	if !s.ContinueExisting || s.ScreenEnabled || !s.ShowTechnicalActions || !s.NotifyBackgroundQuestions || !s.NotifyBackgroundErrors || s.ArchiveRecommendations {
+	if !s.ContinueExisting || s.ScreenEnabled || !s.ShowTechnicalActions || !s.NotifyBackgroundQuestions || !s.NotifyBackgroundErrors || s.ArchiveRecommendations || s.PreprocessingEnabled || s.PreprocessingInstruction != "" {
 		t.Fatalf("unexpected boolean defaults: %+v", s)
 	}
 	if s.CardDetail != CardDetailStandard || s.CardPageLimit != DefaultCardPages || s.SessionLifetime != LifetimeNever || s.VoiceRecognition != VoiceParakeet || s.QueueLimit != DefaultQueueLimit || s.RetryUndeliveredFiles {
@@ -125,6 +125,12 @@ func TestDecodeRequiresOneStrictCompleteDocument(t *testing.T) {
 		v2Snapshot.Settings.ArchiveRecommendations || len(v2Snapshot.Settings.DefaultProviders) != 0 || len(v2Snapshot.Settings.DefaultWorkdirs) != 0 {
 		t.Fatalf("v2 migration = %#v, %v", v2Snapshot, err)
 	}
+	v3 := strings.TrimSuffix(strings.Replace(document, `"version": 1`, `"version": 3, "card_page_limit": 64`, 1), "}") + ",\n  \"archive_recommendations\": false,\n  \"default_providers\": {},\n  \"default_workdirs\": {}\n}"
+	v3Snapshot, err := Decode(strings.NewReader(v3))
+	if err != nil || v3Snapshot.Settings.Version != FormatVersion || v3Snapshot.Settings.PreprocessingEnabled || v3Snapshot.Settings.PreprocessingInstruction != "" {
+		t.Fatalf("v3 migration = %#v, %v", v3Snapshot, err)
+	}
+	v4MissingPreprocessing := strings.Replace(v3, `"version": 3`, `"version": 4`, 1)
 
 	invalid := []struct {
 		name     string
@@ -136,6 +142,7 @@ func TestDecodeRequiresOneStrictCompleteDocument(t *testing.T) {
 		{name: "trailing", document: document + `{}`},
 		{name: "zero revision", document: strings.Replace(document, `"revision": 7`, `"revision": 0`, 1)},
 		{name: "version three missing creation settings", document: strings.Replace(document, `"version": 1`, `"version": 3`, 1)},
+		{name: "version four missing preprocessing settings", document: v4MissingPreprocessing},
 	}
 	for _, test := range invalid {
 		test := test

@@ -8,7 +8,7 @@ import (
 )
 
 const (
-	FormatVersion     = 3
+	FormatVersion     = 4
 	DefaultQueueLimit = 32
 	DefaultCardPages  = 64
 )
@@ -50,6 +50,8 @@ type Settings struct {
 	ArchiveRecommendations    bool              `json:"archive_recommendations"`
 	DefaultProviders          map[string]string `json:"default_providers"`
 	DefaultWorkdirs           map[string]string `json:"default_workdirs"`
+	PreprocessingEnabled      bool              `json:"preprocessing_enabled"`
+	PreprocessingInstruction  string            `json:"preprocessing_instruction"`
 }
 
 type Effective struct {
@@ -68,6 +70,8 @@ type Effective struct {
 	ArchiveRecommendations     bool
 	DefaultProviders           map[string]string
 	DefaultWorkdirs            map[string]string
+	PreprocessingEnabled       bool
+	PreprocessingInstruction   string
 }
 
 func Default() Settings {
@@ -91,6 +95,8 @@ func (s Settings) Effective() Effective {
 		ArchiveRecommendations:     s.ArchiveRecommendations,
 		DefaultProviders:           cloneStringMap(s.DefaultProviders),
 		DefaultWorkdirs:            cloneStringMap(s.DefaultWorkdirs),
+		PreprocessingEnabled:       s.PreprocessingEnabled,
+		PreprocessingInstruction:   s.PreprocessingInstruction,
 	}
 }
 
@@ -124,6 +130,10 @@ func (s Settings) Validate() error {
 		if !validMapKey(computerID) || !portableAbsolute(workdir) || strings.TrimSpace(workdir) != workdir {
 			return errors.New("default workdir entries must contain a valid computer and absolute path")
 		}
+	}
+	if len(s.PreprocessingInstruction) > 16*1024 || strings.ContainsRune(s.PreprocessingInstruction, '\x00') ||
+		s.PreprocessingInstruction != strings.TrimSpace(s.PreprocessingInstruction) {
+		return errors.New("preprocessing instruction must be trimmed and at most 16384 bytes")
 	}
 	return nil
 }

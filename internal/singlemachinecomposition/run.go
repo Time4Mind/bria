@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"bria/internal/app"
@@ -17,6 +18,8 @@ import (
 	"bria/internal/durableflow"
 	"bria/internal/interactioncomposition"
 	"bria/internal/messagejournal"
+	"bria/internal/promptpreprocess"
+	"bria/internal/promptpreprocesscommand"
 	"bria/internal/providerquota"
 	"bria/internal/recoverycomposition"
 	"bria/internal/recoveryruntime"
@@ -260,6 +263,10 @@ func runTelegramController(
 	if err != nil {
 		return fmt.Errorf("open safe operational log: %w", err)
 	}
+	promptPreprocessor, err := promptpreprocesscommand.New(providerPreferences, dependencies.Environment(), computerID)
+	if err != nil {
+		return fmt.Errorf("compose prompt preprocessor: %w", err)
+	}
 	telegramScheduler.SetReporter(func(diagnostic telegram.SchedulerDiagnostic) {
 		_ = safeLogger.Write(safelog.Event{
 			Class: safelog.Service, Type: "telegram.mutation_delayed", ErrorCategory: diagnostic.ErrorClass,
@@ -431,9 +438,11 @@ func runTelegramController(
 		telegramcontroller.Options{
 			QueueLimit: effectiveSettings.QueueLimit, Lifecycle: starter, UIState: state,
 			Settings: telegramPreferences, Providers: settingscomposition.ProviderPreferences{Store: providerPreferences},
-			CreationEnvironment: creationEnvironment,
-			Quotas:              quotaService,
-			Stopper:             turnStopper, ArchivedResumer: archivedResumer, SessionCloser: sessionCloser,
+			CreationEnvironment:   creationEnvironment,
+			Quotas:                quotaService,
+			Preprocessor:          promptPreprocessor,
+			PreprocessingObserver: preprocessingObserver{logger: safeLogger},
+			Stopper:               turnStopper, ArchivedResumer: archivedResumer, SessionCloser: sessionCloser,
 			TurnLifecycle: turnLifecycle, DurableInput: inputCustody, DurableOutput: outputCustody,
 			InputPreparer: inputPreparer, Attachments: attachments, RuntimeEvents: runtimeEvents, Finals: finals,
 			Interactions: interactions.Flow(), Authorization: authorization,
@@ -566,6 +575,23 @@ func runTelegramController(
 		return errors.Join(runErr, fmt.Errorf("persist safe controller failure: %w", logErr))
 	}
 	return runErr
+}
+
+type preprocessingObserver struct{ logger *safelog.Logger }
+
+func (observer preprocessingObserver) ObservePreprocessing(_ context.Context, observation promptpreprocess.Observation) error {
+	if observer.logger == nil {
+		return errors.New("safe logger is required")
+	}
+	return observer.logger.Write(safelog.Event{
+		Class: safelog.Service, Type: "prompt.preprocessing_failed", EntityID: string(observation.SessionID),
+		Result: "fallback_original", ErrorCategory: observation.Category, Error: observation.Error,
+		Fields: map[string]string{
+			"computer_id": string(observation.ComputerID), "session_id": string(observation.SessionID),
+			"message_id": observation.MessageID, "provider": string(observation.Provider), "model": observation.Model,
+			"stage": observation.Stage, "attempt": strconv.Itoa(observation.Attempts),
+		},
+	})
 }
 
 // Run starts the local combined runtime from one validated configuration path.

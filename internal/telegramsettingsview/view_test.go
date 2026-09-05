@@ -15,6 +15,7 @@ func TestRenderGroupsSettingsLikeLegacyNavigation(t *testing.T) {
 		{{Label: "🧾 Содержимое карточки", Action: "settings_category", Choice: int(CategoryCard)}},
 		{{Label: "🎛 Кнопки сессии", Action: "settings_category", Choice: int(CategorySessionButtons)}},
 		{{Label: "🎙 Распознавание речи", Action: "settings_category", Choice: int(CategoryVoice)}},
+		{{Label: "✨ Препроцессинг", Action: "settings_category", Choice: int(CategoryPreprocessing)}},
 		{{Label: "🗄 Сессии и архив", Action: "settings_category", Choice: int(CategoryArchive)}},
 		{{Label: "🔔 Уведомления", Action: "settings_category", Choice: int(CategoryNotifications)}},
 		{{Label: "🛠 Создание сессии", Action: "settings_category", Choice: int(CategoryCreation)}},
@@ -35,6 +36,7 @@ func TestRenderCategoryKeepsEveryCurrentSettingInOneIntuitiveGroup(t *testing.T)
 		{CategoryCard, []string{"Содержимое карточки", "Детализация карточки: standard", "Лимит страниц: 64", "Технические действия: включены"}, []string{"settings_detail", "settings_page_limit", "settings_technical_actions", "menu_settings"}},
 		{CategorySessionButtons, []string{"Кнопки сессии", "Screen: выключен"}, []string{"settings_screen", "menu_settings"}},
 		{CategoryVoice, []string{"Распознавание речи", "Движок: parakeet"}, []string{"menu_settings"}},
+		{CategoryPreprocessing, []string{"Препроцессинг", "Состояние: выключено", "Инструкция: встроенная"}, []string{"settings_preprocessing", "settings_preprocessing_instruction", "settings_preprocessing_reset", "menu_settings"}},
 		{CategoryArchive, []string{"Сессии и архив", "Продолжать существующую: включено", "Рекомендации архива: выключены", "Срок жизни сессий: never", "Очередь: 16"}, []string{"settings_continue_existing", "settings_archive_recommendations", "settings_lifetime_never", "settings_lifetime_6h", "settings_lifetime_12h", "settings_lifetime_24h", "settings_lifetime_48h", "menu_settings"}},
 		{CategoryNotifications, []string{"Уведомления", "Фоновые вопросы: включены", "Фоновые ошибки: включены"}, []string{"settings_background_questions", "settings_background_errors", "menu_settings"}},
 		{CategoryCreation, []string{"Создание сессии"}, []string{"settings_default_provider", "settings_default_workdir", "settings_clear_creation_defaults", "menu_settings"}},
@@ -99,5 +101,9 @@ func (settingsPreferencesStub) SetDefaultWorkdir(context.Context, domain.Compute
 	return nil
 }
 func (settingsPreferencesStub) ClearDefaultWorkdir(context.Context, domain.ComputerID) error {
+	return nil
+}
+func (settingsPreferencesStub) TogglePreprocessing(context.Context) error { return nil }
+func (settingsPreferencesStub) SetPreprocessingInstruction(context.Context, string) error {
 	return nil
 }
