@@ -128,6 +128,8 @@ func RunAdapter(ctx context.Context, parentInput io.ReadCloser, parentOutput io.
 	thread, err := client.StartThread(runCtx, ThreadStartRequest{
 		Cwd:            config.Workdir,
 		ResumeThreadID: config.ResumeThreadID,
+		ApprovalPolicy: "never",
+		Sandbox:        "danger-full-access",
 	})
 	if err != nil {
 		return classifyStartupError(err)

@@ -19,7 +19,7 @@ func TestRenderGroupsSettingsLikeLegacyNavigation(t *testing.T) {
 		{{Label: "🗄 Сессии и архив", Action: "settings_category", Choice: int(CategoryArchive)}},
 		{{Label: "🔔 Уведомления", Action: "settings_category", Choice: int(CategoryNotifications)}},
 		{{Label: "🛠 Создание сессии", Action: "settings_category", Choice: int(CategoryCreation)}},
-		{{Label: "🤖 Исполнители", Action: "settings_category", Choice: int(CategoryProviders)}},
+		{{Label: "🤖 CLI", Action: "settings_category", Choice: int(CategoryProviders)}},
 		{{Label: "Меню", Action: "menu_back"}},
 	}
 	if surface := Render(); surface.Text != "Настройки\n\nВыберите раздел." || !reflect.DeepEqual(surface.Rows, want) {
@@ -40,7 +40,7 @@ func TestRenderCategoryKeepsEveryCurrentSettingInOneIntuitiveGroup(t *testing.T)
 		{CategoryArchive, []string{"Сессии и архив", "Продолжать существующую: включено", "Рекомендации архива: выключены", "Срок жизни сессий: never", "Очередь: 16"}, []string{"settings_continue_existing", "settings_archive_recommendations", "settings_lifetime_never", "settings_lifetime_6h", "settings_lifetime_12h", "settings_lifetime_24h", "settings_lifetime_48h", "menu_settings"}},
 		{CategoryNotifications, []string{"Уведомления", "Фоновые вопросы: включены", "Фоновые ошибки: включены"}, []string{"settings_background_questions", "settings_background_errors", "menu_settings"}},
 		{CategoryCreation, []string{"Создание сессии"}, []string{"settings_default_provider", "settings_default_workdir", "settings_clear_creation_defaults", "menu_settings"}},
-		{CategoryProviders, []string{"Исполнители"}, []string{"authorize_codex", "authorize_claude", "menu_settings"}},
+		{CategoryProviders, []string{"CLI"}, []string{"authorize_codex", "authorize_claude", "menu_settings"}},
 	}
 	for _, test := range tests {
 		t.Run(fmt.Sprint(test.category), func(t *testing.T) {

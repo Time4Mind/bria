@@ -36,6 +36,7 @@ func TestBuildCommandSpecForcesSafeStreamProtocol(t *testing.T) {
 	wantArgs := []string{
 		"--bare",
 		"--print", "--verbose",
+		"--dangerously-skip-permissions",
 		"--input-format", "stream-json",
 		"--output-format", "stream-json",
 		"--replay-user-messages",
@@ -63,6 +64,7 @@ func TestBuildResumeCommandSpecUsesExactExistingSessionWithoutRandomFallback(t *
 	wantArgs := []string{
 		"--bare",
 		"--print", "--verbose",
+		"--dangerously-skip-permissions",
 		"--input-format", "stream-json",
 		"--output-format", "stream-json",
 		"--replay-user-messages",

@@ -217,9 +217,41 @@ func TestSessionAndArchiveSurfacesAreScopedToSelectedNode(t *testing.T) {
 	archive, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{
 		Kind: telegramcontroller.SemanticMenuArchive, UpdateID: 2,
 	})
-	if err != nil || archive.Surface == nil || !strings.Contains(archive.Surface.Text, "33333333") ||
-		strings.Contains(archive.Surface.Text, "44444444") {
+	if err != nil || archive.Surface == nil || len(archive.Surface.Rows) != 2 ||
+		archive.Surface.Rows[0][0].SessionID != localArchived.ID() {
 		t.Fatalf("local archive = %#v, err=%v", archive, err)
+	}
+}
+
+func TestSessionButtonsUseUniqueTenCharacterDirectoryNamesAndMarkActive(t *testing.T) {
+	makeSession := func(id, workdir string) domain.Session {
+		starting, err := domain.NewStartingSession(domain.SessionID(id), domain.IntentID("intent-"+id), "local", domain.ProviderCodex, workdir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ready, err := starting.Ready(domain.ProviderBinding{Provider: domain.ProviderCodex, SessionID: "provider-" + id, Generation: 1})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ready
+	}
+	first := makeSession("11111111-1111-4111-9111-111111111111", "/a/longdirectory")
+	second := makeSession("22222222-2222-4222-9222-222222222222", "/b/longdirectory")
+	controller := newController(t, nil, newLockedSessions(first, second), nil, nil, telegramcontroller.Options{Recovered: []domain.Session{first, second}})
+	t.Cleanup(func() { _ = controller.Close(context.Background()) })
+
+	result, err := controller.ProjectCurrent(context.Background(), first.ID())
+	if err != nil || result.Card == nil {
+		t.Fatalf("card = %#v, err=%v", result, err)
+	}
+	want := []string{"✓ longdirect", "longdirec2"}
+	if len(result.Card.SelectableSessionLabels) != len(want) {
+		t.Fatalf("labels = %#v", result.Card.SelectableSessionLabels)
+	}
+	for index := range want {
+		if result.Card.SelectableSessionLabels[index] != want[index] {
+			t.Fatalf("label %d = %q, want %q", index, result.Card.SelectableSessionLabels[index], want[index])
+		}
 	}
 }
 

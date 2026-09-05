@@ -530,9 +530,8 @@ func runRawHelper() {
 		_, hasEphemeral := params["ephemeral"]
 		requireRaw(!hasEphemeral)
 	}
-	_, hasApproval := params["approvalPolicy"]
-	_, hasSandbox := params["sandbox"]
-	requireRaw(!hasApproval && !hasSandbox)
+	requireRaw(params["approvalPolicy"] == "never")
+	requireRaw(params["sandbox"] == "danger-full-access")
 	providerThreadID := "provider-thread-1"
 	if expectedResumeThreadID != "" {
 		providerThreadID = expectedResumeThreadID

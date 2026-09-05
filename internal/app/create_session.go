@@ -23,6 +23,7 @@ type ConfirmedSessionIntent struct {
 	ComputerID domain.ComputerID
 	Provider   domain.Provider
 	Workdir    string
+	Name       string
 }
 
 // SessionStartMode distinguishes creation of a provider session from exact
@@ -248,6 +249,14 @@ func (creator *SessionCreator) Create(
 	)
 	if err != nil {
 		return CreateSessionResult{}, fmt.Errorf("validate confirmed session intent: %w", err)
+	}
+	if intent.Name != "" {
+		snapshot := starting.Snapshot()
+		snapshot.Name = intent.Name
+		starting, err = domain.RestoreSession(snapshot)
+		if err != nil {
+			return CreateSessionResult{}, fmt.Errorf("validate confirmed session name: %w", err)
+		}
 	}
 
 	stored, inserted, err := creator.store.PutStartingIfAbsent(ctx, starting)

@@ -4,7 +4,11 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 )
+
+const MaxSessionNameRunes = 10
 
 // SessionID identifies one logical Bria session.
 type SessionID string
@@ -72,6 +76,7 @@ type Session struct {
 	computerID     ComputerID
 	provider       Provider
 	workdir        string
+	name           string
 	status         SessionStatus
 	binding        *ProviderBinding
 	createdAt      time.Time
@@ -89,6 +94,7 @@ type SessionSnapshot struct {
 	ComputerID     ComputerID
 	Provider       Provider
 	Workdir        string
+	Name           string
 	Status         SessionStatus
 	Binding        *ProviderBinding
 	CreatedAt      time.Time
@@ -180,6 +186,17 @@ func RestoreSession(snapshot SessionSnapshot) (Session, error) {
 	); err != nil {
 		return Session{}, err
 	}
+	if snapshot.Name != "" {
+		for _, character := range snapshot.Name {
+			if unicode.IsControl(character) {
+				return Session{}, errorsForStatus(snapshot.Status, "session name contains control characters")
+			}
+		}
+		words := strings.Fields(snapshot.Name)
+		if len(words) < 1 || len(words) > 2 || strings.Join(words, " ") != snapshot.Name || utf8.RuneCountInString(snapshot.Name) > MaxSessionNameRunes {
+			return Session{}, errorsForStatus(snapshot.Status, "session name is invalid")
+		}
+	}
 
 	// Older single-computer snapshots did not persist the recovery target. A
 	// binding-less awaiting session could only have failed its initial start;
@@ -237,6 +254,7 @@ func RestoreSession(snapshot SessionSnapshot) (Session, error) {
 		computerID:     snapshot.ComputerID,
 		provider:       snapshot.Provider,
 		workdir:        snapshot.Workdir,
+		name:           snapshot.Name,
 		status:         snapshot.Status,
 		binding:        cloneBinding(snapshot.Binding),
 		createdAt:      snapshot.CreatedAt,
@@ -425,6 +443,7 @@ func (s Session) IntentID() IntentID        { return s.intentID }
 func (s Session) ComputerID() ComputerID    { return s.computerID }
 func (s Session) Provider() Provider        { return s.provider }
 func (s Session) Workdir() string           { return s.workdir }
+func (s Session) Name() string              { return s.name }
 func (s Session) Status() SessionStatus     { return s.status }
 func (s Session) CreatedAt() time.Time      { return s.createdAt }
 func (s Session) StateChangedAt() time.Time { return s.stateChangedAt }
@@ -474,6 +493,7 @@ func (s Session) Snapshot() SessionSnapshot {
 		ComputerID:     s.computerID,
 		Provider:       s.provider,
 		Workdir:        s.workdir,
+		Name:           s.name,
 		Status:         s.status,
 		Binding:        cloneBinding(s.binding),
 		CreatedAt:      s.createdAt,
@@ -499,6 +519,7 @@ func (s Session) Equal(other Session) bool {
 		s.computerID != other.computerID ||
 		s.provider != other.provider ||
 		s.workdir != other.workdir ||
+		s.name != other.name ||
 		s.status != other.status ||
 		!s.createdAt.Equal(other.createdAt) ||
 		!equalTime(s.lastResumedAt, other.lastResumedAt) ||

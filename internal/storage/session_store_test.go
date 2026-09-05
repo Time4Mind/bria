@@ -83,6 +83,12 @@ func TestSessionStoreRoundTripsLifecycleMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	snapshot := want.Snapshot()
+	snapshot.Name = "Проект"
+	want, err = domain.RestoreSession(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
 	path := filepath.Join(t.TempDir(), "sessions.json")
 	store, err := storage.OpenSessionStore(path)
 	if err != nil {
@@ -102,6 +108,34 @@ func TestSessionStoreRoundTripsLifecycleMetadata(t *testing.T) {
 	}
 	if !got.Equal(want) {
 		t.Fatalf("reloaded lifecycle snapshot = %#v, want %#v", got.Snapshot(), want.Snapshot())
+	}
+}
+
+func TestSessionStoreAtomicallyUniquifiesPersistedNames(t *testing.T) {
+	t.Parallel()
+	store, err := storage.OpenSessionStore(filepath.Join(t.TempDir(), "sessions.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	withName := func(session domain.Session, name string) domain.Session {
+		snapshot := session.Snapshot()
+		snapshot.Name = name
+		named, restoreErr := domain.RestoreSession(snapshot)
+		if restoreErr != nil {
+			t.Fatal(restoreErr)
+		}
+		return named
+	}
+	first, _, err := store.PutStartingIfAbsent(context.Background(), withName(mustStartingSession(t, "session-first", "intent-first"), "project"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, _, err := store.PutStartingIfAbsent(context.Background(), withName(mustStartingSession(t, "session-second", "intent-second"), "project"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Name() != "project" || second.Name() != "project2" {
+		t.Fatalf("persisted names = %q, %q", first.Name(), second.Name())
 	}
 }
 

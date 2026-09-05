@@ -10,6 +10,7 @@ import (
 	"bria/internal/sessioncreation"
 	"bria/internal/settingsport"
 	"bria/internal/telegramcreationview"
+	"bria/internal/telegramsessions"
 	"bria/internal/telegramsettingsview"
 )
 
@@ -505,7 +506,7 @@ func (controller *Controller) finishDirectorySelectionV2(ctx context.Context, up
 			}
 			items = append(items, sessioncreation.Recommendation{
 				SessionID: session.ID(),
-				Label: authorizationProviderName(session.Provider()) + " " + shortID(session.ID()) + " · " +
+				Label: authorizationProviderName(session.Provider()) + " " + telegramsessions.ShortID(session.ID()) + " · " +
 					session.StateChangedAt().Local().Format("02.01 15:04"),
 			})
 			if len(items) == maxItems {

@@ -263,7 +263,7 @@ func TestSemanticProviderSettingsUseTypedPortWithoutCredentials(t *testing.T) {
 		t.Fatalf("provider surface = (%#v, %v)", initial, err)
 	}
 	updated, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticSettingsProviderCodex})
-	if err != nil || updated.Surface == nil || !strings.Contains(updated.Surface.Text, "Исполнители") || !strings.Contains(updated.Surface.Text, "codex: выключен, настроен") {
+	if err != nil || updated.Surface == nil || !strings.Contains(updated.Surface.Text, "CLI") || !strings.Contains(updated.Surface.Text, "codex: выключен, настроен") {
 		t.Fatalf("updated provider category = (%#v, %v)", updated, err)
 	}
 	if providers.values[domain.ProviderCodex].Enabled {
@@ -961,7 +961,7 @@ func TestArchiveListsOnlyArchivedSessions(t *testing.T) {
 		ID: 50, Kind: coordinator.UpdateCallback, ActorID: ownerID,
 		ConversationID: chatID, ConversationKind: "private", CallbackQueryID: "q", SourceMessageID: 10, Text: "mm:arch",
 	})
-	if !strings.Contains(decision.Status.Text, "11111111") || strings.Contains(decision.Status.Text, "22222222") {
+	if !strings.Contains(decision.Status.Text, "codex archived /archived") || strings.Contains(decision.Status.Text, "recovering") {
 		t.Fatalf("archive = %q, want archived only", decision.Status.Text)
 	}
 }
@@ -1017,7 +1017,7 @@ func TestCloseSessionArchivesAndRemovesActiveSession(t *testing.T) {
 	t.Cleanup(func() { _ = controller.Close(context.Background()) })
 	mustStatus(t, controller, message(52, "/use "+string(ready.ID())))
 	decision, err := controller.CloseSession(context.Background(), ready.ID())
-	if err != nil || !strings.Contains(decision.Status.Text, "11111111") {
+	if err != nil || !strings.Contains(decision.Status.Text, "claude work /work") {
 		t.Fatalf("CloseSession() = (%#v, %v)", decision, err)
 	}
 	decision = mustStatus(t, controller, message(53, "must not run"))
@@ -1801,14 +1801,15 @@ func TestSemanticStopTargetsBusySessionEvenWhenAnotherSessionIsActive(t *testing
 func TestSemanticCloseAndResumeTargetExplicitSessions(t *testing.T) {
 	ready := readySession(t, "11111111-1111-4111-9111-111111111111", domain.ProviderCodex, t.TempDir(), "provider-1", 1)
 	archivedReady := readySession(t, "22222222-2222-4222-9222-222222222222", domain.ProviderClaude, t.TempDir(), "provider-original", 3)
+	previous := readySession(t, "33333333-3333-4333-9333-333333333333", domain.ProviderCodex, t.TempDir(), "provider-previous", 1)
 	archived := archivedSession(t, string(archivedReady.ID()), archivedReady.Provider(), archivedReady.Workdir(), "provider-original", 3)
 	resuming, _ := archived.BeginResume(archived.StateChangedAt().Add(time.Minute))
 	resumed, _ := resuming.ResumeReady(domain.ProviderBinding{Provider: archived.Provider(), SessionID: "provider-original", Generation: 4}, archived.StateChangedAt().Add(2*time.Minute), domain.SessionLifetimeNever)
-	store := newLockedSessions(ready, archived)
+	store := newLockedSessions(ready, archived, previous)
 	closed := make(chan domain.SessionID, 1)
 	resumedIDs := make(chan domain.SessionID, 1)
 	controller := newController(t, creatorFunc(nil), store, submitterFunc(nil), notifierFunc(nil), telegramcontroller.Options{
-		Recovered: []domain.Session{ready},
+		Recovered: []domain.Session{ready, previous},
 		SessionCloser: sessionCloserFunc(func(_ context.Context, id domain.SessionID) (app.CloseSessionResult, error) {
 			closed <- id
 			result := archivedSession(t, string(ready.ID()), ready.Provider(), ready.Workdir(), "provider-1", 1)
@@ -1822,8 +1823,27 @@ func TestSemanticCloseAndResumeTargetExplicitSessions(t *testing.T) {
 		}),
 	})
 	t.Cleanup(func() { _ = controller.Close(context.Background()) })
-	if _, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticClose, SessionID: ready.ID()}); err != nil {
+	if _, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticSelect, SessionID: previous.ID()}); err != nil {
 		t.Fatal(err)
+	}
+	if _, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticSelect, SessionID: ready.ID()}); err != nil {
+		t.Fatal(err)
+	}
+	prompt, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticClose, SessionID: ready.ID()})
+	if err != nil || prompt.Card == nil || !prompt.Card.CloseConfirmation || !strings.Contains(prompt.Card.Header, "перемещена в архив") {
+		t.Fatalf("close confirmation = (%#v, %v)", prompt, err)
+	}
+	select {
+	case got := <-closed:
+		t.Fatalf("session closed before confirmation: %q", got)
+	default:
+	}
+	closedResult, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticClose, SessionID: ready.ID(), Choice: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if closedResult.Card == nil || closedResult.Card.SessionID != previous.ID() {
+		t.Fatalf("close fallback = %#v, want previous active %q", closedResult, previous.ID())
 	}
 	if got := <-closed; got != ready.ID() {
 		t.Fatalf("closed session = %q", got)
@@ -1842,6 +1862,7 @@ func TestSemanticActionRejectsMissingOrUnexpectedTargetFields(t *testing.T) {
 	for _, action := range []telegramcontroller.SemanticAction{
 		{Kind: telegramcontroller.SemanticStop},
 		{Kind: telegramcontroller.SemanticClose, SessionID: "session", Page: 1},
+		{Kind: telegramcontroller.SemanticClose, SessionID: "session", Choice: 3},
 		{Kind: telegramcontroller.SemanticSettingsCategory},
 		{Kind: telegramcontroller.SemanticSettingsCategory, Choice: 99},
 		{Kind: "unknown", SessionID: "session"},
@@ -1869,6 +1890,12 @@ func TestGlobalSemanticActionsExposeOnlyTypedSurfacesAndStableCreateIdentity(t *
 			sessioncreation.ProviderCapability{Provider: domain.ProviderCodex, Installed: true, Enabled: true})},
 	)
 	t.Cleanup(func() { _ = controller.Close(context.Background()) })
+	menu, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticMenuBack})
+	if err != nil || menu.Surface == nil || len(menu.Surface.Rows) < 2 ||
+		menu.Surface.Rows[0][0].Label != "Сессии" || menu.Surface.Rows[0][1].Label != "Статус" ||
+		menu.Surface.Rows[1][0].Label != "Архив" || menu.Surface.Rows[1][1].Label != "➕ Новая" {
+		t.Fatalf("main menu ordering = (%#v, %v)", menu, err)
+	}
 	for _, kind := range []telegramcontroller.SemanticActionKind{
 		telegramcontroller.SemanticMenuNew,
 		telegramcontroller.SemanticMenuArchive,
@@ -1894,7 +1921,7 @@ func TestGlobalSemanticActionsExposeOnlyTypedSurfacesAndStableCreateIdentity(t *
 		t.Fatal(err)
 	}
 	result, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticCreatePick, UpdateID: 777})
-	if err != nil || result.Card == nil || intent.IntentID != "telegram-update:777" {
+	if err != nil || result.Card == nil || intent.IntentID != "telegram-update:777" || intent.Name == "" || len([]rune(intent.Name)) > domain.MaxSessionNameRunes {
 		t.Fatalf("semantic create = (%#v, %v), intent=%#v", result, err, intent)
 	}
 	if _, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticCreateClaude}); err == nil {

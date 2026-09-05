@@ -294,9 +294,8 @@ func (sender *Sender) acknowledgeCallback(ctx context.Context, operationID, call
 		return
 	}
 	started := make(chan struct{})
-	// Callback acknowledgement is deliberately independent from the visible
-	// card transition: Telegram can reject an expired acknowledgement without
-	// delaying or invalidating the already accepted user action.
+	// Callback acknowledgement is independent from the visible card transition:
+	// an expired acknowledgement does not invalidate the accepted user action.
 	go func() {
 		if sender.acknowledgements != nil {
 			allowed, err := sender.acknowledgements.BeginCallbackAcknowledgement(context.WithoutCancel(ctx), operationID, callbackQueryID)

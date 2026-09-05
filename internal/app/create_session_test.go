@@ -50,6 +50,7 @@ func TestSessionCreatorPersistsStartingBeforeStartAndThenReady(t *testing.T) {
 		ComputerID: "computer-1",
 		Provider:   domain.ProviderCodex,
 		Workdir:    "/workspace/project",
+		Name:       "Проект",
 	})
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
@@ -62,6 +63,9 @@ func TestSessionCreatorPersistsStartingBeforeStartAndThenReady(t *testing.T) {
 	}
 	if got, want := result.Session.Status(), domain.SessionReady; got != want {
 		t.Fatalf("session status = %q, want %q", got, want)
+	}
+	if result.Session.Name() != "Проект" {
+		t.Fatalf("session name = %q, want Проект", result.Session.Name())
 	}
 	if got, ok := result.Session.Binding(); !ok || got != binding {
 		t.Fatalf("session binding = (%#v, %v), want (%#v, true)", got, ok, binding)

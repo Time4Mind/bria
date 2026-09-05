@@ -18,7 +18,7 @@ func TestDefaultsAreProductDefaults(t *testing.T) {
 	if !s.ContinueExisting || s.ScreenEnabled || !s.ShowTechnicalActions || !s.NotifyBackgroundQuestions || !s.NotifyBackgroundErrors || s.ArchiveRecommendations || s.PreprocessingEnabled || s.PreprocessingInstruction != "" {
 		t.Fatalf("unexpected boolean defaults: %+v", s)
 	}
-	if s.CardDetail != CardDetailStandard || s.CardPageLimit != DefaultCardPages || s.SessionLifetime != LifetimeNever || s.VoiceRecognition != VoiceParakeet || s.QueueLimit != DefaultQueueLimit || s.RetryUndeliveredFiles {
+	if s.CardDetail != CardDetailStandard || s.CardPageLimit != DefaultCardPages || s.SessionLifetime != Lifetime12Hours || s.VoiceRecognition != VoiceParakeet || s.QueueLimit != DefaultQueueLimit || s.RetryUndeliveredFiles {
 		t.Fatalf("unexpected defaults: %+v", s)
 	}
 	if err := s.Validate(); err != nil {
@@ -106,7 +106,7 @@ func TestDecodeRequiresOneStrictCompleteDocument(t *testing.T) {
   "show_technical_actions": true,
   "notify_background_questions": true,
   "notify_background_errors": true,
-  "session_lifetime": "never",
+  "session_lifetime": "12h",
   "queue_limit": 32,
   "voice_recognition": "parakeet",
   "retry_undelivered_files": false
@@ -250,7 +250,7 @@ func TestFileStoreCASPersistsRevisionAndRejectsStaleWriter(t *testing.T) {
 
 func TestEffectiveExposesCompositionContract(t *testing.T) {
 	effective := Default().Effective()
-	if effective.QueueLimit != DefaultQueueLimit || effective.SessionLifetime != LifetimeNever ||
+	if effective.QueueLimit != DefaultQueueLimit || effective.SessionLifetime != Lifetime12Hours ||
 		effective.ScreenEnabled || effective.CardDetail != CardDetailStandard ||
 		!effective.NotifyBackgroundQuestions || !effective.NotifyBackgroundErrors ||
 		!effective.NotifyBackgroundCompletion || !effective.ShowTechnicalActions {

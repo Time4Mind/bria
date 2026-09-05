@@ -88,7 +88,7 @@ func TestSessionCreationV2UsesSelectedNodeWithoutComputerStep(t *testing.T) {
 	t.Cleanup(func() { _ = controller.Close(context.Background()) })
 
 	initial, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticMenuNew, UpdateID: 1})
-	if err != nil || initial.Surface == nil || initial.Surface.Text != "Новое\nВыберите корень." || initial.Surface.Rows[0][0].Label != "📁 /local" {
+	if err != nil || initial.Surface == nil || initial.Surface.Text != "Новая сессия\nВыберите корень." || initial.Surface.Rows[0][0].Label != "📁 /local" {
 		t.Fatalf("coordinator creation = (%#v, %v)", initial, err)
 	}
 	nodes, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticMenuNodes, UpdateID: 2})
@@ -99,7 +99,7 @@ func TestSessionCreationV2UsesSelectedNodeWithoutComputerStep(t *testing.T) {
 		t.Fatal(err)
 	}
 	next, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticMenuNew, UpdateID: 4})
-	if err != nil || next.Surface == nil || next.Surface.Text != "Новое\nВыберите корень." || next.Surface.Rows[0][0].Label != "📁 /work" {
+	if err != nil || next.Surface == nil || next.Surface.Text != "Новая сессия\nВыберите корень." || next.Surface.Rows[0][0].Label != "📁 /work" {
 		t.Fatalf("selected-node creation = (%#v, %v)", next, err)
 	}
 }

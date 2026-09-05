@@ -42,7 +42,7 @@ func Render() Surface {
 		{{Label: "🗄 Сессии и архив", Action: "settings_category", Choice: int(CategoryArchive)}},
 		{{Label: "🔔 Уведомления", Action: "settings_category", Choice: int(CategoryNotifications)}},
 		{{Label: "🛠 Создание сессии", Action: "settings_category", Choice: int(CategoryCreation)}},
-		{{Label: "🤖 Исполнители", Action: "settings_category", Choice: int(CategoryProviders)}},
+		{{Label: "🤖 CLI", Action: "settings_category", Choice: int(CategoryProviders)}},
 		{{Label: "Меню", Action: "menu_back"}},
 	}}
 }
@@ -86,7 +86,7 @@ func RenderCategory(ctx context.Context, preferences settingsport.Preferences, p
 			rows = onePerRow(Button{Label: "Backend по умолчанию", Action: "settings_default_provider"}, Button{Label: "Папка по умолчанию", Action: "settings_default_workdir"}, Button{Label: "Сбросить значения по умолчанию", Action: "settings_clear_creation_defaults"})
 		}
 	case CategoryProviders:
-		text = "🤖 Исполнители"
+		text = "🤖 CLI"
 		if providers != nil {
 			providerRows, providerText, providerErr := providerSurface(ctx, providers)
 			if providerErr != nil {

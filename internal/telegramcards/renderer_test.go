@@ -27,7 +27,7 @@ func TestRenderSessionCardBuildsHistoryPagesAndSemanticKeyboard(t *testing.T) {
 	if len(got.Pages) < 1 || got.View.Page != got.View.Pages {
 		t.Fatalf("Render() view = %#v, pages = %#v; want latest page", got.View, got.Pages)
 	}
-	if !strings.Contains(strings.Join(pageTexts(got.Pages), ""), "Исполнитель: codex") {
+	if !strings.Contains(strings.Join(pageTexts(got.Pages), ""), "CLI: codex") {
 		t.Fatalf("rendered pages do not contain session header: %#v", got.Pages)
 	}
 	if !strings.Contains(strings.Join(pageTexts(got.Pages), ""), "Проверь проект") ||

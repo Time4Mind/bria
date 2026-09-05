@@ -157,7 +157,7 @@ func TestPreferencesDriveTypedControllerAndDurableFile(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = controller.Close(context.Background()) })
 	result, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticSettingsCategory, Choice: int(telegramsettingsview.CategoryArchive)})
-	if err != nil || result.Surface == nil || !strings.Contains(result.Surface.Text, "Срок жизни сессий: never") {
+	if err != nil || result.Surface == nil || !strings.Contains(result.Surface.Text, "Срок жизни сессий: 12h") {
 		t.Fatalf("archive settings surface = (%#v, %v)", result, err)
 	}
 	result, err = controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticSettingsCategory, Choice: 1})

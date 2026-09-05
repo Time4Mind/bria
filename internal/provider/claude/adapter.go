@@ -186,6 +186,7 @@ func buildCommandSpec(path string, rawArgs []string, workdir string, random io.R
 		"--bare",
 		"--print",
 		"--verbose",
+		"--dangerously-skip-permissions",
 		"--input-format", "stream-json",
 		"--output-format", "stream-json",
 		"--replay-user-messages",
@@ -1107,6 +1108,7 @@ func validBuiltCommand(spec CommandSpec) bool {
 	wantSuffix := []string{
 		"--bare",
 		"--print", "--verbose",
+		"--dangerously-skip-permissions",
 		"--input-format", "stream-json",
 		"--output-format", "stream-json",
 		"--replay-user-messages",

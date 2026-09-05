@@ -7,6 +7,28 @@ import (
 	"bria/internal/domain"
 )
 
+func TestSessionDisplayNameIsValidatedAndPreservedBySnapshot(t *testing.T) {
+	t.Parallel()
+	session, err := domain.NewStartingSession("named", "named-intent", "computer", domain.ProviderCodex, "/work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot := session.Snapshot()
+	snapshot.Name = "Кратко 2"
+	session, err = domain.RestoreSession(snapshot)
+	restored, err := domain.RestoreSession(session.Snapshot())
+	if err != nil || restored.Name() != "Кратко 2" || !restored.Equal(session) {
+		t.Fatalf("restored named session = (%#v, %v)", restored.Snapshot(), err)
+	}
+	for _, invalid := range []string{"слишком длинное", "раз два три", "bad\x00name"} {
+		snapshot := session.Snapshot()
+		snapshot.Name = invalid
+		if _, err := domain.RestoreSession(snapshot); err == nil {
+			t.Fatalf("RestoreSession(%q) accepted invalid name", invalid)
+		}
+	}
+}
+
 func TestSessionLifecyclePersistsStatesTimesAndDeadline(t *testing.T) {
 	t.Parallel()
 

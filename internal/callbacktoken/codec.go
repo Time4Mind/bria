@@ -117,6 +117,9 @@ const (
 	ActionSettingsCategory                     Action = 72
 	ActionMenuNodes                            Action = 73
 	ActionSelectNode                           Action = 74
+	ActionSettingsPreprocessing                Action = 75
+	ActionSettingsPreprocessingInstruction     Action = 76
+	ActionSettingsPreprocessingReset           Action = 77
 )
 
 // Fields is the semantic callback payload. SessionID identifies the selected
@@ -250,7 +253,8 @@ func validAction(action Action) bool {
 		ActionSettingsDefaultProvider, ActionSettingsDefaultWorkdir, ActionSettingsClearCreationDefaults,
 		ActionSettingsLifetimeNever, ActionSettingsLifetime6Hours, ActionSettingsLifetime12Hours,
 		ActionSettingsLifetime24Hours, ActionSettingsLifetime48Hours,
-		ActionSettingsProviderCodex, ActionSettingsProviderClaude, ActionAuthorizeCodex, ActionAuthorizeClaude:
+		ActionSettingsProviderCodex, ActionSettingsProviderClaude, ActionAuthorizeCodex, ActionAuthorizeClaude,
+		ActionSettingsPreprocessing, ActionSettingsPreprocessingInstruction, ActionSettingsPreprocessingReset:
 		return true
 	case ActionCreateChoice, ActionCreatePrevious, ActionCreateFirst, ActionCreateNext,
 		ActionCreateUp, ActionCreatePick, ActionCreateDirectoryNew, ActionCreateBack, ActionCreateFresh:
@@ -281,7 +285,9 @@ func validTarget(action Action, target int) bool {
 		return target > 0 && target <= MaxTarget
 	case ActionInteractionChoice:
 		return target > 0 && target <= MaxTarget
-	case ActionLatestPage, ActionSelectSession, ActionStop, ActionClose, ActionOptions, ActionScreen, ActionResume, ActionMenuNodes,
+	case ActionClose:
+		return target >= 0 && target <= 2
+	case ActionLatestPage, ActionSelectSession, ActionStop, ActionOptions, ActionScreen, ActionResume, ActionMenuNodes,
 		ActionMenuSessions, ActionMenuNew, ActionMenuArchive, ActionMenuStatus,
 		ActionMenuSettings, ActionMenuBack, ActionCreateSelectCodex, ActionCreateSelectClaude,
 		ActionCreateWorkdir, ActionCreateConfirm, ActionCreateCodex, ActionCreateClaude,
@@ -292,6 +298,8 @@ func validTarget(action Action, target int) bool {
 		ActionSettingsLifetimeNever, ActionSettingsLifetime6Hours, ActionSettingsLifetime12Hours,
 		ActionSettingsLifetime24Hours, ActionSettingsLifetime48Hours,
 		ActionSettingsProviderCodex, ActionSettingsProviderClaude, ActionAuthorizeCodex, ActionAuthorizeClaude:
+		return target == 0
+	case ActionSettingsPreprocessing, ActionSettingsPreprocessingInstruction, ActionSettingsPreprocessingReset:
 		return target == 0
 	case ActionCreatePrevious, ActionCreateFirst, ActionCreateNext,
 		ActionCreateUp, ActionCreatePick, ActionCreateDirectoryNew, ActionCreateBack, ActionCreateFresh:
@@ -344,6 +352,9 @@ func parseCanonicalUUID(value string) ([16]byte, error) {
 	}
 	return uuid, nil
 }
+
+// IsCanonicalSessionID reports whether value has the callback protocol's canonical UUID form.
+func IsCanonicalSessionID(value string) bool { _, err := parseCanonicalUUID(value); return err == nil }
 
 func hexNibble(value byte) (byte, bool) {
 	switch {

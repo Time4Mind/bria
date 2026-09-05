@@ -18,11 +18,9 @@ import (
 )
 
 var (
-	ErrNotOwner         = errors.New("Telegram callback is not owned by this user")
-	ErrNotPrivate       = errors.New("Telegram callback is not from the owner's private chat")
-	ErrStaleCallback    = errors.New("Telegram callback is stale")
-	ErrReplayedCallback = errors.New("Telegram callback was already used")
-	ErrUnknownOperation = errors.New("outbound operation is unknown")
+	ErrNotOwner, ErrNotPrivate            = errors.New("Telegram callback is not owned by this user"), errors.New("Telegram callback is not from the owner's private chat")
+	ErrStaleCallback, ErrReplayedCallback = errors.New("Telegram callback is stale"), errors.New("Telegram callback was already used")
+	ErrUnknownOperation                   = errors.New("outbound operation is unknown")
 )
 
 type CallbackDecoder interface {
@@ -444,6 +442,9 @@ func PlanAcceptedCallback(callback AcceptedCallback) (CallbackPlan, error) {
 	case telegramui.ActionStop:
 		effect = EffectStopSession
 	case telegramui.ActionClose:
+		if callback.Target.Page != 0 || callback.Target.FollowLatest || callback.Target.SessionSlot != 0 || callback.Target.InteractionChoice != 0 || callback.Target.Choice < 0 || callback.Target.Choice > 2 {
+			return CallbackPlan{}, errors.New("close callback target is invalid")
+		}
 		effect = EffectCloseSession
 	case telegramui.ActionOptions:
 		effect = EffectToggleOptions
@@ -511,7 +512,8 @@ func PlanAcceptedCallback(callback AcceptedCallback) (CallbackPlan, error) {
 		telegramui.ActionSettingsLifetimeNever,
 		telegramui.ActionSettingsLifetime6Hours, telegramui.ActionSettingsLifetime12Hours,
 		telegramui.ActionSettingsLifetime24Hours, telegramui.ActionSettingsLifetime48Hours,
-		telegramui.ActionSettingsProviderCodex, telegramui.ActionSettingsProviderClaude:
+		telegramui.ActionSettingsProviderCodex, telegramui.ActionSettingsProviderClaude,
+		telegramui.ActionSettingsPreprocessing, telegramui.ActionSettingsPreprocessingInstruction, telegramui.ActionSettingsPreprocessingReset:
 		effect = EffectChangeSettings
 	case telegramui.ActionAuthorizeCodex:
 		effect = EffectAuthorizeCodex
@@ -567,6 +569,7 @@ func PlanAcceptedCallback(callback AcceptedCallback) (CallbackPlan, error) {
 	}
 	if effect != EffectProjectPage && effect != EffectInteractionChoice && effect != EffectCreateChoice &&
 		callback.Action != telegramui.ActionSettingsCategory && callback.Action != telegramui.ActionSelectNode &&
+		callback.Action != telegramui.ActionClose &&
 		callback.Target != (telegramui.ButtonTarget{}) {
 		return CallbackPlan{}, errors.New("non-page callback must not contain a target")
 	}

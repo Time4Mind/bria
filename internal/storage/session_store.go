@@ -123,6 +123,16 @@ func (store *SessionStore) PutStartingIfAbsent(
 			existingIntent,
 		)
 	}
+	if session.Name() != "" {
+		name := availableSessionName(store.byIntent, session.Name())
+		snapshot := session.Snapshot()
+		snapshot.Name = name
+		var nameErr error
+		session, nameErr = domain.RestoreSession(snapshot)
+		if nameErr != nil {
+			return domain.Session{}, false, fmt.Errorf("assign unique session name: %w", nameErr)
+		}
+	}
 
 	next := cloneSessions(store.byIntent)
 	next[session.IntentID()] = session
@@ -138,6 +148,31 @@ func (store *SessionStore) PutStartingIfAbsent(
 	store.byIntent = next
 	store.byID[session.ID()] = session.IntentID()
 	return session, true, nil
+}
+
+func availableSessionName(sessions map[domain.IntentID]domain.Session, requested string) string {
+	used := make(map[string]struct{}, len(sessions))
+	for _, session := range sessions {
+		if session.Name() != "" {
+			used[strings.ToLower(session.Name())] = struct{}{}
+		}
+	}
+	for ordinal := 1; ordinal < 10000; ordinal++ {
+		suffix := ""
+		if ordinal > 1 {
+			suffix = fmt.Sprintf("%d", ordinal)
+		}
+		runes := []rune(requested)
+		limit := domain.MaxSessionNameRunes - len([]rune(suffix))
+		if len(runes) > limit {
+			runes = runes[:limit]
+		}
+		candidate := strings.TrimSpace(string(runes)) + suffix
+		if _, exists := used[strings.ToLower(candidate)]; !exists {
+			return candidate
+		}
+	}
+	return requested
 }
 
 // CompareAndSwap durably replaces expected with next. Repeating an already
@@ -702,6 +737,7 @@ type sessionRecord struct {
 	ComputerID     domain.ComputerID      `json:"computer_id"`
 	Provider       domain.Provider        `json:"provider"`
 	Workdir        string                 `json:"workdir"`
+	Name           string                 `json:"name,omitempty"`
 	Status         domain.SessionStatus   `json:"status"`
 	Binding        *bindingRecord         `json:"binding,omitempty"`
 	CreatedAt      time.Time              `json:"created_at,omitempty"`
@@ -726,6 +762,7 @@ func recordFromSession(session domain.Session) sessionRecord {
 		ComputerID:     snapshot.ComputerID,
 		Provider:       snapshot.Provider,
 		Workdir:        snapshot.Workdir,
+		Name:           snapshot.Name,
 		Status:         snapshot.Status,
 		CreatedAt:      snapshot.CreatedAt,
 		LastResumedAt:  cloneTime(snapshot.LastResumedAt),
@@ -751,6 +788,7 @@ func (record sessionRecord) restore() (domain.Session, error) {
 		ComputerID:     record.ComputerID,
 		Provider:       record.Provider,
 		Workdir:        record.Workdir,
+		Name:           record.Name,
 		Status:         record.Status,
 		CreatedAt:      record.CreatedAt,
 		LastResumedAt:  cloneTime(record.LastResumedAt),

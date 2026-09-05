@@ -50,7 +50,7 @@ func TestPresenterPreservesCanonicalRowsLabelsAndSignedSemanticCallbacks(t *test
 		{"Screen"},
 		{"Сессия 1", "Сессия 2"},
 		{"Сессия 3"},
-		{"Новое", "Ноды", "≡ Меню"},
+		{"➕ Новая", "Ноды", "≡ Меню"},
 	}
 	if got := labels(markup.InlineKeyboard); !reflect.DeepEqual(got, wantLabels) {
 		t.Fatalf("labels/rows = %#v, want %#v", got, wantLabels)

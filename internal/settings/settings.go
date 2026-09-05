@@ -75,7 +75,7 @@ type Effective struct {
 }
 
 func Default() Settings {
-	return Settings{Version: FormatVersion, ContinueExisting: true, ScreenEnabled: false, CardDetail: CardDetailStandard, CardPageLimit: DefaultCardPages, ShowTechnicalActions: true, NotifyBackgroundQuestions: true, NotifyBackgroundErrors: true, SessionLifetime: LifetimeNever, QueueLimit: DefaultQueueLimit, VoiceRecognition: VoiceParakeet, RetryUndeliveredFiles: false, ArchiveRecommendations: false, DefaultProviders: map[string]string{}, DefaultWorkdirs: map[string]string{}}
+	return Settings{Version: FormatVersion, ContinueExisting: true, ScreenEnabled: false, CardDetail: CardDetailStandard, CardPageLimit: DefaultCardPages, ShowTechnicalActions: true, NotifyBackgroundQuestions: true, NotifyBackgroundErrors: true, SessionLifetime: Lifetime12Hours, QueueLimit: DefaultQueueLimit, VoiceRecognition: VoiceParakeet, RetryUndeliveredFiles: false, ArchiveRecommendations: false, DefaultProviders: map[string]string{}, DefaultWorkdirs: map[string]string{}}
 }
 
 func (s Settings) Effective() Effective {

@@ -144,7 +144,7 @@ func validateCard(card telegramui.SessionCard) error {
 func sessionHeader(card telegramui.SessionCard) string {
 	return "Сессия\n" +
 		"Компьютер: " + string(card.Computer) + "\n" +
-		"Исполнитель: " + string(card.Provider) + "\n" +
+		"CLI: " + string(card.Provider) + "\n" +
 		"Рабочая папка: " + card.Workdir + "\n" +
 		"Статус: " + stateCopy(card.State) + "\n\n"
 }

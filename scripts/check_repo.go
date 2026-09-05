@@ -1077,7 +1077,7 @@ var sessionRuntimeAllowedImports = []string{
 }
 
 var telegramControllerAllowedImports = []string{
-	"internal/app", "internal/coordinator", "internal/domain", "internal/promptpreprocess", "internal/sessioncreation", "internal/sessionruntime", "internal/settingsport", "internal/telegramcreationview", "internal/telegramnodes", "internal/telegramsettings", "internal/telegramsettingsview", "internal/telegramstatus", "internal/turnprocessing",
+	"internal/app", "internal/coordinator", "internal/domain", "internal/promptpreprocess", "internal/sessioncreation", "internal/sessionruntime", "internal/settingsport", "internal/telegramcreationview", "internal/telegramnodes", "internal/telegramsettings", "internal/telegramsettingsview", "internal/telegramsessions", "internal/telegramstatus", "internal/turnprocessing",
 }
 
 var telegramBridgeAllowedImports = []string{
@@ -1650,7 +1650,7 @@ var packagePolicies = map[string]packagePolicy{
 	"internal/telegramcontroller": {
 		responsibility: "coordinate Telegram session interactions",
 		allowedImports: []string{
-			"internal/app", "internal/coordinator", "internal/domain", "internal/promptpreprocess", "internal/sessioncreation", "internal/sessionruntime", "internal/settingsport", "internal/telegramcreationview", "internal/telegramnodes", "internal/telegramsettings", "internal/telegramsettingsview", "internal/telegramstatus", "internal/turnprocessing",
+			"internal/app", "internal/coordinator", "internal/domain", "internal/promptpreprocess", "internal/sessioncreation", "internal/sessionruntime", "internal/settingsport", "internal/telegramcreationview", "internal/telegramnodes", "internal/telegramsettings", "internal/telegramsettingsview", "internal/telegramsessions", "internal/telegramstatus", "internal/turnprocessing",
 		},
 		maxProductionLines: 4200,
 	},
@@ -1692,10 +1692,9 @@ var packagePolicies = map[string]packagePolicy{
 		maxProductionLines: 1550,
 	},
 	"internal/telegramsessions": {
-		responsibility:       "select and paginate Telegram-visible sessions",
-		allowedImports:       []string{"internal/domain"},
-		maxProductionLines:   300,
-		externalOnlyEvidence: "telegram_codex_claude_e2e",
+		responsibility:     "select, name, and paginate Telegram-visible sessions",
+		allowedImports:     []string{"internal/domain"},
+		maxProductionLines: 300,
 	},
 	"internal/telegramstate": {
 		responsibility:     "persist Telegram presentation state",

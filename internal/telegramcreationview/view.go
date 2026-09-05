@@ -21,7 +21,7 @@ type Surface struct {
 }
 
 func Render(snapshot sessioncreation.Snapshot) Surface {
-	lines := []string{"Новое"}
+	lines := []string{"Новая сессия"}
 	rows := make([][]Button, 0, 14)
 	if snapshot.ValidationError != "" {
 		lines = append(lines, "Ошибка: "+snapshot.ValidationError)
@@ -80,7 +80,7 @@ func Render(snapshot sessioncreation.Snapshot) Surface {
 		if snapshot.Pages > 1 {
 			rows = append(rows, []Button{{Label: "◀", Action: "create_previous"}, {Label: fmt.Sprintf("%d/%d", snapshot.Page, snapshot.Pages), Action: "create_first"}, {Label: "▶", Action: "create_next"}})
 		}
-		rows = append(rows, []Button{{Label: "Новое", Action: "create_fresh"}})
+		rows = append(rows, []Button{{Label: "➕ Новая", Action: "create_fresh"}})
 	default:
 		lines = append(lines, "Нет доступных компьютеров.")
 	}
@@ -105,7 +105,7 @@ func RenderLegacy(snapshot sessioncreation.Snapshot, providers []domain.Provider
 	if workdir == "" {
 		workdir = "не выбрана"
 	}
-	lines := []string{"Новая сессия", "Компьютер: " + string(draft.ComputerID), "Исполнитель: " + provider, "Рабочая папка: " + workdir}
+	lines := []string{"Новая сессия", "Компьютер: " + string(draft.ComputerID), "CLI: " + provider, "Рабочая папка: " + workdir}
 	if snapshot.ValidationError != "" {
 		lines = append(lines, "Ошибка: "+snapshot.ValidationError)
 	}

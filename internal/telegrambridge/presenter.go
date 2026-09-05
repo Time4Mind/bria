@@ -105,7 +105,7 @@ func (presenter *Presenter) presentKeyboard(
 	allowStatusRecovery bool,
 	allowArtifactRetry bool,
 ) (telegram.InlineKeyboardMarkup, error) {
-	if !isCanonicalLogicalSessionUUID(logicalSessionID) {
+	if !callbacktoken.IsCanonicalSessionID(logicalSessionID) {
 		return telegram.InlineKeyboardMarkup{}, errors.New("owning logical session ID must be a canonical UUID")
 	}
 	if len(keyboard.Rows) == 0 {
@@ -176,7 +176,7 @@ func (presenter *Presenter) presentKeyboard(
 		return telegram.InlineKeyboardMarkup{}, errors.New("selectable session IDs must exactly match semantic session slots")
 	}
 	for _, sessionID := range selectableSessionIDs {
-		if !isCanonicalLogicalSessionUUID(sessionID) {
+		if !callbacktoken.IsCanonicalSessionID(sessionID) {
 			return telegram.InlineKeyboardMarkup{}, errors.New("selectable logical session ID must be a canonical UUID")
 		}
 	}
@@ -296,7 +296,7 @@ func (presenter *Presenter) PresentCallbackRecoveryKeyboardWithManifest(
 	keyboard telegramui.CardKeyboard,
 ) (KeyboardPresentation, error) {
 	if binding.OperationID == "" || len(binding.OperationID) > 256 || !utf8.ValidString(binding.OperationID) ||
-		binding.UpdateID <= 0 || !isCanonicalLogicalSessionUUID(binding.SessionID) || binding.ChatID <= 0 || binding.MessageID <= 0 ||
+		binding.UpdateID <= 0 || !callbacktoken.IsCanonicalSessionID(binding.SessionID) || binding.ChatID <= 0 || binding.MessageID <= 0 ||
 		(binding.Phase != "effect_unknown" && binding.Phase != "effect_retry_unknown" && binding.Phase != "send_unknown") {
 		return KeyboardPresentation{}, errors.New("callback recovery identity is invalid")
 	}
@@ -316,7 +316,7 @@ func (presenter *Presenter) PresentAcceptedTurnRecoveryKeyboardWithManifest(
 	binding AcceptedTurnRecoveryBinding,
 	keyboard telegramui.CardKeyboard,
 ) (KeyboardPresentation, error) {
-	if !telegramrecovery.ValidAcceptedTurnBinding(&binding) || !isCanonicalLogicalSessionUUID(string(binding.SessionID)) {
+	if !telegramrecovery.ValidAcceptedTurnBinding(&binding) || !callbacktoken.IsCanonicalSessionID(string(binding.SessionID)) {
 		return KeyboardPresentation{}, errors.New("accepted-turn recovery identity is invalid")
 	}
 	markup, err := presenter.presentKeyboard(string(binding.SessionID), nil, keyboard, false, false, false, true, false, false)
@@ -372,7 +372,7 @@ func (presenter *Presenter) PresentArtifactRetryKeyboardWithManifest(binding Art
 }
 
 func validArtifactRetryBinding(binding *ArtifactRetryBinding) bool {
-	return binding != nil && isCanonicalLogicalSessionUUID(binding.PresentationID) && isCanonicalLogicalSessionUUID(binding.SessionID) &&
+	return binding != nil && callbacktoken.IsCanonicalSessionID(binding.PresentationID) && callbacktoken.IsCanonicalSessionID(binding.SessionID) &&
 		binding.PresentationID != binding.SessionID && binding.MessageID != "" && len(binding.MessageID) <= 1024 &&
 		binding.FinalOperationID == binding.MessageID+":final" && binding.Generation > 0 && binding.Slot > 0 &&
 		binding.ExpiresAt.Unix() > 0 && binding.ExpiresAt.Nanosecond() == 0
@@ -497,10 +497,14 @@ func presentButton(button telegramui.Button) (string, callbacktoken.Action, int,
 		}
 		return "Остановить", callbacktoken.ActionStop, 0, nil
 	case telegramui.ActionClose:
-		if button.Target != (telegramui.ButtonTarget{}) {
-			return "", 0, 0, errors.New("close button must not contain a target")
+		if button.Target.Page != 0 || button.Target.FollowLatest || button.Target.SessionSlot != 0 || button.Target.InteractionChoice != 0 || button.Target.Choice < 0 || button.Target.Choice > 2 {
+			return "", 0, 0, errors.New("close button target is invalid")
 		}
-		return "Закрыть", callbacktoken.ActionClose, 0, nil
+		label := button.Label
+		if label == "" {
+			label = "Закрыть"
+		}
+		return label, callbacktoken.ActionClose, button.Target.Choice, nil
 	case telegramui.ActionOptions:
 		if button.Target != (telegramui.ButtonTarget{}) {
 			return "", 0, 0, errors.New("options button must not contain a target")
@@ -520,7 +524,7 @@ func presentButton(button telegramui.Button) (string, callbacktoken.Action, int,
 	case telegramui.ActionMenuSessions:
 		return presentGlobalButton(button, "Сессии", callbacktoken.ActionMenuSessions)
 	case telegramui.ActionMenuNew:
-		return presentGlobalButton(button, "Новое", callbacktoken.ActionMenuNew)
+		return presentGlobalButton(button, "➕ Новая", callbacktoken.ActionMenuNew)
 	case telegramui.ActionMenuArchive:
 		return presentGlobalButton(button, "Архив", callbacktoken.ActionMenuArchive)
 	case telegramui.ActionMenuStatus:
@@ -580,7 +584,7 @@ func presentButton(button telegramui.Button) (string, callbacktoken.Action, int,
 	case telegramui.ActionCreateBack:
 		return presentGlobalButton(button, "Назад", callbacktoken.ActionCreateBack)
 	case telegramui.ActionCreateFresh:
-		return presentGlobalButton(button, "Новое", callbacktoken.ActionCreateFresh)
+		return presentGlobalButton(button, "➕ Новая", callbacktoken.ActionCreateFresh)
 	case telegramui.ActionCreateCodex:
 		return presentGlobalButton(button, "Codex", callbacktoken.ActionCreateCodex)
 	case telegramui.ActionCreateClaude:
@@ -628,6 +632,12 @@ func presentButton(button telegramui.Button) (string, callbacktoken.Action, int,
 		return presentGlobalButton(button, "Codex", callbacktoken.ActionSettingsProviderCodex)
 	case telegramui.ActionSettingsProviderClaude:
 		return presentGlobalButton(button, "Claude", callbacktoken.ActionSettingsProviderClaude)
+	case telegramui.ActionSettingsPreprocessing:
+		return presentGlobalButton(button, "Включить / выключить", callbacktoken.ActionSettingsPreprocessing)
+	case telegramui.ActionSettingsPreprocessingInstruction:
+		return presentGlobalButton(button, "Изменить инструкцию", callbacktoken.ActionSettingsPreprocessingInstruction)
+	case telegramui.ActionSettingsPreprocessingReset:
+		return presentGlobalButton(button, "Вернуть встроенную", callbacktoken.ActionSettingsPreprocessingReset)
 	case telegramui.ActionAuthorizeCodex:
 		return presentGlobalButton(button, "Авторизовать Codex", callbacktoken.ActionAuthorizeCodex)
 	case telegramui.ActionAuthorizeClaude:
@@ -683,7 +693,11 @@ func presentButton(button telegramui.Button) (string, callbacktoken.Action, int,
 			button.Target.SessionSlot < 1 || button.Target.SessionSlot > callbacktoken.MaxTarget || button.Target.InteractionChoice != 0 || button.Target.Choice != 0 {
 			return "", 0, 0, errors.New("session button requires one positive session slot target")
 		}
-		return "Сессия " + strconv.Itoa(button.Target.SessionSlot),
+		label := button.Label
+		if label == "" {
+			label = "Сессия " + strconv.Itoa(button.Target.SessionSlot)
+		}
+		return label,
 			callbacktoken.ActionSelectSession, 0, nil
 	default:
 		return "", 0, 0, fmt.Errorf("unsupported Telegram UI action %q", button.Action)
@@ -696,8 +710,7 @@ func presentGlobalButton(button telegramui.Button, label string, action callback
 	return label, action, 0, nil
 }
 func validPageTarget(target telegramui.ButtonTarget) bool {
-	return target.Page >= 1 && target.Page <= callbacktoken.MaxTarget &&
-		!target.FollowLatest && target.SessionSlot == 0 && target.InteractionChoice == 0 && target.Choice == 0
+	return target.Page >= 1 && target.Page <= callbacktoken.MaxTarget && !target.FollowLatest && target.SessionSlot == 0 && target.InteractionChoice == 0 && target.Choice == 0
 }
 func decodeFields(fields callbacktoken.Fields) (telegramui.Action, telegramui.ButtonTarget, error) {
 	switch fields.Action {
@@ -712,7 +725,7 @@ func decodeFields(fields callbacktoken.Fields) (telegramui.Action, telegramui.Bu
 	case callbacktoken.ActionStop:
 		return telegramui.ActionStop, telegramui.ButtonTarget{}, nil
 	case callbacktoken.ActionClose:
-		return telegramui.ActionClose, telegramui.ButtonTarget{}, nil
+		return telegramui.ActionClose, telegramui.ButtonTarget{Choice: fields.Target}, nil
 	case callbacktoken.ActionOptions:
 		return telegramui.ActionOptions, telegramui.ButtonTarget{}, nil
 	case callbacktoken.ActionScreen:
@@ -803,6 +816,12 @@ func decodeFields(fields callbacktoken.Fields) (telegramui.Action, telegramui.Bu
 		return telegramui.ActionSettingsProviderCodex, telegramui.ButtonTarget{}, nil
 	case callbacktoken.ActionSettingsProviderClaude:
 		return telegramui.ActionSettingsProviderClaude, telegramui.ButtonTarget{}, nil
+	case callbacktoken.ActionSettingsPreprocessing:
+		return telegramui.ActionSettingsPreprocessing, telegramui.ButtonTarget{}, nil
+	case callbacktoken.ActionSettingsPreprocessingInstruction:
+		return telegramui.ActionSettingsPreprocessingInstruction, telegramui.ButtonTarget{}, nil
+	case callbacktoken.ActionSettingsPreprocessingReset:
+		return telegramui.ActionSettingsPreprocessingReset, telegramui.ButtonTarget{}, nil
 	case callbacktoken.ActionAuthorizeCodex:
 		return telegramui.ActionAuthorizeCodex, telegramui.ButtonTarget{}, nil
 	case callbacktoken.ActionAuthorizeClaude:
@@ -852,18 +871,4 @@ func decodeFields(fields callbacktoken.Fields) (telegramui.Action, telegramui.Bu
 	default:
 		return "", telegramui.ButtonTarget{}, errors.New("authenticated callback contains an unsupported action")
 	}
-}
-func isCanonicalLogicalSessionUUID(value string) bool {
-	if len(value) != 36 || value[8] != '-' || value[13] != '-' || value[18] != '-' || value[23] != '-' {
-		return false
-	}
-	for index, character := range value {
-		if index == 8 || index == 13 || index == 18 || index == 23 {
-			continue
-		}
-		if (character < '0' || character > '9') && (character < 'a' || character > 'f') {
-			return false
-		}
-	}
-	return true
 }

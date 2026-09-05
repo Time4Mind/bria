@@ -88,3 +88,20 @@ func TestProjectCardKeyboardUsesCloseAndOmitsCollapsedOptionsRow(t *testing.T) {
 		t.Fatalf("navigation row = %#v, want %#v", got, want)
 	}
 }
+
+func TestProjectCardKeyboardReplacesCloseWithArchiveConfirmation(t *testing.T) {
+	keyboard, err := telegramui.ProjectCardKeyboard(telegramui.CardKeyboardInput{
+		View:              telegramui.PageView{Page: 1, Pages: 1},
+		CloseConfirmation: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := telegramui.ButtonRow{
+		{Action: telegramui.ActionClose, Target: telegramui.ButtonTarget{Choice: 1}, Label: "Архивировать"},
+		{Action: telegramui.ActionClose, Target: telegramui.ButtonTarget{Choice: 2}, Label: "Отмена"},
+	}
+	if !reflect.DeepEqual(keyboard.Rows[1], want) {
+		t.Fatalf("confirmation row = %#v, want %#v", keyboard.Rows[1], want)
+	}
+}

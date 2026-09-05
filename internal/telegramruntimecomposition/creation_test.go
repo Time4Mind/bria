@@ -117,3 +117,23 @@ func TestNodeActionsMapAcrossSignedRuntimeBoundary(t *testing.T) {
 		})
 	}
 }
+
+func TestCloseConfirmationMapsAcrossSignedRuntimeBoundary(t *testing.T) {
+	for _, test := range []struct {
+		target telegramui.ButtonTarget
+	}{
+		{}, {target: telegramui.ButtonTarget{Choice: 1}}, {target: telegramui.ButtonTarget{Choice: 2}},
+	} {
+		plan, err := telegrampipeline.PlanAcceptedCallback(telegrampipeline.AcceptedCallback{
+			UpdateID: 1, SessionID: "11111111-1111-4111-9111-111111111111",
+			Carrier: telegramstate.Carrier{ChatID: 1, MessageID: 2}, Action: telegramui.ActionClose, Target: test.target,
+		})
+		if err != nil || plan.Effect != telegrampipeline.EffectCloseSession {
+			t.Fatalf("plan %#v = (%#v, %v)", test.target, plan, err)
+		}
+		semantic, err := semanticActionFromPlan(plan)
+		if err != nil || semantic.Kind != telegramcontroller.SemanticClose || semantic.Choice != test.target.Choice {
+			t.Fatalf("semantic %#v = (%#v, %v)", test.target, semantic, err)
+		}
+	}
+}

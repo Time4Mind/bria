@@ -204,11 +204,13 @@ type CardKeyboard struct {
 // SessionRowSizes lets a later presentation layer choose row widths without
 // importing the historical implementation's fixed per-row limit.
 type CardKeyboardInput struct {
-	View            PageView
-	Working         bool
-	OptionsExpanded bool
-	Archived        bool
-	SessionRowSizes []int
+	View              PageView
+	Working           bool
+	OptionsExpanded   bool
+	Archived          bool
+	CloseConfirmation bool
+	SessionRowSizes   []int
+	SessionLabels     []string
 }
 
 // ProjectCardKeyboard returns the required row order and wrap-around page
@@ -221,6 +223,13 @@ func ProjectCardKeyboard(input CardKeyboardInput) (CardKeyboard, error) {
 		if size < 1 {
 			return CardKeyboard{}, fmt.Errorf("session row size must be positive")
 		}
+	}
+	selectableCount := 0
+	for _, size := range input.SessionRowSizes {
+		selectableCount += size
+	}
+	if len(input.SessionLabels) != 0 && len(input.SessionLabels) != selectableCount {
+		return CardKeyboard{}, fmt.Errorf("session labels must match selectable sessions")
 	}
 
 	previous := wrappedPage(input.View.Page-1, input.View.Pages)
@@ -241,7 +250,17 @@ func ProjectCardKeyboard(input CardKeyboardInput) (CardKeyboard, error) {
 	} else if input.Working {
 		lifecycle = ActionStop
 	}
-	rows = append(rows, ButtonRow{{Action: lifecycle}, {Action: ActionOptions}})
+	if input.CloseConfirmation {
+		if input.Archived || input.Working {
+			return CardKeyboard{}, fmt.Errorf("close confirmation requires an idle open session")
+		}
+		rows = append(rows, ButtonRow{
+			{Action: ActionClose, Target: ButtonTarget{Choice: 1}, Label: "Архивировать"},
+			{Action: ActionClose, Target: ButtonTarget{Choice: 2}, Label: "Отмена"},
+		})
+	} else {
+		rows = append(rows, ButtonRow{{Action: lifecycle}, {Action: ActionOptions}})
+	}
 	if input.OptionsExpanded {
 		rows = append(rows, ButtonRow{{Action: ActionScreen}})
 	}
@@ -253,6 +272,9 @@ func ProjectCardKeyboard(input CardKeyboardInput) (CardKeyboard, error) {
 			row[index] = Button{
 				Action: ActionSelectSession,
 				Target: ButtonTarget{SessionSlot: slot},
+			}
+			if len(input.SessionLabels) > 0 {
+				row[index].Label = input.SessionLabels[slot-1]
 			}
 			slot++
 		}
