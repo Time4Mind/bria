@@ -193,6 +193,33 @@ func TestCoordinatorCheckpointStorePreservesCallbackQueryID(t *testing.T) {
 	}
 }
 
+func TestCoordinatorCheckpointStorePreservesRecoveryControl(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "state.json")
+	store, err := storage.OpenCoordinatorCheckpointStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := fullCheckpoint(coordinator.OutboundPrepared)
+	want.Outbound.OperationID = "recovery:callback:42"
+	want.Recovery = &coordinator.RecoveryControl{
+		OriginalOperationID: "status:42", PromptOperationID: "recovery:callback:42", UpdateID: 42,
+	}
+	stored, err := store.Save(context.Background(), 0, want)
+	if err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	reopened, err := storage.OpenCoordinatorCheckpointStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, found, err := reopened.Load(context.Background())
+	if err != nil || !found || !reflect.DeepEqual(got, stored) || !reflect.DeepEqual(got.Checkpoint.Recovery, want.Recovery) {
+		t.Fatalf("recovery Load() = (%#v, %v, %v), want %#v", got, found, err, stored)
+	}
+}
+
 func TestCoordinatorCheckpointStoreSerializesConcurrentFirstSave(t *testing.T) {
 	t.Parallel()
 

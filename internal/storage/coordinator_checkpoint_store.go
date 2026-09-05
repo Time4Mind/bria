@@ -151,6 +151,19 @@ func validateCheckpoint(checkpoint coordinator.Checkpoint) error {
 			return errors.New("blocked update reason is required")
 		}
 	}
+	if checkpoint.Recovery != nil {
+		recovery := checkpoint.Recovery
+		if recovery.UpdateID <= 0 || strings.TrimSpace(recovery.OriginalOperationID) == "" ||
+			strings.TrimSpace(recovery.PromptOperationID) == "" || recovery.OriginalOperationID == recovery.PromptOperationID ||
+			recovery.UpdateID > checkpoint.NextUpdateID {
+			return errors.New("recovery control is invalid")
+		}
+		if recovery.UpdateID == checkpoint.NextUpdateID && (checkpoint.Outbound == nil ||
+			checkpoint.Outbound.OperationID != recovery.PromptOperationID || checkpoint.Outbound.UpdateID != recovery.UpdateID ||
+			(checkpoint.Outbound.Phase != coordinator.OutboundPrepared && checkpoint.Outbound.Phase != coordinator.OutboundUnknown)) {
+			return errors.New("recovery control has not been durably accepted")
+		}
+	}
 	if checkpoint.Outbound == nil {
 		return nil
 	}
@@ -201,6 +214,13 @@ func recordFromStoredCheckpoint(stored coordinator.StoredCheckpoint) *coordinato
 			Reason:   stored.Checkpoint.Blocked.Reason,
 		}
 	}
+	if stored.Checkpoint.Recovery != nil {
+		record.Recovery = &recoveryControlRecord{
+			OriginalOperationID: stored.Checkpoint.Recovery.OriginalOperationID,
+			PromptOperationID:   stored.Checkpoint.Recovery.PromptOperationID,
+			UpdateID:            stored.Checkpoint.Recovery.UpdateID,
+		}
+	}
 	if stored.Checkpoint.Outbound != nil {
 		outbound := stored.Checkpoint.Outbound
 		record.Outbound = &outboundOperationRecord{
@@ -243,6 +263,13 @@ func storedCheckpointFromRecord(record *coordinatorRecord) (coordinator.StoredCh
 		checkpoint.Blocked = &coordinator.BlockedUpdate{
 			UpdateID: record.Blocked.UpdateID,
 			Reason:   record.Blocked.Reason,
+		}
+	}
+	if record.Recovery != nil {
+		checkpoint.Recovery = &coordinator.RecoveryControl{
+			OriginalOperationID: record.Recovery.OriginalOperationID,
+			PromptOperationID:   record.Recovery.PromptOperationID,
+			UpdateID:            record.Recovery.UpdateID,
 		}
 	}
 	if record.Outbound != nil {
@@ -291,6 +318,10 @@ func cloneCheckpoint(checkpoint coordinator.Checkpoint) coordinator.Checkpoint {
 	if checkpoint.Blocked != nil {
 		blocked := *checkpoint.Blocked
 		checkpoint.Blocked = &blocked
+	}
+	if checkpoint.Recovery != nil {
+		recovery := *checkpoint.Recovery
+		checkpoint.Recovery = &recovery
 	}
 	if checkpoint.Outbound != nil {
 		outbound := *checkpoint.Outbound

@@ -727,6 +727,13 @@ type coordinatorRecord struct {
 	NextUpdateID int64                    `json:"next_update_id"`
 	Blocked      *blockedUpdateRecord     `json:"blocked,omitempty"`
 	Outbound     *outboundOperationRecord `json:"outbound,omitempty"`
+	Recovery     *recoveryControlRecord   `json:"recovery,omitempty"`
+}
+
+type recoveryControlRecord struct {
+	OriginalOperationID string `json:"original_operation_id"`
+	PromptOperationID   string `json:"prompt_operation_id"`
+	UpdateID            int64  `json:"update_id"`
 }
 
 type blockedUpdateRecord struct {
@@ -1102,6 +1109,10 @@ func cloneCoordinatorRecord(source *coordinatorRecord) *coordinatorRecord {
 	if source.Blocked != nil {
 		blocked := *source.Blocked
 		clone.Blocked = &blocked
+	}
+	if source.Recovery != nil {
+		recovery := *source.Recovery
+		clone.Recovery = &recovery
 	}
 	if source.Outbound != nil {
 		outbound := *source.Outbound
