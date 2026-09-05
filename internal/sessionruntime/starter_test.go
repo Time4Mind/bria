@@ -126,6 +126,26 @@ func TestStarterCarriesVerifiedLocalAttachmentOutsidePromptText(t *testing.T) {
 	}
 }
 
+func TestConfirmedPersistedExitMakesExactAbortIdempotentAfterRestart(t *testing.T) {
+	starter := newHelperStarter(t, "startup-contract", sessionruntime.Options{})
+	prior := domain.ProviderBinding{Provider: domain.ProviderCodex, SessionID: "provider-persisted", Generation: 7}
+	request := testRequest(t.TempDir(), "persisted-exit")
+	request.Mode = app.SessionStartResume
+	request.PriorBinding = &prior
+
+	if err := starter.ConfirmPersistedExit(request, prior); err != nil {
+		t.Fatalf("ConfirmPersistedExit() error = %v", err)
+	}
+	if err := starter.Abort(context.Background(), request, prior); err != nil {
+		t.Fatalf("Abort() after restart proof = %v", err)
+	}
+	mismatch := prior
+	mismatch.Generation++
+	if err := starter.Abort(context.Background(), request, mismatch); !errors.Is(err, sessionruntime.ErrBindingMismatch) {
+		t.Fatalf("Abort() mismatched generation = %v, want ErrBindingMismatch", err)
+	}
+}
+
 func TestSubmitCancellationUnblocksWhenAdapterNeverReadsStdin(t *testing.T) {
 	t.Parallel()
 	starter, request, _ := startHelper(t, "never-read", sessionruntime.Options{

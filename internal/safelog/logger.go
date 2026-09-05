@@ -70,6 +70,8 @@ type Logger struct {
 	now            func() time.Time
 	lockPath       string
 	mu             *sync.Mutex
+	counts         map[Class]int
+	sizes          map[Class]int64
 }
 
 const (
@@ -118,6 +120,8 @@ func Open(options Options) (*Logger, error) {
 		now:            options.Now,
 		lockPath:       filepath.Join(directory, ".lock"),
 		mu:             shared.(*sync.Mutex),
+		counts:         make(map[Class]int),
+		sizes:          make(map[Class]int64),
 	}, nil
 }
 
@@ -157,6 +161,18 @@ func (logger *Logger) Write(event Event) error {
 		return ErrRecordTooLarge
 	}
 	return logger.withLock(func() error {
+		count, size, err := logger.currentBoundsUnlocked(event.Class)
+		if err != nil {
+			return err
+		}
+		if count < logger.maxRecords && size+int64(len(encoded)) <= logger.maxFileBytes {
+			if err := logger.appendUnlocked(event.Class, encoded, size == 0); err != nil {
+				return err
+			}
+			logger.counts[event.Class] = count + 1
+			logger.sizes[event.Class] = size + int64(len(encoded))
+			return nil
+		}
 		records, err := logger.readUnlocked(event.Class)
 		if err != nil {
 			return err
@@ -186,6 +202,10 @@ func (logger *Logger) Cleanup() error {
 			}
 			kept := retain(records, now, class.retention())
 			if len(kept) == len(records) {
+				logger.counts[class] = len(records)
+				if info, statErr := os.Stat(logger.path(class)); statErr == nil {
+					logger.sizes[class] = info.Size()
+				}
 				continue
 			}
 			if err := logger.writeUnlocked(class, kept); err != nil {
@@ -313,6 +333,49 @@ func (logger *Logger) readUnlocked(class Class) ([]Event, error) {
 	return records, nil
 }
 
+func (logger *Logger) currentBoundsUnlocked(class Class) (int, int64, error) {
+	info, err := os.Lstat(logger.path(class))
+	if errors.Is(err, os.ErrNotExist) {
+		logger.counts[class] = 0
+		logger.sizes[class] = 0
+		return 0, 0, nil
+	}
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o077 != 0 || info.Size() > logger.maxFileBytes {
+		return 0, 0, ErrStorage
+	}
+	if cachedSize, known := logger.sizes[class]; known && cachedSize == info.Size() {
+		return logger.counts[class], cachedSize, nil
+	}
+	records, err := logger.readUnlocked(class)
+	if err != nil {
+		return 0, 0, err
+	}
+	logger.counts[class] = len(records)
+	logger.sizes[class] = info.Size()
+	return len(records), info.Size(), nil
+}
+
+func (logger *Logger) appendUnlocked(class Class, encoded []byte, create bool) error {
+	path := logger.path(class)
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return ErrStorage
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o077 != 0 {
+		return ErrStorage
+	}
+	written, err := file.Write(encoded)
+	if err != nil || written != len(encoded) || file.Sync() != nil || file.Close() != nil {
+		return ErrStorage
+	}
+	if create && syncDirectory(logger.directory) != nil {
+		return ErrStorage
+	}
+	return nil
+}
+
 func (logger *Logger) writeUnlocked(class Class, records []Event) (returnErr error) {
 	data, err := encodeRecords(records)
 	if err != nil {
@@ -355,6 +418,8 @@ func (logger *Logger) writeUnlocked(class Class, records []Event) (returnErr err
 	if err != nil || len(persisted) != len(records) {
 		return ErrStorage
 	}
+	logger.counts[class] = len(records)
+	logger.sizes[class] = int64(len(data))
 	return nil
 }
 

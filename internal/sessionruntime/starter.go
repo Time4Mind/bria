@@ -176,6 +176,35 @@ type closeEnvelope struct {
 	Type     string `json:"type"`
 }
 
+// ConfirmPersistedExit records the startup boundary's proof that an adapter
+// from the previous Bria process is no longer alive. It makes a later exact
+// Abort idempotent even when an exact-resume attempt could not be started.
+func (starter *Starter) ConfirmPersistedExit(request app.StartSessionRequest, binding domain.ProviderBinding) error {
+	if starter == nil {
+		return errors.New("session runtime is required")
+	}
+	if err := validateRequest(request); err != nil {
+		return err
+	}
+	if request.Mode != app.SessionStartResume || request.PriorBinding == nil || *request.PriorBinding != binding {
+		return ErrBindingMismatch
+	}
+	request = cloneStartRequest(request)
+	starter.mu.Lock()
+	defer starter.mu.Unlock()
+	if _, exists := starter.processes[request.SessionID]; exists {
+		return fmt.Errorf("%w: %q", ErrSessionAlreadyTracked, request.SessionID)
+	}
+	if previous, exists := starter.tombstones[request.SessionID]; exists {
+		if !sameLogicalRequest(previous.request, request) || previous.binding != binding {
+			return fmt.Errorf("%w: %q", ErrBindingMismatch, request.SessionID)
+		}
+		return nil
+	}
+	starter.tombstones[request.SessionID] = processTombstone{request: request, binding: binding}
+	return nil
+}
+
 func NewStarter(commands map[domain.Provider]CommandSpec, options Options) (*Starter, error) {
 	if len(commands) == 0 {
 		return nil, errors.New("at least one provider command is required")

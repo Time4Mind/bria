@@ -44,8 +44,19 @@ type runtimeStub struct {
 	mu           sync.Mutex
 	starts       int
 	waits        int
+	confirmed    int
 	waitStarted  chan struct{}
 	waitCanceled chan struct{}
+}
+
+func (runtime *runtimeStub) ConfirmPersistedExit(request app.StartSessionRequest, binding domain.ProviderBinding) error {
+	if request.PriorBinding == nil || *request.PriorBinding != binding {
+		return errors.New("persisted exit identity mismatch")
+	}
+	runtime.mu.Lock()
+	runtime.confirmed++
+	runtime.mu.Unlock()
+	return nil
 }
 
 func (runtime *runtimeStub) Start(_ context.Context, request app.StartSessionRequest) (domain.ProviderBinding, error) {
@@ -84,6 +95,12 @@ func (runtime *runtimeStub) counts() (int, int) {
 	return runtime.starts, runtime.waits
 }
 
+func (runtime *runtimeStub) confirmations() int {
+	runtime.mu.Lock()
+	defer runtime.mu.Unlock()
+	return runtime.confirmed
+}
+
 type acceptedStub struct{}
 
 func (acceptedStub) ReconcileAcceptedTurns(context.Context, domain.SessionID, domain.ProviderBinding) (sessionsupervisor.AcceptedTurnReconciliation, error) {
@@ -106,6 +123,9 @@ func TestRecoverStartupReconcilesRunningSessionOnceBeforeGenericRecovery(t *test
 	if recovery.Recovered != 1 || len(recovery.Sessions) != 1 || starts != 1 ||
 		current.Status() != domain.SessionReady || !bound || binding.SessionID != prior.SessionID || binding.Generation != prior.Generation+1 {
 		t.Fatalf("recovery=%#v starts=%d current=%#v", recovery, starts, current)
+	}
+	if runtime.confirmations() != 1 {
+		t.Fatalf("persisted exit confirmations = %d, want one", runtime.confirmations())
 	}
 }
 

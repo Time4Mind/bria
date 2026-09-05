@@ -20,6 +20,7 @@ import (
 	"bria/internal/sessionruntime"
 	"bria/internal/sessionsupervisor"
 	"bria/internal/storage"
+	"bria/internal/supervisioncomposition"
 	"bria/internal/telegramcontroller"
 	workdirvalidator "bria/internal/workdir"
 )
@@ -84,6 +85,9 @@ func TestSyntheticSingleComputerAdapterChild(t *testing.T) {
 		ProviderSessionID: providerID, StartMode: mode, Workdir: workdir, StatusBeforeReady: persisted.Status(),
 	}); err != nil {
 		childExit("record synthetic adapter start: %v", err)
+	}
+	if os.Getenv("BRIA_ACCEPTANCE_FAIL_BEFORE_READY") != "" {
+		os.Exit(0)
 	}
 	ready := map[string]any{
 		"protocol": sessionruntime.ProtocolVersion, "type": "ready",
@@ -187,6 +191,96 @@ func TestSyntheticSingleComputerAdapterChild(t *testing.T) {
 		childExit("scan synthetic adapter requests: %v", err)
 	}
 	childExit("synthetic adapter stdin closed without close")
+}
+
+func TestCloseAwaitingRecoveryAfterRestartArchivesWithoutTrackedProcess(t *testing.T) {
+	testBinary, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	workdir := filepath.Join(root, "workdir")
+	if err := os.Mkdir(workdir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	statePath := filepath.Join(root, "state.json")
+	receiptPath := filepath.Join(root, "restart-close.jsonl")
+	store, err := storage.OpenSessionStore(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	at := time.Date(2026, 9, 5, 17, 0, 0, 0, time.UTC)
+	starting, err := domain.NewStartingSessionAt("restart-close", "restart-close-intent", "local", domain.ProviderCodex, workdir, at, domain.SessionLifetimeNever)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prior := domain.ProviderBinding{Provider: domain.ProviderCodex, SessionID: "persisted-restart-close", Generation: 3}
+	ready, err := starting.ReadyAt(prior, at.Add(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	awaiting, err := ready.AwaitRecoveryAt(at.Add(2 * time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, inserted, err := store.PutStartingIfAbsent(context.Background(), starting); err != nil || !inserted {
+		t.Fatalf("persist starting = (%v, %v)", inserted, err)
+	}
+	if err := store.Replace(context.Background(), starting, ready); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Replace(context.Background(), ready, awaiting); err != nil {
+		t.Fatal(err)
+	}
+
+	starter, err := sessionruntime.NewStarter(map[domain.Provider]sessionruntime.CommandSpec{
+		domain.ProviderCodex: {
+			Path: testBinary, Args: []string{"-test.run=^TestSyntheticSingleComputerAdapterChild$"},
+			Env: []string{
+				syntheticAdapterEnvironment + "=1", "BRIA_ACCEPTANCE_RECEIPT=" + receiptPath,
+				"BRIA_ACCEPTANCE_STORE=" + statePath, "BRIA_ACCEPTANCE_INTENT=restart-close-intent",
+				"BRIA_ACCEPTANCE_EXPECTED_STATUS=awaiting_recovery", "BRIA_ACCEPTANCE_FAIL_BEFORE_READY=1",
+			},
+		},
+	}, sessionruntime.Options{HandshakeTimeout: 2 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager, err := supervisioncomposition.New(supervisioncomposition.Options{
+		LocalComputerID: "local", Store: store, Waiter: starter, Restarter: starter,
+		AcceptedTurns: emptyAcceptedTurns{}, MaxRestartAttempts: 1, SweepInterval: time.Second,
+		Now:             func() time.Time { return at.Add(3 * time.Minute) },
+		WaitBeforeRetry: func(context.Context, int) error { return nil }, Report: func(error) {},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	recovery, err := manager.RecoverStartup(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if recovery.Awaiting != 1 || loadSession(t, statePath, awaiting.ID()).Status() != domain.SessionAwaitingRecovery {
+		t.Fatalf("failed exact resume recovery = %#v", recovery)
+	}
+	waitForReceipt(t, receiptPath, "synthetic-resume", 2*time.Second)
+
+	closer, err := app.NewSessionCloser(store, starter, func() time.Time { return at.Add(4 * time.Minute) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := closer.Close(context.Background(), awaiting.ID())
+	if err != nil {
+		t.Fatalf("close persisted awaiting recovery: %v", err)
+	}
+	if result.Session.Status() != domain.SessionArchived || loadSession(t, statePath, awaiting.ID()).Status() != domain.SessionArchived {
+		t.Fatalf("restart close result = %#v", result.Session.Snapshot())
+	}
+}
+
+type emptyAcceptedTurns struct{}
+
+func (emptyAcceptedTurns) ReconcileAcceptedTurns(context.Context, domain.SessionID, domain.ProviderBinding) (sessionsupervisor.AcceptedTurnReconciliation, error) {
+	return sessionsupervisor.AcceptedTurnReconciliation{}, nil
 }
 
 func TestSingleComputerSyntheticTelegramCreateSubmitCloseAndExactResume(t *testing.T) {

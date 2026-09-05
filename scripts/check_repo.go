@@ -1552,7 +1552,7 @@ var packagePolicies = map[string]packagePolicy{
 		allowedImports: []string{
 			"internal/app", "internal/domain", "internal/processgroup", "internal/runtimeprotocol",
 		},
-		maxProductionLines: 1400,
+		maxProductionLines: 1450,
 	},
 	"internal/sessionsupervisor": {
 		// Startup recovery of persisted sessions is the same lifecycle

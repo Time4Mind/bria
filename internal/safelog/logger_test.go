@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -137,6 +138,36 @@ func TestWriteTimeCannotBeSuppliedByCaller(t *testing.T) {
 	}
 	if len(records) != 1 || !records[0].Time.Equal(now) {
 		t.Fatalf("write timestamp = %v, want %v", records, now)
+	}
+}
+
+func TestWriteAppendsWithinBoundsWithoutReplacingLog(t *testing.T) {
+	dir := t.TempDir()
+	log, err := safelog.Open(safelog.Options{Directory: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := log.Write(safelog.Event{Class: safelog.Detailed, Type: "first"}); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "detailed.jsonl")
+	opened, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer opened.Close()
+	if err := log.Write(safelog.Event{Class: safelog.Detailed, Type: "second"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := opened.Seek(0, 0); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := io.ReadAll(opened)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(raw, []byte(`"type":"first"`)) || !bytes.Contains(raw, []byte(`"type":"second"`)) {
+		t.Fatalf("open log handle did not observe in-place append: %s", raw)
 	}
 }
 

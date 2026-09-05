@@ -38,6 +38,10 @@ type watchedBinding struct {
 	cancel  context.CancelFunc
 }
 
+type persistedExitRecorder interface {
+	ConfirmPersistedExit(app.StartSessionRequest, domain.ProviderBinding) error
+}
+
 type Manager struct {
 	computer  domain.ComputerID
 	store     Store
@@ -103,6 +107,21 @@ func (manager *Manager) RecoverStartup(ctx context.Context) (app.SessionRecovery
 	if err != nil {
 		return app.SessionRecoveryResult{}, err
 	}
+	if recorder, ok := manager.restarter.(persistedExitRecorder); ok {
+		for _, session := range sessions {
+			binding, bound := session.Binding()
+			if session.ComputerID() != manager.computer || !bound || !startupRecoverable(session.Status()) {
+				continue
+			}
+			request := app.StartSessionRequest{
+				SessionID: session.ID(), ComputerID: session.ComputerID(), Provider: session.Provider(), Workdir: session.Workdir(),
+				Mode: app.SessionStartResume, PriorBinding: &binding,
+			}
+			if err := recorder.ConfirmPersistedExit(request, binding); err != nil {
+				return app.SessionRecoveryResult{}, err
+			}
+		}
+	}
 	handled := make(map[domain.SessionID]struct{})
 	var result app.SessionRecoveryResult
 	for _, session := range sessions {
@@ -145,6 +164,16 @@ func (manager *Manager) RecoverStartup(ctx context.Context) (app.SessionRecovery
 	result.SkippedRemote += ordinary.SkippedRemote
 	result.Sessions = append(result.Sessions, ordinary.Sessions...)
 	return result, err
+}
+
+func startupRecoverable(status domain.SessionStatus) bool {
+	switch status {
+	case domain.SessionResuming, domain.SessionReady, domain.SessionRunning, domain.SessionStopping,
+		domain.SessionClosingAfterWork, domain.SessionAwaitingRecovery, domain.SessionClosing:
+		return true
+	default:
+		return false
+	}
 }
 
 type filteredStore struct {
