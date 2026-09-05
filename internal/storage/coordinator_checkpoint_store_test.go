@@ -175,6 +175,7 @@ func TestCoordinatorCheckpointStorePreservesCallbackQueryID(t *testing.T) {
 	}
 	want := fullCheckpoint(coordinator.OutboundPrepared)
 	want.Outbound.Status.CallbackQueryID = "callback-opaque"
+	want.Outbound.Status.RichMarkdown = true
 	stored, err := store.Save(context.Background(), 0, want)
 	if err != nil {
 		t.Fatalf("Save() error = %v", err)

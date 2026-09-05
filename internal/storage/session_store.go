@@ -757,6 +757,7 @@ type durableOutboundReceiptRecord struct {
 type statusRecord struct {
 	ConversationID  int64  `json:"conversation_id"`
 	Text            string `json:"text"`
+	RichMarkdown    bool   `json:"rich_markdown,omitempty"`
 	CallbackQueryID string `json:"callback_query_id,omitempty"`
 	SourceMessageID int64  `json:"source_message_id,omitempty"`
 }

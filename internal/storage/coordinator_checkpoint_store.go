@@ -209,6 +209,7 @@ func recordFromStoredCheckpoint(stored coordinator.StoredCheckpoint) *coordinato
 			Status: statusRecord{
 				ConversationID:  outbound.Status.ConversationID,
 				Text:            outbound.Status.Text,
+				RichMarkdown:    outbound.Status.RichMarkdown,
 				CallbackQueryID: outbound.Status.CallbackQueryID,
 				SourceMessageID: outbound.Status.SourceMessageID,
 			},
@@ -251,6 +252,7 @@ func storedCheckpointFromRecord(record *coordinatorRecord) (coordinator.StoredCh
 			Status: coordinator.Status{
 				ConversationID:  record.Outbound.Status.ConversationID,
 				Text:            record.Outbound.Status.Text,
+				RichMarkdown:    record.Outbound.Status.RichMarkdown,
 				CallbackQueryID: record.Outbound.Status.CallbackQueryID,
 				SourceMessageID: record.Outbound.Status.SourceMessageID,
 			},
