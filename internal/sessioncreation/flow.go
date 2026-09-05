@@ -66,6 +66,7 @@ type Flow struct {
 	providers       []ProviderCapability
 	currentDir      string
 	directories     []Directory
+	directoryPages  map[string]int
 	recommendations []Recommendation
 	page            int
 	recommend       bool
@@ -109,6 +110,7 @@ func (flow *Flow) CurrentV2(computers []Computer, defaults Defaults) (Snapshot, 
 			flow.draft.Workdir = ""
 			flow.currentDir = ""
 			flow.directories = nil
+			flow.directoryPages = nil
 			flow.recommendations = nil
 			enabled := enabledProviders(flow.providers)
 			if len(enabled) == 1 {
@@ -152,6 +154,7 @@ func (flow *Flow) SelectProviderV2(provider domain.Provider, defaults Defaults) 
 	flow.draft.Workdir = strings.TrimSpace(defaults.Workdirs[flow.draft.ComputerID])
 	flow.currentDir = ""
 	flow.directories = nil
+	flow.directoryPages = nil
 	flow.recommendations = nil
 	flow.errText = ""
 	flow.legacyWaiting = false
@@ -174,10 +177,16 @@ func (flow *Flow) SetDirectoryListing(current string, directories []Directory) e
 	if flow.draft == nil || flow.draft.ComputerID == "" || flow.draft.Provider == "" {
 		return errors.New("session creation target is incomplete")
 	}
-	flow.currentDir = current
+	if flow.directoryPages == nil {
+		flow.directoryPages = make(map[string]int)
+	}
+	if flow.currentDir != current {
+		flow.directoryPages[flow.currentDir] = flow.page
+		flow.currentDir = current
+		flow.page = flow.directoryPages[current]
+	}
 	flow.draft.Workdir = ""
 	flow.directories = append([]Directory(nil), directories...)
-	flow.page = 0
 	flow.errText = ""
 	if flow.step == StepDirectoryName {
 		if len(flow.shown) > 0 && flow.shown[len(flow.shown)-1] == StepDirectoryName {
@@ -341,6 +350,7 @@ func (flow *Flow) Cancel() {
 	flow.providers = nil
 	flow.currentDir = ""
 	flow.directories = nil
+	flow.directoryPages = nil
 	flow.recommendations = nil
 	flow.page = 0
 	flow.errText = ""
@@ -353,6 +363,7 @@ func (flow *Flow) resetLocked(computers []Computer, defaults Defaults) {
 	flow.providers = nil
 	flow.currentDir = ""
 	flow.directories = nil
+	flow.directoryPages = make(map[string]int)
 	flow.recommendations = nil
 	flow.page = 0
 	flow.recommend = defaults.ArchiveRecommendations
@@ -377,6 +388,7 @@ func (flow *Flow) chooseComputerLocked(computer Computer, defaults Defaults) {
 	flow.providers = append([]ProviderCapability(nil), computer.Capabilities...)
 	flow.currentDir = ""
 	flow.directories = nil
+	flow.directoryPages = make(map[string]int)
 	flow.recommendations = nil
 	flow.errText = ""
 	enabled := enabledProviders(flow.providers)

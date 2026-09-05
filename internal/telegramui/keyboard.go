@@ -220,6 +220,15 @@ func ProjectCardKeyboard(input CardKeyboardInput) (CardKeyboard, error) {
 	if err := validatePageView(input.View); err != nil {
 		return CardKeyboard{}, err
 	}
+	if input.CloseConfirmation {
+		if input.Archived || input.Working {
+			return CardKeyboard{}, fmt.Errorf("close confirmation requires an idle open session")
+		}
+		return CardKeyboard{Rows: []ButtonRow{{
+			{Action: ActionClose, Target: ButtonTarget{Choice: 1}, Label: "Архивировать"},
+			{Action: ActionClose, Target: ButtonTarget{Choice: 2}, Label: "Отмена"},
+		}}}, nil
+	}
 	for _, size := range input.SessionRowSizes {
 		if size < 1 {
 			return CardKeyboard{}, fmt.Errorf("session row size must be positive")
@@ -251,17 +260,7 @@ func ProjectCardKeyboard(input CardKeyboardInput) (CardKeyboard, error) {
 	} else if input.Working {
 		lifecycle = ActionStop
 	}
-	if input.CloseConfirmation {
-		if input.Archived || input.Working {
-			return CardKeyboard{}, fmt.Errorf("close confirmation requires an idle open session")
-		}
-		rows = append(rows, ButtonRow{
-			{Action: ActionClose, Target: ButtonTarget{Choice: 1}, Label: "Архивировать"},
-			{Action: ActionClose, Target: ButtonTarget{Choice: 2}, Label: "Отмена"},
-		})
-	} else {
-		rows = append(rows, ButtonRow{{Action: lifecycle}, {Action: ActionOptions}})
-	}
+	rows = append(rows, ButtonRow{{Action: lifecycle}, {Action: ActionOptions}})
 	if input.OptionsExpanded {
 		rows = append(rows, ButtonRow{{Action: ActionScreen}})
 	}

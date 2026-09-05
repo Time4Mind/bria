@@ -1640,7 +1640,7 @@ var packagePolicies = map[string]packagePolicy{
 	"internal/sessioncreation": {
 		responsibility:     "own one in-progress new-session draft and bounded node-local directory navigation",
 		allowedImports:     []string{"internal/domain"},
-		maxProductionLines: 900,
+		maxProductionLines: 1100,
 	},
 	"internal/sessionnaming": {
 		responsibility:     "derive and persist optional short session labels",
@@ -1657,7 +1657,7 @@ var packagePolicies = map[string]packagePolicy{
 		allowedImports: []string{
 			"internal/app", "internal/coordinator", "internal/domain", "internal/promptpreprocess", "internal/sessioncreation", "internal/sessionruntime", "internal/settingsport", "internal/telegramcreationview", "internal/telegramnodes", "internal/telegramsettings", "internal/telegramsettingsview", "internal/telegramsessions", "internal/telegramstatus", "internal/turnprocessing",
 		},
-		maxProductionLines: 4225,
+		maxProductionLines: 4300,
 	},
 	"internal/telegramflow": {
 		responsibility: "join Telegram callback, presentation, and durable card boundaries",

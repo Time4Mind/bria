@@ -42,6 +42,7 @@ type Directory struct {
 // Telegram controller about a transport protocol.
 type Environment interface {
 	AvailableComputers(context.Context) ([]Computer, error)
+	Home(context.Context, domain.ComputerID) (string, error)
 	Roots(context.Context, domain.ComputerID) ([]Directory, error)
 	Browse(context.Context, domain.ComputerID, string) ([]Directory, error)
 	CreateChild(context.Context, domain.ComputerID, string, string) (string, error)
@@ -101,6 +102,10 @@ func (environment *LocalEnvironment) RegisteredComputers(ctx context.Context) ([
 	return environment.AvailableComputers(ctx)
 }
 
+func (environment *LocalEnvironment) Home(ctx context.Context, computerID domain.ComputerID) (string, error) {
+	return environment.browser.Home(ctx, computerID)
+}
+
 func (environment *LocalEnvironment) Roots(ctx context.Context, computerID domain.ComputerID) ([]Directory, error) {
 	return environment.browser.Roots(ctx, computerID)
 }
@@ -125,17 +130,21 @@ func (environment *LocalEnvironment) Parent(ctx context.Context, computerID doma
 type LocalBrowser struct {
 	computerID domain.ComputerID
 	roots      []Directory
+	home       string
+	activity   *directoryActivityCache
 }
 
 func NewLocalBrowser(computerID domain.ComputerID, configuredRoots []string) (*LocalBrowser, error) {
 	if strings.TrimSpace(string(computerID)) == "" {
 		return nil, ErrUnavailablePath
 	}
-	if len(configuredRoots) == 0 {
+	useSystemHome := len(configuredRoots) == 0
+	if useSystemHome {
 		configuredRoots = platformRoots()
 	}
 	roots := make([]Directory, 0, len(configuredRoots))
 	seen := make(map[string]struct{}, len(configuredRoots))
+	home := ""
 	for _, raw := range configuredRoots {
 		canonical, err := canonicalDirectory(raw)
 		if err != nil {
@@ -145,6 +154,9 @@ func NewLocalBrowser(computerID domain.ComputerID, configuredRoots []string) (*L
 			continue
 		}
 		seen[canonical] = struct{}{}
+		if home == "" {
+			home = canonical
+		}
 		label := canonical
 		if volume := filepath.VolumeName(canonical); volume != "" {
 			label = volume + string(os.PathSeparator)
@@ -154,8 +166,26 @@ func NewLocalBrowser(computerID domain.ComputerID, configuredRoots []string) (*L
 	if len(roots) == 0 {
 		return nil, ErrUnavailablePath
 	}
+	if useSystemHome {
+		userHome, err := os.UserHomeDir()
+		if err != nil {
+			return nil, ErrUnavailablePath
+		}
+		canonicalHome, err := canonicalDirectory(userHome)
+		if err != nil || !withinAnyRoot(roots, canonicalHome) {
+			return nil, ErrUnavailablePath
+		}
+		home = canonicalHome
+	}
 	sort.Slice(roots, func(i, j int) bool { return roots[i].Path < roots[j].Path })
-	return &LocalBrowser{computerID: computerID, roots: roots}, nil
+	return &LocalBrowser{computerID: computerID, roots: roots, home: home, activity: newDirectoryActivityCache()}, nil
+}
+
+func (browser *LocalBrowser) Home(ctx context.Context, computerID domain.ComputerID) (string, error) {
+	if err := browser.validate(ctx, computerID); err != nil || browser.home == "" {
+		return "", ErrUnavailablePath
+	}
+	return browser.home, nil
 }
 
 func (browser *LocalBrowser) Roots(ctx context.Context, computerID domain.ComputerID) ([]Directory, error) {
@@ -191,9 +221,9 @@ func (browser *LocalBrowser) Browse(ctx context.Context, computerID domain.Compu
 		}
 		directories = append(directories, Directory{Name: entry.Name(), Path: child})
 	}
-	sort.SliceStable(directories, func(i, j int) bool {
-		return strings.ToLower(directories[i].Name) < strings.ToLower(directories[j].Name)
-	})
+	if err := browser.activity.sort(ctx, directories); err != nil {
+		return nil, err
+	}
 	return directories, nil
 }
 
@@ -275,6 +305,15 @@ func canonicalDirectory(path string) (string, error) {
 func within(root, candidate string) bool {
 	relative, err := filepath.Rel(root, candidate)
 	return err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(os.PathSeparator))
+}
+
+func withinAnyRoot(roots []Directory, candidate string) bool {
+	for _, root := range roots {
+		if within(root.Path, candidate) {
+			return true
+		}
+	}
+	return false
 }
 
 func validChildName(name string) bool {

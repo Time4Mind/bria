@@ -456,6 +456,9 @@ func (controller *Controller) HandleSemanticAction(ctx context.Context, action S
 		decision = controller.stopSession(ctx, action.SessionID)
 	case SemanticClose:
 		if action.Choice == 1 {
+			controller.mu.Lock()
+			delete(controller.closeConfirmation, action.SessionID)
+			controller.mu.Unlock()
 			decision, err = controller.CloseSession(ctx, action.SessionID)
 			if err != nil {
 				return SemanticActionResult{}, err
@@ -475,19 +478,20 @@ func (controller *Controller) HandleSemanticAction(ctx context.Context, action S
 			return SemanticActionResult{Decision: decision, Card: &card}, cardErr
 		}
 		if action.Choice == 2 {
+			controller.mu.Lock()
+			delete(controller.closeConfirmation, action.SessionID)
+			controller.mu.Unlock()
 			decision, err = controller.cardDecision(ctx, action.SessionID, "")
+			makeActive = true
 			break
 		}
-		card, cardErr := controller.semanticCard(ctx, action.SessionID, false)
+		controller.mu.Lock()
+		controller.closeConfirmation[action.SessionID] = true
+		controller.mu.Unlock()
+		card, cardErr := controller.semanticCard(ctx, action.SessionID, true)
 		if cardErr != nil {
 			return SemanticActionResult{}, cardErr
 		}
-		card.CloseConfirmation = true
-		label := telegramsessions.LabelForID(card.SelectableSessionIDs, card.SelectableSessionLabels, action.SessionID)
-		if label == "" {
-			label = telegramsessions.ShortID(action.SessionID)
-		}
-		card.Header = "⚠️ Закрыть сессию " + label + "?\nСессия будет остановлена и перемещена в архив."
 		return SemanticActionResult{Card: &card}, nil
 	case SemanticOptions:
 		controller.mu.Lock()
@@ -1103,6 +1107,7 @@ type Controller struct {
 	page                            map[domain.SessionID]int
 	followLatest                    map[domain.SessionID]bool
 	optionsExpanded                 map[domain.SessionID]bool
+	closeConfirmation               map[domain.SessionID]bool
 	deliveryFailures                map[domain.SessionID]NotificationFailure
 	promptIndexes                   map[domain.SessionID]map[string]int
 	promptSessions                  map[string]domain.SessionID
@@ -1212,6 +1217,7 @@ func New(
 		page:                  make(map[domain.SessionID]int),
 		followLatest:          make(map[domain.SessionID]bool),
 		optionsExpanded:       make(map[domain.SessionID]bool),
+		closeConfirmation:     make(map[domain.SessionID]bool),
 		deliveryFailures:      make(map[domain.SessionID]NotificationFailure),
 		promptIndexes:         make(map[domain.SessionID]map[string]int),
 		promptSessions:        make(map[string]domain.SessionID),
@@ -1838,6 +1844,7 @@ func (controller *Controller) semanticCard(ctx context.Context, sessionID domain
 	page := controller.page[sessionID]
 	followLatest := controller.followLatest[sessionID]
 	optionsExpanded := controller.optionsExpanded[sessionID]
+	closeConfirmation := controller.closeConfirmation[sessionID]
 	controller.mu.Unlock()
 	if len(items) == 0 {
 		if historyStore, ok := controller.uiState.(CardHistoryStore); ok {
@@ -1887,7 +1894,7 @@ func (controller *Controller) semanticCard(ctx context.Context, sessionID domain
 	} else if session.Status() == domain.SessionAwaitingRecovery {
 		stateText = "ожидает восстановления"
 	}
-	return SemanticCard{
+	card := SemanticCard{
 		SessionID: sessionID,
 		Effect:    SemanticEditSameCarrier,
 		Header:    fmt.Sprintf("Сессия %s\n%s %s\nРабочая папка: %s", labelsByID[sessionID], session.Provider(), stateText, session.Workdir()),
@@ -1898,7 +1905,23 @@ func (controller *Controller) semanticCard(ctx context.Context, sessionID domain
 		Working: working, Archived: session.Status() == domain.SessionArchived,
 		OptionsExpanded: optionsExpanded, SelectableSessionIDs: selectable,
 		SelectableSessionLabels: selectableLabels, SessionRowSizes: rowSizes, MakeActive: makeActive,
-	}, nil
+	}
+	if closeConfirmation {
+		label := labelsByID[sessionID]
+		if label == "" {
+			label = telegramsessions.ShortID(sessionID)
+		}
+		card.Header = "⚠️ Архивировать сессию " + label + "?\nСессия будет остановлена и перемещена в архив."
+		card.Pages = []SemanticContentPage{{Content: "", Anchors: []string{"close-confirmation"}}}
+		card.View = SemanticPageView{Page: 1, Pages: 1, Anchor: "close-confirmation", FollowLatest: true}
+		card.OptionsExpanded = false
+		card.SelectableSessionIDs = nil
+		card.SelectableSessionLabels = nil
+		card.SessionRowSizes = nil
+		card.CloseConfirmation = true
+		card.MakeActive = true
+	}
+	return card, nil
 }
 
 func (controller *Controller) availableSessionName(ctx context.Context, computerID domain.ComputerID, workdir string) (string, error) {

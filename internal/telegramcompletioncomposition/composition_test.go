@@ -164,10 +164,9 @@ func TestCompletionDelivererSeparatesActiveCardAndBackgroundNotice(t *testing.T)
 	}
 	card := telegramcontroller.SemanticCard{
 		SessionID: "00000000-0000-4000-8000-000000000001", Effect: telegramcontroller.SemanticEditSameCarrier,
-		Header: "Сессия test", Pages: []telegramcontroller.SemanticContentPage{{Content: "FULL FINAL", Anchors: []string{"final"}}},
-		View:                    telegramcontroller.SemanticPageView{Page: 1, Pages: 1, Anchor: "final", FollowLatest: true},
-		SelectableSessionIDs:    []domain.SessionID{"00000000-0000-4000-8000-000000000001"},
-		SelectableSessionLabels: []string{"✓ project"}, SessionRowSizes: []int{1}, CloseConfirmation: true,
+		Header: "⚠️ Архивировать сессию test?", Pages: []telegramcontroller.SemanticContentPage{{Content: "", Anchors: []string{"close-confirmation"}}},
+		View:              telegramcontroller.SemanticPageView{Page: 1, Pages: 1, Anchor: "close-confirmation", FollowLatest: true},
+		CloseConfirmation: true,
 	}
 	for _, test := range []struct {
 		name   string
@@ -187,12 +186,12 @@ func TestCompletionDelivererSeparatesActiveCardAndBackgroundNotice(t *testing.T)
 				t.Fatalf("Deliver() = (%#v, %v)", receipt, err)
 			}
 			if test.active {
-				if !strings.Contains(sender.status.Text, "FULL FINAL") || !sender.prepared.Card.MakeActive {
+				if strings.Contains(sender.status.Text, "FULL FINAL") || !strings.Contains(sender.status.Text, "Архивировать сессию") || !sender.prepared.Card.MakeActive {
 					t.Fatalf("active completion = %#v / %#v", sender.status, sender.prepared.Card)
 				}
 				keyboard := sender.prepared.Card.Projection.Card.Keyboard
-				if len(keyboard.Rows) < 3 || keyboard.Rows[1][0].Label != "Архивировать" || keyboard.Rows[1][1].Label != "Отмена" || keyboard.Rows[2][0].Label != "✓ project" {
-					t.Fatalf("active completion keyboard lost session/close state: %#v", keyboard)
+				if len(keyboard.Rows) != 1 || keyboard.Rows[0][0].Label != "Архивировать" || keyboard.Rows[0][1].Label != "Отмена" {
+					t.Fatalf("active completion keyboard is not compact: %#v", keyboard)
 				}
 			} else if strings.Contains(sender.status.Text, "FULL FINAL") || sender.status.Text != "Фоновая сессия завершена." || sender.prepared.Card.MakeActive {
 				t.Fatalf("background completion leaked final = %#v / %#v", sender.status, sender.prepared.Card)

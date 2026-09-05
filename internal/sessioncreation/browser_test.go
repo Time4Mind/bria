@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"bria/internal/sessioncreation"
 )
@@ -18,6 +19,12 @@ func TestLocalBrowserListsRootsPagesDirectoriesAndCreatesChild(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(root, "alpha"), 0o700); err != nil {
 		t.Fatal(err)
 	}
+	tie := time.Date(2026, 9, 5, 10, 0, 0, 0, time.UTC)
+	for _, name := range []string{"Beta", "alpha"} {
+		if err := os.Chtimes(filepath.Join(root, name), tie, tie); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if err := os.WriteFile(filepath.Join(root, "file"), []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -28,6 +35,10 @@ func TestLocalBrowserListsRootsPagesDirectoriesAndCreatesChild(t *testing.T) {
 	roots, err := browser.Roots(context.Background(), "local")
 	if err != nil || len(roots) != 1 || roots[0].Path != root {
 		t.Fatalf("Roots() = %#v, %v", roots, err)
+	}
+	home, err := browser.Home(context.Background(), "local")
+	if err != nil || home != root {
+		t.Fatalf("Home() = %q, %v", home, err)
 	}
 	directories, err := browser.Browse(context.Background(), "local", root)
 	if err != nil || len(directories) != 2 || directories[0].Name != "alpha" || directories[1].Name != "Beta" {
@@ -41,6 +52,76 @@ func TestLocalBrowserListsRootsPagesDirectoriesAndCreatesChild(t *testing.T) {
 	if err != nil || again != created {
 		t.Fatalf("CreateChild(existing) = %q, %v", again, err)
 	}
+}
+
+func TestLocalBrowserSortsDirectoriesByNewestRecursiveContent(t *testing.T) {
+	root := t.TempDir()
+	stale := filepath.Join(root, "stale")
+	recent := filepath.Join(root, "recent")
+	recentNested := filepath.Join(recent, "nested")
+	recentLeaf := filepath.Join(recentNested, "leaf")
+	for _, directory := range []string{stale, recent, recentNested, recentLeaf} {
+		if err := os.Mkdir(directory, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	oldTime := time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC)
+	newTime := oldTime.Add(24 * time.Hour)
+	staleFile := filepath.Join(stale, "old.txt")
+	recentFile := filepath.Join(recentLeaf, "new.txt")
+	for _, path := range []string{staleFile, recentFile} {
+		if err := os.WriteFile(path, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	projectMarker := filepath.Join(recent, "go.mod")
+	if err := os.WriteFile(projectMarker, []byte("module example.test/recent\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{stale, recent, recentNested, recentLeaf, staleFile, projectMarker} {
+		if err := os.Chtimes(path, oldTime, oldTime); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Chtimes(recentFile, newTime, newTime); err != nil {
+		t.Fatal(err)
+	}
+	browser, err := sessioncreation.NewLocalBrowser("local", []string{root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	directories, err := browser.Browse(context.Background(), "local", root)
+	if err != nil || len(directories) != 2 || directories[0].Name != "recent" || directories[1].Name != "stale" {
+		t.Fatalf("Browse() = %#v, %v", directories, err)
+	}
+}
+
+func TestLocalBrowserDefaultsToUserHomeWithoutRestrictingFilesystemRoot(t *testing.T) {
+	browser, err := sessioncreation.NewLocalBrowser("local", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := filepath.EvalSymlinks(mustUserHome(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	home, err := browser.Home(context.Background(), "local")
+	if err != nil || home != want {
+		t.Fatalf("Home() = %q, %v, want %q", home, err, want)
+	}
+	parent, ok := browser.Parent(home)
+	if !ok || parent != filepath.Dir(home) {
+		t.Fatalf("home parent = %q, %t", parent, ok)
+	}
+}
+
+func mustUserHome(t *testing.T) string {
+	t.Helper()
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return home
 }
 
 func TestLocalBrowserRejectsEscapeForeignComputerAndFileCollision(t *testing.T) {

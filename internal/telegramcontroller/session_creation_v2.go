@@ -192,6 +192,15 @@ func (controller *Controller) advanceCreateV2(ctx context.Context, snapshot sess
 			}
 			controller.createFlow.SetDirectoryError("папка по умолчанию недоступна; выберите другую")
 		}
+		if home, err := controller.creationHomeV2(ctx, snapshot.Draft.ComputerID); err == nil {
+			if directories, browseErr := controller.browseCreationDirectoryV2(ctx, snapshot.Draft.ComputerID, home); browseErr == nil {
+				if err := controller.createFlow.SetDirectoryListing(home, directories); err != nil {
+					return SemanticActionResult{}, err
+				}
+				snapshot, _, _ = controller.currentCreateSnapshotV2(ctx)
+				return SemanticActionResult{Surface: renderCreateSurfaceV2(snapshot)}, nil
+			}
+		}
 		roots, err := controller.creationRootsV2(ctx, snapshot.Draft.ComputerID)
 		if err != nil {
 			return SemanticActionResult{}, err
@@ -205,6 +214,17 @@ func (controller *Controller) advanceCreateV2(ctx context.Context, snapshot sess
 		return controller.confirmCreateDraftV2(ctx, updateID)
 	}
 	return SemanticActionResult{Surface: renderCreateSurfaceV2(snapshot)}, nil
+}
+
+func (controller *Controller) creationHomeV2(ctx context.Context, computerID domain.ComputerID) (string, error) {
+	if controller.creationEnvironment != nil {
+		return controller.creationEnvironment.Home(ctx, computerID)
+	}
+	browser, err := sessioncreation.NewLocalBrowser(controller.localComputerID, nil)
+	if err != nil {
+		return "", err
+	}
+	return browser.Home(ctx, computerID)
 }
 
 func (controller *Controller) creationRootsV2(ctx context.Context, computerID domain.ComputerID) ([]sessioncreation.Directory, error) {

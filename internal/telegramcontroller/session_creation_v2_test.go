@@ -3,6 +3,9 @@ package telegramcontroller_test
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -40,6 +43,13 @@ func (environment *creationEnvironmentStub) RegisteredComputers(context.Context)
 		return append([]sessioncreation.Computer(nil), environment.computers...), nil
 	}
 	return append([]sessioncreation.Computer(nil), environment.registered...), nil
+}
+func (environment *creationEnvironmentStub) Home(_ context.Context, computerID domain.ComputerID) (string, error) {
+	roots := environment.roots[computerID]
+	if len(roots) == 0 {
+		return "", sessioncreation.ErrUnavailablePath
+	}
+	return roots[0].Path, nil
 }
 func (environment *creationEnvironmentStub) Roots(_ context.Context, computerID domain.ComputerID) ([]sessioncreation.Directory, error) {
 	return append([]sessioncreation.Directory(nil), environment.roots[computerID]...), nil
@@ -137,11 +147,8 @@ func TestSessionCreationV2CreatesWithSelectedRemoteNodeCapabilities(t *testing.T
 		t.Fatal(err)
 	}
 	root, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticMenuNew, UpdateID: 1})
-	if err != nil || root.Surface == nil || root.Surface.Rows[0][0].Label != "📁 /work" {
+	if err != nil || root.Surface == nil || !strings.Contains(root.Surface.Text, "Папка: /work") || !hasSemanticAction(root.Surface.Rows, telegramcontroller.SemanticCreatePick) {
 		t.Fatalf("remote root = (%#v, %v)", root, err)
-	}
-	if _, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticCreateChoice, Choice: 1}); err != nil {
-		t.Fatal(err)
 	}
 	created, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticCreatePick, UpdateID: 2})
 	if err != nil || created.Card == nil {
@@ -206,12 +213,8 @@ func TestSessionCreationV2BrowsesAndCreatesWithoutConfirmation(t *testing.T) {
 	t.Cleanup(func() { _ = controller.Close(context.Background()) })
 
 	initial, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticMenuNew, UpdateID: 10})
-	if err != nil || initial.Surface == nil || initial.Surface.Rows[0][0].Label != "📁 "+root {
-		t.Fatalf("root choice = (%#v, %v)", initial, err)
-	}
-	opened, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticCreateChoice, Choice: 1, UpdateID: 11})
-	if err != nil || opened.Surface == nil || !hasSemanticAction(opened.Surface.Rows, telegramcontroller.SemanticCreatePick) {
-		t.Fatalf("opened root = (%#v, %v)", opened, err)
+	if err != nil || initial.Surface == nil || !strings.Contains(initial.Surface.Text, "Папка: "+root) || !hasSemanticAction(initial.Surface.Rows, telegramcontroller.SemanticCreatePick) {
+		t.Fatalf("opened home = (%#v, %v)", initial, err)
 	}
 	created, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticCreatePick, UpdateID: 12})
 	if err != nil || created.Card == nil {
@@ -280,7 +283,7 @@ func TestSessionCreationV2EnablesInstalledBackendInline(t *testing.T) {
 		t.Fatalf("disabled provider choice = (%#v, %v)", initial, err)
 	}
 	next, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticCreateSelectCodex, UpdateID: 31})
-	if err != nil || next.Surface == nil || !strings.Contains(next.Surface.Text, "Выберите корень") || !providers.values[domain.ProviderCodex].Enabled {
+	if err != nil || next.Surface == nil || !strings.Contains(next.Surface.Text, "Папка: ") || !hasSemanticAction(next.Surface.Rows, telegramcontroller.SemanticCreatePick) || !providers.values[domain.ProviderCodex].Enabled {
 		t.Fatalf("inline provider enable = (%#v, %v), preferences=%#v", next, err, providers.values)
 	}
 }
@@ -314,6 +317,61 @@ func TestSessionCreationV2CreatesChildAndKeepsBrowserOpen(t *testing.T) {
 	if err != nil || result.Surface == nil || !strings.Contains(result.Surface.Text, root+"/child") || !hasSemanticAction(result.Surface.Rows, telegramcontroller.SemanticCreatePick) {
 		t.Fatalf("created child browser = (%#v, %v)", result, err)
 	}
+}
+
+func TestSessionCreationV2OpensHomeAndRestoresParentPageOnlyWithinFlow(t *testing.T) {
+	root := t.TempDir()
+	tie := time.Date(2026, 9, 5, 10, 0, 0, 0, time.UTC)
+	for index := 0; index < 10; index++ {
+		path := filepath.Join(root, fmt.Sprintf("dir-%02d", index))
+		if err := os.Mkdir(path, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(path, tie, tie); err != nil {
+			t.Fatal(err)
+		}
+	}
+	environment := localCreationEnvironment(t, root, sessioncreation.ProviderCapability{Provider: domain.ProviderCodex, Installed: true, Enabled: true})
+	controller := newController(t, nil, &memorySessions{}, nil, nil, telegramcontroller.Options{CreationEnvironment: environment})
+	t.Cleanup(func() { _ = controller.Close(context.Background()) })
+
+	initial, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticMenuNew, UpdateID: 80})
+	if err != nil || initial.Surface == nil || !strings.Contains(initial.Surface.Text, "Папка: "+root) || !surfaceHasLabel(initial.Surface, "📁 dir-00") {
+		t.Fatalf("initial home page = (%#v, %v)", initial, err)
+	}
+	second, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticCreateNext, UpdateID: 81})
+	if err != nil || second.Surface == nil || !surfaceHasLabel(second.Surface, "2/2") || !surfaceHasLabel(second.Surface, "📁 dir-08") {
+		t.Fatalf("second home page = (%#v, %v)", second, err)
+	}
+	child, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticCreateChoice, Choice: 1, UpdateID: 82})
+	if err != nil || child.Surface == nil || !strings.Contains(child.Surface.Text, filepath.Join(root, "dir-08")) {
+		t.Fatalf("opened child = (%#v, %v)", child, err)
+	}
+	parent, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticCreateUp, UpdateID: 83})
+	if err != nil || parent.Surface == nil || !surfaceHasLabel(parent.Surface, "2/2") || !surfaceHasLabel(parent.Surface, "📁 dir-08") {
+		t.Fatalf("restored parent page = (%#v, %v)", parent, err)
+	}
+	if _, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticMenuBack, UpdateID: 84}); err != nil {
+		t.Fatal(err)
+	}
+	fresh, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticMenuNew, UpdateID: 85})
+	if err != nil || fresh.Surface == nil || !surfaceHasLabel(fresh.Surface, "1/2") || !surfaceHasLabel(fresh.Surface, "📁 dir-00") {
+		t.Fatalf("fresh flow page = (%#v, %v)", fresh, err)
+	}
+}
+
+func surfaceHasLabel(surface *telegramcontroller.SemanticSurface, label string) bool {
+	if surface == nil {
+		return false
+	}
+	for _, row := range surface.Rows {
+		for _, button := range row {
+			if button.Label == label {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func TestSessionCreationV2OffersExactArchiveContinuation(t *testing.T) {
@@ -379,10 +437,9 @@ func TestSessionCreationDefaultsCanBeChosenAndClearedThroughSettings(t *testing.
 	}
 
 	directoryChoice, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticSettingsDefaultWorkdir, UpdateID: 72})
-	if err != nil || directoryChoice.Surface == nil || directoryChoice.Surface.Rows[0][0].Label != "📁 "+root {
-		t.Fatalf("default directory roots = (%#v, %v)", directoryChoice, err)
+	if err != nil || directoryChoice.Surface == nil || !strings.Contains(directoryChoice.Surface.Text, "Папка: "+root) || !hasSemanticAction(directoryChoice.Surface.Rows, telegramcontroller.SemanticCreatePick) {
+		t.Fatalf("default directory home = (%#v, %v)", directoryChoice, err)
 	}
-	_, _ = controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticCreateChoice, Choice: 1, UpdateID: 73})
 	settingsSurface, err = controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticCreatePick, UpdateID: 74})
 	if err != nil || settingsSurface.Surface == nil || !strings.Contains(settingsSurface.Surface.Text, "Папка по умолчанию: "+root) {
 		t.Fatalf("saved default workdir = (%#v, %v)", settingsSurface, err)

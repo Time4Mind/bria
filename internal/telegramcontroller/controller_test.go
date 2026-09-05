@@ -1889,10 +1889,17 @@ func TestSemanticCloseAndResumeTargetExplicitSessions(t *testing.T) {
 	if err != nil || prompt.Card == nil || !prompt.Card.CloseConfirmation || !strings.Contains(prompt.Card.Header, "перемещена в архив") {
 		t.Fatalf("close confirmation = (%#v, %v)", prompt, err)
 	}
+	if len(prompt.Card.Pages) != 1 || prompt.Card.Pages[0].Content != "" || len(prompt.Card.SelectableSessionIDs) != 0 || prompt.Card.OptionsExpanded {
+		t.Fatalf("close confirmation did not replace full card: %#v", prompt.Card)
+	}
 	select {
 	case got := <-closed:
 		t.Fatalf("session closed before confirmation: %q", got)
 	default:
+	}
+	cancelled, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticClose, SessionID: ready.ID(), Choice: 2})
+	if err != nil || cancelled.Card == nil || cancelled.Card.CloseConfirmation || len(cancelled.Card.Pages) == 0 || cancelled.Card.Pages[0].Content == "" || !cancelled.Card.MakeActive {
+		t.Fatalf("close cancellation did not restore active card = (%#v, %v)", cancelled, err)
 	}
 	closedResult, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticClose, SessionID: ready.ID(), Choice: 1})
 	if err != nil {
@@ -1973,9 +1980,6 @@ func TestGlobalSemanticActionsExposeOnlyTypedSurfacesAndStableCreateIdentity(t *
 	if _, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticMenuNew, UpdateID: 775}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticCreateChoice, Choice: 1, UpdateID: 776}); err != nil {
-		t.Fatal(err)
-	}
 	result, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticCreatePick, UpdateID: 777})
 	if err != nil || result.Card == nil || intent.IntentID != "telegram-update:777" || intent.Name == "" || len([]rune(intent.Name)) > domain.MaxSessionNameRunes {
 		t.Fatalf("semantic create = (%#v, %v), intent=%#v", result, err, intent)
@@ -1999,11 +2003,8 @@ func TestSemanticCreateUsesOnlyExplicitConfirmedAbsoluteDraft(t *testing.T) {
 		sessioncreation.ProviderCapability{Provider: domain.ProviderCodex, Installed: true, Enabled: true})})
 	t.Cleanup(func() { _ = controller.Close(context.Background()) })
 	preview, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticMenuNew, UpdateID: 399})
-	if err != nil || preview.Surface == nil || preview.Surface.Rows[0][0].Label != "📁 "+workdir {
+	if err != nil || preview.Surface == nil || !strings.Contains(preview.Surface.Text, "Папка: "+workdir) || !hasSemanticAction(preview.Surface.Rows, telegramcontroller.SemanticCreatePick) {
 		t.Fatalf("draft preview = (%#v, %v)", preview, err)
-	}
-	if _, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticCreateChoice, Choice: 1, UpdateID: 400}); err != nil {
-		t.Fatal(err)
 	}
 	if _, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticCreatePick, UpdateID: 401}); err != nil {
 		t.Fatal(err)
@@ -2034,15 +2035,11 @@ func TestSemanticNewSessionDoesNotRequireInjectedDraftSelector(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Surface == nil || strings.Contains(result.Surface.Text, "не настроено") || result.Surface.Rows[0][0].Label != "📁 "+workdir {
-		t.Fatalf("new-session surface = %#v, want directory roots after skipping sole computer and backend", result.Surface)
+	if result.Surface == nil || strings.Contains(result.Surface.Text, "не настроено") || !strings.Contains(result.Surface.Text, "Папка: "+workdir) {
+		t.Fatalf("new-session surface = %#v, want home after skipping sole computer and backend", result.Surface)
 	}
-	if hasSemanticAction(result.Surface.Rows, telegramcontroller.SemanticCreateSelectCodex) || hasSemanticAction(result.Surface.Rows, telegramcontroller.SemanticCreatePick) {
-		t.Fatalf("new-session actions = %#v, want root selection first", result.Surface.Rows)
-	}
-	selected, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticCreateChoice, Choice: 1, UpdateID: 501})
-	if err != nil || selected.Surface == nil || !hasSemanticAction(selected.Surface.Rows, telegramcontroller.SemanticCreatePick) {
-		t.Fatalf("selected root = (%#v, %v)", selected, err)
+	if hasSemanticAction(result.Surface.Rows, telegramcontroller.SemanticCreateSelectCodex) || !hasSemanticAction(result.Surface.Rows, telegramcontroller.SemanticCreatePick) {
+		t.Fatalf("new-session actions = %#v, want opened home", result.Surface.Rows)
 	}
 	created, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticCreatePick, UpdateID: 502})
 	if err != nil || created.Card == nil {
@@ -2073,7 +2070,7 @@ func TestSemanticNewSessionDoesNotInferDefaultsFromPreviousSessions(t *testing.T
 		t.Fatalf("provider choice = (%#v, %v)", initial, err)
 	}
 	changed, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticCreateSelectCodex})
-	if err != nil || changed.Surface == nil || changed.Surface.Rows[0][0].Label != "📁 "+workdir {
+	if err != nil || changed.Surface == nil || !strings.Contains(changed.Surface.Text, "Папка: "+workdir) || !hasSemanticAction(changed.Surface.Rows, telegramcontroller.SemanticCreatePick) {
 		t.Fatalf("changed provider draft = (%#v, %v)", changed, err)
 	}
 }
@@ -2117,7 +2114,7 @@ func TestNewSessionAvailabilityFollowsLiveProviderSnapshot(t *testing.T) {
 	t.Cleanup(func() { _ = controller.Close(context.Background()) })
 
 	first, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticMenuNew})
-	if err != nil || first.Surface == nil || !strings.Contains(first.Surface.Text, "Выберите корень") || hasSemanticAction(first.Surface.Rows, telegramcontroller.SemanticCreateSelectCodex) || hasSemanticAction(first.Surface.Rows, telegramcontroller.SemanticCreateSelectClaude) {
+	if err != nil || first.Surface == nil || !strings.Contains(first.Surface.Text, "Папка: ") || !hasSemanticAction(first.Surface.Rows, telegramcontroller.SemanticCreatePick) || hasSemanticAction(first.Surface.Rows, telegramcontroller.SemanticCreateSelectCodex) || hasSemanticAction(first.Surface.Rows, telegramcontroller.SemanticCreateSelectClaude) {
 		t.Fatalf("one-enabled new surface = (%#v, %v)", first, err)
 	}
 	legacy, err := controller.Handle(context.Background(), coordinator.Update{ID: 301, Kind: coordinator.UpdateCallback, ActorID: ownerID, ConversationID: chatID, ConversationKind: "private", CallbackQueryID: "new-menu", SourceMessageID: 1, Text: "menu:new"})
@@ -2133,7 +2130,7 @@ func TestNewSessionAvailabilityFollowsLiveProviderSnapshot(t *testing.T) {
 
 	providers.values[domain.ProviderClaude] = telegramcontroller.ProviderPreference{Provider: domain.ProviderClaude, Configured: true, Enabled: true}
 	reenabled, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticMenuNew})
-	if err != nil || reenabled.Surface == nil || !strings.Contains(reenabled.Surface.Text, "Выберите корень") || hasSemanticAction(reenabled.Surface.Rows, telegramcontroller.SemanticCreateSelectCodex) || hasSemanticAction(reenabled.Surface.Rows, telegramcontroller.SemanticCreateSelectClaude) {
+	if err != nil || reenabled.Surface == nil || !strings.Contains(reenabled.Surface.Text, "Папка: ") || !hasSemanticAction(reenabled.Surface.Rows, telegramcontroller.SemanticCreatePick) || hasSemanticAction(reenabled.Surface.Rows, telegramcontroller.SemanticCreateSelectCodex) || hasSemanticAction(reenabled.Surface.Rows, telegramcontroller.SemanticCreateSelectClaude) {
 		t.Fatalf("re-enabled new surface = (%#v, %v)", reenabled, err)
 	}
 }

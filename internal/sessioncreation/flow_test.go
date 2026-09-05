@@ -1,6 +1,7 @@
 package sessioncreation_test
 
 import (
+	"fmt"
 	"testing"
 
 	"bria/internal/domain"
@@ -81,6 +82,46 @@ func TestFlowPaginatesDirectoriesAndRecommendationsAndBackTracksShownSteps(t *te
 	back, ok := flow.Back()
 	if !ok || back.Step != sessioncreation.StepDirectory || back.Draft.Workdir != "" {
 		t.Fatalf("Back() = %#v, %t", back, ok)
+	}
+}
+
+func TestFlowRestoresDirectoryPageOnlyWithinCurrentDraft(t *testing.T) {
+	flow := sessioncreation.New()
+	computer := sessioncreation.Computer{ID: "local", Name: "Local", Capabilities: []sessioncreation.ProviderCapability{{Provider: domain.ProviderCodex, Installed: true, Enabled: true}}}
+	defaults := sessioncreation.Defaults{}
+	flow.BeginV2([]sessioncreation.Computer{computer}, defaults)
+	parent := make([]sessioncreation.Directory, 10)
+	for index := range parent {
+		parent[index] = sessioncreation.Directory{Name: fmt.Sprintf("dir-%02d", index), Path: fmt.Sprintf("/home/dir-%02d", index)}
+	}
+	if err := flow.SetDirectoryListing("/home", parent); err != nil {
+		t.Fatal(err)
+	}
+	if got := flow.Page(1, false); got.Page != 2 {
+		t.Fatalf("parent page = %d, want 2", got.Page)
+	}
+	selected, err := flow.DirectoryChoice(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := flow.SetDirectoryListing(selected.Path, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := flow.SetDirectoryListing("/home", parent); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := flow.CurrentV2([]sessioncreation.Computer{computer}, defaults)
+	if got.Page != 2 || len(got.Directories) != 2 || got.Directories[0].Path != parent[8].Path {
+		t.Fatalf("restored parent = %#v", got)
+	}
+	flow.Cancel()
+	flow.BeginV2([]sessioncreation.Computer{computer}, defaults)
+	if err := flow.SetDirectoryListing("/home", parent); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = flow.CurrentV2([]sessioncreation.Computer{computer}, defaults)
+	if got.Page != 1 {
+		t.Fatalf("new draft page = %d, want 1", got.Page)
 	}
 }
 
