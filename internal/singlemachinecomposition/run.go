@@ -18,6 +18,7 @@ import (
 	"bria/internal/durableflow"
 	"bria/internal/interactioncomposition"
 	"bria/internal/messagejournal"
+	"bria/internal/observability"
 	"bria/internal/promptpreprocess"
 	"bria/internal/promptpreprocesscommand"
 	"bria/internal/providerquota"
@@ -264,6 +265,11 @@ func runTelegramController(
 	if err != nil {
 		return fmt.Errorf("open safe operational log: %w", err)
 	}
+	flowTrace, err := observability.NewTelegramFlowObserver(safeLogger)
+	if err != nil {
+		return fmt.Errorf("open Telegram flow trace: %w", err)
+	}
+	defer flowTrace.Close()
 	promptPreprocessor, err := promptpreprocesscommand.New(providerPreferences, dependencies.Environment(), computerID)
 	if err != nil {
 		return fmt.Errorf("compose prompt preprocessor: %w", err)
@@ -512,7 +518,7 @@ func runTelegramController(
 		OwnerUserID: configuration.OwnerUserID, OwnerPrivateChatID: configuration.PrivateChatID,
 		Presenter: presenter, CallbackRegistry: callbackRegistry,
 		UIState: telegramruntimecomposition.SessionTelegramUIStore{State: state}, MessageUI: controllerAdapter,
-		Callbacks: callbackExecutor, Operations: callbackOperations, Sender: transportSender,
+		Callbacks: callbackExecutor, Operations: callbackOperations, Sender: transportSender, Observer: flowTrace,
 	})
 	if err != nil {
 		return fmt.Errorf("create signed Telegram flow: %w", err)

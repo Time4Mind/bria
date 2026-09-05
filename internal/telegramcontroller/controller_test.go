@@ -1986,7 +1986,8 @@ func TestGlobalSemanticActionsExposeOnlyTypedSurfacesAndStableCreateIdentity(t *
 		t.Fatal(err)
 	}
 	result, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticCreatePick, UpdateID: 777})
-	if err != nil || result.Card == nil || intent.IntentID != "telegram-update:777" || intent.Name == "" || len([]rune(intent.Name)) > domain.MaxSessionNameRunes {
+	if err != nil || result.Card == nil || !result.Card.MakeActive || strings.Contains(result.Card.Header, "Новая сессия") ||
+		!strings.HasSuffix(result.Card.Header, "\n\n─────\n\n") || intent.IntentID != "telegram-update:777" || intent.Name == "" || len([]rune(intent.Name)) > domain.MaxSessionNameRunes {
 		t.Fatalf("semantic create = (%#v, %v), intent=%#v", result, err, intent)
 	}
 	if _, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticCreateClaude}); err == nil {
@@ -2094,6 +2095,12 @@ func TestProjectCurrentReadsExactOrActiveSurfaceWithoutChangingDurableState(t *t
 	exact, err := controller.ProjectCurrent(context.Background(), second.ID())
 	if err != nil || exact.Card == nil || exact.Card.SessionID != second.ID() || exact.Card.MakeActive {
 		t.Fatalf("exact ProjectCurrent() = (%#v, %v), want second read-only card", exact, err)
+	}
+	if strings.HasPrefix(exact.Card.Header, "Сессия ") || !strings.Contains(exact.Card.Header, " · ") || !strings.HasSuffix(exact.Card.Header, "\n\n─────\n\n") {
+		t.Fatalf("active card header = %q, want compact legacy layout", exact.Card.Header)
+	}
+	if !strings.HasPrefix(exact.Card.Footer, "\n\n\u00a0\n\n─── фон ───") {
+		t.Fatalf("active card footer = %q, want separated background sessions", exact.Card.Footer)
 	}
 	global, err := controller.ProjectCurrent(context.Background(), "")
 	if err != nil || global.Card == nil || global.Card.SessionID != first.ID() || global.Card.MakeActive {

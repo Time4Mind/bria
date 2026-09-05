@@ -46,7 +46,8 @@ func Render(now time.Time, nodes []Node, snapshots []Snapshot) string {
 	lines := []string{
 		"Статус",
 		"",
-		"```text",
+		"\u00a0",
+		"",
 		"| Сервер | Бэк | Израсх. | Остаток | Обновлено | Сброс |",
 		"|---|---|---|---:|---|---|",
 	}
@@ -74,7 +75,6 @@ func Render(now time.Time, nodes []Node, snapshots []Snapshot) string {
 				age(now, firstTime(quota.CollectedAt, node.ObservedAt)), reset(quota, now)))
 		}
 	}
-	lines = append(lines, "```")
 	return strings.Join(lines, "\n")
 }
 
@@ -122,5 +122,6 @@ func firstTime(primary, fallback time.Time) time.Time {
 
 func cell(value string) string {
 	value = strings.NewReplacer("\r", " ", "\n", " ").Replace(value)
-	return strings.ReplaceAll(value, "|", "¦")
+	value = strings.ReplaceAll(value, "|", "¦")
+	return strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;").Replace(value)
 }

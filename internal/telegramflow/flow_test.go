@@ -35,6 +35,21 @@ func (handler *messageHandler) Handle(_ context.Context, update coordinator.Upda
 
 type semanticMessageHandler struct{}
 
+type traceObserver struct{ events []telegramflow.TraceEvent }
+
+func (observer *traceObserver) ObserveTelegramFlow(_ context.Context, event telegramflow.TraceEvent) {
+	observer.events = append(observer.events, event)
+}
+
+func (observer *traceObserver) has(stage string) bool {
+	for _, event := range observer.events {
+		if event.Stage == stage {
+			return true
+		}
+	}
+	return false
+}
+
 func (semanticMessageHandler) HandleMessage(_ context.Context, _ coordinator.Update) (telegramflow.MessageResult, error) {
 	return telegramflow.MessageResult{Surface: &telegramflow.SurfaceOutput{
 		Text: "Меню",
@@ -67,10 +82,11 @@ func TestFlowSignsTypedGlobalSurfacesAndDurablyExecutesTheirCallbacks(t *testing
 	operations := telegramflow.NewMemoryCallbackOperationStore()
 	base := &sender{receipt: coordinator.Receipt{MessageID: 500}}
 	callbacks := &globalCallbackExecutor{}
+	trace := &traceObserver{}
 	handler, outbound, err := telegramflow.New(telegramflow.Config{
 		OwnerUserID: 7, OwnerPrivateChatID: 42, Presenter: presenter,
 		CallbackRegistry: registry, UIState: telegramstate.NewMemoryStore(),
-		MessageUI: semanticMessageHandler{}, Callbacks: callbacks, Operations: operations, Sender: base,
+		MessageUI: semanticMessageHandler{}, Callbacks: callbacks, Operations: operations, Sender: base, Observer: trace,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -108,6 +124,16 @@ func TestFlowSignsTypedGlobalSurfacesAndDurablyExecutesTheirCallbacks(t *testing
 	op, ok, err := operations.Load(context.Background(), "status:2")
 	if err != nil || !ok || op.Phase != telegramflow.CallbackCommitted || op.Receipt != 500 {
 		t.Fatalf("global callback operation = %#v, %t, %v", op, ok, err)
+	}
+	for _, stage := range []string{"ingress.received", "controller.message", "projection.message", "callback.accept", "callback.plan", "controller.callback", "projection.callback", "transport.edit", "state.commit", "ingress.completed"} {
+		if !trace.has(stage) {
+			t.Errorf("trace is missing stage %q: %#v", stage, trace.events)
+		}
+	}
+	for _, event := range trace.events {
+		if strings.Contains(event.Error, "/start") || strings.Contains(event.Error, settingsToken) {
+			t.Fatalf("trace leaked inbound text or callback payload: %#v", event)
+		}
 	}
 }
 

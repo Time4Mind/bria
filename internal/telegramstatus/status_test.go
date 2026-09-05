@@ -17,10 +17,9 @@ func TestRenderMatchesLegacyQuotaTableContract(t *testing.T) {
 		FiveHour: &telegramstatus.Window{UsedPercent: 12}, Weekly: &telegramstatus.Window{UsedPercent: 50, ResetsAt: time.Date(2026, 9, 6, 9, 30, 0, 0, time.UTC)}, TodayRemaining: &today,
 	}})
 	for _, want := range []string{
-		"Статус\n\n```text\n",
+		"Статус\n\n\u00a0\n\n| Сервер |",
 		"| Сервер | Бэк | Израсх. | Остаток | Обновлено | Сброс |\n|---|---|---|---:|---|---|",
 		"| 👑 Coordinator | codex | w 50% | -4.0% · 5ч 88% | 2 | 06.09 12:30 |",
-		"\n```",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("status = %q, want fragment %q", got, want)

@@ -69,6 +69,7 @@ func (controller *Controller) statusSemanticResult(ctx context.Context) (Semanti
 		return SemanticActionResult{}, err
 	}
 	result.Surface.Text = telegramstatus.Render(time.Now(), items, quotas)
+	result.Surface.RichMarkdown = true
 	return result, nil
 }
 

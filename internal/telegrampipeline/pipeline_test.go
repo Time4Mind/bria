@@ -164,6 +164,39 @@ func TestAcceptCallbackClaimsCurrentPresentationOnceAndRejectsStaleButtons(t *te
 	}
 }
 
+func TestAcceptCallbackAllowsGlobalNavigationFromCurrentSessionCard(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0).UTC()
+	codec, err := callbacktoken.New(bytes.Repeat([]byte{0x42}, 32), bytes.NewReader(bytes.Repeat([]byte{0x24}, 128)), func() time.Time { return now })
+	if err != nil {
+		t.Fatal(err)
+	}
+	presenter, err := telegrambridge.NewPresenter(codec, func() time.Time { return now }, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	presented, err := presenter.PresentKeyboardWithManifest(string(sessionID), nil, telegramui.CardKeyboard{Rows: []telegramui.ButtonRow{{
+		{Action: telegramui.ActionMenuNodes},
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry := telegrampipeline.NewMemoryCallbackRegistry(func() time.Time { return now })
+	if err := telegrampipeline.BindPresentation(context.Background(), registry, card().Carrier, presented); err != nil {
+		t.Fatal(err)
+	}
+	callbackUpdate := update(7, 42, 99)
+	callbackUpdate.ID = 102
+	callbackUpdate.CallbackQueryID = "global-navigation"
+	callbackUpdate.Text = presented.Markup.InlineKeyboard[0][0].CallbackData
+	accepted, err := telegrampipeline.AcceptCallback(context.Background(), callbackUpdate, 7, 42, cards{card: card()}, registry, presenter)
+	if err != nil {
+		t.Fatalf("AcceptCallback() error = %v", err)
+	}
+	if accepted.SessionID != domain.SessionID(telegramui.GlobalSurfaceID) || accepted.Action != telegramui.ActionMenuNodes || accepted.Carrier != card().Carrier {
+		t.Fatalf("accepted callback = %#v", accepted)
+	}
+}
+
 func TestPlanAcceptedCallbackMapsEverySemanticAction(t *testing.T) {
 	tests := []struct {
 		action telegramui.Action

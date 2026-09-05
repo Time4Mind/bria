@@ -159,11 +159,23 @@ type SendMessageRequest struct {
 	Priority    MutationPriority      `json:"-"`
 }
 
+type InputRichMessage struct {
+	Markdown string `json:"markdown"`
+}
+
+type SendRichMessageRequest struct {
+	ChatID      ChatID                `json:"chat_id"`
+	RichMessage InputRichMessage      `json:"rich_message"`
+	ReplyMarkup *InlineKeyboardMarkup `json:"reply_markup,omitempty"`
+	Priority    MutationPriority      `json:"-"`
+}
+
 type EditMessageTextRequest struct {
 	ChatID      ChatID                `json:"chat_id"`
 	MessageID   MessageID             `json:"message_id"`
-	Text        string                `json:"text"`
+	Text        string                `json:"text,omitempty"`
 	Entities    []MessageEntity       `json:"entities,omitempty"`
+	RichMessage *InputRichMessage     `json:"rich_message,omitempty"`
 	ReplyMarkup *InlineKeyboardMarkup `json:"reply_markup,omitempty"`
 	Priority    MutationPriority      `json:"-"`
 }
@@ -545,6 +557,40 @@ func (client *Client) SendMessage(
 	return message, nil
 }
 
+func (client *Client) SendRichMessage(ctx context.Context, request SendRichMessageRequest) (Message, error) {
+	if request.ChatID == 0 {
+		return Message{}, errors.New("Telegram rich send chat id is required")
+	}
+	if strings.TrimSpace(request.RichMessage.Markdown) == "" {
+		return Message{}, errors.New("Telegram rich send markdown is required")
+	}
+	if err := validateInlineKeyboard(request.ReplyMarkup); err != nil {
+		return Message{}, fmt.Errorf("Telegram rich send reply markup: %w", err)
+	}
+	var message Message
+	var err error
+	for {
+		err = client.call(ctx, "sendRichMessage", request, &message)
+		if err == nil || client.scheduler == nil || !isRateLimited(err) || ctx.Err() != nil {
+			break
+		}
+	}
+	if err != nil {
+		if errors.Is(err, ErrMutationStopped) {
+			return Message{}, err
+		}
+		var apiErr *APIError
+		if errors.As(err, &apiErr) && isDefinitiveDeliveryRejection(apiErr) {
+			return Message{}, err
+		}
+		return Message{}, fmt.Errorf("%w: %w", ErrDeliveryUnknown, err)
+	}
+	if err := validateMessage(message); err != nil {
+		return Message{}, fmt.Errorf("%w: Telegram sendRichMessage returned an invalid receipt", ErrDeliveryUnknown)
+	}
+	return message, nil
+}
+
 // SendDocument performs exactly one multipart Bot API attempt. Any outcome
 // without a valid Telegram receipt is classified as unknown unless Telegram
 // returned a definitive API rejection; callers must not retry automatically.
@@ -718,8 +764,11 @@ func (client *Client) EditMessageText(
 	if request.MessageID <= 0 {
 		return Message{}, errors.New("Telegram edit message id is required")
 	}
-	if strings.TrimSpace(request.Text) == "" {
-		return Message{}, errors.New("Telegram edit text is required")
+	if strings.TrimSpace(request.Text) == "" && (request.RichMessage == nil || strings.TrimSpace(request.RichMessage.Markdown) == "") {
+		return Message{}, errors.New("Telegram edit text or rich message is required")
+	}
+	if strings.TrimSpace(request.Text) != "" && request.RichMessage != nil {
+		return Message{}, errors.New("Telegram edit cannot contain both text and rich message")
 	}
 	if err := validateInlineKeyboard(request.ReplyMarkup); err != nil {
 		return Message{}, fmt.Errorf("Telegram edit reply markup: %w", err)
@@ -872,6 +921,8 @@ func (client *Client) acquire(ctx context.Context, mutation Mutation) (*Mutation
 func mutationFor(method string, payload any) (Mutation, bool) {
 	switch request := payload.(type) {
 	case SendMessageRequest:
+		return Mutation{Method: method, ChatID: int64(request.ChatID), Priority: request.Priority}, true
+	case SendRichMessageRequest:
 		return Mutation{Method: method, ChatID: int64(request.ChatID), Priority: request.Priority}, true
 	case EditMessageTextRequest:
 		return Mutation{Method: method, ChatID: int64(request.ChatID), CardID: int64(request.MessageID), Priority: request.Priority}, true

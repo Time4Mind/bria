@@ -219,6 +219,16 @@ func (sender *Sender) SendStatus(
 	status coordinator.Status,
 ) (coordinator.Receipt, error) {
 	sender.acknowledgeCallback(ctx, operationID, status.CallbackQueryID)
+	if status.RichMarkdown {
+		message, err := sender.client.SendRichMessage(ctx, telegram.SendRichMessageRequest{
+			ChatID: telegram.ChatID(status.ConversationID), RichMessage: telegram.InputRichMessage{Markdown: telegram.NormalizeRichMarkdown(status.Text)},
+			Priority: callbackPriority(status.CallbackQueryID),
+		})
+		if err != nil {
+			return coordinator.Receipt{}, fmt.Errorf("send rich Telegram status: %w", err)
+		}
+		return coordinator.Receipt{MessageID: int64(message.MessageID)}, nil
+	}
 	text, entities := telegramformat.Markdown(status.Text)
 	message, err := sender.client.SendMessage(ctx, telegram.SendMessageRequest{
 		ChatID:   telegram.ChatID(status.ConversationID),
@@ -246,6 +256,16 @@ func (sender *Sender) SendStatusWithKeyboard(
 	}
 	sender.acknowledgeCallback(ctx, operationID, status.CallbackQueryID)
 	markup := coordinatorMarkup(keyboard)
+	if status.RichMarkdown {
+		message, err := sender.client.SendRichMessage(ctx, telegram.SendRichMessageRequest{
+			ChatID: telegram.ChatID(status.ConversationID), RichMessage: telegram.InputRichMessage{Markdown: telegram.NormalizeRichMarkdown(status.Text)}, ReplyMarkup: markup,
+			Priority: callbackPriority(status.CallbackQueryID),
+		})
+		if err != nil {
+			return coordinator.Receipt{}, fmt.Errorf("send rich Telegram status with keyboard: %w", err)
+		}
+		return coordinator.Receipt{MessageID: int64(message.MessageID)}, nil
+	}
 	text, entities := telegramformat.Markdown(status.Text)
 	message, err := sender.client.SendMessage(ctx, telegram.SendMessageRequest{
 		ChatID: telegram.ChatID(status.ConversationID), Text: text, Entities: entities, ReplyMarkup: markup,
@@ -271,11 +291,14 @@ func (sender *Sender) EditStatusWithKeyboard(
 	}
 	sender.acknowledgeCallback(ctx, operationID, status.CallbackQueryID)
 	markup := coordinatorMarkup(keyboard)
-	text, entities := telegramformat.Markdown(status.Text)
-	message, err := sender.client.EditMessageText(ctx, telegram.EditMessageTextRequest{
-		ChatID: telegram.ChatID(status.ConversationID), MessageID: telegram.MessageID(status.SourceMessageID), Text: text, Entities: entities, ReplyMarkup: markup,
-		Priority: callbackPriority(status.CallbackQueryID),
-	})
+	request := telegram.EditMessageTextRequest{ChatID: telegram.ChatID(status.ConversationID), MessageID: telegram.MessageID(status.SourceMessageID), ReplyMarkup: markup, Priority: callbackPriority(status.CallbackQueryID)}
+	if status.RichMarkdown {
+		rich := telegram.InputRichMessage{Markdown: telegram.NormalizeRichMarkdown(status.Text)}
+		request.RichMessage = &rich
+	} else {
+		request.Text, request.Entities = telegramformat.Markdown(status.Text)
+	}
+	message, err := sender.client.EditMessageText(ctx, request)
 	if err != nil {
 		var apiErr *telegram.APIError
 		if errors.As(err, &apiErr) && strings.Contains(strings.ToLower(apiErr.Description), "message is not modified") {

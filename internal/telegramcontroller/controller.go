@@ -300,6 +300,7 @@ type SemanticCard struct {
 	SessionID                          domain.SessionID
 	Effect                             SemanticCarrierEffect
 	Header                             string
+	Footer                             string
 	Pages                              []SemanticContentPage
 	View                               SemanticPageView
 	Working, Archived, OptionsExpanded bool
@@ -320,8 +321,9 @@ type SemanticButton struct {
 	Choice    int
 }
 type SemanticSurface struct {
-	Text string
-	Rows [][]SemanticButton
+	Text         string
+	RichMarkdown bool
+	Rows         [][]SemanticButton
 }
 
 // ProjectCurrent returns a read-only exact-session or global-active projection.
@@ -1868,6 +1870,7 @@ func (controller *Controller) semanticCard(ctx context.Context, sessionID domain
 	selectable := make([]domain.SessionID, 0, len(sessions))
 	labelsByID := telegramsessions.Labels(sessions, session.ComputerID())
 	selectableLabels := make([]string, 0, len(sessions))
+	background := make([]string, 0, 5)
 	for _, candidate := range sessions {
 		if candidate.ComputerID() != session.ComputerID() || candidate.Status() == domain.SessionArchived {
 			continue
@@ -1876,6 +1879,8 @@ func (controller *Controller) semanticCard(ctx context.Context, sessionID domain
 		label := labelsByID[candidate.ID()]
 		if candidate.ID() == sessionID {
 			label = "✓ " + label
+		} else if len(background) < 5 {
+			background = append(background, fmt.Sprintf("%s %s · %s", sessionStatusGlyph(candidate.Status()), label, sessionStateText(candidate.Status())))
 		}
 		selectableLabels = append(selectableLabels, label)
 	}
@@ -1888,16 +1893,25 @@ func (controller *Controller) semanticCard(ctx context.Context, sessionID domain
 		rowSizes = append(rowSizes, size)
 	}
 	working := session.Status() == domain.SessionRunning || session.Status() == domain.SessionStopping || session.Status() == domain.SessionClosingAfterWork
-	stateText := string(session.Status())
-	if session.Status() == domain.SessionReady {
-		stateText = "готова"
-	} else if session.Status() == domain.SessionAwaitingRecovery {
-		stateText = "ожидает восстановления"
+	stateText := sessionStateText(session.Status())
+	nodeName := string(session.ComputerID())
+	if nodes, inventoryErr := controller.nodeInventory(ctx); inventoryErr == nil {
+		for _, node := range nodes {
+			if node.ID == session.ComputerID() && node.Name != "" {
+				nodeName = node.Name
+				break
+			}
+		}
+	}
+	footer := ""
+	if len(background) > 0 {
+		footer = "\n\n\u00a0\n\n─── фон ───  \n" + strings.Join(background, "  \n")
 	}
 	card := SemanticCard{
 		SessionID: sessionID,
 		Effect:    SemanticEditSameCarrier,
-		Header:    fmt.Sprintf("Сессия %s\n%s %s\nРабочая папка: %s", labelsByID[sessionID], session.Provider(), stateText, session.Workdir()),
+		Header:    fmt.Sprintf("%s · %s · %s · %s\n\n─────\n\n", labelsByID[sessionID], nodeName, session.Provider(), stateText),
+		Footer:    footer,
 		Pages:     pages,
 		View: SemanticPageView{
 			Page: page, Pages: len(pages), Anchor: pages[page-1].Anchors[0], FollowLatest: followLatest,
@@ -1922,6 +1936,42 @@ func (controller *Controller) semanticCard(ctx context.Context, sessionID domain
 		card.MakeActive = true
 	}
 	return card, nil
+}
+
+func sessionStateText(status domain.SessionStatus) string {
+	switch status {
+	case domain.SessionStarting:
+		return "запускается"
+	case domain.SessionResuming:
+		return "возобновляется"
+	case domain.SessionReady:
+		return "готова"
+	case domain.SessionRunning:
+		return "в работе"
+	case domain.SessionStopping:
+		return "останавливается"
+	case domain.SessionClosingAfterWork, domain.SessionClosing:
+		return "архивируется"
+	case domain.SessionAwaitingRecovery:
+		return "ожидает восстановления"
+	case domain.SessionResumeFailed:
+		return "ошибка"
+	default:
+		return string(status)
+	}
+}
+
+func sessionStatusGlyph(status domain.SessionStatus) string {
+	switch status {
+	case domain.SessionRunning, domain.SessionStarting, domain.SessionResuming, domain.SessionStopping, domain.SessionClosingAfterWork, domain.SessionClosing:
+		return "⏳"
+	case domain.SessionResumeFailed:
+		return "❌"
+	case domain.SessionAwaitingRecovery:
+		return "❓"
+	default:
+		return "✅"
+	}
 }
 
 func (controller *Controller) availableSessionName(ctx context.Context, computerID domain.ComputerID, workdir string) (string, error) {

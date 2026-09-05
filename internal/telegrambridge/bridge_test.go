@@ -428,6 +428,33 @@ func TestSenderConvertsProviderMarkdownToTelegramEntities(t *testing.T) {
 	}
 }
 
+func TestSenderUsesNativeRichMessageForStatusTables(t *testing.T) {
+	t.Parallel()
+
+	client := mustTelegramClient(t, func(request *http.Request) (*http.Response, error) {
+		if request.URL.Path != "/bot123:test/bootstrap/sendRichMessage" {
+			t.Fatalf("path = %q, want sendRichMessage", request.URL.Path)
+		}
+		var body telegram.SendRichMessageRequest
+		decodeJSON(t, request, &body)
+		if body.ChatID != 42 || !strings.Contains(body.RichMessage.Markdown, "| <sub>Сервер</sub> |") || body.ReplyMarkup == nil {
+			t.Fatalf("rich send body = %#v", body)
+		}
+		return response(http.StatusOK, `{"ok":true,"result":{"message_id":503,"from":{"id":600,"is_bot":true},"chat":{"id":42,"type":"private"}}}`), nil
+	})
+	sender, err := telegrambridge.NewSender(client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyboard := coordinator.KeyboardMarkup{{{Text: "≡ Меню", CallbackData: "signed"}}}
+	if _, err := sender.SendStatusWithKeyboard(context.Background(), "status:rich", coordinator.Status{
+		ConversationID: 42, RichMarkdown: true,
+		Text: "Статус\n\n\u00a0\n\n| Сервер | Бэк |\n|---|---|\n| local | codex |",
+	}, &keyboard); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestSenderNeverRetriesTransientSendFailure(t *testing.T) {
 	t.Parallel()
 

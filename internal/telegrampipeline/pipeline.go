@@ -243,9 +243,6 @@ func acceptCallback(
 			StatusRecovery: cloneStatusRecoveryBinding(claimResult.StatusRecovery),
 		}, nil
 	}
-	if telegramui.IsGlobalAction(decoded.Callback.Action) {
-		return AcceptedCallback{}, ErrStaleCallback
-	}
 	if claimResult.ArtifactRetry != nil {
 		binding := claimResult.ArtifactRetry
 		if !telegramui.IsArtifactRetryAction(decoded.Callback.Action) || decoded.Callback.SessionID != binding.PresentationID ||

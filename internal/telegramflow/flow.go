@@ -18,7 +18,24 @@ import (
 	"reflect"
 	"strconv"
 	"sync"
+	"time"
 )
+
+type TraceEvent struct {
+	Stage       string
+	OperationID string
+	UpdateID    int64
+	UpdateKind  coordinator.UpdateKind
+	Action      telegramui.Action
+	Effect      telegrampipeline.CallbackEffect
+	Result      string
+	Error       string
+	Duration    time.Duration
+}
+
+type TraceObserver interface {
+	ObserveTelegramFlow(context.Context, TraceEvent)
+}
 
 type CallbackExecutor interface {
 	HandleCallback(context.Context, telegrampipeline.CallbackPlan) (CallbackResult, error)
@@ -39,6 +56,7 @@ type MessageResult struct {
 }
 type SurfaceOutput struct {
 	Text                 string
+	RichMarkdown         bool
 	Keyboard             telegramui.CardKeyboard
 	SelectableSessionIDs []domain.SessionID
 	InteractionSessionID domain.SessionID
@@ -56,6 +74,7 @@ type TerminalOutput struct {
 type CardOutput struct {
 	SessionID            domain.SessionID
 	Header               string
+	Footer               string
 	Projection           telegramui.CarrierProjection
 	OptionsExpanded      bool
 	SelectableSessionIDs []domain.SessionID
@@ -80,6 +99,7 @@ type Config struct {
 	Callbacks          CallbackExecutor
 	Operations         CallbackOperationStore
 	Sender             TransportSender
+	Observer           TraceObserver
 }
 type pendingStore struct {
 	mu    sync.Mutex
@@ -98,6 +118,7 @@ type Handler struct {
 	operations         CallbackOperationStore
 	acknowledger       CallbackAcknowledger
 	pending            *pendingStore
+	observer           TraceObserver
 }
 type Sender struct {
 	base       TransportSender
@@ -105,6 +126,7 @@ type Sender struct {
 	uiState    telegramstate.Store
 	operations CallbackOperationStore
 	pending    *pendingStore
+	observer   TraceObserver
 }
 type UnknownCallbackOperation struct {
 	OwnerUserID        int64
@@ -153,12 +175,14 @@ func New(config Config) (*Handler, *Sender, error) {
 			operations:         config.Operations,
 			acknowledger:       acknowledger,
 			pending:            pending,
+			observer:           config.Observer,
 		}, &Sender{
 			base:       config.Sender,
 			registry:   config.CallbackRegistry,
 			uiState:    config.UIState,
 			operations: config.Operations,
 			pending:    pending,
+			observer:   config.Observer,
 		}, nil
 }
 func (handler *Handler) ListUnknown(ctx context.Context, limit int) ([]UnknownCallbackOperation, error) {
@@ -221,16 +245,34 @@ func (handler *Handler) PrepareUnknownRecovery(ctx context.Context, update coord
 	}
 	return coordinator.RecoveryControl{}, coordinator.Decision{}, errors.New("project unknown callback recovery")
 }
-func (handler *Handler) Handle(ctx context.Context, update coordinator.Update) (coordinator.Decision, error) {
+func (handler *Handler) Handle(ctx context.Context, update coordinator.Update) (decision coordinator.Decision, returnErr error) {
+	started := time.Now()
+	operationID := "status:" + strconv.FormatInt(update.ID, 10)
+	handler.trace(ctx, TraceEvent{Stage: "ingress.received", OperationID: operationID, UpdateID: update.ID, UpdateKind: update.Kind, Result: "started"})
+	defer func() {
+		result := "completed"
+		errorText := ""
+		if returnErr != nil {
+			result, errorText = "failed", returnErr.Error()
+		}
+		handler.trace(context.WithoutCancel(ctx), TraceEvent{Stage: "ingress.completed", OperationID: operationID, UpdateID: update.ID, UpdateKind: update.Kind, Result: result, Error: errorText, Duration: time.Since(started)})
+	}()
 	if update.Kind != coordinator.UpdateCallback {
 		if handler.messageUI != nil {
+			stageStarted := time.Now()
 			result, err := handler.messageUI.HandleMessage(ctx, update)
+			handler.trace(ctx, completedTrace("controller.message", operationID, update, "", "", stageStarted, err))
 			if err != nil {
 				return coordinator.Decision{}, err
 			}
-			return handler.prepareMessageResult(update, result)
+			stageStarted = time.Now()
+			decision, err := handler.prepareMessageResult(update, result)
+			handler.trace(ctx, completedTrace("projection.message", operationID, update, "", "", stageStarted, err))
+			return decision, err
 		}
+		stageStarted := time.Now()
 		decision, err := handler.messages.Handle(ctx, update)
+		handler.trace(ctx, completedTrace("controller.message", operationID, update, "", "", stageStarted, err))
 		if err == nil && decision.Keyboard != nil {
 			return coordinator.Decision{}, errors.New("unsigned Telegram keyboard rejected")
 		}
@@ -240,7 +282,6 @@ func (handler *Handler) Handle(ctx context.Context, update coordinator.Update) (
 		update.ConversationKind != "private" {
 		return coordinator.Decision{Kind: coordinator.DecisionSkip}, nil
 	}
-	operationID := "status:" + strconv.FormatInt(update.ID, 10)
 	digest := fmt.Sprintf("%x", sha256.Sum256([]byte(update.Text)))
 	if existing, found, err := handler.operations.Load(ctx, operationID); err != nil {
 		return coordinator.Decision{}, fmt.Errorf("load callback operation: %w", err)
@@ -252,6 +293,7 @@ func (handler *Handler) Handle(ctx context.Context, update coordinator.Update) (
 			return coordinator.Decision{}, fmt.Errorf("persist callback acknowledgement: %w", err)
 		}
 	}
+	stageStarted := time.Now()
 	accepted, err := telegrampipeline.AcceptCallbackForDurableOperation(
 		ctx,
 		update,
@@ -261,6 +303,7 @@ func (handler *Handler) Handle(ctx context.Context, update coordinator.Update) (
 		handler.registry,
 		handler.presenter,
 	)
+	handler.trace(ctx, completedTrace("callback.accept", operationID, update, "", "", stageStarted, err))
 	if err != nil {
 		if recoverableCallbackError(err) {
 			if handler.acknowledger != nil {
@@ -270,7 +313,9 @@ func (handler *Handler) Handle(ctx context.Context, update coordinator.Update) (
 		}
 		return coordinator.Decision{}, err
 	}
+	stageStarted = time.Now()
 	plan, err := telegrampipeline.PlanAcceptedCallback(accepted)
+	handler.trace(ctx, completedTrace("callback.plan", operationID, update, accepted.Action, "", stageStarted, err))
 	if err != nil {
 		return coordinator.Decision{}, err
 	}
@@ -304,7 +349,9 @@ func (handler *Handler) executeClaimed(ctx context.Context, update coordinator.U
 		}
 		return handler.resumeOperation(ctx, update, operation.CallbackDigest, existing)
 	}
+	stageStarted := time.Now()
 	result, err := handler.callbacks.HandleCallback(ctx, operation.Plan)
+	handler.trace(ctx, completedTrace("controller.callback", operation.ID, update, operation.Plan.Action, operation.Plan.Effect, stageStarted, err))
 	if err != nil {
 		return coordinator.Decision{}, fmt.Errorf("%w: callback effect: %v", telegrampipeline.ErrUnknownOperation, err)
 	}
@@ -314,7 +361,9 @@ func (handler *Handler) executeClaimed(ctx context.Context, update coordinator.U
 	if result.OperationID != operation.ID {
 		return coordinator.Decision{}, fmt.Errorf("%w: callback executor did not acknowledge operation %s", telegrampipeline.ErrUnknownOperation, operation.ID)
 	}
+	stageStarted = time.Now()
 	prepared, err := handler.prepareCallbackResult(operation, result)
+	handler.trace(ctx, completedTrace("projection.callback", operation.ID, update, operation.Plan.Action, operation.Plan.Effect, stageStarted, err))
 	if err != nil {
 		return coordinator.Decision{}, fmt.Errorf("%w: callback effect output: %v", telegrampipeline.ErrUnknownOperation, err)
 	}
@@ -484,6 +533,34 @@ func recoverableCallbackError(err error) bool {
 		errors.Is(err, telegrampipeline.ErrReplayedCallback)
 }
 
+func completedTrace(stage, operationID string, update coordinator.Update, action telegramui.Action, effect telegrampipeline.CallbackEffect, started time.Time, err error) TraceEvent {
+	result, errorText := "completed", ""
+	if err != nil {
+		result, errorText = "failed", err.Error()
+	}
+	return TraceEvent{Stage: stage, OperationID: operationID, UpdateID: update.ID, UpdateKind: update.Kind, Action: action, Effect: effect, Result: result, Error: errorText, Duration: time.Since(started)}
+}
+
+func (handler *Handler) trace(ctx context.Context, event TraceEvent) {
+	if handler != nil && handler.observer != nil {
+		handler.observer.ObserveTelegramFlow(ctx, event)
+	}
+}
+
+func (sender *Sender) trace(ctx context.Context, event TraceEvent) {
+	if sender != nil && sender.observer != nil {
+		sender.observer.ObserveTelegramFlow(ctx, event)
+	}
+}
+
+func transportTrace(stage, operationID string, plan telegrampipeline.CallbackPlan, started time.Time, err error) TraceEvent {
+	result, errorText := "completed", ""
+	if err != nil {
+		result, errorText = "failed", err.Error()
+	}
+	return TraceEvent{Stage: stage, OperationID: operationID, UpdateID: plan.UpdateID, UpdateKind: coordinator.UpdateCallback, Action: plan.Action, Effect: plan.Effect, Result: result, Error: errorText, Duration: time.Since(started)}
+}
+
 type Prepared struct {
 	OperationID  string
 	Status       coordinator.Status
@@ -649,7 +726,7 @@ func prepareCard(
 		OperationID: operationID,
 		Status: coordinator.Status{
 			ConversationID:  conversationID,
-			Text:            card.Header + projection.Card.Pages[projection.Card.View.Page-1].Content,
+			Text:            card.Header + projection.Card.Pages[projection.Card.View.Page-1].Content + card.Footer,
 			CallbackQueryID: callbackQueryID,
 			SourceMessageID: sourceMessageID,
 		},
@@ -727,7 +804,7 @@ func PrepareSurface(
 		return Prepared{}, err
 	}
 	copySurface := cloneSurfaceOutput(surface)
-	return Prepared{OperationID: operationID, Status: coordinator.Status{ConversationID: conversationID, Text: surface.Text, CallbackQueryID: callbackQueryID, SourceMessageID: sourceMessageID}, Keyboard: coordinatorKeyboard(presentation.Markup), Presentation: presentation, Surface: &copySurface, Edit: edit}, nil
+	return Prepared{OperationID: operationID, Status: coordinator.Status{ConversationID: conversationID, Text: surface.Text, RichMarkdown: surface.RichMarkdown, CallbackQueryID: callbackQueryID, SourceMessageID: sourceMessageID}, Keyboard: coordinatorKeyboard(presentation.Markup), Presentation: presentation, Surface: &copySurface, Edit: edit}, nil
 }
 func prepareTerminal(
 	operationID string,
@@ -774,7 +851,7 @@ func (sender *Sender) EnqueuePrepared(ctx context.Context, sequence uint64, prep
 func sameArtifactRetryPrepared(left, right Prepared) bool {
 	return left.OperationID == right.OperationID && left.Status == right.Status && left.Edit == right.Edit && left.Surface != nil && right.Surface != nil &&
 		left.Surface.ArtifactRetry != nil && right.Surface.ArtifactRetry != nil && *left.Surface.ArtifactRetry == *right.Surface.ArtifactRetry &&
-		left.Surface.Text == right.Surface.Text && reflect.DeepEqual(left.Surface.Keyboard, right.Surface.Keyboard)
+		left.Surface.Text == right.Surface.Text && left.Surface.RichMarkdown == right.Surface.RichMarkdown && reflect.DeepEqual(left.Surface.Keyboard, right.Surface.Keyboard)
 }
 func (sender *Sender) EnqueueRecoveryStatus(ctx context.Context, operationID string, status coordinator.Status, keyboard *coordinator.KeyboardMarkup, recovery StatusRecoveryBinding) (coordinator.DurableOutboundReceipt, error) {
 	return sender.enqueueStatus(ctx, operationID, status, keyboard, &recovery)
@@ -834,7 +911,15 @@ func (sender *Sender) DeliverPendingStatuses(ctx context.Context, limit int) err
 	}
 	return nil
 }
-func (sender *Sender) deliverStatusOperation(ctx context.Context, operation StatusOperation) (coordinator.Receipt, error) {
+func (sender *Sender) deliverStatusOperation(ctx context.Context, operation StatusOperation) (receiptResult coordinator.Receipt, returnErr error) {
+	started := time.Now()
+	defer func() {
+		result, errorText := "completed", ""
+		if returnErr != nil {
+			result, errorText = "failed", returnErr.Error()
+		}
+		sender.trace(context.WithoutCancel(ctx), TraceEvent{Stage: "delivery.durable", OperationID: operation.ID, Result: result, Error: errorText, Duration: time.Since(started)})
+	}()
 	unknown := operation
 	unknown.Phase = StatusSendUnknown
 	changed, err := sender.operations.CompareAndSwapStatus(ctx, operation.ID, StatusQueued, unknown)
@@ -1032,10 +1117,17 @@ func (sender *Sender) sendPrepared(
 		}
 	}
 	if !found {
+		started := time.Now()
+		stage := "transport.send"
 		if edit {
-			return sender.base.EditStatusWithKeyboard(ctx, operationID, status, keyboard)
+			stage = "transport.edit"
+			receipt, err := sender.base.EditStatusWithKeyboard(ctx, operationID, status, keyboard)
+			sender.trace(ctx, transportTrace(stage, operationID, telegrampipeline.CallbackPlan{}, started, err))
+			return receipt, err
 		}
-		return sender.base.SendStatusWithKeyboard(ctx, operationID, status, keyboard)
+		receipt, err := sender.base.SendStatusWithKeyboard(ctx, operationID, status, keyboard)
+		sender.trace(ctx, transportTrace(stage, operationID, telegrampipeline.CallbackPlan{}, started, err))
+		return receipt, err
 	}
 	defer sender.pending.remove(operationID)
 	if !reflect.DeepEqual(prepared.Status, status) || !reflect.DeepEqual(prepared.Keyboard, keyboard) {
@@ -1059,11 +1151,15 @@ func (sender *Sender) sendPrepared(
 	}
 	var receipt coordinator.Receipt
 	var err error
+	transportStarted := time.Now()
+	transportStage := "transport.send"
 	if edit {
+		transportStage = "transport.edit"
 		receipt, err = sender.base.EditStatusWithKeyboard(ctx, operationID, status, keyboard)
 	} else {
 		receipt, err = sender.base.SendStatusWithKeyboard(ctx, operationID, status, keyboard)
 	}
+	sender.trace(ctx, transportTrace(transportStage, operationID, operation.Plan, transportStarted, err))
 	if err != nil {
 		return coordinator.Receipt{}, err
 	}
@@ -1086,9 +1182,12 @@ func (sender *Sender) sendPrepared(
 		}
 		operation = confirmed
 	}
+	finalizeStarted := time.Now()
 	if err := finalizePrepared(ctx, sender.registry, sender.uiState, prepared, receipt.MessageID); err != nil {
+		sender.trace(ctx, transportTrace("state.commit", operationID, operation.Plan, finalizeStarted, err))
 		return coordinator.Receipt{}, err
 	}
+	sender.trace(ctx, transportTrace("state.commit", operationID, operation.Plan, finalizeStarted, nil))
 	if durable {
 		committed := operation
 		committed.Phase = CallbackCommitted

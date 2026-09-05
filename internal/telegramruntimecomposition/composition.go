@@ -332,7 +332,7 @@ func projectSemanticCard(card telegramcontroller.SemanticCard, effect telegramui
 	if err != nil {
 		return nil, fmt.Errorf("project semantic card keyboard: %w", err)
 	}
-	return &telegramflow.CardOutput{SessionID: card.SessionID, Header: card.Header, Projection: telegramui.CarrierProjection{Effect: effect, Card: telegramui.ProjectedCard{Pages: pages, View: view, Keyboard: keyboard}}, OptionsExpanded: card.OptionsExpanded, SelectableSessionIDs: append([]domain.SessionID(nil), card.SelectableSessionIDs...), MakeActive: card.MakeActive}, nil
+	return &telegramflow.CardOutput{SessionID: card.SessionID, Header: card.Header, Footer: card.Footer, Projection: telegramui.CarrierProjection{Effect: effect, Card: telegramui.ProjectedCard{Pages: pages, View: view, Keyboard: keyboard}}, OptionsExpanded: card.OptionsExpanded, SelectableSessionIDs: append([]domain.SessionID(nil), card.SelectableSessionIDs...), MakeActive: card.MakeActive}, nil
 }
 
 func projectSemanticSurface(surface telegramcontroller.SemanticSurface) (*telegramflow.SurfaceOutput, error) {
@@ -373,7 +373,7 @@ func projectSemanticSurface(surface telegramcontroller.SemanticSurface) (*telegr
 			keyboard.Rows[rowIndex][buttonIndex] = button
 		}
 	}
-	return &telegramflow.SurfaceOutput{Text: surface.Text, Keyboard: keyboard, SelectableSessionIDs: selectable}, nil
+	return &telegramflow.SurfaceOutput{Text: surface.Text, RichMarkdown: surface.RichMarkdown, Keyboard: keyboard, SelectableSessionIDs: selectable}, nil
 }
 
 func telegramUIAction(action telegramcontroller.SemanticActionKind) (telegramui.Action, error) {

@@ -74,6 +74,7 @@ type KeyboardMarkup [][]KeyboardButton
 type Status struct {
 	ConversationID  int64
 	Text            string
+	RichMarkdown    bool
 	CallbackQueryID string
 	SourceMessageID int64
 }
