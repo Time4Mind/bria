@@ -44,6 +44,12 @@ func Apply(ctx context.Context, preferences settingsport.Preferences, providers 
 			return errors.New("session creation settings are not configured")
 		}
 		return creation.ToggleArchiveRecommendations(ctx)
+	case "settings_session_naming":
+		creation, ok := preferences.(settingsport.CreationPreferences)
+		if !ok {
+			return errors.New("session creation settings are not configured")
+		}
+		return creation.ToggleSessionNaming(ctx)
 	case "settings_preprocessing":
 		preprocessing, ok := preferences.(settingsport.PreprocessingPreferences)
 		if !ok {

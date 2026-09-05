@@ -25,6 +25,57 @@ const (
 	chatID  = int64(42)
 )
 
+func TestSessionNamePrefersProviderTitleAndFallsBackToCheapModel(t *testing.T) {
+	for _, test := range []struct {
+		name         string
+		providerName string
+		settings     *testPreferences
+		want         string
+		wantSource   domain.SessionNameSource
+	}{
+		{name: "provider", providerName: "Fix menu", want: "Fix menu", wantSource: domain.SessionNameProvider},
+		{name: "cheap model", settings: &testPreferences{settings: settingsport.Snapshot{CardDetail: "standard", CardPageLimit: 64, SessionNamingEnabled: true}}, want: "Quick fix", wantSource: domain.SessionNameModel},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ready := readySession(t, "aaaaaaaa-aaaa-4aaa-9aaa-aaaaaaaaaaaa", domain.ProviderCodex, "/workspace/project", "provider-a", 1)
+			var err error
+			ready, err = ready.Rename("project", domain.SessionNameDirectory)
+			if err != nil {
+				t.Fatal(err)
+			}
+			store := newLockedSessions(ready)
+			finals := make(chan telegramcontroller.Notification, 1)
+			options := telegramcontroller.Options{Recovered: []domain.Session{ready}, SessionNamer: testSessionNamer{store: store, generated: test.settings != nil}}
+			controller := newController(t, nil, store, submitterFunc(func(context.Context, domain.SessionID, string) (sessionruntime.TurnResult, error) {
+				return sessionruntime.TurnResult{Final: "done", TerminalStatus: sessionruntime.StatusCompleted, ProviderSessionName: test.providerName}, nil
+			}), notifierFunc(func(_ context.Context, notification telegramcontroller.Notification) error {
+				if notification.Kind == telegramcontroller.NotificationFinal {
+					finals <- notification
+				}
+				return nil
+			}), options)
+			t.Cleanup(func() { _ = controller.Close(context.Background()) })
+			mustStatus(t, controller, message(1, "/use "+string(ready.ID())))
+			mustStatus(t, controller, message(2, "/review now"))
+			select {
+			case <-finals:
+			case <-time.After(time.Second):
+				t.Fatal("timed out waiting for final")
+			}
+			deadline := time.Now().Add(time.Second)
+			for time.Now().Before(deadline) {
+				got, _ := store.Load(context.Background(), ready.ID())
+				if got.Name() == test.want && got.NameSource() == test.wantSource {
+					return
+				}
+				time.Sleep(time.Millisecond)
+			}
+			got, _ := store.Load(context.Background(), ready.ID())
+			t.Fatalf("session name = %q/%q, want %q/%q", got.Name(), got.NameSource(), test.want, test.wantSource)
+		})
+	}
+}
+
 func TestRoutesOnlyOwnerPrivateMessagesAndUnknownSlashIsAPrompt(t *testing.T) {
 	controller := newController(t, creatorFunc(nil), &memorySessions{}, submitterFunc(nil), notifierFunc(nil), telegramcontroller.Options{})
 	t.Cleanup(func() { _ = controller.Close(context.Background()) })
@@ -439,6 +490,11 @@ func (p *testPreferences) ToggleBackgroundErrors(context.Context) error {
 func (p *testPreferences) ToggleArchiveRecommendations(context.Context) error {
 	_, _ = p.Snapshot(context.Background())
 	p.settings.ArchiveRecommendations = !p.settings.ArchiveRecommendations
+	return nil
+}
+func (p *testPreferences) ToggleSessionNaming(context.Context) error {
+	_, _ = p.Snapshot(context.Background())
+	p.settings.SessionNamingEnabled = !p.settings.SessionNamingEnabled
 	return nil
 }
 func (p *testPreferences) TogglePreprocessing(context.Context) error {
@@ -3139,6 +3195,24 @@ type lockedSessions struct {
 	byID map[domain.SessionID]domain.Session
 }
 
+type testSessionNamer struct {
+	store     *lockedSessions
+	generated bool
+}
+
+func (namer testSessionNamer) Begin(_ context.Context, session domain.Session, _, _ string) func(string) {
+	return func(providerName string) {
+		name, source := providerName, domain.SessionNameProvider
+		if name == "" && namer.generated {
+			name, source = "Quick fix", domain.SessionNameModel
+		}
+		if name != "" {
+			_, _ = namer.store.RenameSession(context.Background(), session.ID(), name, source)
+		}
+	}
+}
+func (testSessionNamer) Wait(context.Context) error { return nil }
+
 func newLockedSessions(sessions ...domain.Session) *lockedSessions {
 	store := &lockedSessions{byID: make(map[domain.SessionID]domain.Session, len(sessions))}
 	for _, session := range sessions {
@@ -3170,6 +3244,20 @@ func (sessions *lockedSessions) Load(_ context.Context, id domain.SessionID) (do
 		return session, nil
 	}
 	return domain.Session{}, errors.New("session not found")
+}
+
+func (sessions *lockedSessions) RenameSession(_ context.Context, id domain.SessionID, name string, source domain.SessionNameSource) (domain.Session, error) {
+	sessions.mu.Lock()
+	defer sessions.mu.Unlock()
+	current, ok := sessions.byID[id]
+	if !ok {
+		return domain.Session{}, errors.New("session not found")
+	}
+	renamed, err := current.Rename(name, source)
+	if err == nil {
+		sessions.byID[id] = renamed
+	}
+	return renamed, err
 }
 
 func (sessions *memorySessions) List(context.Context) ([]domain.Session, error) {

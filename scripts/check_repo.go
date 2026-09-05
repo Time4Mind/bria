@@ -1273,7 +1273,7 @@ var packagePolicies = map[string]packagePolicy{
 	},
 	"internal/domain": {
 		responsibility:     "define dependency-free product state and rules",
-		maxProductionLines: 700,
+		maxProductionLines: 750,
 	},
 	"internal/durableflow": {
 		responsibility:     "process durable ordered message journal work",
@@ -1417,7 +1417,7 @@ var packagePolicies = map[string]packagePolicy{
 		allowedImports: []string{
 			"internal/coordinator", "internal/domain", "internal/telegramcontroller", "internal/telegramflow", "internal/telegrampipeline", "internal/telegramrecoverycomposition", "internal/telegramstate", "internal/telegramui",
 		},
-		maxProductionLines: 600,
+		maxProductionLines: 610,
 	},
 	"internal/telegramcompletioncomposition": {
 		responsibility: "route durable session output into active cards or policy-controlled background notifications",
@@ -1507,7 +1507,7 @@ var packagePolicies = map[string]packagePolicy{
 	"internal/singlemachinecomposition": {
 		responsibility: "compose the single-computer Bria process",
 		allowedImports: []string{
-			"internal/app", "internal/authcomposition", "internal/callbacktoken", "internal/claudestore", "internal/config", "internal/coordinator", "internal/domain", "internal/durablecomposition", "internal/durableflow", "internal/interactioncomposition", "internal/messagejournal", "internal/processenv", "internal/promptpreprocess", "internal/promptpreprocesscommand", "internal/providerquota", "internal/recoverycomposition", "internal/recoveryruntime", "internal/runtimefactory", "internal/safelog", "internal/sessioncreation", "internal/sessionexpiry", "internal/sessionid", "internal/sessionruntime", "internal/sessionsupervisor", "internal/settings", "internal/settingscomposition", "internal/storage", "internal/supervisioncomposition", "internal/telegram", "internal/telegrambridge", "internal/telegramcompletioncomposition", "internal/telegramcontroller", "internal/telegramflow", "internal/telegramnotify", "internal/telegrampipeline", "internal/telegrampromptcomposition", "internal/telegramrecoverycomposition", "internal/telegramruntimecomposition", "internal/turnruntimecomposition", "internal/workdir",
+			"internal/app", "internal/authcomposition", "internal/callbacktoken", "internal/claudestore", "internal/config", "internal/coordinator", "internal/domain", "internal/durablecomposition", "internal/durableflow", "internal/interactioncomposition", "internal/messagejournal", "internal/processenv", "internal/promptpreprocess", "internal/promptpreprocesscommand", "internal/providerquota", "internal/recoverycomposition", "internal/recoveryruntime", "internal/runtimefactory", "internal/safelog", "internal/sessioncreation", "internal/sessionexpiry", "internal/sessionid", "internal/sessionnaming", "internal/sessionruntime", "internal/sessionsupervisor", "internal/settings", "internal/settingscomposition", "internal/storage", "internal/supervisioncomposition", "internal/telegram", "internal/telegrambridge", "internal/telegramcompletioncomposition", "internal/telegramcontroller", "internal/telegramflow", "internal/telegramnotify", "internal/telegrampipeline", "internal/telegrampromptcomposition", "internal/telegramrecoverycomposition", "internal/telegramruntimecomposition", "internal/turnruntimecomposition", "internal/workdir",
 		},
 		maxProductionLines: 850,
 	},
@@ -1620,7 +1620,7 @@ var packagePolicies = map[string]packagePolicy{
 		allowedImports: []string{
 			"internal/callbacktoken", "internal/coordinator", "internal/telegram", "internal/telegramformat", "internal/telegramrecovery", "internal/telegramrecovery/statusrecovery", "internal/telegramui",
 		},
-		maxProductionLines: 1350,
+		maxProductionLines: 1360,
 	},
 	"internal/telegramformat": {
 		responsibility:     "convert bounded provider Markdown into Telegram text entities",
@@ -1642,6 +1642,11 @@ var packagePolicies = map[string]packagePolicy{
 		allowedImports:     []string{"internal/domain"},
 		maxProductionLines: 900,
 	},
+	"internal/sessionnaming": {
+		responsibility:     "derive and persist optional short session labels",
+		allowedImports:     []string{"internal/domain", "internal/promptpreprocess"},
+		maxProductionLines: 250,
+	},
 	"internal/telegramcreationview": {
 		responsibility:     "render the transport-neutral Telegram session-creation wizard",
 		allowedImports:     []string{"internal/domain", "internal/sessioncreation"},
@@ -1652,7 +1657,7 @@ var packagePolicies = map[string]packagePolicy{
 		allowedImports: []string{
 			"internal/app", "internal/coordinator", "internal/domain", "internal/promptpreprocess", "internal/sessioncreation", "internal/sessionruntime", "internal/settingsport", "internal/telegramcreationview", "internal/telegramnodes", "internal/telegramsettings", "internal/telegramsettingsview", "internal/telegramsessions", "internal/telegramstatus", "internal/turnprocessing",
 		},
-		maxProductionLines: 4200,
+		maxProductionLines: 4225,
 	},
 	"internal/telegramflow": {
 		responsibility: "join Telegram callback, presentation, and durable card boundaries",

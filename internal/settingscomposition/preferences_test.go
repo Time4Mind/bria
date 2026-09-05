@@ -73,6 +73,11 @@ func TestPreferencesMutationsPersistAndLocalReloadSharesOneFile(t *testing.T) {
 				t.Fatal("archive recommendations remained disabled")
 			}
 		}},
+		{"session naming", func() error { return preferences.ToggleSessionNaming(context.Background()) }, func(t *testing.T, got settings.Settings) {
+			if !got.SessionNamingEnabled {
+				t.Fatal("session naming remained disabled")
+			}
+		}},
 		{"preprocessing", func() error { return preferences.TogglePreprocessing(context.Background()) }, func(t *testing.T, got settings.Settings) {
 			if !got.PreprocessingEnabled {
 				t.Fatal("preprocessing remained disabled")
@@ -169,6 +174,7 @@ func TestPreferencesDriveTypedControllerAndDurableFile(t *testing.T) {
 		telegramcontroller.SemanticSettingsDetail, telegramcontroller.SemanticSettingsPageLimit, telegramcontroller.SemanticSettingsTechnicalActions,
 		telegramcontroller.SemanticSettingsBackgroundQuestions, telegramcontroller.SemanticSettingsBackgroundErrors,
 		telegramcontroller.SemanticSettingsArchiveRecommendations,
+		telegramcontroller.SemanticSettingsSessionNaming,
 		telegramcontroller.SemanticSettingsPreprocessing,
 		telegramcontroller.SemanticSettingsLifetime48Hours,
 	} {
@@ -184,7 +190,7 @@ func TestPreferencesDriveTypedControllerAndDurableFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	persisted, err := reopened.Load(context.Background())
-	if err != nil || persisted.ContinueExisting || !persisted.ScreenEnabled || persisted.CardDetail != settings.CardDetailCompact || persisted.CardPageLimit != 128 || persisted.ShowTechnicalActions || persisted.NotifyBackgroundQuestions || persisted.NotifyBackgroundErrors || !persisted.ArchiveRecommendations || !persisted.PreprocessingEnabled || persisted.PreprocessingInstruction != "clean speech" || persisted.SessionLifetime != settings.Lifetime48Hours {
+	if err != nil || persisted.ContinueExisting || !persisted.ScreenEnabled || persisted.CardDetail != settings.CardDetailCompact || persisted.CardPageLimit != 128 || persisted.ShowTechnicalActions || persisted.NotifyBackgroundQuestions || persisted.NotifyBackgroundErrors || !persisted.ArchiveRecommendations || !persisted.SessionNamingEnabled || !persisted.PreprocessingEnabled || persisted.PreprocessingInstruction != "clean speech" || persisted.SessionLifetime != settings.Lifetime48Hours {
 		t.Fatalf("durable controller settings = %+v, %v", persisted, err)
 	}
 }

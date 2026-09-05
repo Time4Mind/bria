@@ -42,6 +42,7 @@ func TestExistingAdapterMessagesRemainWireCompatible(t *testing.T) {
 		{`{"protocol":1,"type":"event","request_id":"request-1","kind":"commentary","text":"working"}`, AdapterMessage{Protocol: 1, Type: TypeEvent, RequestID: "request-1", Kind: "commentary", Text: "working"}},
 		{`{"protocol":1,"type":"final","request_id":"request-1","text":"done"}`, AdapterMessage{Protocol: 1, Type: TypeFinal, RequestID: "request-1", Text: "done"}},
 		{`{"protocol":1,"type":"completed","request_id":"request-1","status":"failed","error_code":"provider_error"}`, AdapterMessage{Protocol: 1, Type: TypeCompleted, RequestID: "request-1", Status: "failed", ErrorCode: "provider_error"}},
+		{`{"protocol":1,"type":"completed","request_id":"request-1","status":"completed","provider_session_name":"Fix menu"}`, AdapterMessage{Protocol: 1, Type: TypeCompleted, RequestID: "request-1", Status: "completed", ProviderSessionName: "Fix menu"}},
 	}
 	for _, test := range tests {
 		got, err := DecodeAdapterLine([]byte(test.line), Limits{})

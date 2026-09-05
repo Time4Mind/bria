@@ -39,7 +39,7 @@ func TestRenderCategoryKeepsEveryCurrentSettingInOneIntuitiveGroup(t *testing.T)
 		{CategoryPreprocessing, []string{"Препроцессинг", "Состояние: выключено", "Инструкция: встроенная"}, []string{"settings_preprocessing", "settings_preprocessing_instruction", "settings_preprocessing_reset", "menu_settings"}},
 		{CategoryArchive, []string{"Сессии и архив", "Продолжать существующую: включено", "Рекомендации архива: выключены", "Срок жизни сессий: never", "Очередь: 16"}, []string{"settings_continue_existing", "settings_archive_recommendations", "settings_lifetime_never", "settings_lifetime_6h", "settings_lifetime_12h", "settings_lifetime_24h", "settings_lifetime_48h", "menu_settings"}},
 		{CategoryNotifications, []string{"Уведомления", "Фоновые вопросы: включены", "Фоновые ошибки: включены"}, []string{"settings_background_questions", "settings_background_errors", "menu_settings"}},
-		{CategoryCreation, []string{"Создание сессии"}, []string{"settings_default_provider", "settings_default_workdir", "settings_clear_creation_defaults", "menu_settings"}},
+		{CategoryCreation, []string{"Создание сессии", "Автоимя дешёвой моделью: выключено"}, []string{"settings_session_naming", "settings_default_provider", "settings_default_workdir", "settings_clear_creation_defaults", "menu_settings"}},
 		{CategoryProviders, []string{"CLI"}, []string{"authorize_codex", "authorize_claude", "menu_settings"}},
 	}
 	for _, test := range tests {
@@ -91,6 +91,7 @@ func (settingsPreferencesStub) SetSessionLifetime(context.Context, string) error
 func (settingsPreferencesStub) ToggleArchiveRecommendations(context.Context) error {
 	return nil
 }
+func (settingsPreferencesStub) ToggleSessionNaming(context.Context) error { return nil }
 func (settingsPreferencesStub) SetDefaultProvider(context.Context, domain.ComputerID, domain.Provider) error {
 	return nil
 }

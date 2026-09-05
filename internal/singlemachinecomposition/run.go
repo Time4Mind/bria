@@ -28,6 +28,7 @@ import (
 	"bria/internal/sessioncreation"
 	"bria/internal/sessionexpiry"
 	"bria/internal/sessionid"
+	"bria/internal/sessionnaming"
 	"bria/internal/sessionruntime"
 	"bria/internal/sessionsupervisor"
 	"bria/internal/settings"
@@ -267,6 +268,13 @@ func runTelegramController(
 	if err != nil {
 		return fmt.Errorf("compose prompt preprocessor: %w", err)
 	}
+	sessionNamer, err := sessionnaming.New(state, func(ctx context.Context) (bool, error) {
+		current, loadErr := preferences.Load(ctx)
+		return current.SessionNamingEnabled, loadErr
+	}, sessionnaming.CheapGenerator{Processor: promptPreprocessor})
+	if err != nil {
+		return fmt.Errorf("compose session naming: %w", err)
+	}
 	telegramScheduler.SetReporter(func(diagnostic telegram.SchedulerDiagnostic) {
 		_ = safeLogger.Write(safelog.Event{
 			Class: safelog.Service, Type: "telegram.mutation_delayed", ErrorCategory: diagnostic.ErrorClass,
@@ -441,6 +449,7 @@ func runTelegramController(
 			CreationEnvironment:   creationEnvironment,
 			Quotas:                quotaService,
 			Preprocessor:          promptPreprocessor,
+			SessionNamer:          sessionNamer,
 			PreprocessingObserver: preprocessingObserver{logger: safeLogger},
 			Stopper:               turnStopper, ArchivedResumer: archivedResumer, SessionCloser: sessionCloser,
 			TurnLifecycle: turnLifecycle, DurableInput: inputCustody, DurableOutput: outputCustody,

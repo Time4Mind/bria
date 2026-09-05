@@ -208,6 +208,8 @@ func semanticActionFromPlan(plan telegrampipeline.CallbackPlan) (telegramcontrol
 		kind = telegramcontroller.SemanticSettingsPreprocessingInstruction
 	case telegramui.ActionSettingsPreprocessingReset:
 		kind = telegramcontroller.SemanticSettingsPreprocessingReset
+	case telegramui.ActionSettingsSessionNaming:
+		kind = telegramcontroller.SemanticSettingsSessionNaming
 	case telegramui.ActionAuthorizeCodex:
 		kind = telegramcontroller.SemanticAuthorizeCodex
 	case telegramui.ActionAuthorizeClaude:
@@ -291,7 +293,7 @@ func callbackEffectForAction(action telegramui.Action) telegrampipeline.Callback
 		telegramui.ActionSettingsLifetime6Hours, telegramui.ActionSettingsLifetime12Hours,
 		telegramui.ActionSettingsLifetime24Hours, telegramui.ActionSettingsLifetime48Hours,
 		telegramui.ActionSettingsProviderCodex, telegramui.ActionSettingsProviderClaude,
-		telegramui.ActionSettingsPreprocessing, telegramui.ActionSettingsPreprocessingInstruction, telegramui.ActionSettingsPreprocessingReset:
+		telegramui.ActionSettingsPreprocessing, telegramui.ActionSettingsPreprocessingInstruction, telegramui.ActionSettingsPreprocessingReset, telegramui.ActionSettingsSessionNaming:
 		return telegrampipeline.EffectChangeSettings
 	case telegramui.ActionAuthorizeCodex:
 		return telegrampipeline.EffectAuthorizeCodex
@@ -484,6 +486,8 @@ func telegramUIAction(action telegramcontroller.SemanticActionKind) (telegramui.
 		return telegramui.ActionSettingsPreprocessingInstruction, nil
 	case telegramcontroller.SemanticSettingsPreprocessingReset:
 		return telegramui.ActionSettingsPreprocessingReset, nil
+	case telegramcontroller.SemanticSettingsSessionNaming:
+		return telegramui.ActionSettingsSessionNaming, nil
 	case telegramcontroller.SemanticAuthorizeCodex:
 		return telegramui.ActionAuthorizeCodex, nil
 	case telegramcontroller.SemanticAuthorizeClaude:

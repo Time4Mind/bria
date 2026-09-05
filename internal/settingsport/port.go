@@ -24,6 +24,7 @@ type Snapshot struct {
 	DefaultWorkdirs           map[domain.ComputerID]string
 	PreprocessingEnabled      bool
 	PreprocessingInstruction  string
+	SessionNamingEnabled      bool
 }
 
 type Preferences interface {
@@ -42,6 +43,7 @@ type Preferences interface {
 // established general settings contract.
 type CreationPreferences interface {
 	ToggleArchiveRecommendations(context.Context) error
+	ToggleSessionNaming(context.Context) error
 	SetDefaultProvider(context.Context, domain.ComputerID, domain.Provider) error
 	ClearDefaultProvider(context.Context, domain.ComputerID) error
 	SetDefaultWorkdir(context.Context, domain.ComputerID, string) error

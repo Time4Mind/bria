@@ -51,6 +51,10 @@ type SessionStore interface {
 	List(context.Context) ([]domain.Session, error)
 	Load(context.Context, domain.SessionID) (domain.Session, error)
 }
+type SessionNamer interface {
+	Begin(context.Context, domain.Session, string, string) func(string)
+	Wait(context.Context) error
+}
 type Notifier interface {
 	Notify(context.Context, Notification) error
 }
@@ -264,6 +268,7 @@ const (
 	SemanticSettingsPreprocessing            SemanticActionKind = "settings_preprocessing"
 	SemanticSettingsPreprocessingInstruction SemanticActionKind = "settings_preprocessing_instruction"
 	SemanticSettingsPreprocessingReset       SemanticActionKind = "settings_preprocessing_reset"
+	SemanticSettingsSessionNaming            SemanticActionKind = "settings_session_naming"
 	SemanticAuthorizeCodex                   SemanticActionKind = "authorize_codex"
 	SemanticAuthorizeClaude                  SemanticActionKind = "authorize_claude"
 )
@@ -530,6 +535,7 @@ func isGlobalSemanticAction(kind SemanticActionKind) bool {
 		SemanticSettingsLifetime24Hours, SemanticSettingsLifetime48Hours,
 		SemanticSettingsProviderCodex, SemanticSettingsProviderClaude,
 		SemanticSettingsPreprocessing, SemanticSettingsPreprocessingInstruction, SemanticSettingsPreprocessingReset,
+		SemanticSettingsSessionNaming,
 		SemanticAuthorizeCodex, SemanticAuthorizeClaude:
 		return true
 	}
@@ -614,7 +620,7 @@ func (controller *Controller) handleGlobalSemanticAction(ctx context.Context, ac
 		return controller.confirmCreateDraft(ctx, action.UpdateID)
 	case SemanticSettingsScreen, SemanticSettingsDetail, SemanticSettingsPageLimit, SemanticSettingsContinueExisting, SemanticSettingsTechnicalActions,
 		SemanticSettingsBackgroundQuestions, SemanticSettingsBackgroundErrors,
-		SemanticSettingsArchiveRecommendations,
+		SemanticSettingsArchiveRecommendations, SemanticSettingsSessionNaming,
 		SemanticSettingsLifetimeNever, SemanticSettingsLifetime6Hours, SemanticSettingsLifetime12Hours,
 		SemanticSettingsLifetime24Hours, SemanticSettingsLifetime48Hours, SemanticSettingsProviderCodex, SemanticSettingsProviderClaude:
 		if err := telegramsettings.Apply(ctx, controller.settings, controller.scopedProviderPreferences(), string(action.Kind)); err != nil {
@@ -1047,6 +1053,7 @@ type Options struct {
 	CreationEnvironment   sessioncreation.Environment
 	Quotas                telegramstatus.Reader
 	Preprocessor          promptpreprocess.Processor
+	SessionNamer          SessionNamer
 	PreprocessingObserver promptpreprocess.Observer
 	PreprocessingTimeout  time.Duration
 }
@@ -1104,6 +1111,7 @@ type Controller struct {
 	creationEnvironment             sessioncreation.Environment
 	quotas                          telegramstatus.Reader
 	preprocessor                    promptpreprocess.Processor
+	sessionNamer                    SessionNamer
 	preprocessingObserver           promptpreprocess.Observer
 	preprocessingTimeout            time.Duration
 	preprocessingInstructionPending bool
@@ -1212,6 +1220,7 @@ func New(
 		creationEnvironment:   options.CreationEnvironment,
 		quotas:                options.Quotas,
 		preprocessor:          options.Preprocessor,
+		sessionNamer:          options.SessionNamer,
 		preprocessingObserver: options.PreprocessingObserver,
 		preprocessingTimeout:  preprocessingTimeout,
 	}
@@ -3089,6 +3098,10 @@ func (worker *sessionWorker) runTurnWithAcceptance(
 	current := worker.controller.live[worker.sessionID]
 	worker.controller.mu.Unlock()
 	binding, _ := current.Binding()
+	var finishName func(string)
+	if worker.controller.sessionNamer != nil {
+		finishName = worker.controller.sessionNamer.Begin(worker.controller.rootContext, current, turn.messageID, turn.text)
+	}
 	execution, err := turnprocessing.Execute(turnContext, worker.controller.submitter, worker.controller.interactions, worker.controller.attachments,
 		turnprocessing.Request{
 			SessionID: worker.sessionID, ProviderSessionID: binding.SessionID, MessageID: turn.messageID,
@@ -3127,6 +3140,9 @@ func (worker *sessionWorker) runTurnWithAcceptance(
 				return DurableInputFailed, accepted
 			}
 		}
+	}
+	if finishName != nil {
+		finishName(result.ProviderSessionName)
 	}
 	if err != nil || result.TerminalStatus != sessionruntime.StatusCompleted {
 		errorText := "Ошибка CLI: запрос не выполнен."
@@ -3347,6 +3363,9 @@ func (controller *Controller) closeWithin(ctx context.Context) error {
 		case <-ctx.Done():
 			return errors.Join(append(abortErrors, ctx.Err())...)
 		}
+	}
+	if controller.sessionNamer != nil {
+		abortErrors = append(abortErrors, controller.sessionNamer.Wait(ctx))
 	}
 	return errors.Join(abortErrors...)
 }

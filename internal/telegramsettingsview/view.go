@@ -81,9 +81,9 @@ func RenderCategory(ctx context.Context, preferences settingsport.Preferences, p
 		text = fmt.Sprintf("🔔 Уведомления\n\nФоновые вопросы: %s\nФоновые ошибки: %s", state(current.NotifyBackgroundQuestions, true), state(current.NotifyBackgroundErrors, true))
 		rows = onePerRow(Button{Label: "Вопросы", Action: "settings_background_questions"}, Button{Label: "Ошибки", Action: "settings_background_errors"})
 	case CategoryCreation:
-		text = "🛠 Создание сессии"
+		text = "🛠 Создание сессии\n\nАвтоимя дешёвой моделью: " + state(current.SessionNamingEnabled, false)
 		if _, ok := preferences.(settingsport.CreationPreferences); ok {
-			rows = onePerRow(Button{Label: "Backend по умолчанию", Action: "settings_default_provider"}, Button{Label: "Папка по умолчанию", Action: "settings_default_workdir"}, Button{Label: "Сбросить значения по умолчанию", Action: "settings_clear_creation_defaults"})
+			rows = onePerRow(Button{Label: "Автоимя", Action: "settings_session_naming"}, Button{Label: "Backend по умолчанию", Action: "settings_default_provider"}, Button{Label: "Папка по умолчанию", Action: "settings_default_workdir"}, Button{Label: "Сбросить значения по умолчанию", Action: "settings_clear_creation_defaults"})
 		}
 	case CategoryProviders:
 		text = "🤖 CLI"
@@ -114,7 +114,7 @@ func CategoryForAction(action string) (Category, bool) {
 		return CategoryArchive, true
 	case "settings_background_questions", "settings_background_errors":
 		return CategoryNotifications, true
-	case "settings_default_provider", "settings_default_workdir", "settings_clear_creation_defaults":
+	case "settings_session_naming", "settings_default_provider", "settings_default_workdir", "settings_clear_creation_defaults":
 		return CategoryCreation, true
 	case "settings_provider_codex", "settings_provider_claude", "authorize_codex", "authorize_claude":
 		return CategoryProviders, true

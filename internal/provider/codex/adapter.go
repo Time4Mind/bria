@@ -136,6 +136,7 @@ func RunAdapter(ctx context.Context, parentInput io.ReadCloser, parentOutput io.
 	}
 	session.threadID = thread.ThreadID
 	session.providerSessionID = thread.ThreadID
+	session.providerSessionName = thread.Name
 	session.effectiveApprovalPolicy = thread.EffectiveApprovalPolicy
 	session.effectiveSandbox = thread.EffectiveSandbox
 	if err := session.writeReady(); err != nil {
@@ -515,6 +516,7 @@ type adapterSession struct {
 	client                  *Client
 	threadID                string
 	providerSessionID       string
+	providerSessionName     string
 	effectiveApprovalPolicy string
 	effectiveSandbox        Sandbox
 	output                  io.Writer
@@ -809,6 +811,22 @@ func (session *adapterSession) waitForTurn() {
 }
 
 func (session *adapterSession) handleNotification(notification Notification) error {
+	if notification.Method == "thread/name/updated" {
+		var params struct {
+			ThreadID   string  `json:"threadId"`
+			ThreadName *string `json:"threadName"`
+		}
+		if json.Unmarshal(notification.Params, &params) != nil || params.ThreadID != session.threadID ||
+			params.ThreadName == nil || !boundedExactText(*params.ThreadName, session.maxTextBytes, false) {
+			return nil
+		}
+		session.mu.Lock()
+		if !session.closing {
+			session.providerSessionName = *params.ThreadName
+		}
+		session.mu.Unlock()
+		return nil
+	}
 	if notification.Method != "item/completed" {
 		return nil
 	}
@@ -984,13 +1002,14 @@ type readyMessage struct {
 }
 
 type requestMessage struct {
-	Protocol  int    `json:"protocol"`
-	Type      string `json:"type"`
-	RequestID string `json:"request_id"`
-	Kind      string `json:"kind,omitempty"`
-	Text      string `json:"text,omitempty"`
-	Status    string `json:"status,omitempty"`
-	ErrorCode string `json:"error_code,omitempty"`
+	Protocol            int    `json:"protocol"`
+	Type                string `json:"type"`
+	RequestID           string `json:"request_id"`
+	Kind                string `json:"kind,omitempty"`
+	Text                string `json:"text,omitempty"`
+	Status              string `json:"status,omitempty"`
+	ErrorCode           string `json:"error_code,omitempty"`
+	ProviderSessionName string `json:"provider_session_name,omitempty"`
 }
 
 func (session *adapterSession) writeReady() error {
@@ -1023,8 +1042,12 @@ func (session *adapterSession) writeFinal(requestID string, text string) error {
 }
 
 func (session *adapterSession) writeCompleted(requestID string, status string, errorCode string) error {
+	session.mu.Lock()
+	name := session.providerSessionName
+	session.mu.Unlock()
 	return session.write(requestMessage{
 		Protocol: AdapterProtocolVersion, Type: "completed", RequestID: requestID, Status: status, ErrorCode: errorCode,
+		ProviderSessionName: name,
 	})
 }
 

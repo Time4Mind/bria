@@ -87,6 +87,30 @@ func TestAdapterReadySubmitFinalAndConfirmedClose(t *testing.T) {
 	}
 }
 
+func TestAdapterPublishesOfficialThreadNameWithCompletion(t *testing.T) {
+	workdir := t.TempDir()
+	parentInput, adapterInput := io.Pipe()
+	adapterOutput := newLineWriter()
+	runDone := make(chan error, 1)
+	go func() {
+		runDone <- codex.RunAdapter(context.Background(), parentInput, adapterOutput, codex.AdapterConfig{
+			RawCommand: []string{os.Args[0], "-test.run=^TestRawCodexAppServerHelperProcess$", "--", "app-server"},
+			RawEnv:     []string{"BRIA_CODEX_RAW_HELPER=1", "BRIA_EXPECT_WORKDIR=" + workdir, "BRIA_RAW_HELPER_MODE=named"},
+			Workdir:    workdir, ClientInfo: codex.ClientInfo{Name: "bria", Version: "test"},
+		})
+	}()
+	assertJSONLine(t, adapterOutput, readyLine())
+	writeParentLine(t, adapterInput, `{"protocol":1,"type":"submit","request_id":"named-1","text":"fix menu"}`)
+	assertJSONLine(t, adapterOutput, map[string]any{"protocol": float64(1), "type": "accepted", "request_id": "named-1"})
+	assertJSONLine(t, adapterOutput, map[string]any{"protocol": float64(1), "type": "event", "request_id": "named-1", "kind": "commentary", "text": "working"})
+	assertJSONLine(t, adapterOutput, map[string]any{"protocol": float64(1), "type": "final", "request_id": "named-1", "text": "done"})
+	assertJSONLine(t, adapterOutput, map[string]any{"protocol": float64(1), "type": "completed", "request_id": "named-1", "status": "completed", "provider_session_name": "Fix menu"})
+	writeParentLine(t, adapterInput, `{"protocol":1,"type":"close"}`)
+	if err := <-runDone; err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestAdapterVerifiesAndEncodesOfficialLocalImageWithoutPromptPath(t *testing.T) {
 	workdir := t.TempDir()
 	path := filepath.Join(workdir, "photo.png")
@@ -728,6 +752,9 @@ func runRawHelper() {
 			"phase": "commentary",
 		},
 	})
+	if os.Getenv("BRIA_RAW_HELPER_MODE") == "named" {
+		writeRawNotification(encoder, "thread/name/updated", map[string]any{"threadId": "provider-thread-1", "threadName": "Fix menu"})
+	}
 	writeRawNotification(encoder, "item/completed", map[string]any{
 		"threadId": "provider-thread-1",
 		"turnId":   "turn-1",

@@ -8,7 +8,7 @@ import (
 )
 
 const (
-	FormatVersion     = 4
+	FormatVersion     = 5
 	DefaultQueueLimit = 32
 	DefaultCardPages  = 64
 )
@@ -52,6 +52,7 @@ type Settings struct {
 	DefaultWorkdirs           map[string]string `json:"default_workdirs"`
 	PreprocessingEnabled      bool              `json:"preprocessing_enabled"`
 	PreprocessingInstruction  string            `json:"preprocessing_instruction"`
+	SessionNamingEnabled      bool              `json:"session_naming_enabled"`
 }
 
 type Effective struct {
@@ -72,6 +73,7 @@ type Effective struct {
 	DefaultWorkdirs            map[string]string
 	PreprocessingEnabled       bool
 	PreprocessingInstruction   string
+	SessionNamingEnabled       bool
 }
 
 func Default() Settings {
@@ -97,6 +99,7 @@ func (s Settings) Effective() Effective {
 		DefaultWorkdirs:            cloneStringMap(s.DefaultWorkdirs),
 		PreprocessingEnabled:       s.PreprocessingEnabled,
 		PreprocessingInstruction:   s.PreprocessingInstruction,
+		SessionNamingEnabled:       s.SessionNamingEnabled,
 	}
 }
 

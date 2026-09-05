@@ -165,8 +165,9 @@ func TestCompletionDelivererSeparatesActiveCardAndBackgroundNotice(t *testing.T)
 	card := telegramcontroller.SemanticCard{
 		SessionID: "00000000-0000-4000-8000-000000000001", Effect: telegramcontroller.SemanticEditSameCarrier,
 		Header: "Сессия test", Pages: []telegramcontroller.SemanticContentPage{{Content: "FULL FINAL", Anchors: []string{"final"}}},
-		View:                 telegramcontroller.SemanticPageView{Page: 1, Pages: 1, Anchor: "final", FollowLatest: true},
-		SelectableSessionIDs: []domain.SessionID{"00000000-0000-4000-8000-000000000001"}, SessionRowSizes: []int{1},
+		View:                    telegramcontroller.SemanticPageView{Page: 1, Pages: 1, Anchor: "final", FollowLatest: true},
+		SelectableSessionIDs:    []domain.SessionID{"00000000-0000-4000-8000-000000000001"},
+		SelectableSessionLabels: []string{"✓ project"}, SessionRowSizes: []int{1}, CloseConfirmation: true,
 	}
 	for _, test := range []struct {
 		name   string
@@ -188,6 +189,10 @@ func TestCompletionDelivererSeparatesActiveCardAndBackgroundNotice(t *testing.T)
 			if test.active {
 				if !strings.Contains(sender.status.Text, "FULL FINAL") || !sender.prepared.Card.MakeActive {
 					t.Fatalf("active completion = %#v / %#v", sender.status, sender.prepared.Card)
+				}
+				keyboard := sender.prepared.Card.Projection.Card.Keyboard
+				if len(keyboard.Rows) < 3 || keyboard.Rows[1][0].Label != "Архивировать" || keyboard.Rows[1][1].Label != "Отмена" || keyboard.Rows[2][0].Label != "✓ project" {
+					t.Fatalf("active completion keyboard lost session/close state: %#v", keyboard)
 				}
 			} else if strings.Contains(sender.status.Text, "FULL FINAL") || sender.status.Text != "Фоновая сессия завершена." || sender.prepared.Card.MakeActive {
 				t.Fatalf("background completion leaked final = %#v / %#v", sender.status, sender.prepared.Card)

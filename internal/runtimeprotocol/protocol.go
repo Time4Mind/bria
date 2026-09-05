@@ -137,19 +137,20 @@ type ParentMessage struct {
 }
 
 type AdapterMessage struct {
-	Protocol           int                 `json:"protocol"`
-	Type               MessageType         `json:"type"`
-	ProviderSessionID  string              `json:"provider_session_id,omitempty"`
-	Readiness          string              `json:"readiness,omitempty"`
-	Authentication     string              `json:"authentication,omitempty"`
-	RequestID          string              `json:"request_id,omitempty"`
-	MessageID          string              `json:"message_id,omitempty"`
-	Kind               string              `json:"kind,omitempty"`
-	Text               string              `json:"text,omitempty"`
-	Status             string              `json:"status,omitempty"`
-	ErrorCode          string              `json:"error_code,omitempty"`
-	InteractionRequest *InteractionRequest `json:"interaction_request,omitempty"`
-	InteractionID      string              `json:"interaction_id,omitempty"`
+	Protocol            int                 `json:"protocol"`
+	Type                MessageType         `json:"type"`
+	ProviderSessionID   string              `json:"provider_session_id,omitempty"`
+	ProviderSessionName string              `json:"provider_session_name,omitempty"`
+	Readiness           string              `json:"readiness,omitempty"`
+	Authentication      string              `json:"authentication,omitempty"`
+	RequestID           string              `json:"request_id,omitempty"`
+	MessageID           string              `json:"message_id,omitempty"`
+	Kind                string              `json:"kind,omitempty"`
+	Text                string              `json:"text,omitempty"`
+	Status              string              `json:"status,omitempty"`
+	ErrorCode           string              `json:"error_code,omitempty"`
+	InteractionRequest  *InteractionRequest `json:"interaction_request,omitempty"`
+	InteractionID       string              `json:"interaction_id,omitempty"`
 }
 
 func DecodeParentLine(line []byte, limits Limits) (ParentMessage, error) {
@@ -381,12 +382,13 @@ func encodeAdapterLine(message AdapterMessage, max int) ([]byte, error) {
 		}{message.Protocol, message.Type, message.RequestID, message.Text}, max)
 	case TypeCompleted:
 		return encodeLine(struct {
-			Protocol  int         `json:"protocol"`
-			Type      MessageType `json:"type"`
-			RequestID string      `json:"request_id"`
-			Status    string      `json:"status"`
-			ErrorCode string      `json:"error_code,omitempty"`
-		}{message.Protocol, message.Type, message.RequestID, message.Status, message.ErrorCode}, max)
+			Protocol            int         `json:"protocol"`
+			Type                MessageType `json:"type"`
+			RequestID           string      `json:"request_id"`
+			Status              string      `json:"status"`
+			ErrorCode           string      `json:"error_code,omitempty"`
+			ProviderSessionName string      `json:"provider_session_name,omitempty"`
+		}{message.Protocol, message.Type, message.RequestID, message.Status, message.ErrorCode, message.ProviderSessionName}, max)
 	case TypeInteractionRequest:
 		return encodeLine(struct {
 			Protocol           int                 `json:"protocol"`
@@ -467,7 +469,7 @@ func adapterFields(messageType MessageType) fieldRequirement {
 	case TypeFinal:
 		return fields([]string{"protocol", "type", "request_id", "text"})
 	case TypeCompleted:
-		return fields([]string{"protocol", "type", "request_id", "status"}, "error_code")
+		return fields([]string{"protocol", "type", "request_id", "status"}, "error_code", "provider_session_name")
 	case TypeInteractionRequest:
 		return fields([]string{"protocol", "type", "request_id", "interaction_request"})
 	case TypeInteractionResponseAccepted:
@@ -632,7 +634,7 @@ func validateAdapter(message AdapterMessage, limits Limits) error {
 	case TypeReady:
 		if !validRequiredText(message.ProviderSessionID, limits.MaxTextBytes) || message.Readiness != "protocol" ||
 			message.Authentication != "unknown" || message.RequestID != "" || message.Kind != "" || message.Text != "" ||
-			message.Status != "" || message.ErrorCode != "" || message.MessageID != "" || message.InteractionRequest != nil || message.InteractionID != "" {
+			message.Status != "" || message.ErrorCode != "" || message.MessageID != "" || message.ProviderSessionName != "" || message.InteractionRequest != nil || message.InteractionID != "" {
 			return ErrProtocol
 		}
 	case TypeAccepted:
@@ -650,20 +652,21 @@ func validateAdapter(message AdapterMessage, limits Limits) error {
 			return ErrProtocol
 		}
 	case TypeCompleted:
-		if !validRequestID(message.RequestID) || message.Kind != "" || message.Text != "" || message.MessageID != "" || hasAdapterEnvelopeFields(message) ||
+		if !validRequestID(message.RequestID) || message.Kind != "" || message.Text != "" || message.MessageID != "" || hasAdapterEnvelopeFieldsExceptName(message) ||
+			!validOptionalDisplayName(message.ProviderSessionName, limits.MaxTextBytes) ||
 			!validTerminal(message.Status, message.ErrorCode) {
 			return ErrProtocol
 		}
 	case TypeInteractionRequest:
 		if !validRequestID(message.RequestID) || message.Kind != "" || message.Text != "" || message.MessageID != "" || message.Status != "" ||
 			message.ErrorCode != "" || message.ProviderSessionID != "" || message.Readiness != "" || message.Authentication != "" ||
-			message.InteractionRequest == nil || message.InteractionID != "" || validateInteractionRequest(*message.InteractionRequest, limits) != nil {
+			message.ProviderSessionName != "" || message.InteractionRequest == nil || message.InteractionID != "" || validateInteractionRequest(*message.InteractionRequest, limits) != nil {
 			return ErrProtocol
 		}
 	case TypeInteractionResponseAccepted:
 		if !validRequiredText(message.ProviderSessionID, limits.MaxTextBytes) || !validRequestID(message.RequestID) ||
 			!validOpaqueID(message.MessageID) || !validOpaqueID(message.InteractionID) || message.Kind != "" || message.Text != "" ||
-			message.Status != "" || message.ErrorCode != "" || message.Readiness != "" || message.Authentication != "" || message.InteractionRequest != nil {
+			message.Status != "" || message.ErrorCode != "" || message.Readiness != "" || message.Authentication != "" || message.ProviderSessionName != "" || message.InteractionRequest != nil {
 			return ErrProtocol
 		}
 	case TypeAcceptedTurn:
@@ -688,7 +691,15 @@ func onlyTurnCorrelation(message AdapterMessage) bool {
 }
 
 func hasAdapterEnvelopeFields(message AdapterMessage) bool {
+	return message.ProviderSessionName != "" || hasAdapterEnvelopeFieldsExceptName(message)
+}
+
+func hasAdapterEnvelopeFieldsExceptName(message AdapterMessage) bool {
 	return message.ProviderSessionID != "" || message.Readiness != "" || message.Authentication != "" || message.InteractionRequest != nil || message.InteractionID != ""
+}
+
+func validOptionalDisplayName(value string, max int) bool {
+	return value == "" || validText(value, max) && strings.TrimSpace(value) == value
 }
 
 func validTerminal(status, errorCode string) bool {

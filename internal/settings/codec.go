@@ -33,6 +33,7 @@ var creationDocumentFields = []string{
 }
 
 var preprocessingDocumentFields = []string{"preprocessing_enabled", "preprocessing_instruction"}
+var namingDocumentFields = []string{"session_naming_enabled"}
 
 type settingsDocument struct {
 	Version                   int               `json:"version"`
@@ -53,6 +54,7 @@ type settingsDocument struct {
 	DefaultWorkdirs           map[string]string `json:"default_workdirs"`
 	PreprocessingEnabled      bool              `json:"preprocessing_enabled"`
 	PreprocessingInstruction  string            `json:"preprocessing_instruction"`
+	SessionNamingEnabled      bool              `json:"session_naming_enabled"`
 }
 
 // Decode reads one complete settings document. Every field is explicit so a
@@ -110,8 +112,15 @@ func Decode(reader io.Reader) (Snapshot, error) {
 			}
 		}
 		decoded.Version = FormatVersion
-	} else if decoded.Version == FormatVersion {
+	} else if decoded.Version == 4 {
 		for _, field := range append(creationDocumentFields, preprocessingDocumentFields...) {
+			if _, ok := seen[field]; !ok {
+				return Snapshot{}, fmt.Errorf("validate settings JSON: missing field %q", field)
+			}
+		}
+		decoded.Version = FormatVersion
+	} else if decoded.Version == FormatVersion {
+		for _, field := range append(append(creationDocumentFields, preprocessingDocumentFields...), namingDocumentFields...) {
 			if _, ok := seen[field]; !ok {
 				return Snapshot{}, fmt.Errorf("validate settings JSON: missing field %q", field)
 			}
@@ -143,6 +152,9 @@ func inspectStrictDocument(document []byte) (map[string]struct{}, error) {
 		allowed[field] = struct{}{}
 	}
 	for _, field := range preprocessingDocumentFields {
+		allowed[field] = struct{}{}
+	}
+	for _, field := range namingDocumentFields {
 		allowed[field] = struct{}{}
 	}
 	for decoder.More() {
@@ -199,6 +211,7 @@ func documentFromSnapshot(snapshot Snapshot) settingsDocument {
 		DefaultWorkdirs:          cloneStringMap(s.DefaultWorkdirs),
 		PreprocessingEnabled:     s.PreprocessingEnabled,
 		PreprocessingInstruction: s.PreprocessingInstruction,
+		SessionNamingEnabled:     s.SessionNamingEnabled,
 	}
 }
 
@@ -221,5 +234,6 @@ func (document settingsDocument) snapshot() Snapshot {
 		DefaultWorkdirs:           cloneStringMap(document.DefaultWorkdirs),
 		PreprocessingEnabled:      document.PreprocessingEnabled,
 		PreprocessingInstruction:  document.PreprocessingInstruction,
+		SessionNamingEnabled:      document.SessionNamingEnabled,
 	}}
 }

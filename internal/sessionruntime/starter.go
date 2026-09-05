@@ -135,19 +135,20 @@ type steerWaiter struct {
 }
 
 type wireMessage struct {
-	Protocol           int
-	Type               string
-	ProviderSessionID  string
-	Readiness          string
-	Authentication     AuthenticationState
-	RequestID          string
-	MessageID          string
-	Kind               EventKind
-	Text               string
-	Status             string
-	ErrorCode          string
-	InteractionRequest *runtimeprotocol.InteractionRequest
-	InteractionID      string
+	Protocol            int
+	Type                string
+	ProviderSessionID   string
+	ProviderSessionName string
+	Readiness           string
+	Authentication      AuthenticationState
+	RequestID           string
+	MessageID           string
+	Kind                EventKind
+	Text                string
+	Status              string
+	ErrorCode           string
+	InteractionRequest  *runtimeprotocol.InteractionRequest
+	InteractionID       string
 }
 
 type wireResult struct {
@@ -552,6 +553,7 @@ func (starter *Starter) submitWithCallbacks(ctx context.Context, sessionID domai
 				starter.finishTurn(record, turn, message.Status == StatusInterrupted, nil)
 				result.TerminalStatus = message.Status
 				result.ErrorCode = message.ErrorCode
+				result.ProviderSessionName = message.ProviderSessionName
 				if message.Status != StatusCompleted {
 					result.Final = ""
 					return result, fmt.Errorf("%w: %s", ErrTurnFailed, result.ErrorCode)
@@ -817,7 +819,8 @@ func decodeWire(line []byte) (wireMessage, error) {
 	}
 	return wireMessage{
 		Protocol: decoded.Protocol, Type: string(decoded.Type), ProviderSessionID: decoded.ProviderSessionID,
-		Readiness: decoded.Readiness, Authentication: AuthenticationState(decoded.Authentication),
+		ProviderSessionName: decoded.ProviderSessionName,
+		Readiness:           decoded.Readiness, Authentication: AuthenticationState(decoded.Authentication),
 		RequestID: decoded.RequestID, MessageID: decoded.MessageID, Kind: EventKind(decoded.Kind), Text: decoded.Text,
 		Status: decoded.Status, ErrorCode: decoded.ErrorCode, InteractionRequest: decoded.InteractionRequest,
 		InteractionID: decoded.InteractionID,

@@ -253,6 +253,7 @@ func (creator *SessionCreator) Create(
 	if intent.Name != "" {
 		snapshot := starting.Snapshot()
 		snapshot.Name = intent.Name
+		snapshot.NameSource = domain.SessionNameDirectory
 		starting, err = domain.RestoreSession(snapshot)
 		if err != nil {
 			return CreateSessionResult{}, fmt.Errorf("validate confirmed session name: %w", err)

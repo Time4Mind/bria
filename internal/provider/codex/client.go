@@ -153,6 +153,7 @@ type ThreadStartRequest struct {
 // requested values are retained only to make policy overrides explicit.
 type ThreadStartResult struct {
 	ThreadID string
+	Name     string
 	// SessionID is the provider binding Bria can pass to thread/resume. Codex
 	// defines that identifier as thread.id; thread.sessionId is a distinct,
 	// optional live-session tree root and is exposed separately below.
@@ -181,6 +182,7 @@ type ThreadListRequest struct {
 // Codex thread. Prompt previews and rollout paths are intentionally discarded.
 type ThreadSummary struct {
 	ID        string
+	Name      string
 	Cwd       string
 	CreatedAt time.Time
 	UpdatedAt time.Time
@@ -433,7 +435,8 @@ func (client *Client) StartThread(ctx context.Context, request ThreadStartReques
 	}
 	if result.Thread.ID == "" ||
 		(request.ResumeThreadID != "" && result.Thread.ID != request.ResumeThreadID) ||
-		(result.Thread.Ephemeral != nil && *result.Thread.Ephemeral) {
+		(result.Thread.Ephemeral != nil && *result.Thread.Ephemeral) ||
+		(result.Thread.Name != nil && !boundedExactText(*result.Thread.Name, DefaultMaxMessageBytes, true)) {
 		return ThreadStartResult{}, ErrInvalidResponse
 	}
 	if request.Cwd != "" && result.Thread.Cwd != nil && *result.Thread.Cwd != request.Cwd {
@@ -456,6 +459,7 @@ func (client *Client) StartThread(ctx context.Context, request ThreadStartReques
 
 	return ThreadStartResult{
 		ThreadID:                   result.Thread.ID,
+		Name:                       optionalString(result.Thread.Name),
 		SessionID:                  result.Thread.ID,
 		ReportedSessionID:          result.Thread.SessionID,
 		Cwd:                        effectiveCwd,
@@ -507,11 +511,12 @@ func (client *Client) ListThreads(ctx context.Context, request ThreadListRequest
 	for _, thread := range *result.Data {
 		if thread.ID == nil || thread.Cwd == nil || thread.CreatedAt == nil || thread.UpdatedAt == nil || thread.Ephemeral == nil ||
 			*thread.Ephemeral || *thread.CreatedAt < 0 || *thread.UpdatedAt < *thread.CreatedAt ||
-			!boundedExactText(*thread.ID, 1024, false) || !boundedExactText(*thread.Cwd, 16*1024, false) {
+			!boundedExactText(*thread.ID, 1024, false) || !boundedExactText(*thread.Cwd, 16*1024, false) ||
+			(thread.Name != nil && !boundedExactText(*thread.Name, DefaultMaxMessageBytes, true)) {
 			return ThreadListPage{}, ErrInvalidResponse
 		}
 		page.Threads = append(page.Threads, ThreadSummary{
-			ID: *thread.ID, Cwd: *thread.Cwd,
+			ID: *thread.ID, Name: optionalString(thread.Name), Cwd: *thread.Cwd,
 			CreatedAt: time.Unix(*thread.CreatedAt, 0).UTC(),
 			UpdatedAt: time.Unix(*thread.UpdatedAt, 0).UTC(),
 		})
@@ -1337,6 +1342,7 @@ type threadResumeParams struct {
 type threadStartResult struct {
 	Thread struct {
 		ID        string  `json:"id"`
+		Name      *string `json:"name"`
 		SessionID string  `json:"sessionId"`
 		Cwd       *string `json:"cwd"`
 		Ephemeral *bool   `json:"ephemeral"`
@@ -1380,10 +1386,18 @@ type wireThreadTurn struct {
 
 type wireThreadSummary struct {
 	ID        *string `json:"id"`
+	Name      *string `json:"name"`
 	Cwd       *string `json:"cwd"`
 	CreatedAt *int64  `json:"createdAt"`
 	UpdatedAt *int64  `json:"updatedAt"`
 	Ephemeral *bool   `json:"ephemeral"`
+}
+
+func optionalString(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
 }
 
 func boundedExactText(value string, maxBytes int, allowEmpty bool) bool {

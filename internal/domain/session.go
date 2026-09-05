@@ -10,6 +10,14 @@ import (
 
 const MaxSessionNameRunes = 10
 
+type SessionNameSource string
+
+const (
+	SessionNameDirectory SessionNameSource = "directory"
+	SessionNameModel     SessionNameSource = "model"
+	SessionNameProvider  SessionNameSource = "provider"
+)
+
 // SessionID identifies one logical Bria session.
 type SessionID string
 
@@ -77,6 +85,7 @@ type Session struct {
 	provider       Provider
 	workdir        string
 	name           string
+	nameSource     SessionNameSource
 	status         SessionStatus
 	binding        *ProviderBinding
 	createdAt      time.Time
@@ -95,6 +104,7 @@ type SessionSnapshot struct {
 	Provider       Provider
 	Workdir        string
 	Name           string
+	NameSource     SessionNameSource
 	Status         SessionStatus
 	Binding        *ProviderBinding
 	CreatedAt      time.Time
@@ -196,6 +206,14 @@ func RestoreSession(snapshot SessionSnapshot) (Session, error) {
 		if len(words) < 1 || len(words) > 2 || strings.Join(words, " ") != snapshot.Name || utf8.RuneCountInString(snapshot.Name) > MaxSessionNameRunes {
 			return Session{}, errorsForStatus(snapshot.Status, "session name is invalid")
 		}
+		if snapshot.NameSource == "" {
+			snapshot.NameSource = SessionNameDirectory
+		}
+		if snapshot.NameSource != SessionNameDirectory && snapshot.NameSource != SessionNameModel && snapshot.NameSource != SessionNameProvider {
+			return Session{}, errorsForStatus(snapshot.Status, "session name source is invalid")
+		}
+	} else if snapshot.NameSource != "" {
+		return Session{}, errorsForStatus(snapshot.Status, "unnamed session has a name source")
 	}
 
 	// Older single-computer snapshots did not persist the recovery target. A
@@ -255,6 +273,7 @@ func RestoreSession(snapshot SessionSnapshot) (Session, error) {
 		provider:       snapshot.Provider,
 		workdir:        snapshot.Workdir,
 		name:           snapshot.Name,
+		nameSource:     snapshot.NameSource,
 		status:         snapshot.Status,
 		binding:        cloneBinding(snapshot.Binding),
 		createdAt:      snapshot.CreatedAt,
@@ -438,16 +457,17 @@ func (s Session) Recovered(binding ProviderBinding, at time.Time) (Session, erro
 	return next, nil
 }
 
-func (s Session) ID() SessionID             { return s.id }
-func (s Session) IntentID() IntentID        { return s.intentID }
-func (s Session) ComputerID() ComputerID    { return s.computerID }
-func (s Session) Provider() Provider        { return s.provider }
-func (s Session) Workdir() string           { return s.workdir }
-func (s Session) Name() string              { return s.name }
-func (s Session) Status() SessionStatus     { return s.status }
-func (s Session) CreatedAt() time.Time      { return s.createdAt }
-func (s Session) StateChangedAt() time.Time { return s.stateChangedAt }
-func (s Session) Lifetime() SessionLifetime { return s.lifetime }
+func (s Session) ID() SessionID                 { return s.id }
+func (s Session) IntentID() IntentID            { return s.intentID }
+func (s Session) ComputerID() ComputerID        { return s.computerID }
+func (s Session) Provider() Provider            { return s.provider }
+func (s Session) Workdir() string               { return s.workdir }
+func (s Session) Name() string                  { return s.name }
+func (s Session) NameSource() SessionNameSource { return s.nameSource }
+func (s Session) Status() SessionStatus         { return s.status }
+func (s Session) CreatedAt() time.Time          { return s.createdAt }
+func (s Session) StateChangedAt() time.Time     { return s.stateChangedAt }
+func (s Session) Lifetime() SessionLifetime     { return s.lifetime }
 func (s Session) LastResumedAt() (time.Time, bool) {
 	if s.lastResumedAt == nil {
 		return time.Time{}, false
@@ -466,6 +486,14 @@ func (s Session) RecoveryTarget() (SessionStatus, bool) {
 	}
 	return *s.recoveryTarget, true
 }
+
+func (s Session) Rename(name string, source SessionNameSource) (Session, error) {
+	snapshot := s.Snapshot()
+	snapshot.Name = name
+	snapshot.NameSource = source
+	return RestoreSession(snapshot)
+}
+
 func (s Session) Expired(now time.Time) bool {
 	return s.deadlineAt != nil && !now.Before(*s.deadlineAt)
 }
@@ -494,6 +522,7 @@ func (s Session) Snapshot() SessionSnapshot {
 		Provider:       s.provider,
 		Workdir:        s.workdir,
 		Name:           s.name,
+		NameSource:     s.nameSource,
 		Status:         s.status,
 		Binding:        cloneBinding(s.binding),
 		CreatedAt:      s.createdAt,

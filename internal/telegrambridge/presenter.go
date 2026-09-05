@@ -638,6 +638,8 @@ func presentButton(button telegramui.Button) (string, callbacktoken.Action, int,
 		return presentGlobalButton(button, "Изменить инструкцию", callbacktoken.ActionSettingsPreprocessingInstruction)
 	case telegramui.ActionSettingsPreprocessingReset:
 		return presentGlobalButton(button, "Вернуть встроенную", callbacktoken.ActionSettingsPreprocessingReset)
+	case telegramui.ActionSettingsSessionNaming:
+		return presentGlobalButton(button, "Автоимя", callbacktoken.ActionSettingsSessionNaming)
 	case telegramui.ActionAuthorizeCodex:
 		return presentGlobalButton(button, "Авторизовать Codex", callbacktoken.ActionAuthorizeCodex)
 	case telegramui.ActionAuthorizeClaude:
@@ -822,6 +824,8 @@ func decodeFields(fields callbacktoken.Fields) (telegramui.Action, telegramui.Bu
 		return telegramui.ActionSettingsPreprocessingInstruction, telegramui.ButtonTarget{}, nil
 	case callbacktoken.ActionSettingsPreprocessingReset:
 		return telegramui.ActionSettingsPreprocessingReset, telegramui.ButtonTarget{}, nil
+	case callbacktoken.ActionSettingsSessionNaming:
+		return telegramui.ActionSettingsSessionNaming, telegramui.ButtonTarget{}, nil
 	case callbacktoken.ActionAuthorizeCodex:
 		return telegramui.ActionAuthorizeCodex, telegramui.ButtonTarget{}, nil
 	case callbacktoken.ActionAuthorizeClaude:

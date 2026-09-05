@@ -70,10 +70,11 @@ type TurnEvent struct {
 // failed or interrupted turn Final is empty even if an adapter sent a final
 // candidate before its terminal failure.
 type TurnResult struct {
-	Events         []TurnEvent
-	Final          string
-	TerminalStatus string
-	ErrorCode      string
+	Events              []TurnEvent
+	Final               string
+	TerminalStatus      string
+	ErrorCode           string
+	ProviderSessionName string
 }
 
 // InteractionRequest and InteractionResponse deliberately reuse the bounded

@@ -38,6 +38,7 @@ func (p Preferences) Snapshot(ctx context.Context) (settingsport.Snapshot, error
 		DefaultWorkdirs:          workdirDefaults(current.DefaultWorkdirs),
 		PreprocessingEnabled:     current.PreprocessingEnabled,
 		PreprocessingInstruction: current.PreprocessingInstruction,
+		SessionNamingEnabled:     current.SessionNamingEnabled,
 	}, nil
 }
 
@@ -84,6 +85,9 @@ func (p Preferences) SetSessionLifetime(ctx context.Context, lifetime string) er
 }
 func (p Preferences) ToggleArchiveRecommendations(ctx context.Context) error {
 	return p.update(ctx, func(current *settings.Settings) { current.ArchiveRecommendations = !current.ArchiveRecommendations })
+}
+func (p Preferences) ToggleSessionNaming(ctx context.Context) error {
+	return p.update(ctx, func(current *settings.Settings) { current.SessionNamingEnabled = !current.SessionNamingEnabled })
 }
 func (p Preferences) TogglePreprocessing(ctx context.Context) error {
 	return p.update(ctx, func(current *settings.Settings) { current.PreprocessingEnabled = !current.PreprocessingEnabled })

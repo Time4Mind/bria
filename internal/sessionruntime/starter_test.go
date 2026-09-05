@@ -99,6 +99,9 @@ func TestStarterVersionedJSONLFlowPreservesTextAndEventOrder(t *testing.T) {
 	if result.TerminalStatus != sessionruntime.StatusCompleted || result.ErrorCode != "" {
 		t.Errorf("terminal = %q/%q, want completed/empty", result.TerminalStatus, result.ErrorCode)
 	}
+	if result.ProviderSessionName != "Fix menu" {
+		t.Errorf("provider session name = %q", result.ProviderSessionName)
+	}
 	if err := starter.Abort(context.Background(), request, binding); err != nil {
 		t.Fatalf("Abort() error = %v", err)
 	}
@@ -1147,7 +1150,7 @@ func success(message parentMessage) {
 	emit(map[string]any{"protocol": 1, "type": "event", "request_id": message.RequestID, "kind": "commentary", "text": "first"})
 	emit(map[string]any{"protocol": 1, "type": "event", "request_id": message.RequestID, "kind": "question", "text": "second?"})
 	emit(map[string]any{"protocol": 1, "type": "final", "request_id": message.RequestID, "text": "done:" + message.Text})
-	emit(map[string]any{"protocol": 1, "type": "completed", "request_id": message.RequestID, "status": "completed"})
+	emit(map[string]any{"protocol": 1, "type": "completed", "request_id": message.RequestID, "status": "completed", "provider_session_name": "Fix menu"})
 }
 
 var outputMu sync.Mutex

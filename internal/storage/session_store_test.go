@@ -139,6 +139,41 @@ func TestSessionStoreAtomicallyUniquifiesPersistedNames(t *testing.T) {
 	}
 }
 
+func TestSessionStoreRenamesWithoutChangingLifecycleAndPersistsSource(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "sessions.json")
+	store, err := storage.OpenSessionStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := mustStartingSession(t, "session-first", "intent-first")
+	second := mustStartingSession(t, "session-second", "intent-second")
+	for _, session := range []domain.Session{first, second} {
+		if _, _, err := store.PutStartingIfAbsent(context.Background(), session); err != nil {
+			t.Fatal(err)
+		}
+	}
+	first, err = store.RenameSession(context.Background(), first.ID(), "Fix menu", domain.SessionNameProvider)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err = store.RenameSession(context.Background(), second.ID(), "Fix menu", domain.SessionNameModel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Name() != "Fix menu" || first.NameSource() != domain.SessionNameProvider || second.Name() != "Fix menu2" || second.NameSource() != domain.SessionNameModel {
+		t.Fatalf("renamed sessions = %#v / %#v", first.Snapshot(), second.Snapshot())
+	}
+	reloaded, err := storage.OpenSessionStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := reloaded.Load(context.Background(), first.ID())
+	if err != nil || got.Status() != first.Status() || got.NameSource() != domain.SessionNameProvider {
+		t.Fatalf("reloaded = %#v, %v", got.Snapshot(), err)
+	}
+}
+
 func TestSessionStoreMigratesLegacyDocumentAndRoundTripsTelegramUI(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "sessions.json")

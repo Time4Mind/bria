@@ -15,7 +15,7 @@ import (
 
 func TestDefaultsAreProductDefaults(t *testing.T) {
 	s := Default()
-	if !s.ContinueExisting || s.ScreenEnabled || !s.ShowTechnicalActions || !s.NotifyBackgroundQuestions || !s.NotifyBackgroundErrors || s.ArchiveRecommendations || s.PreprocessingEnabled || s.PreprocessingInstruction != "" {
+	if !s.ContinueExisting || s.ScreenEnabled || !s.ShowTechnicalActions || !s.NotifyBackgroundQuestions || !s.NotifyBackgroundErrors || s.ArchiveRecommendations || s.PreprocessingEnabled || s.PreprocessingInstruction != "" || s.SessionNamingEnabled {
 		t.Fatalf("unexpected boolean defaults: %+v", s)
 	}
 	if s.CardDetail != CardDetailStandard || s.CardPageLimit != DefaultCardPages || s.SessionLifetime != Lifetime12Hours || s.VoiceRecognition != VoiceParakeet || s.QueueLimit != DefaultQueueLimit || s.RetryUndeliveredFiles {
@@ -131,6 +131,12 @@ func TestDecodeRequiresOneStrictCompleteDocument(t *testing.T) {
 		t.Fatalf("v3 migration = %#v, %v", v3Snapshot, err)
 	}
 	v4MissingPreprocessing := strings.Replace(v3, `"version": 3`, `"version": 4`, 1)
+	v4 := strings.TrimSuffix(v4MissingPreprocessing, "}") + ",\n  \"preprocessing_enabled\": false,\n  \"preprocessing_instruction\": \"\"\n}"
+	v4Snapshot, err := Decode(strings.NewReader(v4))
+	if err != nil || v4Snapshot.Settings.Version != FormatVersion || v4Snapshot.Settings.SessionNamingEnabled {
+		t.Fatalf("v4 migration = %#v, %v", v4Snapshot, err)
+	}
+	v5MissingNaming := strings.Replace(v4, `"version": 4`, `"version": 5`, 1)
 
 	invalid := []struct {
 		name     string
@@ -143,6 +149,7 @@ func TestDecodeRequiresOneStrictCompleteDocument(t *testing.T) {
 		{name: "zero revision", document: strings.Replace(document, `"revision": 7`, `"revision": 0`, 1)},
 		{name: "version three missing creation settings", document: strings.Replace(document, `"version": 1`, `"version": 3`, 1)},
 		{name: "version four missing preprocessing settings", document: v4MissingPreprocessing},
+		{name: "version five missing session naming setting", document: v5MissingNaming},
 	}
 	for _, test := range invalid {
 		test := test

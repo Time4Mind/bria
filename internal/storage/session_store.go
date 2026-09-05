@@ -124,7 +124,7 @@ func (store *SessionStore) PutStartingIfAbsent(
 		)
 	}
 	if session.Name() != "" {
-		name := availableSessionName(store.byIntent, session.Name())
+		name := availableSessionName(store.byIntent, "", session.Name())
 		snapshot := session.Snapshot()
 		snapshot.Name = name
 		var nameErr error
@@ -150,10 +150,10 @@ func (store *SessionStore) PutStartingIfAbsent(
 	return session, true, nil
 }
 
-func availableSessionName(sessions map[domain.IntentID]domain.Session, requested string) string {
+func availableSessionName(sessions map[domain.IntentID]domain.Session, excluded domain.SessionID, requested string) string {
 	used := make(map[string]struct{}, len(sessions))
 	for _, session := range sessions {
-		if session.Name() != "" {
+		if session.ID() != excluded && session.Name() != "" {
 			used[strings.ToLower(session.Name())] = struct{}{}
 		}
 	}
@@ -173,6 +173,40 @@ func availableSessionName(sessions map[domain.IntentID]domain.Session, requested
 		}
 	}
 	return requested
+}
+
+// RenameSession atomically assigns the best available short name while
+// preserving every lifecycle field of the logical session.
+func (store *SessionStore) RenameSession(ctx context.Context, id domain.SessionID, requested string, source domain.SessionNameSource) (domain.Session, error) {
+	if err := ctx.Err(); err != nil {
+		return domain.Session{}, err
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if err := store.reload(); err != nil {
+		return domain.Session{}, err
+	}
+	intent, ok := store.byID[id]
+	if !ok {
+		return domain.Session{}, ErrSessionNotFound
+	}
+	current := store.byIntent[intent]
+	name := availableSessionName(store.byIntent, id, requested)
+	next, err := current.Rename(name, source)
+	if err != nil {
+		return domain.Session{}, fmt.Errorf("validate session name: %w", err)
+	}
+	if next.Equal(current) {
+		return current, nil
+	}
+	sessions := cloneSessions(store.byIntent)
+	sessions[intent] = next
+	if err := writeSessionFile(store.path, sessions, store.checkpoint, store.telegramUI); err != nil {
+		_ = store.reload()
+		return domain.Session{}, fmt.Errorf("persist session name: %w", err)
+	}
+	store.byIntent = sessions
+	return next, nil
 }
 
 // CompareAndSwap durably replaces expected with next. Repeating an already
@@ -732,20 +766,21 @@ type receiptRecord struct {
 }
 
 type sessionRecord struct {
-	ID             domain.SessionID       `json:"id"`
-	IntentID       domain.IntentID        `json:"intent_id"`
-	ComputerID     domain.ComputerID      `json:"computer_id"`
-	Provider       domain.Provider        `json:"provider"`
-	Workdir        string                 `json:"workdir"`
-	Name           string                 `json:"name,omitempty"`
-	Status         domain.SessionStatus   `json:"status"`
-	Binding        *bindingRecord         `json:"binding,omitempty"`
-	CreatedAt      time.Time              `json:"created_at,omitempty"`
-	LastResumedAt  *time.Time             `json:"last_resumed_at,omitempty"`
-	StateChangedAt time.Time              `json:"state_changed_at,omitempty"`
-	Lifetime       domain.SessionLifetime `json:"lifetime,omitempty"`
-	DeadlineAt     *time.Time             `json:"deadline_at,omitempty"`
-	RecoveryTarget *domain.SessionStatus  `json:"recovery_target,omitempty"`
+	ID             domain.SessionID         `json:"id"`
+	IntentID       domain.IntentID          `json:"intent_id"`
+	ComputerID     domain.ComputerID        `json:"computer_id"`
+	Provider       domain.Provider          `json:"provider"`
+	Workdir        string                   `json:"workdir"`
+	Name           string                   `json:"name,omitempty"`
+	NameSource     domain.SessionNameSource `json:"name_source,omitempty"`
+	Status         domain.SessionStatus     `json:"status"`
+	Binding        *bindingRecord           `json:"binding,omitempty"`
+	CreatedAt      time.Time                `json:"created_at,omitempty"`
+	LastResumedAt  *time.Time               `json:"last_resumed_at,omitempty"`
+	StateChangedAt time.Time                `json:"state_changed_at,omitempty"`
+	Lifetime       domain.SessionLifetime   `json:"lifetime,omitempty"`
+	DeadlineAt     *time.Time               `json:"deadline_at,omitempty"`
+	RecoveryTarget *domain.SessionStatus    `json:"recovery_target,omitempty"`
 }
 
 type bindingRecord struct {
@@ -763,6 +798,7 @@ func recordFromSession(session domain.Session) sessionRecord {
 		Provider:       snapshot.Provider,
 		Workdir:        snapshot.Workdir,
 		Name:           snapshot.Name,
+		NameSource:     snapshot.NameSource,
 		Status:         snapshot.Status,
 		CreatedAt:      snapshot.CreatedAt,
 		LastResumedAt:  cloneTime(snapshot.LastResumedAt),
@@ -789,6 +825,7 @@ func (record sessionRecord) restore() (domain.Session, error) {
 		Provider:       record.Provider,
 		Workdir:        record.Workdir,
 		Name:           record.Name,
+		NameSource:     record.NameSource,
 		Status:         record.Status,
 		CreatedAt:      record.CreatedAt,
 		LastResumedAt:  cloneTime(record.LastResumedAt),
