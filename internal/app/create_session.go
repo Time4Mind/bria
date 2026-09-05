@@ -92,6 +92,14 @@ type CreateSessionResult struct {
 	StartError error
 }
 
+// PreparedSessionCreate is the durable, pre-provider half of session
+// creation. CompleteCreate performs the potentially slow provider launch.
+type PreparedSessionCreate struct {
+	Session  domain.Session
+	request  StartSessionRequest
+	replayed bool
+}
+
 // SessionIDSource supplies stable logical session identifiers.
 type SessionIDSource interface {
 	NewSessionID(context.Context) (domain.SessionID, error)
@@ -197,16 +205,29 @@ func (creator *SessionCreator) Create(
 	ctx context.Context,
 	intent ConfirmedSessionIntent,
 ) (CreateSessionResult, error) {
+	prepared, err := creator.PrepareCreate(ctx, intent)
+	if err != nil {
+		return CreateSessionResult{}, err
+	}
+	return creator.CompleteCreate(ctx, prepared)
+}
+
+// PrepareCreate validates the intent and durably publishes the starting
+// session without waiting for the provider process to become ready.
+func (creator *SessionCreator) PrepareCreate(
+	ctx context.Context,
+	intent ConfirmedSessionIntent,
+) (PreparedSessionCreate, error) {
 	if err := domain.ValidateSessionIntent(
 		intent.IntentID,
 		intent.ComputerID,
 		intent.Provider,
 		intent.Workdir,
 	); err != nil {
-		return CreateSessionResult{}, fmt.Errorf("validate confirmed session intent: %w", err)
+		return PreparedSessionCreate{}, fmt.Errorf("validate confirmed session intent: %w", err)
 	}
 	if intent.ComputerID != creator.localComputerID {
-		return CreateSessionResult{}, fmt.Errorf(
+		return PreparedSessionCreate{}, fmt.Errorf(
 			"%w: got %q, local %q",
 			ErrComputerNotLocal,
 			intent.ComputerID,
@@ -216,26 +237,26 @@ func (creator *SessionCreator) Create(
 
 	stored, exists, err := creator.store.GetByIntent(ctx, intent.IntentID)
 	if err != nil {
-		return CreateSessionResult{}, fmt.Errorf("load confirmed session intent: %w", err)
+		return PreparedSessionCreate{}, fmt.Errorf("load confirmed session intent: %w", err)
 	}
 	if exists {
 		if !sameConfirmedIntent(stored, intent) {
-			return CreateSessionResult{}, fmt.Errorf(
+			return PreparedSessionCreate{}, fmt.Errorf(
 				"%w: intent %q",
 				ErrIntentConflict,
 				intent.IntentID,
 			)
 		}
-		return CreateSessionResult{Session: stored, Replayed: true}, nil
+		return PreparedSessionCreate{Session: stored, replayed: true}, nil
 	}
 
 	if err := creator.workdirs.Validate(ctx, intent.Workdir); err != nil {
-		return CreateSessionResult{}, fmt.Errorf("validate confirmed workdir: %w", err)
+		return PreparedSessionCreate{}, fmt.Errorf("validate confirmed workdir: %w", err)
 	}
 
 	sessionID, err := creator.ids.NewSessionID(ctx)
 	if err != nil {
-		return CreateSessionResult{}, fmt.Errorf("allocate session id: %w", err)
+		return PreparedSessionCreate{}, fmt.Errorf("allocate session id: %w", err)
 	}
 
 	starting, err := domain.NewStartingSessionAt(
@@ -248,7 +269,7 @@ func (creator *SessionCreator) Create(
 		creator.lifetime,
 	)
 	if err != nil {
-		return CreateSessionResult{}, fmt.Errorf("validate confirmed session intent: %w", err)
+		return PreparedSessionCreate{}, fmt.Errorf("validate confirmed session intent: %w", err)
 	}
 	if intent.Name != "" {
 		snapshot := starting.Snapshot()
@@ -256,26 +277,26 @@ func (creator *SessionCreator) Create(
 		snapshot.NameSource = domain.SessionNameDirectory
 		starting, err = domain.RestoreSession(snapshot)
 		if err != nil {
-			return CreateSessionResult{}, fmt.Errorf("validate confirmed session name: %w", err)
+			return PreparedSessionCreate{}, fmt.Errorf("validate confirmed session name: %w", err)
 		}
 	}
 
 	stored, inserted, err := creator.store.PutStartingIfAbsent(ctx, starting)
 	if err != nil {
-		return CreateSessionResult{}, fmt.Errorf("persist starting session: %w", err)
+		return PreparedSessionCreate{}, fmt.Errorf("persist starting session: %w", err)
 	}
 	if !inserted {
 		if !sameConfirmedIntent(stored, intent) {
-			return CreateSessionResult{}, fmt.Errorf(
+			return PreparedSessionCreate{}, fmt.Errorf(
 				"%w: intent %q",
 				ErrIntentConflict,
 				intent.IntentID,
 			)
 		}
-		return CreateSessionResult{Session: stored, Replayed: true}, nil
+		return PreparedSessionCreate{Session: stored, replayed: true}, nil
 	}
 	if !sameConfirmedIntent(stored, intent) || stored.Status() != domain.SessionStarting {
-		return CreateSessionResult{}, errors.New("session store returned a different inserted session")
+		return PreparedSessionCreate{}, errors.New("session store returned a different inserted session")
 	}
 
 	startRequest := StartSessionRequest{
@@ -285,6 +306,28 @@ func (creator *SessionCreator) Create(
 		Workdir:    stored.Workdir(),
 		Mode:       SessionStartNew,
 	}
+	return PreparedSessionCreate{Session: stored, request: startRequest}, nil
+}
+
+// CompleteCreate starts the provider for an exact durable preparation.
+func (creator *SessionCreator) CompleteCreate(ctx context.Context, prepared PreparedSessionCreate) (CreateSessionResult, error) {
+	stored := prepared.Session
+	if prepared.replayed {
+		return CreateSessionResult{Session: stored, Replayed: true}, nil
+	}
+	if stored.Status() != domain.SessionStarting || prepared.request.SessionID != stored.ID() ||
+		prepared.request.ComputerID != stored.ComputerID() || prepared.request.Provider != stored.Provider() ||
+		prepared.request.Workdir != stored.Workdir() || prepared.request.Mode != SessionStartNew || prepared.request.PriorBinding != nil {
+		return CreateSessionResult{}, errors.New("prepared session creation is invalid")
+	}
+	persisted, err := creator.store.Load(ctx, stored.ID())
+	if err != nil {
+		return CreateSessionResult{}, fmt.Errorf("load prepared session creation: %w", err)
+	}
+	if !persisted.Equal(stored) {
+		return CreateSessionResult{}, errors.New("prepared session creation no longer matches durable state")
+	}
+	startRequest := prepared.request
 	binding, startErr := creator.starter.Start(ctx, startRequest)
 	if startErr == nil {
 		ready, transitionErr := stored.Ready(binding)

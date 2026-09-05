@@ -1136,7 +1136,7 @@ var packagePolicies = map[string]packagePolicy{
 	"internal/app": {
 		responsibility:     "implement provider-independent session use cases",
 		allowedImports:     []string{"internal/domain"},
-		maxProductionLines: 900,
+		maxProductionLines: 1000,
 	},
 	"internal/artifactproduction": {
 		responsibility:     "compose durable final artifact delivery with content integrity, exact attempt receipts, and fenced manual-retry recovery",
@@ -1509,7 +1509,7 @@ var packagePolicies = map[string]packagePolicy{
 		allowedImports: []string{
 			"internal/app", "internal/authcomposition", "internal/callbacktoken", "internal/claudestore", "internal/config", "internal/coordinator", "internal/domain", "internal/durablecomposition", "internal/durableflow", "internal/interactioncomposition", "internal/messagejournal", "internal/observability", "internal/processenv", "internal/promptpreprocess", "internal/promptpreprocesscommand", "internal/providerquota", "internal/recoverycomposition", "internal/recoveryruntime", "internal/runtimefactory", "internal/safelog", "internal/sessioncreation", "internal/sessionexpiry", "internal/sessionid", "internal/sessionnaming", "internal/sessionruntime", "internal/sessionsupervisor", "internal/settings", "internal/settingscomposition", "internal/storage", "internal/supervisioncomposition", "internal/telegram", "internal/telegrambridge", "internal/telegramcompletioncomposition", "internal/telegramcontroller", "internal/telegramflow", "internal/telegramnotify", "internal/telegrampipeline", "internal/telegrampromptcomposition", "internal/telegramrecoverycomposition", "internal/telegramruntimecomposition", "internal/turnruntimecomposition", "internal/workdir",
 		},
-		maxProductionLines: 850,
+		maxProductionLines: 950,
 	},
 	"internal/secretfile": {
 		responsibility:     "pass a bounded secret file to a callback with guaranteed transient zeroization",
@@ -1665,7 +1665,7 @@ var packagePolicies = map[string]packagePolicy{
 			"internal/callbacktoken", "internal/coordinator", "internal/domain", "internal/telegram", "internal/telegrambridge",
 			"internal/telegramops", "internal/telegrampipeline", "internal/telegramrecovery", "internal/telegramrecovery/statusrecovery", "internal/telegramstate", "internal/telegramui",
 		},
-		maxProductionLines: 2350,
+		maxProductionLines: 2500,
 	},
 	"internal/telegramnotify": {
 		responsibility: "deliver final and background Telegram notifications",

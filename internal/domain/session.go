@@ -355,10 +355,15 @@ func (s Session) CloseAfterWork(at time.Time) (Session, error) {
 }
 
 func (s Session) BeginClose(at time.Time) (Session, error) {
-	if s.status != SessionReady && s.status != SessionClosingAfterWork {
+	if s.status != SessionReady && s.status != SessionClosingAfterWork && s.status != SessionAwaitingRecovery {
 		return Session{}, fmt.Errorf("cannot close session %q from %q", s.id, s.status)
 	}
-	return s.transition(SessionClosing, at)
+	next, err := s.transition(SessionClosing, at)
+	if err != nil {
+		return Session{}, err
+	}
+	next.recoveryTarget = nil
+	return next, nil
 }
 
 func (s Session) Archive(at time.Time) (Session, error) {

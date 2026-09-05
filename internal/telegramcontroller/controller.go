@@ -2398,7 +2398,15 @@ func (controller *Controller) awaitCreatedSession(intent app.ConfirmedSessionInt
 			controller.mu.Unlock()
 		default:
 			controller.asyncStartFailed(pending.Session.ID(), "Не удалось подтвердить запуск сессии.", previousActive)
+			return
 		}
+		controller.notify(context.WithoutCancel(controller.rootContext), Notification{
+			OperationID:    "session-start:" + string(outcome.Session.ID()) + ":state",
+			ConversationID: controller.ownerPrivateChatID,
+			SessionID:      outcome.Session.ID(),
+			Kind:           NotificationPromptStatus,
+			Text:           "session-state",
+		})
 	}
 }
 func (controller *Controller) resumeArchivedAsync(ctx context.Context, sessionID domain.SessionID) (coordinator.Decision, error) {

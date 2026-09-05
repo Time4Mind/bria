@@ -1,6 +1,7 @@
 package telegramops_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"path/filepath"
@@ -36,6 +37,35 @@ func TestFileStorePersistsIndependentNamespacesAndPhaseCAS(t *testing.T) {
 	}
 	if records, err := reopened.List(context.Background(), telegramops.Statuses, []string{"send_unknown"}, 1); err != nil || len(records) != 1 {
 		t.Fatalf("status records = %q, %v", records, err)
+	}
+}
+
+func TestFileStoreCompactsOnlyCommittedRecoveryPayloads(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "operations.json")
+	store, err := telegramops.OpenFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	committed := json.RawMessage(`{"id":"status:42","update_id":42,"phase":"committed","prepared":{"large":"payload"},"recovery":{"large":"payload"},"receipt":9}`)
+	unknown := json.RawMessage(`{"id":"status:43","update_id":43,"phase":"effect_unknown","prepared":{"must":"remain"}}`)
+	if err := store.Insert(context.Background(), telegramops.Callbacks, "status:42", committed); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Insert(context.Background(), telegramops.Callbacks, "status:43", unknown); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := store.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(snapshot.Operations["status:42"], []byte(`"prepared"`)) {
+		t.Fatalf("committed operation retained recovery payload: %s", snapshot.Operations["status:42"])
+	}
+	if !bytes.Contains(snapshot.Operations["status:42"], []byte(`"recovery"`)) {
+		t.Fatalf("committed operation lost recovery identity: %s", snapshot.Operations["status:42"])
+	}
+	if !bytes.Contains(snapshot.Operations["status:43"], []byte(`"prepared"`)) {
+		t.Fatalf("uncertain operation lost recovery payload: %s", snapshot.Operations["status:43"])
 	}
 }
 

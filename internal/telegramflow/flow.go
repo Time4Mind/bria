@@ -284,17 +284,23 @@ func (handler *Handler) Handle(ctx context.Context, update coordinator.Update) (
 		return coordinator.Decision{Kind: coordinator.DecisionSkip}, nil
 	}
 	digest := fmt.Sprintf("%x", sha256.Sum256([]byte(update.Text)))
-	if existing, found, err := handler.operations.Load(ctx, operationID); err != nil {
+	stageStarted := time.Now()
+	existing, found, err := handler.operations.Load(ctx, operationID)
+	handler.trace(ctx, completedTrace("callback.operation.load", operationID, update, "", "", stageStarted, err))
+	if err != nil {
 		return coordinator.Decision{}, fmt.Errorf("load callback operation: %w", err)
 	} else if found {
 		return handler.resumeOperation(ctx, update, digest, existing)
 	}
 	if acknowledgements, ok := handler.operations.(CallbackAcknowledgementStore); ok {
-		if err := acknowledgements.CreateCallbackAcknowledgement(ctx, operationID, update.CallbackQueryID); err != nil {
+		stageStarted = time.Now()
+		err := acknowledgements.CreateCallbackAcknowledgement(ctx, operationID, update.CallbackQueryID)
+		handler.trace(ctx, completedTrace("callback.ack.persist", operationID, update, "", "", stageStarted, err))
+		if err != nil {
 			return coordinator.Decision{}, fmt.Errorf("persist callback acknowledgement: %w", err)
 		}
 	}
-	stageStarted := time.Now()
+	stageStarted = time.Now()
 	accepted, err := telegrampipeline.AcceptCallbackForDurableOperation(
 		ctx,
 		update,
@@ -324,7 +330,10 @@ func (handler *Handler) Handle(ctx context.Context, update coordinator.Update) (
 		ID: operationID, UpdateID: update.ID, CallbackQueryID: update.CallbackQueryID,
 		CallbackDigest: digest, Plan: plan, Phase: CallbackClaimed,
 	}
-	if err := handler.operations.Create(ctx, operation); err != nil {
+	stageStarted = time.Now()
+	err = handler.operations.Create(ctx, operation)
+	handler.trace(ctx, completedTrace("callback.claim.persist", operationID, update, plan.Action, plan.Effect, stageStarted, err))
+	if err != nil {
 		if !errors.Is(err, ErrCallbackOperationExists) {
 			return coordinator.Decision{}, fmt.Errorf("persist claimed callback: %w", err)
 		}
@@ -339,7 +348,9 @@ func (handler *Handler) Handle(ctx context.Context, update coordinator.Update) (
 func (handler *Handler) executeClaimed(ctx context.Context, update coordinator.Update, operation CallbackOperation) (coordinator.Decision, error) {
 	effectUnknown := operation
 	effectUnknown.Phase = CallbackEffectUnknown
+	stageStarted := time.Now()
 	changed, err := handler.operations.CompareAndSwap(ctx, operation.ID, CallbackClaimed, effectUnknown)
+	handler.trace(ctx, completedTrace("callback.effect.fence", operation.ID, update, operation.Plan.Action, operation.Plan.Effect, stageStarted, err))
 	if err != nil {
 		return coordinator.Decision{}, fmt.Errorf("fence callback effect: %w", err)
 	}
@@ -350,7 +361,7 @@ func (handler *Handler) executeClaimed(ctx context.Context, update coordinator.U
 		}
 		return handler.resumeOperation(ctx, update, operation.CallbackDigest, existing)
 	}
-	stageStarted := time.Now()
+	stageStarted = time.Now()
 	result, err := handler.callbacks.HandleCallback(ctx, operation.Plan)
 	handler.trace(ctx, completedTrace("controller.callback", operation.ID, update, operation.Plan.Action, operation.Plan.Effect, stageStarted, err))
 	if err != nil {
@@ -371,7 +382,9 @@ func (handler *Handler) executeClaimed(ctx context.Context, update coordinator.U
 	preparedOperation := effectUnknown
 	preparedOperation.Phase = CallbackPrepared
 	preparedOperation.Prepared = &prepared
+	stageStarted = time.Now()
 	changed, err = handler.operations.CompareAndSwap(ctx, operation.ID, CallbackEffectUnknown, preparedOperation)
+	handler.trace(ctx, completedTrace("callback.output.persist", operation.ID, update, operation.Plan.Action, operation.Plan.Effect, stageStarted, err))
 	if err != nil {
 		return coordinator.Decision{}, fmt.Errorf("persist callback effect output: %w", err)
 	}
@@ -460,6 +473,7 @@ func (handler *Handler) resumeOperation(ctx context.Context, update coordinator.
 		}
 		committed := operation
 		committed.Phase = CallbackCommitted
+		committed.Prepared = nil
 		changed, err := handler.operations.CompareAndSwap(ctx, operation.ID, CallbackReceiptConfirmed, committed)
 		if err != nil {
 			return coordinator.Decision{}, fmt.Errorf("commit recovered callback operation: %w", err)
@@ -535,11 +549,22 @@ func recoverableCallbackError(err error) bool {
 }
 
 func completedTrace(stage, operationID string, update coordinator.Update, action telegramui.Action, effect telegrampipeline.CallbackEffect, started time.Time, err error) TraceEvent {
-	result, errorText := "completed", ""
-	if err != nil {
-		result, errorText = "failed", err.Error()
-	}
+	result, errorText := traceResult(err), traceError(err)
 	return TraceEvent{Stage: stage, OperationID: operationID, UpdateID: update.ID, UpdateKind: update.Kind, Action: action, Effect: effect, Result: result, Error: errorText, Duration: time.Since(started)}
+}
+
+func traceResult(err error) string {
+	if err != nil {
+		return "failed"
+	}
+	return "completed"
+}
+
+func traceError(err error) string {
+	if err != nil {
+		return err.Error()
+	}
+	return ""
 }
 
 func (handler *Handler) trace(ctx context.Context, event TraceEvent) {
@@ -836,7 +861,16 @@ func (sender *Sender) EnqueuePrepared(ctx context.Context, sequence uint64, prep
 	if existing, found, err := sender.operations.LoadStatus(ctx, prepared.OperationID); err != nil {
 		return coordinator.DurableOutboundReceipt{}, err
 	} else if found {
-		if existing.Sequence != sequence || existing.Prepared == nil || !sameArtifactRetryPrepared(*existing.Prepared, prepared) {
+		if existing.Sequence != sequence {
+			return coordinator.DurableOutboundReceipt{}, errors.New("durable prepared Telegram status identity collision")
+		}
+		if existing.Phase == StatusCommitted {
+			if !reflect.DeepEqual(existing.Status, prepared.Status) || !reflect.DeepEqual(existing.Keyboard, prepared.Keyboard) || existing.Edit != prepared.Edit {
+				return coordinator.DurableOutboundReceipt{}, errors.New("durable prepared Telegram status identity collision")
+			}
+			return coordinator.DurableOutboundReceipt{OperationID: existing.ID, Sequence: existing.Sequence}, nil
+		}
+		if existing.Prepared == nil || !sameArtifactRetryPrepared(*existing.Prepared, prepared) {
 			return coordinator.DurableOutboundReceipt{}, errors.New("durable prepared Telegram status identity collision")
 		}
 		if existing.Phase == StatusQueued {
@@ -924,6 +958,8 @@ func (sender *Sender) deliverStatusOperation(ctx context.Context, operation Stat
 	sender.delivery.Lock()
 	defer sender.delivery.Unlock()
 	current, found, err := sender.operations.LoadStatus(ctx, operation.ID)
+	loadFinished := time.Now()
+	sender.trace(ctx, TraceEvent{Stage: "delivery.operation.load", OperationID: operation.ID, Result: traceResult(err), Error: traceError(err), Duration: loadFinished.Sub(started)})
 	if err != nil {
 		return coordinator.Receipt{}, err
 	}
@@ -943,7 +979,9 @@ func (sender *Sender) deliverStatusOperation(ctx context.Context, operation Stat
 	}
 	unknown := operation
 	unknown.Phase = StatusSendUnknown
+	fenceStarted := time.Now()
 	changed, err := sender.operations.CompareAndSwapStatus(ctx, operation.ID, StatusQueued, unknown)
+	sender.trace(ctx, TraceEvent{Stage: "delivery.send.fence", OperationID: operation.ID, Result: traceResult(err), Error: traceError(err), Duration: time.Since(fenceStarted)})
 	if err != nil || !changed {
 		if err != nil {
 			return coordinator.Receipt{}, err
@@ -978,7 +1016,9 @@ func (sender *Sender) deliverStatusOperation(ctx context.Context, operation Stat
 	confirmed := unknown
 	confirmed.Phase = StatusReceiptConfirmed
 	confirmed.Receipt = receipt.MessageID
+	receiptStarted := time.Now()
 	changed, err = sender.operations.CompareAndSwapStatus(context.WithoutCancel(ctx), operation.ID, StatusSendUnknown, confirmed)
+	sender.trace(ctx, TraceEvent{Stage: "delivery.receipt.persist", OperationID: operation.ID, Result: traceResult(err), Error: traceError(err), Duration: time.Since(receiptStarted)})
 	if err != nil || !changed {
 		if err != nil {
 			return coordinator.Receipt{}, err
@@ -987,7 +1027,10 @@ func (sender *Sender) deliverStatusOperation(ctx context.Context, operation Stat
 	}
 	committed := confirmed
 	committed.Phase = StatusCommitted
+	committed.Prepared = nil
+	commitStarted := time.Now()
 	changed, err = sender.operations.CompareAndSwapStatus(context.WithoutCancel(ctx), operation.ID, StatusReceiptConfirmed, committed)
+	sender.trace(ctx, TraceEvent{Stage: "delivery.commit.persist", OperationID: operation.ID, Result: traceResult(err), Error: traceError(err), Duration: time.Since(commitStarted)})
 	if err != nil || !changed {
 		if err != nil {
 			return coordinator.Receipt{}, err
@@ -1071,6 +1114,7 @@ func (sender *Sender) ConfirmUnknownStatus(ctx context.Context, operationID stri
 	}
 	committed := confirmed
 	committed.Phase = StatusCommitted
+	committed.Prepared = nil
 	changed, err = sender.operations.CompareAndSwapStatus(ctx, operationID, StatusReceiptConfirmed, committed)
 	if err != nil {
 		return err
@@ -1212,6 +1256,7 @@ func (sender *Sender) sendPrepared(
 	if durable {
 		committed := operation
 		committed.Phase = CallbackCommitted
+		committed.Prepared = nil
 		changed, err := sender.operations.CompareAndSwap(ctx, operationID, CallbackReceiptConfirmed, committed)
 		if err != nil {
 			return coordinator.Receipt{}, fmt.Errorf("persist committed callback carrier: %w", err)
@@ -1270,6 +1315,7 @@ func (sender *Sender) ConfirmUnknownSend(ctx context.Context, operationID string
 	}
 	committed := confirmed
 	committed.Phase = CallbackCommitted
+	committed.Prepared = nil
 	changed, err = sender.operations.CompareAndSwap(ctx, operationID, CallbackReceiptConfirmed, committed)
 	if err != nil {
 		return err

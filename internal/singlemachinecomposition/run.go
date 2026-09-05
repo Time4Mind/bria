@@ -76,6 +76,33 @@ type liveConfigStarter struct {
 	store config.Store
 }
 
+type asyncSessionCreator struct {
+	creator *app.SessionCreator
+	root    context.Context
+}
+
+func (creator asyncSessionCreator) BeginCreate(ctx context.Context, intent app.ConfirmedSessionIntent) (telegramcontroller.PendingSessionStart, error) {
+	if creator.creator == nil || creator.root == nil {
+		return telegramcontroller.PendingSessionStart{}, errors.New("async session creator is not configured")
+	}
+	prepared, err := creator.creator.PrepareCreate(ctx, intent)
+	if err != nil {
+		return telegramcontroller.PendingSessionStart{}, err
+	}
+	if prepared.Session.Status() != domain.SessionStarting {
+		return telegramcontroller.PendingSessionStart{}, errors.New("async session creation replay is not starting")
+	}
+	outcome := make(chan telegramcontroller.SessionStartOutcome, 1)
+	go func() {
+		defer close(outcome)
+		result, completeErr := creator.creator.CompleteCreate(creator.root, prepared)
+		outcome <- telegramcontroller.SessionStartOutcome{
+			Session: result.Session, Replayed: result.Replayed, StartError: result.StartError, Err: completeErr,
+		}
+	}()
+	return telegramcontroller.PendingSessionStart{Session: prepared.Session, Outcome: outcome}, nil
+}
+
 func (starter liveConfigStarter) Start(ctx context.Context, request app.StartSessionRequest) (domain.ProviderBinding, error) {
 	if starter.base == nil || starter.store == nil {
 		return domain.ProviderBinding{}, errors.New("live provider starter is not configured")
@@ -455,6 +482,7 @@ func runTelegramController(
 			QueueLimit: effectiveSettings.QueueLimit, Lifecycle: starter, UIState: state,
 			Settings: telegramPreferences, Providers: settingscomposition.ProviderPreferences{Store: providerPreferences},
 			CreationEnvironment:   creationEnvironment,
+			AsyncCreator:          asyncSessionCreator{creator: creator, root: ctx},
 			Quotas:                quotaService,
 			Preprocessor:          promptPreprocessor,
 			SessionNamer:          sessionNamer,

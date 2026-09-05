@@ -305,7 +305,9 @@ func swapStatus(ctx context.Context, backend telegramops.Store, id string, old S
 	if err != nil || !found {
 		return false, err
 	}
-	if !sameStatusOperationIdentity(current, next) {
+	if !sameStatusOperationIdentity(current, next) ||
+		(old != StatusReceiptConfirmed || next.Phase != StatusCommitted) &&
+			!reflect.DeepEqual(current.Prepared, next.Prepared) {
 		return false, errors.New("status operation immutable identity changed")
 	}
 	raw, _ := json.Marshal(next)
@@ -375,9 +377,13 @@ func validateCallbackOperation(operation CallbackOperation) error {
 		if operation.Prepared == nil || operation.Receipt != 0 {
 			return errors.New("prepared callback operation is invalid")
 		}
-	case CallbackReceiptConfirmed, CallbackCommitted:
+	case CallbackReceiptConfirmed:
 		if operation.Prepared == nil || operation.Receipt <= 0 {
 			return errors.New("confirmed callback operation is invalid")
+		}
+	case CallbackCommitted:
+		if operation.Receipt <= 0 {
+			return errors.New("committed callback operation requires receipt")
 		}
 	default:
 		return errors.New("unsupported callback operation phase")
@@ -415,10 +421,12 @@ func sameCallbackOperationIdentity(left, right CallbackOperation) bool {
 	return left.ID == right.ID && left.UpdateID == right.UpdateID && left.CallbackQueryID == right.CallbackQueryID && left.CallbackDigest == right.CallbackDigest && reflect.DeepEqual(left.Plan, right.Plan)
 }
 func sameStatusOperationIdentity(left, right StatusOperation) bool {
-	return left.ID == right.ID && left.Sequence == right.Sequence && reflect.DeepEqual(left.Status, right.Status) && reflect.DeepEqual(left.Keyboard, right.Keyboard) && reflect.DeepEqual(left.Prepared, right.Prepared) && left.Edit == right.Edit && reflect.DeepEqual(left.Recovery, right.Recovery)
+	return left.ID == right.ID && left.Sequence == right.Sequence && reflect.DeepEqual(left.Status, right.Status) && reflect.DeepEqual(left.Keyboard, right.Keyboard) && left.Edit == right.Edit && reflect.DeepEqual(left.Recovery, right.Recovery)
 }
 func validStatusRecoveryBinding(binding StatusRecoveryBinding, operation StatusOperation) bool {
-	if !statusrecovery.Valid(binding) || binding.OperationID != operation.ID || binding.Sequence != operation.Sequence || binding.Prepared != (operation.Prepared != nil) || binding.Edit != operation.Edit || binding.Carrier.ChatID != operation.Status.ConversationID {
+	if !statusrecovery.Valid(binding) || binding.OperationID != operation.ID || binding.Sequence != operation.Sequence ||
+		operation.Phase != StatusCommitted && binding.Prepared != (operation.Prepared != nil) ||
+		binding.Edit != operation.Edit || binding.Carrier.ChatID != operation.Status.ConversationID {
 		return false
 	}
 	return !operation.Edit || binding.Carrier.MessageID == operation.Status.SourceMessageID

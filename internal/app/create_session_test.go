@@ -78,6 +78,29 @@ func TestSessionCreatorPersistsStartingBeforeStartAndThenReady(t *testing.T) {
 	}
 }
 
+func TestPreparedSessionCreationReturnsBeforeProviderStart(t *testing.T) {
+	t.Parallel()
+
+	store := newMemorySessionStore()
+	starter := &recordingStarter{start: func(request app.StartSessionRequest) (domain.ProviderBinding, error) {
+		return domain.ProviderBinding{Provider: request.Provider, SessionID: "provider-async", Generation: 1}, nil
+	}}
+	creator := mustSessionCreator(t, &sequenceIDs{ids: []domain.SessionID{"session-async"}}, store, starter)
+	prepared, err := creator.PrepareCreate(context.Background(), app.ConfirmedSessionIntent{
+		IntentID: "intent-async", ComputerID: "computer-1", Provider: domain.ProviderCodex, Workdir: "/workspace/project",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prepared.Session.Status() != domain.SessionStarting || starter.calls != 0 {
+		t.Fatalf("prepared session = %q, provider starts = %d", prepared.Session.Status(), starter.calls)
+	}
+	result, err := creator.CompleteCreate(context.Background(), prepared)
+	if err != nil || result.Session.Status() != domain.SessionReady || starter.calls != 1 {
+		t.Fatalf("completed creation = (%#v, %v), provider starts = %d", result, err, starter.calls)
+	}
+}
+
 func TestStartSessionRequestRequiresExplicitConsistentLifecycleMode(t *testing.T) {
 	t.Parallel()
 

@@ -67,7 +67,7 @@ func (closer *SessionCloser) Close(ctx context.Context, id domain.SessionID) (Cl
 			return CloseSessionResult{}, fmt.Errorf("persist close after work: %w", err)
 		}
 		return CloseSessionResult{Session: scheduled, Scheduled: true}, nil
-	case domain.SessionReady, domain.SessionClosingAfterWork, domain.SessionClosing:
+	case domain.SessionReady, domain.SessionClosingAfterWork, domain.SessionAwaitingRecovery, domain.SessionClosing:
 		return closer.closeNow(ctx, current, at)
 	default:
 		return CloseSessionResult{}, fmt.Errorf("session %q cannot close from %q", id, current.Status())
@@ -88,6 +88,18 @@ func (closer *SessionCloser) closeNow(ctx context.Context, current domain.Sessio
 	}
 	binding, ok := closing.Binding()
 	if !ok {
+		// A binding-less awaiting-recovery session comes from a provider start
+		// failure whose contract guarantees that no adapter process remains.
+		if current.Status() == domain.SessionAwaitingRecovery {
+			archived, err := closing.Archive(at)
+			if err != nil {
+				return CloseSessionResult{Session: closing}, err
+			}
+			if err := closer.store.Replace(ctx, closing, archived); err != nil {
+				return CloseSessionResult{Session: closing}, fmt.Errorf("persist binding-less archived session: %w", err)
+			}
+			return CloseSessionResult{Session: archived}, nil
+		}
 		return CloseSessionResult{Session: closing}, errors.New("closing session has no provider binding")
 	}
 	request := StartSessionRequest{

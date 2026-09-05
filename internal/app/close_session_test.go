@@ -78,6 +78,56 @@ func TestCloseAbortFailurePersistsRecoveryTargetAndDoesNotArchive(t *testing.T) 
 	}
 }
 
+func TestCloseAwaitingRecoveryConfirmsExactProcessExitBeforeArchiving(t *testing.T) {
+	now := time.Date(2026, 9, 5, 15, 46, 0, 0, time.UTC)
+	ready := readySession(t, now.Add(-time.Hour))
+	awaiting, err := ready.AwaitRecoveryAt(now.Add(-time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := &lifecycleStore{session: awaiting}
+	starter := &lifecycleStarter{}
+	closer, _ := app.NewSessionCloser(store, starter, func() time.Time { return now })
+
+	result, err := closer.Close(context.Background(), awaiting.ID())
+	if err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	if result.Session.Status() != domain.SessionArchived || starter.abortCalls != 1 {
+		t.Fatalf("close awaiting recovery = %#v, aborts %d", result, starter.abortCalls)
+	}
+	prior, _ := awaiting.Binding()
+	if starter.lastAbortBinding != prior || starter.lastAbortRequest.PriorBinding == nil || *starter.lastAbortRequest.PriorBinding != prior {
+		t.Fatalf("abort did not target exact recovering process: %#v / %#v", starter.lastAbortRequest, starter.lastAbortBinding)
+	}
+	if got, want := store.statuses, []domain.SessionStatus{domain.SessionClosing, domain.SessionArchived}; !equalStatuses(got, want) {
+		t.Fatalf("persisted statuses = %v, want %v", got, want)
+	}
+}
+
+func TestCloseBindinglessAwaitingRecoveryArchivesWithoutProviderAbort(t *testing.T) {
+	now := time.Date(2026, 9, 5, 15, 46, 0, 0, time.UTC)
+	starting, err := domain.NewStartingSessionAt("logical-start-failure", "intent-start-failure", "local", domain.ProviderClaude, "/work", now.Add(-time.Hour), domain.SessionLifetimeNever)
+	if err != nil {
+		t.Fatal(err)
+	}
+	awaiting, err := starting.AwaitRecoveryAt(now.Add(-time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := &lifecycleStore{session: awaiting}
+	starter := &lifecycleStarter{}
+	closer, _ := app.NewSessionCloser(store, starter, func() time.Time { return now })
+
+	result, err := closer.Close(context.Background(), awaiting.ID())
+	if err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	if result.Session.Status() != domain.SessionArchived || starter.abortCalls != 0 {
+		t.Fatalf("binding-less close = %#v, aborts %d", result, starter.abortCalls)
+	}
+}
+
 func readySession(t *testing.T, createdAt time.Time) domain.Session {
 	t.Helper()
 	session, err := domain.NewStartingSessionAt("logical-close", "intent-close", "local", domain.ProviderClaude, "/work", createdAt, domain.SessionLifetimeNever)

@@ -152,6 +152,7 @@ func (store *FileStore) Insert(ctx context.Context, namespace Namespace, id stri
 	}
 	next := cloneSnapshot(store.state)
 	namespaceMap(next, namespace)[id] = cloneRaw(raw)
+	next = compactFinalized(next)
 	if err := writeAtomic(store.path, next, store.syncDirectory); err != nil {
 		return err
 	}
@@ -174,6 +175,7 @@ func (store *FileStore) CompareAndSwap(ctx context.Context, namespace Namespace,
 	}
 	next := cloneSnapshot(store.state)
 	namespaceMap(next, namespace)[id] = cloneRaw(raw)
+	next = compactFinalized(next)
 	if err := writeAtomic(store.path, next, store.syncDirectory); err != nil {
 		return false, err
 	}
@@ -372,6 +374,30 @@ func cloneSnapshot(state Snapshot) Snapshot {
 	}
 	return clone
 }
+
+// compactFinalized removes recovery payloads that are no longer used after a
+// durable operation has committed. Active and uncertain operations retain
+// their complete payload, while old committed records keep the identity and
+// receipt needed for bounded replay checks.
+func compactFinalized(state Snapshot) Snapshot {
+	for _, records := range []map[string]json.RawMessage{state.Operations, state.Statuses} {
+		for id, raw := range records {
+			if rawPhase(raw) != "committed" {
+				continue
+			}
+			var record map[string]json.RawMessage
+			if json.Unmarshal(raw, &record) != nil {
+				continue
+			}
+			delete(record, "prepared")
+			compacted, err := json.Marshal(record)
+			if err == nil {
+				records[id] = compacted
+			}
+		}
+	}
+	return state
+}
 func validateSnapshot(state Snapshot) error {
 	if state.Version != Version || state.Operations == nil {
 		return errors.New("Telegram operation store schema is invalid")
@@ -395,7 +421,7 @@ func validateSnapshot(state Snapshot) error {
 }
 
 func writeAtomic(path string, state Snapshot, syncDirectory func(string) error) error {
-	data, err := json.MarshalIndent(state, "", "  ")
+	data, err := json.Marshal(state)
 	if err != nil {
 		return err
 	}
