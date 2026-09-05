@@ -435,6 +435,8 @@ func runTelegramController(
 	if err != nil {
 		return fmt.Errorf("compose session creation environment: %w", err)
 	}
+	creationEnvironment.Start(ctx)
+	defer creationEnvironment.Close()
 	handler, err := telegramcontroller.New(
 		configuration.OwnerUserID,
 		configuration.PrivateChatID,

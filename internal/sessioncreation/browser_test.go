@@ -56,8 +56,8 @@ func TestLocalBrowserListsRootsPagesDirectoriesAndCreatesChild(t *testing.T) {
 
 func TestLocalBrowserSortsDirectoriesByNewestRecursiveContent(t *testing.T) {
 	root := t.TempDir()
-	stale := filepath.Join(root, "stale")
-	recent := filepath.Join(root, "recent")
+	stale := filepath.Join(root, "alpha-stale")
+	recent := filepath.Join(root, "zulu-recent")
 	recentNested := filepath.Join(recent, "nested")
 	recentLeaf := filepath.Join(recentNested, "leaf")
 	for _, directory := range []string{stale, recent, recentNested, recentLeaf} {
@@ -90,9 +90,18 @@ func TestLocalBrowserSortsDirectoriesByNewestRecursiveContent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	directories, err := browser.Browse(context.Background(), "local", root)
-	if err != nil || len(directories) != 2 || directories[0].Name != "recent" || directories[1].Name != "stale" {
-		t.Fatalf("Browse() = %#v, %v", directories, err)
+	browser.Start(context.Background())
+	t.Cleanup(browser.Close)
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		directories, browseErr := browser.Browse(context.Background(), "local", root)
+		if browseErr == nil && len(directories) == 2 && directories[0].Name == "zulu-recent" && directories[1].Name == "alpha-stale" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("Browse() never observed warmed activity order: %#v, %v", directories, browseErr)
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 }
 

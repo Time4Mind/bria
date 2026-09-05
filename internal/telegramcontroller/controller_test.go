@@ -148,7 +148,12 @@ func TestStatusProvidesBriaMainMenuKeyboard(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decision.Keyboard == nil || len(*decision.Keyboard) != 3 || (*decision.Keyboard)[0][0].CallbackData != "menu:sessions" {
+	want := coordinator.KeyboardMarkup{
+		{{Text: "Сессии", CallbackData: "menu:sessions"}, {Text: "Архив", CallbackData: "menu:archive"}},
+		{{Text: "Статус", CallbackData: "menu:status"}, {Text: "➕ Новая", CallbackData: "menu:new"}},
+		{{Text: "Настройки", CallbackData: "menu:settings"}},
+	}
+	if decision.Keyboard == nil || !reflect.DeepEqual(*decision.Keyboard, want) {
 		t.Fatalf("keyboard = %#v", decision.Keyboard)
 	}
 }
@@ -1955,8 +1960,8 @@ func TestGlobalSemanticActionsExposeOnlyTypedSurfacesAndStableCreateIdentity(t *
 	t.Cleanup(func() { _ = controller.Close(context.Background()) })
 	menu, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticMenuBack})
 	if err != nil || menu.Surface == nil || len(menu.Surface.Rows) < 2 ||
-		menu.Surface.Rows[0][0].Label != "Сессии" || menu.Surface.Rows[0][1].Label != "Статус" ||
-		menu.Surface.Rows[1][0].Label != "Архив" || menu.Surface.Rows[1][1].Label != "➕ Новая" {
+		menu.Surface.Rows[0][0].Label != "Сессии" || menu.Surface.Rows[0][1].Label != "Архив" ||
+		menu.Surface.Rows[1][0].Label != "Статус" || menu.Surface.Rows[1][1].Label != "➕ Новая" {
 		t.Fatalf("main menu ordering = (%#v, %v)", menu, err)
 	}
 	for _, kind := range []telegramcontroller.SemanticActionKind{

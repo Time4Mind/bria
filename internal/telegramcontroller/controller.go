@@ -667,8 +667,8 @@ func (controller *Controller) handleGlobalSemanticAction(ctx context.Context, ac
 }
 func mainMenuSurface(text string) *SemanticSurface {
 	return &SemanticSurface{Text: text, Rows: [][]SemanticButton{
-		{{Label: "Сессии", Action: SemanticMenuSessions}, {Label: "Статус", Action: SemanticMenuStatus}},
-		{{Label: "Архив", Action: SemanticMenuArchive}, {Label: "➕ Новая", Action: SemanticMenuNew}},
+		{{Label: "Сессии", Action: SemanticMenuSessions}, {Label: "Архив", Action: SemanticMenuArchive}},
+		{{Label: "Статус", Action: SemanticMenuStatus}, {Label: "➕ Новая", Action: SemanticMenuNew}},
 		{{Label: "Настройки", Action: SemanticMenuSettings}},
 	}}
 }
@@ -2035,8 +2035,8 @@ func withCallbackID(decision coordinator.Decision, update coordinator.Update) co
 func (controller *Controller) menuStatus(text string) coordinator.Decision {
 	decision := controller.status(text)
 	keyboard := coordinator.KeyboardMarkup{
-		{{Text: "Сессии", CallbackData: "menu:sessions"}, {Text: "Статус", CallbackData: "menu:status"}},
-		{{Text: "Архив", CallbackData: "menu:archive"}, {Text: "➕ Новая", CallbackData: "menu:new"}},
+		{{Text: "Сессии", CallbackData: "menu:sessions"}, {Text: "Архив", CallbackData: "menu:archive"}},
+		{{Text: "Статус", CallbackData: "menu:status"}, {Text: "➕ Новая", CallbackData: "menu:new"}},
 		{{Text: "Настройки", CallbackData: "menu:settings"}},
 	}
 	decision.Keyboard = &keyboard

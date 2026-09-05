@@ -125,13 +125,25 @@ func (environment *LocalEnvironment) Parent(ctx context.Context, computerID doma
 	return environment.browser.Parent(path)
 }
 
+func (environment *LocalEnvironment) Start(ctx context.Context) {
+	if environment != nil {
+		environment.browser.Start(ctx)
+	}
+}
+
+func (environment *LocalEnvironment) Close() {
+	if environment != nil {
+		environment.browser.Close()
+	}
+}
+
 // LocalBrowser implements the filesystem half of Environment for one local
 // computer. Provider capability discovery remains composition-owned.
 type LocalBrowser struct {
 	computerID domain.ComputerID
 	roots      []Directory
 	home       string
-	activity   *directoryActivityCache
+	activity   *directoryActivityIndex
 }
 
 func NewLocalBrowser(computerID domain.ComputerID, configuredRoots []string) (*LocalBrowser, error) {
@@ -178,7 +190,21 @@ func NewLocalBrowser(computerID domain.ComputerID, configuredRoots []string) (*L
 		home = canonicalHome
 	}
 	sort.Slice(roots, func(i, j int) bool { return roots[i].Path < roots[j].Path })
-	return &LocalBrowser{computerID: computerID, roots: roots, home: home, activity: newDirectoryActivityCache()}, nil
+	return &LocalBrowser{computerID: computerID, roots: roots, home: home, activity: newDirectoryActivityIndex()}, nil
+}
+
+// Start warms and periodically refreshes directory activity outside Telegram's
+// callback path. Browse remains non-blocking with respect to this worker.
+func (browser *LocalBrowser) Start(ctx context.Context) {
+	if browser != nil && browser.activity != nil {
+		browser.activity.start(ctx, browser.home)
+	}
+}
+
+func (browser *LocalBrowser) Close() {
+	if browser != nil && browser.activity != nil {
+		browser.activity.close()
+	}
 }
 
 func (browser *LocalBrowser) Home(ctx context.Context, computerID domain.ComputerID) (string, error) {
@@ -215,15 +241,10 @@ func (browser *LocalBrowser) Browse(ctx context.Context, computerID domain.Compu
 		if !entry.IsDir() || entry.Type()&os.ModeSymlink != 0 {
 			continue
 		}
-		child, _, childErr := browser.allowedDirectory(filepath.Join(canonical, entry.Name()))
-		if childErr != nil {
-			continue
-		}
+		child := filepath.Join(canonical, entry.Name())
 		directories = append(directories, Directory{Name: entry.Name(), Path: child})
 	}
-	if err := browser.activity.sort(ctx, directories); err != nil {
-		return nil, err
-	}
+	browser.activity.sort(directories)
 	return directories, nil
 }
 

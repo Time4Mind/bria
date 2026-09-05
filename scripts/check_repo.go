@@ -1638,9 +1638,9 @@ var packagePolicies = map[string]packagePolicy{
 		externalOnlyEvidence: "telegram_codex_claude_e2e",
 	},
 	"internal/sessioncreation": {
-		responsibility:     "own one in-progress new-session draft and bounded node-local directory navigation",
+		responsibility:     "own one in-progress new-session draft, bounded node-local directory navigation, and its background activity index",
 		allowedImports:     []string{"internal/domain"},
-		maxProductionLines: 1100,
+		maxProductionLines: 1250,
 	},
 	"internal/sessionnaming": {
 		responsibility:     "derive and persist optional short session labels",
