@@ -379,7 +379,7 @@ func (store *PhotoCustody) validateContext(ctx context.Context) error {
 }
 func validAttachment(attachment mediaflow.PhotoAttachment, maxBytes int64) bool {
 	return validOpaque(attachment.FileID) && validOptionalOpaque(attachment.FileUniqueID) &&
-		(attachment.MIMEType == "image/jpeg" || attachment.MIMEType == "image/png" || attachment.MIMEType == "image/webp") &&
+		attachment.MIMEType != "" && utf8.ValidString(attachment.MIMEType) &&
 		attachment.Width >= 0 && attachment.Height >= 0 && len(attachment.Content) > 0 && int64(len(attachment.Content)) <= maxBytes
 }
 func validReceipt(receipt AttachmentReceipt) bool {
@@ -388,7 +388,7 @@ func validReceipt(receipt AttachmentReceipt) bool {
 func validRecord(record photoRecord, id string, maxBytes int64) bool {
 	if record.Version != photoRecordVersion || record.ID != id || !validPhotoID(record.ID) ||
 		!validOpaque(record.FileID) || !validOptionalOpaque(record.FileUniqueID) ||
-		(record.MIMEType != "image/jpeg" && record.MIMEType != "image/png" && record.MIMEType != "image/webp") ||
+		record.MIMEType == "" || !utf8.ValidString(record.MIMEType) ||
 		record.Width < 0 || record.Height < 0 || record.Size <= 0 || record.Size > maxBytes || len(record.SHA256) != sha256.Size*2 {
 		return false
 	}

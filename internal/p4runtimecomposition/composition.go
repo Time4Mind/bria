@@ -66,8 +66,9 @@ func Open(options Options) (*Bundle, bool, error) {
 	media, err := mediaproduction.Open(options.Telegram, mediaproduction.Config{
 		VoiceTempDirectory: p4.VoiceTempDirectory, PhotoDirectory: p4.PhotoCustodyDirectory,
 		VoiceBytes: limits.VoiceBytes, PhotoBytes: limits.PhotoBytes, PreparedBytes: int(limits.TranscriptBytes),
-		Parakeet:     parakeet.Command{Executable: command.Executable, ModelPath: command.ModelPath, Arguments: append([]string(nil), command.Argv...), Environment: []string{}, MaxTranscriptBytes: limits.TranscriptBytes, MaxDiagnosticBytes: limits.DiagnosticBytes},
-		DocumentMode: mediaproduction.DocumentsReject,
+		Parakeet:       parakeet.Command{Executable: command.Executable, ModelPath: command.ModelPath, Arguments: append([]string(nil), command.Argv...), Environment: []string{}, MaxTranscriptBytes: limits.TranscriptBytes, MaxDiagnosticBytes: limits.DiagnosticBytes},
+		DocumentMode:   mediaproduction.DocumentsPrepare,
+		DocumentPolicy: mediaproduction.TextDocumentPolicy{Downloader: options.Telegram, MaxBytes: limits.TranscriptBytes},
 	})
 	if err != nil {
 		return nil, true, fmt.Errorf("compose media runtime: %w", err)

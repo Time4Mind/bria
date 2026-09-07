@@ -67,8 +67,8 @@ func TestTelegramReplyAndMediaSurviveTransportNormalization(t *testing.T) {
 		got.MediaHeight != 1080 || got.MediaDurationSeconds != 12 {
 		t.Fatalf("normalized video policy = %#v", got)
 	}
-	if got := updates[4]; got.Caption != "document caption only" || got.MediaKind != "" || got.MediaDownloadAllowed {
-		t.Fatalf("normalized document caption policy = %#v", got)
+	if got := updates[4]; got.Caption != "document caption only" || got.MediaKind != "document" || got.MediaFileID != "document-id" || got.MediaFileUniqueID != "document-unique" || !got.MediaDownloadAllowed {
+		t.Fatalf("normalized document input = %#v", got)
 	}
 
 	active := mustIntegrationReadySession(t, "11111111-1111-4111-9111-111111111111", "intent-active", domain.ProviderCodex, "codex-active")

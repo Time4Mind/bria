@@ -691,8 +691,8 @@ func validateMessageMedia(update Update) error {
 	if strings.TrimSpace(update.MediaKind) != update.MediaKind || strings.TrimSpace(update.MediaFileID) == "" {
 		return errors.New("message media requires a normalized kind and file id")
 	}
-	if update.MediaDownloadAllowed && update.MediaKind != "voice" && update.MediaKind != "photo" {
-		return errors.New("only voice and photo media may be downloaded")
+	if update.MediaDownloadAllowed && update.MediaKind != "voice" && update.MediaKind != "photo" && update.MediaKind != "document" {
+		return errors.New("only voice, photo, and document media may be downloaded")
 	}
 	if update.MediaKind == "video" && update.MediaDownloadAllowed {
 		return errors.New("video download must remain disabled")

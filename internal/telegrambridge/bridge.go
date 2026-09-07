@@ -151,6 +151,14 @@ func normalizeUpdate(update telegram.Update) coordinator.Update {
 			result.MediaWidth = video.Width
 			result.MediaHeight = video.Height
 			result.MediaDownloadAllowed = false
+		case update.Message.Document != nil:
+			document := update.Message.Document
+			result.MediaKind = string(telegram.MediaDocument)
+			result.MediaFileID = document.FileID
+			result.MediaFileUniqueID = document.FileUniqueID
+			result.MediaFileSize = document.FileSize
+			result.MediaMIMEType = document.MIMEType
+			result.MediaDownloadAllowed = true
 		}
 		return result
 	}

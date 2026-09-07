@@ -47,8 +47,8 @@ type Terminal struct {
 }
 
 func Open(ctx context.Context, config Config) (terminal *Terminal, err error) {
-	if runtime.GOOS != "linux" || (runtime.GOARCH != "amd64" && runtime.GOARCH != "arm64") {
-		return nil, errors.New("native terminal exact cleanup requires Linux amd64/arm64")
+	if (runtime.GOOS != "linux" && runtime.GOOS != "darwin") || (runtime.GOARCH != "amd64" && runtime.GOARCH != "arm64") {
+		return nil, errors.New("native terminal requires Linux or macOS amd64/arm64")
 	}
 	if len(config.Command) == 0 || config.Command[0] == "" {
 		return nil, errors.New("native terminal command required")

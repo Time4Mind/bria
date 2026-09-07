@@ -1,6 +1,9 @@
 package mediaproduction
 
 import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -11,6 +14,8 @@ import (
 	"bria/internal/files"
 	"bria/internal/mediaflow"
 	"bria/internal/speech/parakeet"
+	"bria/internal/telegram"
+	"bria/internal/telegramcontroller"
 )
 
 var (
@@ -48,6 +53,41 @@ type Runtime struct {
 	Photos   *PhotoCustody
 }
 
+// TextDocumentPolicy accepts bounded Telegram documents and stores their bytes
+// in custody. Providers receive the verified local path, never file contents
+// injected into the prompt.
+type TextDocumentPolicy struct {
+	Downloader mediaflow.Downloader
+	Attacher   mediaflow.PhotoAttacher
+	MaxBytes   int64
+}
+
+func (policy TextDocumentPolicy) PrepareDocument(ctx context.Context, input telegramcontroller.IncomingInput) (string, error) {
+	return "", mediaflow.ErrDocumentPolicy
+}
+
+func (policy TextDocumentPolicy) PrepareDocumentStructured(ctx context.Context, input telegramcontroller.IncomingInput) (telegramcontroller.PreparedInput, error) {
+	if policy.Attacher == nil {
+		return telegramcontroller.PreparedInput{}, mediaflow.ErrDocumentPolicy
+	}
+	if policy.Downloader == nil || policy.MaxBytes <= 0 || input.Kind != string(telegram.MediaDocument) || !input.DownloadPermitted || input.FileSize <= 0 || input.FileSize > policy.MaxBytes {
+		return telegramcontroller.PreparedInput{}, mediaflow.ErrMediaTooLarge
+	}
+	download, err := policy.Downloader.DownloadMedia(ctx, telegram.DownloadMediaRequest{Kind: telegram.MediaDocument, FileID: input.FileID, MaxBytes: policy.MaxBytes})
+	if err != nil {
+		return telegramcontroller.PreparedInput{}, err
+	}
+	if download.File.FileID != input.FileID || (input.FileUniqueID != "" && download.File.FileUniqueID != input.FileUniqueID) || int64(len(download.Content)) != input.FileSize || int64(len(download.Content)) > policy.MaxBytes {
+		return telegramcontroller.PreparedInput{}, mediaflow.ErrDownloadMismatch
+	}
+	ref, err := policy.Attacher.AttachPhoto(ctx, mediaflow.PhotoAttachment{FileID: input.FileID, FileUniqueID: input.FileUniqueID, MIMEType: "application/octet-stream", Content: download.Content})
+	if err != nil {
+		return telegramcontroller.PreparedInput{}, err
+	}
+	digest := sha256.Sum256(download.Content)
+	return telegramcontroller.PreparedInput{Attachments: []telegramcontroller.AttachmentRef{{Reference: ref, Size: input.FileSize, SHA256: hex.EncodeToString(digest[:])}}}, nil
+}
+
 func Open(downloader mediaflow.Downloader, config Config) (*Runtime, error) {
 	if !validBound(config.VoiceBytes) || !validBound(config.PhotoBytes) ||
 		config.PreparedBytes <= 0 || config.PreparedBytes > 1<<20 {
@@ -60,6 +100,10 @@ func Open(downloader mediaflow.Downloader, config Config) (*Runtime, error) {
 	photos, err := OpenPhotoCustody(config.PhotoDirectory, config.PhotoBytes)
 	if err != nil {
 		return nil, err
+	}
+	if policy, ok := config.DocumentPolicy.(TextDocumentPolicy); ok && policy.Attacher == nil {
+		policy.Attacher = photos
+		config.DocumentPolicy = policy
 	}
 	var documents mediaflow.DocumentPolicy
 	switch config.DocumentMode {

@@ -71,6 +71,10 @@ type DocumentPolicy interface {
 	PrepareDocument(context.Context, telegramcontroller.IncomingInput) (string, error)
 }
 
+type StructuredDocumentPolicy interface {
+	PrepareDocumentStructured(context.Context, telegramcontroller.IncomingInput) (telegramcontroller.PreparedInput, error)
+}
+
 type Limits struct {
 	VoiceBytes    int64
 	PhotoBytes    int64
@@ -149,6 +153,11 @@ func (preparer *Preparer) PrepareStructured(ctx context.Context, input telegramc
 		return telegramcontroller.PreparedInput{}, ErrInvalidInput
 	}
 	if input.Kind != string(telegram.MediaPhoto) {
+		if input.Kind == string(telegram.MediaDocument) {
+			if structured, ok := preparer.documents.(StructuredDocumentPolicy); ok {
+				return structured.PrepareDocumentStructured(ctx, input)
+			}
+		}
 		text, err := preparer.Prepare(ctx, input)
 		return telegramcontroller.PreparedInput{Text: text}, err
 	}

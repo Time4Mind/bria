@@ -262,9 +262,10 @@ type File struct {
 type MediaKind string
 
 const (
-	MediaVoice MediaKind = "voice"
-	MediaPhoto MediaKind = "photo"
-	MediaVideo MediaKind = "video"
+	MediaVoice    MediaKind = "voice"
+	MediaPhoto    MediaKind = "photo"
+	MediaVideo    MediaKind = "video"
+	MediaDocument MediaKind = "document"
 )
 
 type DownloadMediaRequest struct {
@@ -408,8 +409,8 @@ func (client *Client) DownloadMedia(
 	if request.Kind == MediaVideo {
 		return DownloadedMedia{}, ErrVideoDownloadForbidden
 	}
-	if request.Kind != MediaVoice && request.Kind != MediaPhoto {
-		return DownloadedMedia{}, errors.New("Telegram media download kind must be voice or photo")
+	if request.Kind != MediaVoice && request.Kind != MediaPhoto && request.Kind != MediaDocument {
+		return DownloadedMedia{}, errors.New("Telegram media download kind must be voice, photo, or document")
 	}
 	if request.FileID == "" || strings.TrimSpace(request.FileID) != request.FileID {
 		return DownloadedMedia{}, errors.New("Telegram media file id is required")
