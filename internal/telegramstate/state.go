@@ -52,6 +52,9 @@ type Card struct {
 	// append-only provider output; a prompt message ID lets its visible status
 	// be replaced without duplicating the user's text.
 	HistoryKeys []string `json:"history_keys,omitempty"`
+	// HistoryTurnKeys associates provider output with its originating prompt so
+	// projections can keep each answer directly after its request.
+	HistoryTurnKeys []string `json:"history_turn_keys,omitempty"`
 	// HistoryKinds is positionally aligned with History. "tool" identifies an
 	// exact provider tool event; empty values are ordinary history. A missing
 	// legacy slice means every retained item is ordinary.
@@ -90,6 +93,7 @@ func (s State) Clone() State {
 	for id, card := range s.Cards {
 		card.History = append([]string(nil), card.History...)
 		card.HistoryKeys = append([]string(nil), card.HistoryKeys...)
+		card.HistoryTurnKeys = append([]string(nil), card.HistoryTurnKeys...)
 		card.HistoryKinds = append([]string(nil), card.HistoryKinds...)
 		clone.Cards[id] = card
 	}
@@ -161,6 +165,9 @@ func (s State) Validate() error {
 		}
 		if len(card.HistoryKinds) != 0 && len(card.HistoryKinds) != len(card.History) {
 			return fmt.Errorf("card %q history kinds are not aligned", id)
+		}
+		if len(card.HistoryTurnKeys) != 0 && len(card.HistoryTurnKeys) != len(card.History) {
+			return fmt.Errorf("card %q history turn keys are not aligned", id)
 		}
 		seenKeys := make(map[string]struct{}, len(card.HistoryKeys))
 		for _, key := range card.HistoryKeys {

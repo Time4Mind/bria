@@ -88,8 +88,8 @@ func RenderCategory(ctx context.Context, preferences settingsport.Preferences, p
 		rows = onePerRow(Button{Label: "Включить / выключить", Action: "settings_preprocessing"}, Button{Label: "Изменить инструкцию", Action: "settings_preprocessing_instruction"}, Button{Label: "Вернуть встроенную", Action: "settings_preprocessing_reset"})
 	case CategoryArchive:
 		text = "🗄 Сессии и архив"
-		fields = []Field{{"Рекомендации архива", state(current.ArchiveRecommendations, true)}, {"Срок жизни сессий", current.SessionLifetime}, {"Очередь", fmt.Sprint(current.QueueLimit)}}
-		rows = onePerRow(Button{Label: "Рекомендации архива", Action: "settings_archive_recommendations"})
+		fields = []Field{{"Продолжать текущую", state(current.ContinueExisting, false)}, {"Рекомендации архива", state(current.ArchiveRecommendations, true)}, {"Срок жизни сессий", current.SessionLifetime}, {"Очередь", fmt.Sprint(current.QueueLimit)}}
+		rows = onePerRow(Button{Label: "Продолжать текущую", Action: "settings_continue_existing"}, Button{Label: "Рекомендации архива", Action: "settings_archive_recommendations"})
 		rows = append(rows,
 			[]Button{{Label: "Никогда", Action: "settings_lifetime_never"}, {Label: "6 ч", Action: "settings_lifetime_6h"}, {Label: "12 ч", Action: "settings_lifetime_12h"}},
 			[]Button{{Label: "24 ч", Action: "settings_lifetime_24h"}, {Label: "48 ч", Action: "settings_lifetime_48h"}})
@@ -102,11 +102,16 @@ func RenderCategory(ctx context.Context, preferences settingsport.Preferences, p
 		fields = []Field{{"Автоимя дешёвой моделью", state(current.SessionNamingEnabled, false)}}
 		if _, ok := preferences.(settingsport.CreationPreferences); ok {
 			fields = append(fields, Field{"Backend по умолчанию", defaultProviderValue(current.DefaultProviders)}, Field{"Папка по умолчанию", defaultWorkdirValue(current.DefaultWorkdirs)})
-			rows = onePerRow(Button{Label: "Автоимя", Action: "settings_session_naming"}, Button{Label: "Backend по умолчанию", Action: "settings_default_provider"}, Button{Label: "Папка по умолчанию", Action: "settings_default_workdir"}, Button{Label: "Сбросить значения по умолчанию", Action: "settings_clear_creation_defaults"})
+			// Keep controls in the same order as the rendered key/value table;
+			// the directory default is the final setting before Back.
+			rows = onePerRow(Button{Label: "Автоимя", Action: "settings_session_naming"}, Button{Label: "Backend по умолчанию", Action: "settings_default_provider"}, Button{Label: "Сбросить значения по умолчанию", Action: "settings_clear_creation_defaults"})
 		}
 		fields = append(fields, Field{"Ожидающая сессия", state(current.StandbyEnabled, false)})
 		if _, ok := preferences.(settingsport.StandbyPreferences); ok {
 			rows = append(rows, []Button{{Label: "Ожидающая сессия", Action: "settings_standby"}})
+		}
+		if _, ok := preferences.(settingsport.CreationPreferences); ok {
+			rows = append(rows, []Button{{Label: "Папка по умолчанию", Action: "settings_default_workdir"}})
 		}
 	case CategoryProviders:
 		text = "🤖 CLI"
@@ -164,7 +169,7 @@ func CategoryForAction(action string) (Category, bool) {
 		return CategoryArchive, true
 	case "settings_background_questions", "settings_background_errors":
 		return CategoryNotifications, true
-	case "settings_standby", "settings_session_naming", "settings_default_provider", "settings_default_workdir", "settings_clear_creation_defaults":
+	case "settings_standby", "settings_session_naming", "settings_default_provider", "settings_default_workdir", "settings_clear_creation_defaults", "settings_rename_node":
 		return CategoryCreation, true
 	case "settings_provider_codex", "settings_provider_claude", "authorize_codex", "authorize_claude":
 		return CategoryProviders, true

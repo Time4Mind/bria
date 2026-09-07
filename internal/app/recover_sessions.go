@@ -21,6 +21,10 @@ type emptyRecoverySessionStore interface {
 	DeleteEmptyAwaitingRecovery(context.Context, domain.Session) (bool, error)
 }
 
+type unrecoverableRecoverySessionStore interface {
+	DeleteUnrecoverableAwaitingRecovery(context.Context, domain.Session) (bool, error)
+}
+
 type SessionRecoveryResult struct {
 	Recovered        int
 	Awaiting         int
@@ -75,6 +79,16 @@ func RecoverPersistedSessionsForComputer(
 			// If the session has no recorded user work, remove it instead of
 			// leaving an unusable phantom in the session picker.
 			if session.Status() == domain.SessionAwaitingRecovery {
+				if unrecoverable, ok := store.(unrecoverableRecoverySessionStore); ok {
+					deleted, deleteErr := unrecoverable.DeleteUnrecoverableAwaitingRecovery(ctx, session)
+					if deleteErr != nil {
+						return result, fmt.Errorf("delete unrecoverable failed recovery %q: %w", session.ID(), deleteErr)
+					}
+					if deleted {
+						result.FinalizedClosing++
+						continue
+					}
+				}
 				if emptyStore, ok := store.(emptyRecoverySessionStore); ok {
 					deleted, deleteErr := emptyStore.DeleteEmptyAwaitingRecovery(ctx, session)
 					if deleteErr != nil {

@@ -19,13 +19,6 @@ func TestSettingsSurfacesAreRichTablesWithoutChangingNavigation(t *testing.T) {
 		if !strings.Contains(surface.Text, "\n\n\u00a0\n\n| Настройка | Значение |") {
 			t.Errorf("category%d lacks rich table: %q", category, surface.Text)
 		}
-		for _, row := range surface.Rows {
-			for _, button := range row {
-				if button.Action == "settings_continue_existing" {
-					t.Error("inert continuation setting remains visible")
-				}
-			}
-		}
 	}
 }
 

@@ -126,6 +126,19 @@ func TestDelivererEditsActiveCardWithInCardMarker(t *testing.T) {
 	if !foundName {
 		t.Fatalf("prompt refresh lost selected session name: %+v", sender.prepared.Keyboard)
 	}
+	// A hidden native overlay must not suppress ordinary prompt/card updates.
+	// Voice recognition happens asynchronously and relies on this path to
+	// refresh the already visible session card without a menu round-trip.
+	sender = &senderStub{}
+	deliverer.Controller = visibleNativeController{controllerStub: controllerStub{card: card}, visible: false}
+	deliverer.Sender = sender
+	receipt, err = deliverer.Deliver(context.Background(), telegramcontroller.Notification{
+		OperationID: "prompt-status:recognized", ConversationID: 42, SessionID: sessionID,
+		Kind: telegramcontroller.NotificationPromptStatus, Text: "🙋‍♂",
+	}, "prompt-status:recognized")
+	if err != nil || receipt.State != "confirmed" || receipt.Suppressed || sender.status.SourceMessageID != 77 {
+		t.Fatalf("prompt status was suppressed while native overlay hidden: %#v %v", receipt, err)
+	}
 	for _, nativeID := range []domain.SessionID{sessionID, "wrong-session", ""} {
 		sender := &senderStub{}
 		deliverer.Controller = controllerStub{surface: &telegramcontroller.SemanticSurface{Text: "CLI menu", NativeSessionID: nativeID}}

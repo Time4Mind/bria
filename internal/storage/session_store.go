@@ -700,6 +700,9 @@ func (store *SessionStore) appendCardHistory(ctx context.Context, sessionID doma
 			if len(card.HistoryKinds) != 0 {
 				card.HistoryKinds = append([]string(nil), card.HistoryKinds[len(card.HistoryKinds)-511:]...)
 			}
+			if len(card.HistoryTurnKeys) != 0 {
+				card.HistoryTurnKeys = append([]string(nil), card.HistoryTurnKeys[len(card.HistoryTurnKeys)-511:]...)
+			}
 		}
 		if kind != "" && len(card.HistoryKinds) == 0 {
 			card.HistoryKinds = make([]string, len(card.History))
@@ -710,6 +713,69 @@ func (store *SessionStore) appendCardHistory(ctx context.Context, sessionID doma
 		}
 		if len(card.HistoryKinds) != 0 {
 			card.HistoryKinds = append(card.HistoryKinds, kind)
+		}
+		if len(card.HistoryTurnKeys) != 0 {
+			card.HistoryTurnKeys = append(card.HistoryTurnKeys, "")
+		}
+		return state.SetCard(card)
+	})
+}
+
+// InsertCardTypedHistoryAfterPrompt keeps a provider event beside the prompt
+// that produced it, rather than after later queued prompts.
+func (store *SessionStore) InsertCardTypedHistoryAfterPrompt(ctx context.Context, sessionID domain.SessionID, promptID, item, kind string) error {
+	if sessionID == "" || promptID == "" || item == "" {
+		return errors.New("session, prompt, and history item are required")
+	}
+	return store.UpdateTelegramUI(ctx, func(state *telegramstate.State) error {
+		card, ok := state.Cards[sessionID]
+		if !ok {
+			return ErrSessionNotFound
+		}
+		index := -1
+		for i, key := range card.HistoryTurnKeys {
+			if key == promptID {
+				index = i
+			}
+		}
+		// The first event has no turn-key anchor yet; subsequent events use the
+		// last event of the same turn to preserve provider event order.
+		if index >= 0 {
+			// continue with the latest same-turn index
+		} else {
+			for i, key := range card.HistoryKeys {
+				if key == promptID {
+					index = i
+				}
+			}
+		}
+		if index < 0 {
+			return fmt.Errorf("prompt history anchor %q not found", promptID)
+		}
+		insert := index + 1
+		card.History = append(card.History, "")
+		copy(card.History[insert+1:], card.History[insert:])
+		card.History[insert] = item
+		if len(card.HistoryKeys) != 0 {
+			card.HistoryKeys = append(card.HistoryKeys, "")
+			copy(card.HistoryKeys[insert+1:], card.HistoryKeys[insert:])
+			card.HistoryKeys[insert] = ""
+		}
+		if len(card.HistoryKinds) != 0 || kind != "" {
+			if len(card.HistoryKinds) == 0 {
+				card.HistoryKinds = make([]string, len(card.History)-1)
+			}
+			card.HistoryKinds = append(card.HistoryKinds, "")
+			copy(card.HistoryKinds[insert+1:], card.HistoryKinds[insert:])
+			card.HistoryKinds[insert] = kind
+		}
+		if len(card.HistoryTurnKeys) != 0 || promptID != "" {
+			if len(card.HistoryTurnKeys) == 0 {
+				card.HistoryTurnKeys = make([]string, len(card.History)-1)
+			}
+			card.HistoryTurnKeys = append(card.HistoryTurnKeys, "")
+			copy(card.HistoryTurnKeys[insert+1:], card.HistoryTurnKeys[insert:])
+			card.HistoryTurnKeys[insert] = promptID
 		}
 		return state.SetCard(card)
 	})

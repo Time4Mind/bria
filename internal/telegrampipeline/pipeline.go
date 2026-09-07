@@ -67,6 +67,10 @@ type CallbackClaimResult struct {
 	AcceptedTurnRecovery  *AcceptedTurnRecoveryBinding
 	StatusRecovery        *StatusRecoveryBinding
 	ArtifactRetry         *ArtifactRetryBinding
+	// Retired means the callback came from a presentation persisted by a
+	// previous Bria process. It remains valid after restart, but its carrier
+	// may no longer be the currently stored card carrier.
+	Retired bool
 }
 type ClaimOutcome string
 
@@ -292,13 +296,13 @@ func acceptCallback(
 		return AcceptedCallback{}, fmt.Errorf("load callback card: %w", err)
 	}
 	if !ok || card.SessionID != claimResult.PresentationSessionID ||
-		card.Carrier.ChatID != ownerPrivateChatID || card.Carrier.MessageID != update.SourceMessageID {
+		card.Carrier.ChatID != ownerPrivateChatID || (!claimResult.Retired && card.Carrier.MessageID != update.SourceMessageID) {
 		return AcceptedCallback{}, ErrStaleCallback
 	}
 	return AcceptedCallback{
 		UpdateID:             update.ID,
 		SessionID:            domain.SessionID(decoded.Callback.SessionID),
-		Carrier:              card.Carrier,
+		Carrier:              claim.Carrier,
 		Action:               decoded.Callback.Action,
 		Target:               decoded.Callback.Target,
 		InteractionRequestID: claimResult.InteractionRequestID,

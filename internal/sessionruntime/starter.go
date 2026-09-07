@@ -311,6 +311,18 @@ func (starter *Starter) Start(ctx context.Context, request app.StartSessionReque
 	if err := ctx.Err(); err != nil {
 		return domain.ProviderBinding{}, err
 	}
+	// A previous Bria instance may have died after handing the provider off to
+	// a detached terminal/tmux process.  The in-memory tracker cannot see that
+	// process, so an exact resume can otherwise collide with it forever.  Before
+	// launching a replacement, reap only a process whose command line contains
+	// the exact provider session id and whose working directory matches exactly.
+	// The platform helper is fail-closed and is a no-op where process inspection
+	// is unavailable.
+	if request.Mode == app.SessionStartResume {
+		if err := cleanupOrphanResumeProcess(request); err != nil {
+			return domain.ProviderBinding{}, fmt.Errorf("clean stale provider runtime: %w", err)
+		}
+	}
 
 	generation := uint64(1)
 	if request.Mode == app.SessionStartResume {

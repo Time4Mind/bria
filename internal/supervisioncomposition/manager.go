@@ -130,7 +130,9 @@ func (manager *Manager) RecoverStartup(ctx context.Context) (app.SessionRecovery
 		if err != nil {
 			if errors.Is(err, sessionsupervisor.ErrReconciliationRequired) || errors.Is(err, sessionsupervisor.ErrRecoveryExhausted) {
 				manager.report(err)
-				if manager.deleteEmptyRecovery(ctx, session) {
+				if manager.deleteUnrecoverableRecovery(ctx, session) {
+					result.FinalizedClosing++
+				} else if manager.deleteEmptyRecovery(ctx, session) {
 					result.FinalizedClosing++
 				} else {
 					result.Awaiting++
@@ -160,6 +162,17 @@ func (manager *Manager) RecoverStartup(ctx context.Context) (app.SessionRecovery
 	result.SkippedRemote += ordinary.SkippedRemote
 	result.Sessions = append(result.Sessions, ordinary.Sessions...)
 	return result, err
+}
+
+func (manager *Manager) deleteUnrecoverableRecovery(ctx context.Context, session domain.Session) bool {
+	store, ok := manager.store.(interface {
+		DeleteUnrecoverableAwaitingRecovery(context.Context, domain.Session) (bool, error)
+	})
+	if !ok {
+		return false
+	}
+	deleted, err := store.DeleteUnrecoverableAwaitingRecovery(ctx, session)
+	return err == nil && deleted
 }
 
 func (manager *Manager) deleteEmptyRecovery(ctx context.Context, session domain.Session) bool {
@@ -205,6 +218,15 @@ func (store filteredStore) DeleteEmptyAwaitingRecovery(ctx context.Context, sess
 		DeleteEmptyAwaitingRecovery(context.Context, domain.Session) (bool, error)
 	}); ok {
 		return empty.DeleteEmptyAwaitingRecovery(ctx, session)
+	}
+	return false, nil
+}
+
+func (store filteredStore) DeleteUnrecoverableAwaitingRecovery(ctx context.Context, session domain.Session) (bool, error) {
+	if unrecoverable, ok := store.Store.(interface {
+		DeleteUnrecoverableAwaitingRecovery(context.Context, domain.Session) (bool, error)
+	}); ok {
+		return unrecoverable.DeleteUnrecoverableAwaitingRecovery(ctx, session)
 	}
 	return false, nil
 }

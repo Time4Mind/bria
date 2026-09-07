@@ -28,7 +28,7 @@ func (store *SessionStore) LoadCardTranscript(ctx context.Context, id domain.Ses
 		if len(card.HistoryKinds) > index {
 			kind = card.HistoryKinds[index]
 		}
-		if len(card.HistoryKeys) > index && card.HistoryKeys[index] != "" {
+		if kind == "" && len(card.HistoryKeys) > index && card.HistoryKeys[index] != "" {
 			kind = "prompt"
 		}
 		if kind == "tool" && !showTechnical {

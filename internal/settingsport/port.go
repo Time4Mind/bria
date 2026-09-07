@@ -61,6 +61,11 @@ type StandbyPreferences interface {
 	ToggleStandby(context.Context) error
 }
 
+// NodeRenamer optionally persists the display name of a computer node.
+type NodeRenamer interface {
+	RenameNode(context.Context, domain.ComputerID, string) error
+}
+
 // ScreenCapturePreferences controls the bounded native terminal capture.
 // It is optional so older composition implementations remain compatible.
 type ScreenCapturePreferences interface {

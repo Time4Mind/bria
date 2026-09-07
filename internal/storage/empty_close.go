@@ -53,7 +53,23 @@ func (store *SessionStore) DeleteEmptyAwaitingRecovery(ctx context.Context, expe
 	return store.deleteProvenEmpty(ctx, expected)
 }
 
+// DeleteUnrecoverableAwaitingRecovery removes a provider session proven
+// absent after startup resume attempts, so no permanent phantom is exposed.
+func (store *SessionStore) DeleteUnrecoverableAwaitingRecovery(ctx context.Context, expected domain.Session) (bool, error) {
+	if expected.Status() != domain.SessionAwaitingRecovery {
+		return false, fmt.Errorf("unrecoverable deletion requires awaiting recovery")
+	}
+	// A failed resume may still represent durable user work.  Only remove the
+	// provider binding when the card is explicitly empty; pending prompts must
+	// remain recoverable and visible for a later retry/close flow.
+	return store.deleteProven(ctx, expected, true)
+}
+
 func (store *SessionStore) deleteProvenEmpty(ctx context.Context, expected domain.Session) (bool, error) {
+	return store.deleteProven(ctx, expected, true)
+}
+
+func (store *SessionStore) deleteProven(ctx context.Context, expected domain.Session, requireEmpty bool) (bool, error) {
 	store.mu.Lock()
 	defer store.mu.Unlock()
 	if err := ctx.Err(); err != nil {
@@ -75,7 +91,7 @@ func (store *SessionStore) deleteProvenEmpty(ctx context.Context, expected domai
 		return false, nil
 	}
 	card, ok := store.telegramUI.Cards[expected.ID()]
-	if !ok || !card.EmptyCloseEligible || len(card.History) != 0 {
+	if requireEmpty && (!ok || !card.EmptyCloseEligible || len(card.History) != 0) {
 		return false, nil
 	}
 	sessions := cloneSessions(store.byIntent)

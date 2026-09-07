@@ -282,6 +282,7 @@ const (
 	SemanticSettingsPreprocessingReset       SemanticActionKind = "settings_preprocessing_reset"
 	SemanticSettingsSessionNaming            SemanticActionKind = "settings_session_naming"
 	SemanticSettingsStandby                  SemanticActionKind = "settings_standby"
+	SemanticSettingsRenameNode               SemanticActionKind = "settings_rename_node"
 	SemanticAuthorizeCodex                   SemanticActionKind = "authorize_codex"
 	SemanticAuthorizeClaude                  SemanticActionKind = "authorize_claude"
 )
@@ -461,6 +462,9 @@ func (controller *Controller) handleSemanticAction(ctx context.Context, action S
 	if action.Kind != SemanticSettingsPreprocessingInstruction {
 		controller.mu.Lock()
 		controller.preprocessingInstructionPending = false
+		if action.Kind != SemanticSettingsRenameNode {
+			controller.nodeRenamePending = false
+		}
 		controller.mu.Unlock()
 	}
 	if isGlobalSemanticAction(action.Kind) {
@@ -580,6 +584,7 @@ func isGlobalSemanticAction(kind SemanticActionKind) bool {
 		SemanticSettingsProviderCodex, SemanticSettingsProviderClaude,
 		SemanticSettingsPreprocessing, SemanticSettingsPreprocessingInstruction, SemanticSettingsPreprocessingReset,
 		SemanticSettingsSessionNaming, SemanticSettingsStandby,
+		SemanticSettingsRenameNode,
 		SemanticAuthorizeCodex, SemanticAuthorizeClaude:
 		return true
 	}
@@ -713,6 +718,14 @@ func (controller *Controller) handleGlobalSemanticAction(ctx context.Context, ac
 			Text: "Отправьте новую инструкцию препроцессинга одним текстовым сообщением.",
 			Rows: [][]SemanticButton{{{Label: "Отмена", Action: SemanticMenuSettings}}},
 		}}, nil
+	case SemanticSettingsRenameNode:
+		if _, ok := controller.providerPreferences.(settingsport.NodeRenamer); !ok {
+			return SemanticActionResult{}, errors.New("переименование ноды не настроено")
+		}
+		controller.mu.Lock()
+		controller.nodeRenamePending = true
+		controller.mu.Unlock()
+		return SemanticActionResult{Surface: &SemanticSurface{Text: "Отправьте новое имя ноды одним текстовым сообщением (до 64 символов).", Rows: [][]SemanticButton{{{Label: "Отмена", Action: SemanticMenuSettings}}}}}, nil
 	case SemanticSettingsPreprocessing, SemanticSettingsPreprocessingReset:
 		if err := telegramsettings.Apply(ctx, controller.settings, controller.scopedProviderPreferences(), string(action.Kind)); err != nil {
 			return SemanticActionResult{}, err
@@ -1176,6 +1189,7 @@ type Controller struct {
 	closeConfirmation               map[domain.SessionID]bool
 	deliveryFailures                map[domain.SessionID]NotificationFailure
 	promptIndexes                   map[domain.SessionID]map[string]int
+	runtimeTail                     map[domain.SessionID]map[string]int
 	technicalHistory                map[domain.SessionID]map[int]bool
 	promptSessions                  map[string]domain.SessionID
 	pendingAuthorization            *AuthorizationChallenge
@@ -1197,6 +1211,7 @@ type Controller struct {
 	preprocessingObserver           promptpreprocess.Observer
 	preprocessingTimeout            time.Duration
 	preprocessingInstructionPending bool
+	nodeRenamePending               bool
 	creationPreferenceMode          string
 	creates                         sync.WaitGroup
 	standbyMu                       sync.Mutex
@@ -1300,6 +1315,7 @@ func New(
 		closeConfirmation:     make(map[domain.SessionID]bool),
 		deliveryFailures:      make(map[domain.SessionID]NotificationFailure),
 		promptIndexes:         make(map[domain.SessionID]map[string]int),
+		runtimeTail:           make(map[domain.SessionID]map[string]int),
 		promptSessions:        make(map[string]domain.SessionID),
 		nodes:                 nodes,
 		createFlow:            sessioncreation.New(),
@@ -1337,6 +1353,7 @@ func (controller *Controller) Handle(
 	if update.Kind == coordinator.UpdateCallback {
 		controller.mu.Lock()
 		controller.preprocessingInstructionPending = false
+		controller.nodeRenamePending = false
 		controller.mu.Unlock()
 		return controller.handleCallback(ctx, update)
 	}
@@ -1389,6 +1406,9 @@ func (controller *Controller) Handle(
 		}
 	}
 	if decision, handled, err := controller.consumePreprocessingInstruction(ctx, update); handled {
+		return decision, err
+	}
+	if decision, handled, err := controller.consumeNodeRename(ctx, update); handled {
 		return decision, err
 	}
 	text := strings.TrimSpace(update.Text)
@@ -1478,15 +1498,34 @@ func (controller *Controller) prepareAndEnqueueVoice(ctx context.Context, update
 	prepared, rejection := controller.prepareInput(ctx, update)
 	if rejection != "" {
 		controller.setPromptState(ctx, sessionID, messageID, promptText, "🙅‍♂")
-		controller.notify(ctx, Notification{OperationID: messageID + ":prompt-status:🙅‍♂", ConversationID: controller.ownerPrivateChatID, SessionID: sessionID, Kind: NotificationPromptStatus, Text: "🙅‍♂"})
+		controller.notifyPromptCard(ctx, sessionID, messageID, "🙅‍♂")
 		return
 	}
 	if strings.TrimSpace(prepared.Text) != "" {
 		promptText = prepared.Text
 		controller.setPromptState(ctx, sessionID, messageID, promptText, "🙋‍♂")
+		// Voice preparation runs outside the Telegram update handler.  Persisted
+		// prompt state alone is not enough: without an output event the carrier
+		// remains stale until the user re-enters the session menu.  Publish the
+		// recognized text immediately; durable input processing will publish the
+		// later preprocessing/provider states in order.
+		controller.notifyPromptCard(ctx, sessionID, messageID, "🙋‍♂")
 	}
 	payload := controller.preprocessingPayload(ctx, prepared.Text)
 	controller.enqueue(ctx, update.ID, update.SourceMessageID, prepared, payload)
+}
+
+func (controller *Controller) notifyPromptCard(ctx context.Context, sessionID domain.SessionID, messageID, emoji string) {
+	if sessionID == "" || strings.TrimSpace(messageID) == "" || strings.TrimSpace(emoji) == "" {
+		return
+	}
+	controller.notify(ctx, Notification{
+		OperationID:    messageID + ":prompt-status:" + emoji + ":card",
+		ConversationID: controller.ownerPrivateChatID,
+		SessionID:      sessionID,
+		Kind:           NotificationPromptStatus,
+		Text:           emoji,
+	})
 }
 
 func mediaPromptLabel(kind string) string {
@@ -1526,6 +1565,29 @@ func (controller *Controller) consumePreprocessingInstruction(ctx context.Contex
 	controller.mu.Unlock()
 	controller.invalidatePreprocessor()
 	return controller.status("Инструкция препроцессинга сохранена."), true, nil
+}
+
+func (controller *Controller) consumeNodeRename(ctx context.Context, update coordinator.Update) (coordinator.Decision, bool, error) {
+	controller.mu.Lock()
+	pending := controller.nodeRenamePending
+	controller.mu.Unlock()
+	if !pending {
+		return coordinator.Decision{}, false, nil
+	}
+	if update.MediaKind != "" || update.Caption != "" || strings.TrimSpace(update.Text) == "" {
+		return controller.status("Имя ноды должно быть непустым текстовым сообщением."), true, nil
+	}
+	renamer, ok := controller.providerPreferences.(settingsport.NodeRenamer)
+	if !ok {
+		return coordinator.Decision{}, true, errors.New("переименование ноды не настроено")
+	}
+	if err := renamer.RenameNode(ctx, controller.currentNodeID(), strings.TrimSpace(update.Text)); err != nil {
+		return controller.status("Не удалось переименовать ноду: " + err.Error()), true, nil
+	}
+	controller.mu.Lock()
+	controller.nodeRenamePending = false
+	controller.mu.Unlock()
+	return controller.status("Имя ноды сохранено."), true, nil
 }
 
 func (controller *Controller) preprocessingPayload(ctx context.Context, text string) []byte {
@@ -2064,7 +2126,7 @@ func (controller *Controller) semanticCard(ctx context.Context, sessionID domain
 	card := SemanticCard{
 		SessionID: sessionID,
 		Effect:    SemanticEditSameCarrier,
-		Header:    fmt.Sprintf("%s · %s · %s · %s\n\n─────\n\n", labelsByID[sessionID], nodeName, session.Provider(), stateText),
+		Header:    fmt.Sprintf("%s · %s · %s · %s\n\n─────\n", labelsByID[sessionID], nodeName, session.Provider(), stateText),
 		Footer:    footer,
 		Pages:     pages,
 		View: SemanticPageView{
@@ -2382,6 +2444,27 @@ func (controller *Controller) applyClosedSession(ctx context.Context, session do
 	fallback, err := controller.nodes.Remove(ctx, session)
 	if err != nil {
 		return err
+	}
+	// The node scope's recent list is intentionally bounded and may be empty
+	// after a restart. Never leave the carrier on an archived session: choose
+	// the newest still-selectable session on the same node by durable state
+	// timestamp, then persist it as the node's active session.
+	if fallback == "" {
+		if sessions, listErr := controller.sessions.List(ctx); listErr == nil {
+			var newest domain.Session
+			for _, candidate := range sessions {
+				if candidate.ID() == session.ID() || candidate.ComputerID() != session.ComputerID() || !telegramsessions.Selectable(candidate.Status()) {
+					continue
+				}
+				if newest.ID() == "" || candidate.StateChangedAt().After(newest.StateChangedAt()) {
+					newest = candidate
+				}
+			}
+			if newest.ID() != "" {
+				fallback = newest.ID()
+				_ = controller.nodes.RestoreActive(ctx, session.ComputerID(), fallback)
+			}
+		}
 	}
 	controller.mu.Lock()
 	if controller.currentNodeID() == session.ComputerID() {
@@ -3454,7 +3537,7 @@ func (worker *sessionWorker) runTurnWithAcceptance(
 		}
 	}
 	if result.Final != "" {
-		worker.controller.appendRuntimeHistory(worker.controller.rootContext, worker.sessionID, sessionruntime.TurnEvent{Kind: "final", Text: result.Final})
+		worker.controller.appendRuntimeHistoryForMessage(worker.controller.rootContext, worker.sessionID, turn.messageID, sessionruntime.TurnEvent{Kind: "final", Text: result.Final})
 	}
 	worker.controller.notify(worker.controller.rootContext, Notification{
 		OperationID:    turn.messageID + ":final",
@@ -3466,7 +3549,7 @@ func (worker *sessionWorker) runTurnWithAcceptance(
 	return DurableInputSucceeded, accepted
 }
 func (worker *sessionWorker) emitTurnEvent(messageID string, eventIndex int, event sessionruntime.TurnEvent) {
-	worker.controller.appendRuntimeHistory(worker.controller.rootContext, worker.sessionID, event)
+	worker.controller.appendRuntimeHistoryForMessage(worker.controller.rootContext, worker.sessionID, messageID, event)
 	kind := NotificationKind("")
 	switch event.Kind {
 	case sessionruntime.EventCommentary, sessionruntime.EventTool:

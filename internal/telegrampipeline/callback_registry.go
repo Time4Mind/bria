@@ -42,6 +42,7 @@ type fileCallbackClaimIdentity struct {
 type fileCallbackRegistryState struct {
 	Version       int                                           `json:"version"`
 	Presentations map[domain.SessionID]fileCallbackPresentation `json:"presentations"`
+	Retired       map[string]fileCallbackPresentation           `json:"retired,omitempty"`
 }
 type FileCallbackRegistry struct {
 	mu            sync.Mutex
@@ -49,6 +50,7 @@ type FileCallbackRegistry struct {
 	now           func() time.Time
 	syncDirectory func(string) error
 	state         fileCallbackRegistryState
+	retainRetired bool // process-local: true only when reopened from disk
 }
 
 func OpenFileCallbackRegistry(path string, now func() time.Time) (*FileCallbackRegistry, error) {
@@ -69,6 +71,7 @@ func OpenFileCallbackRegistry(path string, now func() time.Time) (*FileCallbackR
 		state: fileCallbackRegistryState{
 			Version:       callbackRegistryVersion,
 			Presentations: make(map[domain.SessionID]fileCallbackPresentation),
+			Retired:       make(map[string]fileCallbackPresentation),
 		},
 	}
 	info, err := os.Stat(absolute)
@@ -91,6 +94,7 @@ func OpenFileCallbackRegistry(path string, now func() time.Time) (*FileCallbackR
 	if err := validateFileCallbackRegistryState(registry.state); err != nil {
 		return nil, fmt.Errorf("validate callback registry: %w", err)
 	}
+	registry.retainRetired = true
 	return registry, nil
 }
 func (registry *FileCallbackRegistry) Replace(ctx context.Context, presentation CallbackPresentation) error {
@@ -106,6 +110,24 @@ func (registry *FileCallbackRegistry) Replace(ctx context.Context, presentation 
 	registry.mu.Lock()
 	defer registry.mu.Unlock()
 	next := cloneFileCallbackRegistryState(registry.state)
+	if registry.retainRetired {
+		if previous, exists := next.Presentations[presentation.SessionID]; exists && previous.Carrier == presentation.Carrier {
+			if next.Retired == nil {
+				next.Retired = make(map[string]fileCallbackPresentation)
+			}
+			for tokenID := range previous.Tokens {
+				next.Retired[tokenID] = cloneFileCallbackPresentation(previous)
+			}
+			// Keep the restart compatibility set bounded. Oldest ordering is not
+			// needed for correctness; deterministic truncation limits disk growth.
+			for tokenID := range next.Retired {
+				if len(next.Retired) <= 4096 {
+					break
+				}
+				delete(next.Retired, tokenID)
+			}
+		}
+	}
 	for sessionID, candidate := range next.Presentations {
 		if sessionID != presentation.SessionID && candidate.Carrier == presentation.Carrier {
 			delete(next.Presentations, sessionID)
@@ -148,6 +170,7 @@ func (registry *FileCallbackRegistry) Claim(ctx context.Context, claim CallbackC
 	registry.mu.Lock()
 	defer registry.mu.Unlock()
 	ownerSessionID, presentation, found := findFileCallbackPresentation(registry.state, claim, registry.now())
+	retired := false
 	// Telegram client transports can expose a different message-id namespace
 	// than the Bot API used to persist the carrier.  The signed token and
 	// owner/chat checks still bind the callback; when the exact carrier misses,
@@ -156,17 +179,26 @@ func (registry *FileCallbackRegistry) Claim(ctx context.Context, claim CallbackC
 		ownerSessionID, presentation, found = findFileCallbackPresentationByToken(registry.state, claim, registry.now())
 	}
 	if !found {
+		ownerSessionID, presentation, found = findRetiredCallbackPresentation(registry.state, claim, registry.now())
+		retired = found
+	}
+	if !found {
 		return CallbackClaimResult{Outcome: ClaimStale}, nil
 	}
 	if presentation.Tokens[claim.TokenID] {
 		identity, known := presentation.Claims[claim.TokenID]
 		if known && identity.UpdateID == claim.UpdateID && identity.CallbackQueryID == claim.CallbackQueryID {
-			return fileCallbackClaimResult(ClaimRecovered, ownerSessionID, presentation), nil
+			result := fileCallbackClaimResult(ClaimRecovered, ownerSessionID, presentation)
+			result.Retired = retired
+			return result, nil
 		}
 		return fileCallbackClaimResult(ClaimReplayed, ownerSessionID, presentation), nil
 	}
 	next := cloneFileCallbackRegistryState(registry.state)
 	nextPresentation := next.Presentations[ownerSessionID]
+	if retired {
+		nextPresentation = next.Retired[claim.TokenID]
+	}
 	nextPresentation.Tokens[claim.TokenID] = true
 	if nextPresentation.Claims == nil {
 		nextPresentation.Claims = make(map[string]fileCallbackClaimIdentity)
@@ -174,12 +206,37 @@ func (registry *FileCallbackRegistry) Claim(ctx context.Context, claim CallbackC
 	nextPresentation.Claims[claim.TokenID] = fileCallbackClaimIdentity{
 		UpdateID: claim.UpdateID, CallbackQueryID: claim.CallbackQueryID,
 	}
-	next.Presentations[ownerSessionID] = nextPresentation
+	if retired {
+		next.Retired[claim.TokenID] = nextPresentation
+	} else {
+		next.Presentations[ownerSessionID] = nextPresentation
+	}
 	if err := writeCallbackRegistryAtomic(registry.path, next, registry.syncDirectory); err != nil {
 		return CallbackClaimResult{}, fmt.Errorf("persist callback claim: %w", err)
 	}
 	registry.state = next
-	return fileCallbackClaimResult(ClaimAccepted, ownerSessionID, presentation), nil
+	result := fileCallbackClaimResult(ClaimAccepted, ownerSessionID, presentation)
+	result.Retired = retired
+	return result, nil
+}
+
+func findRetiredCallbackPresentation(state fileCallbackRegistryState, claim CallbackClaim, now time.Time) (domain.SessionID, fileCallbackPresentation, bool) {
+	presentation, ok := state.Retired[claim.TokenID]
+	if !ok || presentation.Carrier.ChatID != claim.Carrier.ChatID || presentation.Carrier.MessageID != claim.Carrier.MessageID ||
+		presentation.ExpiresAt != claim.ExpiresAt || !presentation.ExpiresAt.After(now) {
+		return "", fileCallbackPresentation{}, false
+	}
+	// Recovery, retry, and interaction callbacks are one-shot protocol
+	// operations. They must never be resurrected from a retired presentation.
+	if presentation.InteractionRequestID != "" || presentation.OutboundOperationID != "" ||
+		presentation.Recovery != nil || presentation.AcceptedTurnRecovery != nil ||
+		presentation.StatusRecovery != nil || presentation.ArtifactRetry != nil {
+		return "", fileCallbackPresentation{}, false
+	}
+	if _, ok := presentation.Tokens[claim.TokenID]; !ok {
+		return "", fileCallbackPresentation{}, false
+	}
+	return presentation.SessionID, presentation, true
 }
 
 func findFileCallbackPresentationByToken(state fileCallbackRegistryState, claim CallbackClaim, now time.Time) (domain.SessionID, fileCallbackPresentation, bool) {
@@ -209,6 +266,23 @@ func fileCallbackClaimResult(outcome ClaimOutcome, ownerSessionID domain.Session
 		StatusRecovery:       cloneStatusRecoveryBinding(presentation.StatusRecovery),
 		ArtifactRetry:        cloneArtifactRetryBinding(presentation.ArtifactRetry),
 	}
+}
+
+func cloneFileCallbackPresentation(value fileCallbackPresentation) fileCallbackPresentation {
+	value.Tokens = cloneClaimedTokens(value.Tokens)
+	value.Claims = cloneFileCallbackClaims(value.Claims)
+	value.Recovery = cloneCallbackRecoveryBinding(value.Recovery)
+	value.AcceptedTurnRecovery = cloneAcceptedTurnRecoveryBinding(value.AcceptedTurnRecovery)
+	value.StatusRecovery = cloneStatusRecoveryBinding(value.StatusRecovery)
+	value.ArtifactRetry = cloneArtifactRetryBinding(value.ArtifactRetry)
+	return value
+}
+func cloneFileCallbackClaims(values map[string]fileCallbackClaimIdentity) map[string]fileCallbackClaimIdentity {
+	result := make(map[string]fileCallbackClaimIdentity, len(values))
+	for key, value := range values {
+		result[key] = value
+	}
+	return result
 }
 func (registry *FileCallbackRegistry) InvalidateCarrier(ctx context.Context, carrier telegramstate.Carrier) error {
 	if err := ctx.Err(); err != nil {
@@ -302,12 +376,23 @@ func validateFileCallbackRegistryState(state fileCallbackRegistryState) error {
 			}
 		}
 	}
+	for tokenID, presentation := range state.Retired {
+		if !validCallbackTokenID(tokenID) || presentation.SessionID == "" ||
+			presentation.Carrier.ChatID <= 0 || presentation.Carrier.MessageID <= 0 ||
+			presentation.ExpiresAt.IsZero() {
+			return errors.New("retired callback presentation is invalid")
+		}
+		if _, ok := presentation.Tokens[tokenID]; !ok {
+			return errors.New("retired callback token is not present in its presentation")
+		}
+	}
 	return nil
 }
 func cloneFileCallbackRegistryState(state fileCallbackRegistryState) fileCallbackRegistryState {
 	clone := fileCallbackRegistryState{
 		Version:       state.Version,
 		Presentations: make(map[domain.SessionID]fileCallbackPresentation, len(state.Presentations)),
+		Retired:       make(map[string]fileCallbackPresentation, len(state.Retired)),
 	}
 	for sessionID, presentation := range state.Presentations {
 		copyPresentation := presentation
@@ -324,6 +409,9 @@ func cloneFileCallbackRegistryState(state fileCallbackRegistryState) fileCallbac
 		copyPresentation.StatusRecovery = cloneStatusRecoveryBinding(presentation.StatusRecovery)
 		copyPresentation.ArtifactRetry = cloneArtifactRetryBinding(presentation.ArtifactRetry)
 		clone.Presentations[sessionID] = copyPresentation
+	}
+	for tokenID, presentation := range state.Retired {
+		clone.Retired[tokenID] = cloneFileCallbackPresentation(presentation)
 	}
 	return clone
 }

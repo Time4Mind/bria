@@ -55,9 +55,14 @@ func (deliverer Deliverer) Deliver(ctx context.Context, notification telegramcon
 			ctx = guarded
 		}
 	}
-	if visibility, ok := deliverer.Controller.(interface{ NativeScreenVisible(domain.SessionID) bool }); ok && !visibility.NativeScreenVisible(notification.SessionID) {
-		receipt.State, receipt.Suppressed = telegramnotify.DeliveryConfirmed, true
-		return receipt, nil
+	// Native-screen notifications are suppressed while the user is not
+	// viewing the CLI overlay. Prompt-status notifications, including voice
+	// recognition and queue transitions, must still refresh the active card.
+	if notification.Kind == telegramcontroller.NotificationNativeScreen {
+		if visibility, ok := deliverer.Controller.(interface{ NativeScreenVisible(domain.SessionID) bool }); ok && !visibility.NativeScreenVisible(notification.SessionID) {
+			receipt.State, receipt.Suppressed = telegramnotify.DeliveryConfirmed, true
+			return receipt, nil
+		}
 	}
 	state, err := deliverer.Cards.Load(ctx)
 	if err != nil {

@@ -5,6 +5,7 @@ package settingscomposition
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"bria/internal/config"
 	"bria/internal/domain"
@@ -195,4 +196,37 @@ func (p ProviderPreferences) ToggleProvider(ctx context.Context, provider domain
 		}
 	}
 	return config.ErrRevisionConflict
+}
+
+// RenameNode updates only the non-secret display metadata in the local config.
+// It is intentionally exposed through the provider/config composition so the
+// Telegram controller does not depend on a concrete config store.
+func (p ProviderPreferences) RenameNode(ctx context.Context, nodeID domain.ComputerID, name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" || len([]rune(name)) > 64 {
+		return errors.New("имя ноды должно содержать от 1 до 64 символов")
+	}
+	if p.Store == nil {
+		return errors.New("provider configuration store is required")
+	}
+	for attempt := 0; attempt < 8; attempt++ {
+		snapshot, err := p.Store.Current(ctx)
+		if err != nil {
+			return err
+		}
+		if snapshot.Config.Computer == nil || domain.ComputerID(snapshot.Config.Computer.ID) != nodeID {
+			return errors.New("нода не найдена в локальной конфигурации")
+		}
+		next := snapshot.Config
+		computer := *snapshot.Config.Computer
+		computer.Name = name
+		next.Computer = &computer
+		if _, err = p.Store.CompareAndSwap(ctx, snapshot.Revision, next); err == nil {
+			return nil
+		}
+		if !errors.Is(err, config.ErrRevisionConflict) {
+			return err
+		}
+	}
+	return errors.New("не удалось сохранить имя ноды из-за конфликта конфигурации")
 }

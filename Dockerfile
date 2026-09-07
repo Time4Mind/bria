@@ -32,7 +32,8 @@ LABEL org.opencontainers.image.title="Bria" \
       org.opencontainers.image.revision="$REVISION" \
       io.time4mind.bria.role-selection="config-and-fail-closed-preflight"
 RUN apk add --no-cache tmux && \
-    addgroup -S -g 65532 bria && adduser -S -D -H -u 65532 -G bria bria
+    (addgroup -S -g 65532 bria || true) && \
+    (adduser -S -D -H -u 65532 -G bria bria || true)
 COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=build /out/bria /out/bria-codex-adapter /out/bria-claude-adapter /out/bria-container-preflight /opt/bria/
 COPY docker/entrypoint.sh /opt/bria/entrypoint.sh

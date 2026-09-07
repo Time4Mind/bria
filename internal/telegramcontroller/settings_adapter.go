@@ -48,6 +48,15 @@ func (controller *Controller) projectSettingsSurface(ctx context.Context, surfac
 	if category == telegramsettingsview.CategoryCreation && controller.settings != nil {
 		if current, snapshotErr := controller.settings.Snapshot(ctx); snapshotErr == nil {
 			nodeID := controller.currentNodeID()
+			nodeName := string(nodeID)
+			if nodes, inventoryErr := controller.nodeInventory(ctx); inventoryErr == nil {
+				for _, node := range nodes {
+					if node.ID == nodeID && strings.TrimSpace(node.Name) != "" {
+						nodeName = node.Name
+						break
+					}
+				}
+			}
 			provider := "не задан"
 			if value := current.DefaultProviders[nodeID]; value != "" {
 				provider = authorizationProviderName(value)
@@ -56,10 +65,15 @@ func (controller *Controller) projectSettingsSurface(ctx context.Context, surfac
 			if value := strings.TrimSpace(current.DefaultWorkdirs[nodeID]); value != "" {
 				workdir = value
 			}
+			// Contextual values are part of the creation table in the same order
+			// as their controls; avoid appending duplicate, unbound rows.
 			surface = telegramsettingsview.AppendFields(surface,
-				telegramsettingsview.Field{Name: "Нода", Value: string(nodeID)},
+				telegramsettingsview.Field{Name: "Нода", Value: nodeName},
 				telegramsettingsview.Field{Name: "CLI по умолчанию", Value: provider},
 				telegramsettingsview.Field{Name: "Папка по умолчанию", Value: workdir})
+			if _, ok := controller.providerPreferences.(settingsport.NodeRenamer); ok {
+				surface.Rows = append(surface.Rows[:len(surface.Rows)-1], []telegramsettingsview.Button{{Label: "Переименовать ноду", Action: "settings_rename_node"}}, surface.Rows[len(surface.Rows)-1])
+			}
 			if hint := controller.StandbyError(nodeID); hint != "" {
 				surface = telegramsettingsview.AppendFields(surface, telegramsettingsview.Field{Name: "Ожидающая сессия: ошибка", Value: hint})
 			}
