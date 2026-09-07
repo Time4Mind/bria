@@ -3,6 +3,7 @@ package sessionsupervisor_test
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -11,6 +12,7 @@ import (
 	"bria/internal/app"
 	"bria/internal/domain"
 	"bria/internal/sessionsupervisor"
+	"bria/internal/storage"
 )
 
 func TestUnexpectedExitRecoversExactProviderSessionAtHigherGeneration(t *testing.T) {
@@ -405,6 +407,58 @@ func TestExitedClosingSessionArchivesWithoutStartingReplacement(t *testing.T) {
 				t.Fatalf("restart requests = %d, want none", len(restarter.requests))
 			}
 		})
+	}
+}
+
+func TestEmptyCloseFinalizersUseExactDeletionReceipt(t *testing.T) {
+	ctx := context.Background()
+	store, err := storage.OpenSessionStore(filepath.Join(t.TempDir(), "state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ready := readySession(t, "empty-race")
+	snapshot := ready.Snapshot()
+	snapshot.Status = domain.SessionStarting
+	snapshot.Binding = nil
+	starting, err := domain.RestoreSession(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := store.PutStartingIfAbsent(ctx, starting); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Replace(ctx, starting, ready); err != nil {
+		t.Fatal(err)
+	}
+	closing, err := ready.BeginClose(ready.StateChangedAt().Add(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Replace(ctx, ready, closing); err != nil {
+		t.Fatal(err)
+	}
+	binding, _ := closing.Binding()
+	supervisor := newSupervisor(t, store, waitFunc(func(context.Context, domain.SessionID, domain.ProviderBinding) error { return nil }), &fakeRestarter{}, 1, nil)
+	result, err := supervisor.Watch(ctx, closing.ID(), binding)
+	if err != nil || !result.Deleted || result.Archived {
+		t.Fatalf("supervisor deletion=%#v err=%v", result, err)
+	}
+	// The user's closer finishing after the watcher gets exact success, not a CAS
+	// error; an unrelated or stale missing session can never claim this success.
+	if deleted, err := store.DeleteEmptyClosing(ctx, closing); err != nil || !deleted {
+		t.Fatalf("duplicate finalizer=%t err=%v", deleted, err)
+	}
+	for _, waitErr := range []error{nil, errors.New("process handle removed")} {
+		supervisor = newSupervisor(t, store, waitFunc(func(context.Context, domain.SessionID, domain.ProviderBinding) error { return waitErr }), &fakeRestarter{}, 1, nil)
+		result, err = supervisor.Watch(ctx, closing.ID(), binding)
+		if err != nil || !result.Deleted {
+			t.Fatalf("late watcher=%#v err=%v", result, err)
+		}
+		wrong := binding
+		wrong.Generation++
+		if result, err := supervisor.Watch(ctx, closing.ID(), wrong); err == nil || result.Deleted {
+			t.Fatalf("wrong generation deletion=%#v err=%v", result, err)
+		}
 	}
 }
 

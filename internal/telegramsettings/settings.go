@@ -24,10 +24,22 @@ func Apply(ctx context.Context, preferences settingsport.Preferences, providers 
 		return errors.New("settings are not configured")
 	}
 	switch action {
+	case "settings_standby":
+		standby, ok := preferences.(settingsport.StandbyPreferences)
+		if !ok {
+			return errors.New("standby session settings are not configured")
+		}
+		return standby.ToggleStandby(ctx)
 	case "settings_continue_existing":
 		return preferences.ToggleContinueExisting(ctx)
 	case "settings_screen":
 		return preferences.ToggleScreen(ctx)
+	case "settings_screen_capture_limit":
+		capture, ok := preferences.(settingsport.ScreenCapturePreferences)
+		if !ok {
+			return errors.New("screen capture settings are not configured")
+		}
+		return capture.CycleScreenCaptureLimit(ctx)
 	case "settings_detail":
 		return preferences.ToggleCardDetail(ctx)
 	case "settings_page_limit":

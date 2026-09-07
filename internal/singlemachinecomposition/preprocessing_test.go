@@ -39,3 +39,30 @@ func TestPreprocessingObserverPersistsIdentityWithoutPrompt(t *testing.T) {
 		t.Fatal("prompt leaked into preprocessing observation")
 	}
 }
+
+func TestPreprocessingObserverDistinguishesConfirmedRunFromCache(t *testing.T) {
+	logger, err := safelog.Open(safelog.Options{Directory: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	observer := preprocessingObserver{logger: logger}
+	request := promptpreprocess.Request{ComputerID: "local", SessionID: "session-a", MessageID: "message-a", Text: "private prompt"}
+	for _, observation := range []promptpreprocess.Observation{
+		promptpreprocess.SuccessObservation(request, promptpreprocess.Result{Provider: domain.ProviderCodex, Model: "gpt-5.6-luna", ModelEvidence: "codex_cli_header"}),
+		promptpreprocess.CachedObservation(request, false),
+	} {
+		if err := observer.ObservePreprocessing(context.Background(), observation); err != nil {
+			t.Fatal(err)
+		}
+	}
+	events, err := logger.Read(safelog.Service)
+	if err != nil || len(events) != 2 {
+		t.Fatalf("events: %v %v", events, err)
+	}
+	if events[0].Type != "prompt.preprocessing_completed" || events[0].Fields["model_evidence"] != "codex_cli_header" || events[0].Fields["model"] != "gpt-5.6-luna" {
+		t.Fatalf("success: %#v", events[0])
+	}
+	if events[1].Type != "prompt.preprocessing_cached" || events[1].Fields["model"] != "" || events[1].Fields["attempt"] != "0" {
+		t.Fatalf("cache: %#v", events[1])
+	}
+}

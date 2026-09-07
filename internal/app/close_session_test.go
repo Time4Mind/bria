@@ -39,6 +39,37 @@ func TestCloseReadyConfirmsExactProcessExitBeforeArchiving(t *testing.T) {
 	}
 }
 
+type emptyLifecycleStore struct {
+	lifecycleStore
+	starter     *lifecycleStarter
+	deleteCalls int
+}
+
+func (s *emptyLifecycleStore) DeleteEmptyClosing(_ context.Context, expected domain.Session) (bool, error) {
+	s.deleteCalls++
+	if s.starter.abortCalls != 1 || s.starter.abortErr != nil || expected.Status() != domain.SessionClosing || !s.session.Equal(expected) {
+		return false, errors.New("deletion before confirmed exact process exit")
+	}
+	return true, nil
+}
+
+func TestCloseKnownEmptyDeletesOnlyAfterConfirmedExit(t *testing.T) {
+	for _, abortErr := range []error{nil, errors.New("exit uncertain")} {
+		now := time.Now().UTC()
+		starter := &lifecycleStarter{abortErr: abortErr}
+		store := &emptyLifecycleStore{lifecycleStore: lifecycleStore{session: readySession(t, now.Add(-time.Hour))}, starter: starter}
+		closer, _ := app.NewSessionCloser(store, starter, func() time.Time { return now })
+		result, err := closer.Close(context.Background(), store.session.ID())
+		if abortErr == nil {
+			if err != nil || !result.Deleted || store.deleteCalls != 1 {
+				t.Fatalf("result=%#v err=%v deletes=%d", result, err, store.deleteCalls)
+			}
+		} else if !errors.Is(err, abortErr) || result.Deleted || store.deleteCalls != 0 {
+			t.Fatalf("unsafe deletion result=%#v err=%v deletes=%d", result, err, store.deleteCalls)
+		}
+	}
+}
+
 func TestCloseRunningSchedulesArchiveWithoutInterruptingWork(t *testing.T) {
 	now := time.Date(2026, 9, 3, 9, 0, 0, 0, time.UTC)
 	running, err := readySession(t, now.Add(-time.Hour)).StartWork(now.Add(-time.Minute))
@@ -105,7 +136,7 @@ func TestCloseAwaitingRecoveryConfirmsExactProcessExitBeforeArchiving(t *testing
 	}
 }
 
-func TestCloseBindinglessAwaitingRecoveryArchivesWithoutProviderAbort(t *testing.T) {
+func TestCloseBindinglessAwaitingRecoveryRequiresEmptyEvidenceWithoutProviderAbort(t *testing.T) {
 	now := time.Date(2026, 9, 5, 15, 46, 0, 0, time.UTC)
 	starting, err := domain.NewStartingSessionAt("logical-start-failure", "intent-start-failure", "local", domain.ProviderClaude, "/work", now.Add(-time.Hour), domain.SessionLifetimeNever)
 	if err != nil {
@@ -120,10 +151,10 @@ func TestCloseBindinglessAwaitingRecoveryArchivesWithoutProviderAbort(t *testing
 	closer, _ := app.NewSessionCloser(store, starter, func() time.Time { return now })
 
 	result, err := closer.Close(context.Background(), awaiting.ID())
-	if err != nil {
-		t.Fatalf("Close() error = %v", err)
+	if err == nil {
+		t.Fatal("close accepted missing atomic empty-session evidence")
 	}
-	if result.Session.Status() != domain.SessionArchived || starter.abortCalls != 0 {
+	if result.Deleted || !store.session.Equal(awaiting) || result.Session.Status() != domain.SessionAwaitingRecovery || starter.abortCalls != 0 {
 		t.Fatalf("binding-less close = %#v, aborts %d", result, starter.abortCalls)
 	}
 }

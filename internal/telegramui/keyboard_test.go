@@ -105,3 +105,14 @@ func TestProjectCardKeyboardReplacesCloseWithArchiveConfirmation(t *testing.T) {
 		t.Fatalf("confirmation keyboard = %#v, want only %#v", keyboard.Rows, want)
 	}
 }
+
+func TestEmptyCloseKeyboardOnlyOffersDeleteAndCancel(t *testing.T) {
+	keyboard, err := telegramui.ProjectCardKeyboard(telegramui.CardKeyboardInput{
+		View: telegramui.PageView{Page: 1, Pages: 1}, CloseConfirmation: true, DeleteConfirmation: true,
+	})
+	if err != nil || len(keyboard.Rows) != 1 || len(keyboard.Rows[0]) != 2 ||
+		keyboard.Rows[0][0].Label != "Удалить" || keyboard.Rows[0][0].Target.Choice != 1 ||
+		keyboard.Rows[0][1].Label != "Отмена" || keyboard.Rows[0][1].Target.Choice != 2 {
+		t.Fatalf("empty confirmation keyboard=%#v err=%v", keyboard, err)
+	}
+}

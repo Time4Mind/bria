@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bria/internal/nativeadapter"
 	"context"
 	"crypto/rand"
 	"fmt"
@@ -20,6 +21,13 @@ const (
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	if len(os.Args) > 1 && os.Args[1] == "--native" {
+		if err := runNative(ctx, os.Args[2:], os.Stdin, os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, "bria-native-startup:"+nativeadapter.StartupFailureClass(err))
+			os.Exit(1)
+		}
+		return
+	}
 	factory := &osProcessFactory{credentialPath: os.Getenv(claude.CredentialFileEnvironment)}
 	exitCode := run(
 		ctx,

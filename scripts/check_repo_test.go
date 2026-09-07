@@ -16,8 +16,88 @@ import (
 	"time"
 )
 
+func TestNativeMigrationKeepsExactPackageBoundaries(t *testing.T) {
+	for _, test := range []struct {
+		path    string
+		imports []string
+	}{
+		{"internal/nativeadapter", []string{"internal/domain", "internal/nativeattachment", "internal/nativecli", "internal/nativeterminal", "internal/nativetranscript", "internal/runtimeprotocol"}},
+		{"internal/nativeattachment", nil},
+		{"internal/nativecli", []string{"internal/domain"}},
+		{"internal/nativeterminal", nil},
+		{"internal/nativetranscript", []string{"internal/runtimeprotocol"}},
+	} {
+		policy, ok := packagePolicies[test.path]
+		if !ok || policy.responsibility == "" || policy.compositionRoot || strings.Join(policy.allowedImports, "\x00") != strings.Join(test.imports, "\x00") {
+			t.Fatalf("native policy %s = %#v", test.path, policy)
+		}
+		for _, target := range []string{"internal/storage", "internal/telegramcontroller", "internal/telegram", "internal/singlemachinecomposition"} {
+			if errors := checkGraph(graphWithEdge(test.path, target)); len(errors) == 0 {
+				t.Fatalf("native boundary improperly allows %s -> %s", test.path, target)
+			}
+		}
+	}
+	for _, command := range []string{"cmd/bria-codex-adapter", "cmd/bria-claude-adapter"} {
+		for _, target := range []string{"internal/nativeadapter", "internal/domain"} {
+			if errors := checkGraph(graphWithEdge(command, target)); len(errors) != 0 {
+				t.Fatalf("native composition %s -> %s: %v", command, target, errors)
+			}
+		}
+	}
+}
+
+func TestNativeAttachmentKeepsStdlibBoundaryAndTwoExactConsumers(t *testing.T) {
+	policy := packagePolicies["internal/nativeattachment"]
+	if policy.responsibility != "validate bounded native photo custody from content bytes" || len(policy.allowedImports) != 0 || policy.maxProductionLines != 100 {
+		t.Fatalf("native attachment policy = %#v", policy)
+	}
+	wantConsumers := map[string]bool{
+		"internal/nativeadapter":            true,
+		"internal/providerinputcomposition": true,
+	}
+	for source, registered := range packagePolicies {
+		for _, target := range registered.allowedImports {
+			if target == "internal/nativeattachment" {
+				if !wantConsumers[source] {
+					t.Fatalf("native attachment admitted unexpected consumer %s", source)
+				}
+				delete(wantConsumers, source)
+			}
+		}
+	}
+	if len(wantConsumers) != 0 {
+		t.Fatalf("native attachment consumers missing: %v", wantConsumers)
+	}
+	assertErrorContains(
+		t,
+		checkGraph(graphWithEdge("internal/nativeattachment", "internal/domain")),
+		"package imports dependency outside registered boundary: internal/nativeattachment -> internal/domain",
+	)
+}
+
+func TestProviderModelsKeepsNarrowCatalogBoundary(t *testing.T) {
+	policy := packagePolicies["internal/providermodels"]
+	want := []string{"internal/config", "internal/domain", "internal/processenv", "internal/processgroup", "internal/settingsport"}
+	if strings.Join(policy.allowedImports, "\x00") != strings.Join(want, "\x00") || policy.maxProductionLines != 275 || policy.responsibility != "collect bounded local CLI model catalogs with successful-result caching and process cleanup" {
+		t.Fatalf("model catalog policy = %#v", policy)
+	}
+	for path, registered := range packagePolicies {
+		for _, target := range registered.allowedImports {
+			if target == "internal/providermodels" && path != "internal/singlemachinecomposition" {
+				t.Fatalf("catalog must be composed only at single-machine root: %s", path)
+			}
+		}
+	}
+	for _, target := range []string{"internal/storage", "internal/telegramcontroller", "internal/telegram", "internal/providerquota"} {
+		if errors := checkGraph(graphWithEdge("internal/providermodels", target)); len(errors) == 0 {
+			t.Fatalf("catalog improperly allows %s", target)
+		}
+	}
+}
+
 var requiredInvariantLines = []string{
 	"- единый неизменный договор задачи до начала работы;",
+	"- весь запрос как единица завершения, сохранность todo, восстановление контекста и проверка каждого обязательства перед финалом;",
 	"- карта покрытия до параллельного запуска;",
 	"- максимальная безопасная параллельность и непересекающееся владение;",
 	"- отдельные рабочие копии для конфликтующих изменений;",
@@ -29,6 +109,18 @@ var requiredInvariantLines = []string{
 }
 
 var requiredPolicyClauseLines = map[string][]string{
+	"Task continuity": {
+		"Перед многошаговой работой и после compaction обязательно восстановить текущий контекст по [docs/HARNESS.md](docs/HARNESS.md).",
+		"Единица завершения — весь запрос пользователя со всеми действующими дополнениями, а не отдельная подзадача.",
+		"Сохранять в одном durable todo все обязательства запроса с устойчивыми ID, критериями приёмки, статусами и доказательствами проверок; обновлять его при изменении объёма и перед передачей работы.",
+		"Новые сообщения дополняют или уточняют текущий объём; вопрос о статусе не отменяет работу. Удалять обязательство или заменять задачу можно только по явному указанию пользователя.",
+		"Восстанавливать текущий договор, все незакрытые пункты и ограничения без молчаливого усечения; читать связанные доказательства по необходимости, не всю историю. Backlog сохраняется, но сам по себе не разрешает новую работу.",
+		"Сбой формата Harness не должен терять, обнулять или блокировать todo: сохранить исходные записи, продолжить безопасную разрешённую работу и локально исправить совместимость без требования к пользователю чинить метаданные. Нечитаемую запись нельзя считать выполненной.",
+		"До объявления блокера проверить актуальные проектные указатели и доступные доказательства; старый блокер не доказывает отсутствие доступа сейчас. Выполнить всю независимую разрешённую подготовку, не расширяя полномочия.",
+		"Перед финалом владелец объединения сверяет каждый пункт всего запроса с физическим результатом и проверкой актуальной версии. Если остаётся выполнимая разрешённая работа, продолжать её; частичный успех не завершает запрос.",
+		"End-to-end включает затронутых потребителей и пользовательскую границу, включая live-сценарий, когда он необходим и разрешён. Локальная проверка не заменяет требуемую внешнюю приёмку; непроверенные границы остаются открытыми.",
+		"При реальном блокере или необходимом новом разрешении дать краткий статус и точное требуемое решение, сохранив незакрытые пункты. Итоговый отчёт кратко перечисляет решённые проблемы и существенные ограничения; проверка метаданных не заменяет приёмку результата.",
+	},
 	"Task contract": {
 		"Перед любым многошаговым исследованием или изменением письменно зафиксировать единый договор задачи:",
 		"- точный результат;",
@@ -458,27 +550,28 @@ func TestArchitectureCheckerRegistersCurrentCompositionBoundaries(t *testing.T) 
 		},
 		{
 			path:           "internal/telegramruntimecomposition",
-			responsibility: "project typed Telegram controller actions and reconcile durable delivery receipts",
+			responsibility: "project typed Telegram controller actions, signed model selectors and durable delivery receipts",
 			imports:        []string{"internal/coordinator", "internal/domain", "internal/telegramcontroller", "internal/telegramflow", "internal/telegrampipeline", "internal/telegramrecoverycomposition", "internal/telegramstate", "internal/telegramui"},
-			limit:          610,
+			limit:          650,
 		},
 		{
 			path:           "internal/telegrampromptcomposition",
-			responsibility: "refresh the active Telegram card from durable user-prompt delivery state",
+			responsibility: "refresh active prompt and native-screen cards with visibility-scoped cancellation",
 			imports:        []string{"internal/coordinator", "internal/domain", "internal/telegrambridge", "internal/telegramcontroller", "internal/telegramflow", "internal/telegramnotify", "internal/telegramstate", "internal/telegramui"},
-			limit:          150,
+			limit:          225,
 		},
 		{
 			path:           "internal/turnruntimecomposition",
-			responsibility: "assemble the controller-facing P4 turn path from explicit dependencies after durable state and safelog are open",
+			responsibility: "assemble the controller-facing P4 turn path and durable per-session model preferences after state and safelog are open",
 			imports:        []string{"internal/artifactruntimecomposition", "internal/config", "internal/domain", "internal/observability", "internal/observabilitycomposition", "internal/p4runtimecomposition", "internal/providerinputcomposition", "internal/safelog", "internal/sessionruntime", "internal/settings", "internal/storage", "internal/telegram", "internal/telegrambridge", "internal/telegramflow", "internal/turnprocessing"},
-			limit:          200,
+			limit:          250,
 		},
 		{
 			path:           "internal/singlemachinecomposition",
 			responsibility: "compose the single-computer Bria process",
 			imports: []string{
-				"internal/app", "internal/authcomposition", "internal/callbacktoken", "internal/claudestore", "internal/config", "internal/coordinator", "internal/domain", "internal/durablecomposition", "internal/durableflow", "internal/interactioncomposition", "internal/messagejournal", "internal/observability", "internal/processenv", "internal/promptpreprocess", "internal/promptpreprocesscommand", "internal/providerquota", "internal/recoverycomposition", "internal/recoveryruntime", "internal/runtimefactory", "internal/safelog", "internal/sessioncreation", "internal/sessionexpiry", "internal/sessionid", "internal/sessionnaming", "internal/sessionruntime", "internal/sessionsupervisor", "internal/settings", "internal/settingscomposition", "internal/storage", "internal/supervisioncomposition", "internal/telegram", "internal/telegrambridge", "internal/telegramcompletioncomposition", "internal/telegramcontroller", "internal/telegramflow", "internal/telegramnotify", "internal/telegrampipeline", "internal/telegrampromptcomposition", "internal/telegramrecoverycomposition", "internal/telegramruntimecomposition", "internal/turnruntimecomposition", "internal/workdir",
+				"internal/providermodels",
+				"internal/app", "internal/authcomposition", "internal/callbacktoken", "internal/claudestore", "internal/config", "internal/coordinator", "internal/domain", "internal/durablecomposition", "internal/durableflow", "internal/interactioncomposition", "internal/messagejournal", "internal/observability", "internal/processenv", "internal/promptpreprocess", "internal/promptpreprocesscommand", "internal/providerquota", "internal/recoverycomposition", "internal/recoveryruntime", "internal/runtimefactory", "internal/safelog", "internal/screenproduction", "internal/sessioncreation", "internal/sessionexpiry", "internal/sessionid", "internal/sessionnaming", "internal/sessionruntime", "internal/sessionsupervisor", "internal/settings", "internal/settingscomposition", "internal/storage", "internal/supervisioncomposition", "internal/telegram", "internal/telegrambridge", "internal/telegramcompletioncomposition", "internal/telegramcontroller", "internal/telegramflow", "internal/telegramnotify", "internal/telegrampipeline", "internal/telegrampromptcomposition", "internal/telegramrecoverycomposition", "internal/telegramruntimecomposition", "internal/turnruntimecomposition", "internal/workdir",
 			},
 			limit: 950,
 		},
@@ -732,7 +825,26 @@ func TestArchitectureCheckerCapsCoherentCustodyResponsibilities(t *testing.T) {
 		{path: "internal/messagejournal", limit: 1400},
 		{path: "internal/sessionsupervisor", limit: 450},
 		{path: "internal/telegramflow", limit: 2500},
-		{path: "internal/telegrampipeline", limit: 1550},
+		{path: "internal/telegrampipeline", limit: 1700},
+		{path: "internal/sessionruntime", limit: 1850},
+		{path: "internal/coordinator", limit: 825},
+		{path: "internal/nativeadapter", limit: 850},
+		{path: "internal/nativeattachment", limit: 100},
+		{path: "internal/nativecli", limit: 600},
+		{path: "internal/runtimeprotocol", limit: 1150},
+		{path: "internal/telegrampromptcomposition", limit: 225},
+		{path: "internal/telegramsettingsview", limit: 280},
+		{path: "internal/nativeterminal", limit: 510},
+		{path: "internal/nativetranscript", limit: 1000},
+		{path: "internal/providerquota", limit: 350},
+		{path: "internal/storage", limit: 1900},
+		{path: "internal/telegram", limit: 1750},
+		{path: "internal/telegramcompletioncomposition", limit: 275},
+		{path: "internal/telegramcontroller", limit: 5500},
+		{path: "internal/domain", limit: 800},
+		{path: "internal/telegrambridge", limit: 1550},
+		{path: "internal/telegramui", limit: 800},
+		{path: "internal/providermodels", limit: 275},
 	} {
 		pkg := testPackage(test.path)
 		pkg.ProductionLines = test.limit
@@ -1175,6 +1287,22 @@ func TestArchitectureCheckerRejectsTelegramBridgeDependenciesOutsideTransportAda
 	}
 }
 
+func TestArchitectureCheckerAllowsBridgeExternalScreenFixtureWithoutDomainRelaxation(t *testing.T) {
+	if errors := checkGraph(graphWithTestEdge("internal/telegrambridge", "internal/screen", true)); len(errors) != 0 {
+		t.Fatalf("external screen fixture rejected: %v", errors)
+	}
+	assertErrorContains(
+		t,
+		checkGraph(graphWithEdge("internal/telegrambridge", "internal/screen")),
+		"package imports dependency outside registered boundary: internal/telegrambridge -> internal/screen",
+	)
+	assertErrorContains(
+		t,
+		checkGraph(graphWithTestEdge("internal/telegrambridge", "internal/domain", true)),
+		"Telegram bridge imports package outside transport adaptation: internal/telegrambridge -> internal/domain",
+	)
+}
+
 func TestArchitectureCheckerKeepsCoordinatorTransportNeutral(t *testing.T) {
 	for _, target := range []string{
 		"internal/app",
@@ -1381,8 +1509,8 @@ func TestArchitectureCheckerRegistersFrozenProductionPackagePolicies(t *testing.
 		},
 		{
 			path:           "internal/screenproduction",
-			responsibility: "project typed provider events into virtual screen and optional Telegram media",
-			imports:        []string{"internal/screen", "internal/settings", "internal/telegram", "internal/turnprocessing"},
+			responsibility: "project typed provider events and active native session snapshots into virtual screen and optional Telegram media",
+			imports:        []string{"internal/domain", "internal/screen", "internal/sessionruntime", "internal/settings", "internal/telegram", "internal/turnprocessing"},
 			limit:          200,
 		},
 		{
@@ -1396,7 +1524,7 @@ func TestArchitectureCheckerRegistersFrozenProductionPackagePolicies(t *testing.
 			path:           "internal/recoveryruntime",
 			responsibility: "run bounded provider adapters as read-only accepted-turn history readers",
 			imports:        []string{"internal/claudestore", "internal/domain", "internal/processgroup", "internal/runtimeprotocol", "internal/sessionruntime"},
-			limit:          400,
+			limit:          575,
 		},
 		{
 			path:           "internal/updatecomposition",
@@ -1437,7 +1565,7 @@ func TestArchitectureCheckerFrozenProductionPoliciesEnforceEdgesAndReleaseBlocke
 	}{
 		{path: "internal/artifactcomposition", imports: []string{"internal/artifactproduction", "internal/turnprocessing"}},
 		{path: "internal/inputcomposition", imports: []string{"internal/mediaproduction", "internal/turnprocessing"}},
-		{path: "internal/screenproduction", imports: []string{"internal/screen", "internal/settings", "internal/telegram", "internal/turnprocessing"}},
+		{path: "internal/screenproduction", imports: []string{"internal/domain", "internal/screen", "internal/sessionruntime", "internal/settings", "internal/telegram", "internal/turnprocessing"}},
 		{path: "internal/containerpreflight", imports: []string{"internal/config"}, evidence: "platform_docker_executor"},
 		{path: "internal/recoveryruntime", imports: []string{"internal/claudestore", "internal/domain", "internal/processgroup", "internal/runtimeprotocol", "internal/sessionruntime"}},
 		{path: "internal/updatecomposition", imports: []string{"internal/update", "internal/updateflow", "internal/updateinstall"}, evidence: "update_and_forced_rollback"},
@@ -1567,7 +1695,7 @@ func TestArchitectureCheckerExtendsStorageAndRecoveryRuntimeEdges(t *testing.T) 
 	}{
 		{
 			path:    "internal/storage",
-			imports: []string{"internal/archiveimport", "internal/coordinator", "internal/domain", "internal/telegramstate"},
+			imports: []string{"internal/archiveimport", "internal/cardtranscript", "internal/coordinator", "internal/domain", "internal/telegramstate"},
 		},
 		{
 			path:    "internal/recoveryruntime",
@@ -1596,7 +1724,7 @@ func TestArchitectureCheckerRegistersSettingsAndProviderInputPolicies(t *testing
 		{
 			path:           "internal/providerinputcomposition",
 			responsibility: "resolve durable attachment custody at the provider boundary without flattening local paths into prompt text",
-			imports:        []string{"internal/domain", "internal/sessionruntime", "internal/turnprocessing"},
+			imports:        []string{"internal/domain", "internal/nativeattachment", "internal/sessionruntime", "internal/turnprocessing"},
 			limit:          250,
 			evidence:       "",
 		},
@@ -1620,9 +1748,9 @@ func TestArchitectureCheckerRegistersSettingsAndProviderInputPolicies(t *testing
 		},
 		{
 			path:           "internal/telegramsettingsview",
-			responsibility: "render grouped Telegram settings surfaces through neutral preferences ports",
+			responsibility: "render escaped grouped settings tables through neutral preferences ports",
 			imports:        []string{"internal/domain", "internal/settingsport"},
-			limit:          200,
+			limit:          280,
 		},
 	}
 
@@ -1910,6 +2038,7 @@ func makeRepo(t *testing.T, policy string) string {
 	t.Helper()
 	repo := t.TempDir()
 	writeFile(t, filepath.Join(repo, "AGENTS.md"), policy)
+	writeFile(t, filepath.Join(repo, "docs", "HARNESS.md"), "# Harness fixture\n")
 	runGit(t, repo, "init", "--quiet")
 	return repo
 }

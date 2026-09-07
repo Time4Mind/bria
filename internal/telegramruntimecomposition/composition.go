@@ -100,6 +100,16 @@ func semanticActionFromPlan(plan telegrampipeline.CallbackPlan) (telegramcontrol
 	}
 	var kind telegramcontroller.SemanticActionKind
 	switch plan.Action {
+	case telegramui.ActionModelMenu:
+		kind = telegramcontroller.SemanticModelMenu
+	case telegramui.ActionNativeKey:
+		kind = telegramcontroller.SemanticNativeKey
+	case telegramui.ActionModelChoice:
+		kind = telegramcontroller.SemanticModelChoice
+	case telegramui.ActionEffortMenu:
+		kind = telegramcontroller.SemanticEffortMenu
+	case telegramui.ActionEffortChoice:
+		kind = telegramcontroller.SemanticEffortChoice
 	case telegramui.ActionPagePrevious:
 		kind = telegramcontroller.SemanticPagePrevious
 	case telegramui.ActionPageLatest:
@@ -126,6 +136,8 @@ func semanticActionFromPlan(plan telegrampipeline.CallbackPlan) (telegramcontrol
 		kind = telegramcontroller.SemanticMenuArchive
 	case telegramui.ActionMenuStatus:
 		kind = telegramcontroller.SemanticMenuStatus
+	case telegramui.ActionRefreshStatus:
+		kind = telegramcontroller.SemanticRefreshStatus
 	case telegramui.ActionMenuSettings:
 		kind = telegramcontroller.SemanticMenuSettings
 	case telegramui.ActionMenuBack:
@@ -168,6 +180,8 @@ func semanticActionFromPlan(plan telegrampipeline.CallbackPlan) (telegramcontrol
 		kind = telegramcontroller.SemanticSettingsCategory
 	case telegramui.ActionSettingsScreen:
 		kind = telegramcontroller.SemanticSettingsScreen
+	case telegramui.ActionSettingsScreenCaptureLimit:
+		kind = telegramcontroller.SemanticSettingsScreenCaptureLimit
 	case telegramui.ActionSettingsDetail:
 		kind = telegramcontroller.SemanticSettingsDetail
 	case telegramui.ActionSettingsPageLimit:
@@ -210,6 +224,8 @@ func semanticActionFromPlan(plan telegrampipeline.CallbackPlan) (telegramcontrol
 		kind = telegramcontroller.SemanticSettingsPreprocessingReset
 	case telegramui.ActionSettingsSessionNaming:
 		kind = telegramcontroller.SemanticSettingsSessionNaming
+	case telegramui.ActionSettingsStandby:
+		kind = telegramcontroller.SemanticSettingsStandby
 	case telegramui.ActionAuthorizeCodex:
 		kind = telegramcontroller.SemanticAuthorizeCodex
 	case telegramui.ActionAuthorizeClaude:
@@ -221,7 +237,8 @@ func semanticActionFromPlan(plan telegrampipeline.CallbackPlan) (telegramcontrol
 		return telegramcontroller.SemanticAction{}, errors.New("callback plan action and effect disagree")
 	}
 	sessionID := plan.SessionID
-	if telegramui.IsGlobalAction(plan.Action) {
+	if telegramui.IsGlobalAction(plan.Action) &&
+		(plan.Action != telegramui.ActionMenuNodes && plan.Action != telegramui.ActionMenuBack || sessionID == domain.SessionID(telegramui.GlobalSurfaceID)) {
 		if sessionID != domain.SessionID(telegramui.GlobalSurfaceID) {
 			return telegramcontroller.SemanticAction{}, errors.New("global callback plan has invalid surface identity")
 		}
@@ -232,6 +249,10 @@ func semanticActionFromPlan(plan telegrampipeline.CallbackPlan) (telegramcontrol
 
 func callbackEffectForAction(action telegramui.Action) telegrampipeline.CallbackEffect {
 	switch action {
+	case telegramui.ActionModelMenu, telegramui.ActionModelChoice, telegramui.ActionEffortMenu, telegramui.ActionEffortChoice:
+		return telegrampipeline.EffectModelSelector
+	case telegramui.ActionNativeKey:
+		return telegrampipeline.EffectNativeKey
 	case telegramui.ActionPagePrevious, telegramui.ActionPageLatest, telegramui.ActionPageNext:
 		return telegrampipeline.EffectProjectPage
 	case telegramui.ActionStop:
@@ -253,6 +274,8 @@ func callbackEffectForAction(action telegramui.Action) telegrampipeline.Callback
 	case telegramui.ActionMenuArchive:
 		return telegrampipeline.EffectOpenArchive
 	case telegramui.ActionMenuStatus:
+		return telegrampipeline.EffectShowStatus
+	case telegramui.ActionRefreshStatus:
 		return telegrampipeline.EffectShowStatus
 	case telegramui.ActionMenuSettings:
 		return telegrampipeline.EffectOpenSettings
@@ -293,7 +316,7 @@ func callbackEffectForAction(action telegramui.Action) telegrampipeline.Callback
 		telegramui.ActionSettingsLifetime6Hours, telegramui.ActionSettingsLifetime12Hours,
 		telegramui.ActionSettingsLifetime24Hours, telegramui.ActionSettingsLifetime48Hours,
 		telegramui.ActionSettingsProviderCodex, telegramui.ActionSettingsProviderClaude,
-		telegramui.ActionSettingsPreprocessing, telegramui.ActionSettingsPreprocessingInstruction, telegramui.ActionSettingsPreprocessingReset, telegramui.ActionSettingsSessionNaming:
+		telegramui.ActionSettingsPreprocessing, telegramui.ActionSettingsPreprocessingInstruction, telegramui.ActionSettingsPreprocessingReset, telegramui.ActionSettingsSessionNaming, telegramui.ActionSettingsStandby:
 		return telegrampipeline.EffectChangeSettings
 	case telegramui.ActionAuthorizeCodex:
 		return telegrampipeline.EffectAuthorizeCodex
@@ -328,11 +351,11 @@ func projectSemanticCard(card telegramcontroller.SemanticCard, effect telegramui
 		pages[index] = telegramui.ContentPage{Content: page.Content, Anchors: append([]string(nil), page.Anchors...)}
 	}
 	view := telegramui.PageView{Page: card.View.Page, Pages: card.View.Pages, Anchor: card.View.Anchor, FollowLatest: card.View.FollowLatest}
-	keyboard, err := telegramui.ProjectCardKeyboard(telegramui.CardKeyboardInput{View: view, Working: card.Working, Archived: card.Archived, CloseConfirmation: card.CloseConfirmation, OptionsExpanded: card.OptionsExpanded, SessionRowSizes: append([]int(nil), card.SessionRowSizes...), SessionLabels: append([]string(nil), card.SelectableSessionLabels...)})
+	keyboard, err := telegramui.ProjectCardKeyboard(telegramui.CardKeyboardInput{View: view, Working: card.Working, Archived: card.Archived, CloseConfirmation: card.CloseConfirmation, DeleteConfirmation: card.DeleteConfirmation, OptionsExpanded: card.OptionsExpanded, SessionRowSizes: append([]int(nil), card.SessionRowSizes...), SessionLabels: append([]string(nil), card.SelectableSessionLabels...)})
 	if err != nil {
 		return nil, fmt.Errorf("project semantic card keyboard: %w", err)
 	}
-	return &telegramflow.CardOutput{SessionID: card.SessionID, Header: card.Header, Footer: card.Footer, Projection: telegramui.CarrierProjection{Effect: effect, Card: telegramui.ProjectedCard{Pages: pages, View: view, Keyboard: keyboard}}, OptionsExpanded: card.OptionsExpanded, SelectableSessionIDs: append([]domain.SessionID(nil), card.SelectableSessionIDs...), MakeActive: card.MakeActive}, nil
+	return &telegramflow.CardOutput{ScreenEligible: !card.Archived && !card.CloseConfirmation && !card.DeleteConfirmation, SessionID: card.SessionID, Header: card.Header, Footer: card.Footer, Projection: telegramui.CarrierProjection{Effect: effect, Card: telegramui.ProjectedCard{Pages: pages, View: view, Keyboard: keyboard}}, OptionsExpanded: card.OptionsExpanded, SelectableSessionIDs: append([]domain.SessionID(nil), card.SelectableSessionIDs...), MakeActive: card.MakeActive}, nil
 }
 
 func projectSemanticSurface(surface telegramcontroller.SemanticSurface) (*telegramflow.SurfaceOutput, error) {
@@ -354,14 +377,16 @@ func projectSemanticSurface(surface telegramcontroller.SemanticSurface) (*telegr
 			button := telegramui.Button{Action: action}
 			switch action {
 			case telegramui.ActionSettingsCategory, telegramui.ActionMenuSettings, telegramui.ActionSelectNode,
+				telegramui.ActionNativeKey, telegramui.ActionModelMenu, telegramui.ActionModelChoice, telegramui.ActionEffortMenu, telegramui.ActionEffortChoice,
 				telegramui.ActionCreateChoice, telegramui.ActionCreateFirst,
-				telegramui.ActionCreateSelectCodex, telegramui.ActionCreateSelectClaude:
+				telegramui.ActionCreateSelectCodex, telegramui.ActionCreateSelectClaude,
+				telegramui.ActionSelectSession, telegramui.ActionResume, telegramui.ActionMenuArchive:
 				button.Label = semantic.Label
 			}
-			if action == telegramui.ActionCreateChoice || action == telegramui.ActionSettingsCategory || action == telegramui.ActionSelectNode {
+			if action == telegramui.ActionCreateChoice || action == telegramui.ActionSettingsCategory || action == telegramui.ActionSelectNode || action == telegramui.ActionMenuArchive || telegramui.IsSessionSurfaceAction(action) {
 				button.Target.Choice = semantic.Choice
 			}
-			if action == telegramui.ActionSelectSession || action == telegramui.ActionResume {
+			if action == telegramui.ActionSelectSession || action == telegramui.ActionResume || telegramui.IsSessionSurfaceAction(action) {
 				if semantic.SessionID == "" {
 					return nil, errors.New("selectable semantic surface action requires a session")
 				}
@@ -373,11 +398,21 @@ func projectSemanticSurface(surface telegramcontroller.SemanticSurface) (*telegr
 			keyboard.Rows[rowIndex][buttonIndex] = button
 		}
 	}
-	return &telegramflow.SurfaceOutput{Text: surface.Text, RichMarkdown: surface.RichMarkdown, Keyboard: keyboard, SelectableSessionIDs: selectable}, nil
+	return &telegramflow.SurfaceOutput{Text: surface.Text, RichMarkdown: surface.RichMarkdown, NativeSessionID: surface.NativeSessionID, Keyboard: keyboard, SelectableSessionIDs: selectable}, nil
 }
 
 func telegramUIAction(action telegramcontroller.SemanticActionKind) (telegramui.Action, error) {
 	switch action {
+	case telegramcontroller.SemanticModelMenu:
+		return telegramui.ActionModelMenu, nil
+	case telegramcontroller.SemanticNativeKey:
+		return telegramui.ActionNativeKey, nil
+	case telegramcontroller.SemanticModelChoice:
+		return telegramui.ActionModelChoice, nil
+	case telegramcontroller.SemanticEffortMenu:
+		return telegramui.ActionEffortMenu, nil
+	case telegramcontroller.SemanticEffortChoice:
+		return telegramui.ActionEffortChoice, nil
 	case telegramcontroller.SemanticPagePrevious:
 		return telegramui.ActionPagePrevious, nil
 	case telegramcontroller.SemanticPageLatest:
@@ -404,6 +439,8 @@ func telegramUIAction(action telegramcontroller.SemanticActionKind) (telegramui.
 		return telegramui.ActionMenuArchive, nil
 	case telegramcontroller.SemanticMenuStatus:
 		return telegramui.ActionMenuStatus, nil
+	case telegramcontroller.SemanticRefreshStatus:
+		return telegramui.ActionRefreshStatus, nil
 	case telegramcontroller.SemanticMenuSettings:
 		return telegramui.ActionMenuSettings, nil
 	case telegramcontroller.SemanticMenuBack:
@@ -446,6 +483,8 @@ func telegramUIAction(action telegramcontroller.SemanticActionKind) (telegramui.
 		return telegramui.ActionCreateClaude, nil
 	case telegramcontroller.SemanticSettingsScreen:
 		return telegramui.ActionSettingsScreen, nil
+	case telegramcontroller.SemanticSettingsScreenCaptureLimit:
+		return telegramui.ActionSettingsScreenCaptureLimit, nil
 	case telegramcontroller.SemanticSettingsDetail:
 		return telegramui.ActionSettingsDetail, nil
 	case telegramcontroller.SemanticSettingsPageLimit:
@@ -488,6 +527,8 @@ func telegramUIAction(action telegramcontroller.SemanticActionKind) (telegramui.
 		return telegramui.ActionSettingsPreprocessingReset, nil
 	case telegramcontroller.SemanticSettingsSessionNaming:
 		return telegramui.ActionSettingsSessionNaming, nil
+	case telegramcontroller.SemanticSettingsStandby:
+		return telegramui.ActionSettingsStandby, nil
 	case telegramcontroller.SemanticAuthorizeCodex:
 		return telegramui.ActionAuthorizeCodex, nil
 	case telegramcontroller.SemanticAuthorizeClaude:

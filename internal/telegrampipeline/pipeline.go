@@ -229,7 +229,7 @@ func acceptCallback(
 		if statusRecoveryBound {
 			validGlobal = telegramui.IsStatusRecoveryAction(decoded.Callback.Action) && decoded.Callback.SessionID == telegramui.GlobalSurfaceID
 		}
-		validSessionTarget := (decoded.Callback.Action == telegramui.ActionSelectSession || decoded.Callback.Action == telegramui.ActionResume) &&
+		validSessionTarget := (decoded.Callback.Action == telegramui.ActionSelectSession || decoded.Callback.Action == telegramui.ActionResume || telegramui.IsSessionSurfaceAction(decoded.Callback.Action)) &&
 			decoded.Callback.SessionID != telegramui.GlobalSurfaceID && !outboundBound && !recoveryBound && !statusRecoveryBound
 		if !validGlobal && !validSessionTarget {
 			return AcceptedCallback{}, ErrStaleCallback
@@ -336,6 +336,8 @@ const (
 	EffectOpenSessions                         CallbackEffect = "open_sessions"
 	EffectOpenNew                              CallbackEffect = "open_new"
 	EffectOpenArchive                          CallbackEffect = "open_archive"
+	EffectModelSelector                        CallbackEffect = "model_selector"
+	EffectNativeKey                            CallbackEffect = "native_key"
 	EffectShowStatus                           CallbackEffect = "show_status"
 	EffectOpenSettings                         CallbackEffect = "open_settings"
 	EffectOpenMenu                             CallbackEffect = "open_menu"
@@ -426,6 +428,19 @@ func PlanAcceptedCallback(callback AcceptedCallback) (CallbackPlan, error) {
 	}
 	var effect CallbackEffect
 	switch callback.Action {
+	case telegramui.ActionNativeKey:
+		if callback.Target.Choice < 1 || callback.Target.Choice > 8 || callback.Target.Page != 0 || callback.Target.FollowLatest ||
+			callback.Target.SessionSlot != 0 || callback.Target.InteractionChoice != 0 {
+			return CallbackPlan{}, errors.New("native key target is invalid")
+		}
+		effect = EffectNativeKey
+	case telegramui.ActionModelMenu, telegramui.ActionModelChoice, telegramui.ActionEffortMenu, telegramui.ActionEffortChoice:
+		if callback.Target.Choice < 0 || callback.Target.Choice > 65535 || callback.Target.Page != 0 || callback.Target.FollowLatest ||
+			callback.Target.SessionSlot != 0 || callback.Target.InteractionChoice != 0 ||
+			((callback.Action == telegramui.ActionModelChoice || callback.Action == telegramui.ActionEffortChoice) && callback.Target.Choice == 0) {
+			return CallbackPlan{}, errors.New("model selector target is invalid")
+		}
+		effect = EffectModelSelector
 	case telegramui.ActionPagePrevious, telegramui.ActionPageNext:
 		if callback.Target.Page < 1 || callback.Target.FollowLatest || callback.Target.SessionSlot != 0 || callback.Target.InteractionChoice != 0 || callback.Target.Choice != 0 {
 			return CallbackPlan{}, errors.New("page callback target is invalid")
@@ -456,8 +471,14 @@ func PlanAcceptedCallback(callback AcceptedCallback) (CallbackPlan, error) {
 	case telegramui.ActionMenuNew:
 		effect = EffectOpenNew
 	case telegramui.ActionMenuArchive:
+		if callback.Target.Choice < 0 || callback.Target.Page != 0 || callback.Target.FollowLatest ||
+			callback.Target.SessionSlot != 0 || callback.Target.InteractionChoice != 0 {
+			return CallbackPlan{}, errors.New("archive page target is invalid")
+		}
 		effect = EffectOpenArchive
 	case telegramui.ActionMenuStatus:
+		effect = EffectShowStatus
+	case telegramui.ActionRefreshStatus:
 		effect = EffectShowStatus
 	case telegramui.ActionMenuNodes:
 		effect = EffectShowStatus
@@ -502,7 +523,7 @@ func PlanAcceptedCallback(callback AcceptedCallback) (CallbackPlan, error) {
 		effect = EffectToggleSettingsScreen
 	case telegramui.ActionSettingsDetail:
 		effect = EffectToggleSettingsDetail
-	case telegramui.ActionSettingsPageLimit, telegramui.ActionSettingsContinueExisting,
+	case telegramui.ActionSettingsPageLimit, telegramui.ActionSettingsScreenCaptureLimit, telegramui.ActionSettingsContinueExisting,
 		telegramui.ActionSettingsTechnicalActions, telegramui.ActionSettingsBackgroundQuestions,
 		telegramui.ActionSettingsBackgroundErrors, telegramui.ActionSettingsArchiveRecommendations,
 		telegramui.ActionSettingsDefaultProvider, telegramui.ActionSettingsDefaultWorkdir, telegramui.ActionSettingsClearCreationDefaults,
@@ -510,7 +531,7 @@ func PlanAcceptedCallback(callback AcceptedCallback) (CallbackPlan, error) {
 		telegramui.ActionSettingsLifetime6Hours, telegramui.ActionSettingsLifetime12Hours,
 		telegramui.ActionSettingsLifetime24Hours, telegramui.ActionSettingsLifetime48Hours,
 		telegramui.ActionSettingsProviderCodex, telegramui.ActionSettingsProviderClaude,
-		telegramui.ActionSettingsPreprocessing, telegramui.ActionSettingsPreprocessingInstruction, telegramui.ActionSettingsPreprocessingReset, telegramui.ActionSettingsSessionNaming:
+		telegramui.ActionSettingsPreprocessing, telegramui.ActionSettingsPreprocessingInstruction, telegramui.ActionSettingsPreprocessingReset, telegramui.ActionSettingsSessionNaming, telegramui.ActionSettingsStandby:
 		effect = EffectChangeSettings
 	case telegramui.ActionAuthorizeCodex:
 		effect = EffectAuthorizeCodex
@@ -564,9 +585,9 @@ func PlanAcceptedCallback(callback AcceptedCallback) (CallbackPlan, error) {
 	default:
 		return CallbackPlan{}, fmt.Errorf("unsupported callback action %q", callback.Action)
 	}
-	if effect != EffectProjectPage && effect != EffectInteractionChoice && effect != EffectCreateChoice &&
+	if effect != EffectProjectPage && effect != EffectInteractionChoice && effect != EffectCreateChoice && effect != EffectModelSelector && effect != EffectNativeKey &&
 		callback.Action != telegramui.ActionSettingsCategory && callback.Action != telegramui.ActionSelectNode &&
-		callback.Action != telegramui.ActionClose &&
+		callback.Action != telegramui.ActionClose && callback.Action != telegramui.ActionMenuArchive &&
 		callback.Target != (telegramui.ButtonTarget{}) {
 		return CallbackPlan{}, errors.New("non-page callback must not contain a target")
 	}

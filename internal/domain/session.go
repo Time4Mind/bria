@@ -86,6 +86,8 @@ type Session struct {
 	workdir        string
 	name           string
 	nameSource     SessionNameSource
+	model          string
+	effort         string
 	status         SessionStatus
 	binding        *ProviderBinding
 	createdAt      time.Time
@@ -105,6 +107,8 @@ type SessionSnapshot struct {
 	Workdir        string
 	Name           string
 	NameSource     SessionNameSource
+	Model          string
+	Effort         string
 	Status         SessionStatus
 	Binding        *ProviderBinding
 	CreatedAt      time.Time
@@ -185,6 +189,9 @@ func ValidateSessionIntent(
 }
 
 func RestoreSession(snapshot SessionSnapshot) (Session, error) {
+	if err := validateModelPreferences(snapshot.Model, snapshot.Effort); err != nil {
+		return Session{}, err
+	}
 	if strings.TrimSpace(string(snapshot.ID)) == "" {
 		return Session{}, fmt.Errorf("session id is required")
 	}
@@ -274,6 +281,8 @@ func RestoreSession(snapshot SessionSnapshot) (Session, error) {
 		workdir:        snapshot.Workdir,
 		name:           snapshot.Name,
 		nameSource:     snapshot.NameSource,
+		model:          snapshot.Model,
+		effort:         snapshot.Effort,
 		status:         snapshot.Status,
 		binding:        cloneBinding(snapshot.Binding),
 		createdAt:      snapshot.CreatedAt,
@@ -499,6 +508,31 @@ func (s Session) Rename(name string, source SessionNameSource) (Session, error) 
 	return RestoreSession(snapshot)
 }
 
+// WithModelPreferences changes only the next-turn provider preferences.
+// Empty values retain provider defaults. The caller serializes changes against input.
+func (s Session) WithModelPreferences(model, effort string) (Session, error) {
+	if s.status != SessionReady {
+		return Session{}, fmt.Errorf("cannot change model preferences from %q", s.status)
+	}
+	snapshot := s.Snapshot()
+	snapshot.Model, snapshot.Effort = model, effort
+	return RestoreSession(snapshot)
+}
+
+func validateModelPreferences(model, effort string) error {
+	for _, value := range []string{model, effort} {
+		if len(value) > 128 || !utf8.ValidString(value) || strings.TrimSpace(value) != value {
+			return fmt.Errorf("invalid model preference")
+		}
+		for _, r := range value {
+			if unicode.IsControl(r) || unicode.IsSpace(r) || unicode.Is(unicode.Cf, r) {
+				return fmt.Errorf("invalid model preference")
+			}
+		}
+	}
+	return nil
+}
+
 func (s Session) Expired(now time.Time) bool {
 	return s.deadlineAt != nil && !now.Before(*s.deadlineAt)
 }
@@ -528,6 +562,8 @@ func (s Session) Snapshot() SessionSnapshot {
 		Workdir:        s.workdir,
 		Name:           s.name,
 		NameSource:     s.nameSource,
+		Model:          s.model,
+		Effort:         s.effort,
 		Status:         s.status,
 		Binding:        cloneBinding(s.binding),
 		CreatedAt:      s.createdAt,
@@ -554,6 +590,8 @@ func (s Session) Equal(other Session) bool {
 		s.provider != other.provider ||
 		s.workdir != other.workdir ||
 		s.name != other.name ||
+		s.model != other.model ||
+		s.effort != other.effort ||
 		s.status != other.status ||
 		!s.createdAt.Equal(other.createdAt) ||
 		!equalTime(s.lastResumedAt, other.lastResumedAt) ||

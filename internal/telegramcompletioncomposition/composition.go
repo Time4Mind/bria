@@ -74,10 +74,11 @@ func (router *Router) Deliver(ctx context.Context, notification telegramcontroll
 	router.mu.RLock()
 	deliverer := router.fallback
 	if (notification.Kind == telegramcontroller.NotificationFinal ||
+		notification.Kind == telegramcontroller.NotificationQuestion ||
 		notification.Kind == telegramcontroller.NotificationCommentary ||
 		notification.Kind == telegramcontroller.NotificationError) && router.finals != nil {
 		deliverer = router.finals
-	} else if notification.Kind == telegramcontroller.NotificationPromptStatus && router.prompts != nil {
+	} else if (notification.Kind == telegramcontroller.NotificationPromptStatus || notification.Kind == telegramcontroller.NotificationNativeScreen) && router.prompts != nil {
 		deliverer = router.prompts
 	}
 	router.mu.RUnlock()
@@ -111,6 +112,19 @@ func (deliverer CompletionDeliverer) Deliver(ctx context.Context, notification t
 	}
 	var storedState telegramstate.State
 	var err error
+	question := notification.Kind == telegramcontroller.NotificationQuestion
+	if question {
+		var allowed bool
+		storedState, allowed, err = deliverer.questionPolicy(ctx, notification.SessionID)
+		if err != nil {
+			return receipt, err
+		}
+		if !allowed {
+			receipt.State = telegramnotify.DeliveryConfirmed
+			receipt.Suppressed = true
+			return receipt, nil
+		}
+	}
 	if notification.Kind == telegramcontroller.NotificationCommentary {
 		if deliverer.Cards == nil {
 			return receipt, errors.New("commentary card store is required")
@@ -128,6 +142,13 @@ func (deliverer CompletionDeliverer) Deliver(ctx context.Context, notification t
 	card, active, err := deliverer.Controller.ProjectCompletion(ctx, notification.SessionID)
 	if err != nil {
 		return receipt, err
+	}
+	// A native overlay owns its screen and arrow controls. Its passive observer
+	// renders questions; don't replace it with a transcript card or duplicate alert.
+	if question && storedState.ActiveSession == notification.SessionID && !active {
+		receipt.State = telegramnotify.DeliveryConfirmed
+		receipt.Suppressed = true
+		return receipt, nil
 	}
 	if notification.Kind == telegramcontroller.NotificationCommentary && !active {
 		receipt.State = telegramnotify.DeliveryConfirmed
@@ -160,7 +181,7 @@ func (deliverer CompletionDeliverer) Deliver(ctx context.Context, notification t
 		},
 	}
 	var prepared telegramflow.Prepared
-	if notification.Kind == telegramcontroller.NotificationCommentary {
+	if notification.Kind == telegramcontroller.NotificationCommentary || question && active {
 		stored, ok := storedState.Card(card.SessionID)
 		if !ok || stored.Carrier.ChatID <= 0 || stored.Carrier.MessageID <= 0 {
 			return receipt, errors.New("active commentary card carrier is not confirmed")
@@ -174,9 +195,19 @@ func (deliverer CompletionDeliverer) Deliver(ctx context.Context, notification t
 	if err != nil {
 		return receipt, err
 	}
+	if question && !active {
+		prepared.Status.Text = "Фоновая сессия ждёт ответа."
+	}
 	prepared.Card.Header = card.Header + "\n\n"
 	if active {
 		prepared.Status.Text = prepared.Card.Header + prepared.Card.Projection.Card.Pages[prepared.Card.Projection.Card.View.Page-1].Content
+	}
+	if question && active {
+		if visibility, ok := deliverer.Controller.(interface{ NativeScreenVisible(domain.SessionID) bool }); ok && !visibility.NativeScreenVisible(notification.SessionID) {
+			receipt.State = telegramnotify.DeliveryConfirmed
+			receipt.Suppressed = true
+			return receipt, nil
+		}
 	}
 	if err := deliverer.Sender.Register(prepared); err != nil {
 		return receipt, err
@@ -196,5 +227,5 @@ func (deliverer CompletionDeliverer) Deliver(ctx context.Context, notification t
 }
 
 func stateNotification(kind telegramcontroller.NotificationKind) bool {
-	return kind == telegramcontroller.NotificationFinal || kind == telegramcontroller.NotificationCommentary || kind == telegramcontroller.NotificationError
+	return kind == telegramcontroller.NotificationFinal || kind == telegramcontroller.NotificationQuestion || kind == telegramcontroller.NotificationCommentary || kind == telegramcontroller.NotificationError
 }

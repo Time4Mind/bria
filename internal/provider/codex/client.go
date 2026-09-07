@@ -15,6 +15,8 @@ import (
 	"sync/atomic"
 	"time"
 	"unicode/utf8"
+
+	"bria/internal/runtimeprotocol"
 )
 
 const DefaultMaxMessageBytes = 1024 * 1024
@@ -243,6 +245,8 @@ type SandboxPolicy struct {
 }
 
 type TurnStartRequest struct {
+	Model         string
+	Effort        string
 	ThreadID      string
 	MessageID     string
 	Input         []TextInput
@@ -610,6 +614,9 @@ func validThreadTurnStatus(status ThreadTurnStatus) bool {
 }
 
 func (client *Client) StartTurn(ctx context.Context, request TurnStartRequest) (TurnOutcome, error) {
+	if runtimeprotocol.ValidateModelSelection(request.Model, request.Effort) != nil {
+		return TurnOutcome{}, ErrInvalidRequest
+	}
 	client.opMu.Lock()
 	defer client.opMu.Unlock()
 
@@ -632,7 +639,7 @@ func (client *Client) StartTurn(ctx context.Context, request TurnStartRequest) (
 		}
 		input = append(input, wireUserInput{Type: "localImage", Path: image.Path})
 	}
-	params := turnStartParams{ThreadID: request.ThreadID, Input: input, ClientUserMessageID: request.MessageID}
+	params := turnStartParams{ThreadID: request.ThreadID, Input: input, ClientUserMessageID: request.MessageID, Model: request.Model, Effort: request.Effort}
 	if request.SandboxPolicy != nil {
 		if request.SandboxPolicy.Type == "" {
 			return TurnOutcome{}, ErrInvalidRequest
@@ -1424,6 +1431,8 @@ type wireSandboxPolicy struct {
 }
 
 type turnStartParams struct {
+	Model               string             `json:"model,omitempty"`
+	Effort              string             `json:"effort,omitempty"`
 	ThreadID            string             `json:"threadId"`
 	Input               []wireUserInput    `json:"input"`
 	ClientUserMessageID string             `json:"clientUserMessageId,omitempty"`

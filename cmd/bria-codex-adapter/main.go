@@ -8,6 +8,8 @@ import (
 	"os/signal"
 	"syscall"
 
+	"bria/internal/domain"
+	"bria/internal/nativeadapter"
 	"bria/internal/provider/codex"
 )
 
@@ -15,12 +17,19 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	if err := run(ctx, os.Args[1:]); err != nil {
-		_, _ = fmt.Fprintln(os.Stderr, "bria codex adapter failed")
+		if len(os.Args) > 1 && os.Args[1] == "--native" {
+			_, _ = fmt.Fprintln(os.Stderr, "bria-native-startup:"+nativeadapter.StartupFailureClass(err))
+		} else {
+			_, _ = fmt.Fprintln(os.Stderr, "bria codex adapter failed")
+		}
 		os.Exit(1)
 	}
 }
 
 func run(ctx context.Context, args []string) error {
+	if len(args) > 0 && args[0] == "--native" {
+		return nativeadapter.Main(ctx, domain.ProviderCodex, args[1:], os.Stdin, os.Stdout)
+	}
 	command, err := parseRawCommand(args)
 	if err != nil {
 		return err

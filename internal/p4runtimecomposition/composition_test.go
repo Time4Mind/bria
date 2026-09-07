@@ -180,7 +180,7 @@ func TestOpenExplicitP4RuntimeRoutesOpaquePhotoCustodyToCodexRuntime(t *testing.
 	}
 }
 
-func TestOpenP4RuntimeScreenGateUsesFileSettingsAndConfirmedTelegramReceipt(t *testing.T) {
+func TestOpenP4RuntimeDoesNotInstallBackgroundScreenPhotoObserver(t *testing.T) {
 	const token = "987655:p4-screen-test"
 	sendPhotoCalls := 0
 	telegramClient := mustP4TelegramClient(t, token, p4HTTPClientFunc(func(request *http.Request) (*http.Response, error) {
@@ -220,18 +220,10 @@ func TestOpenP4RuntimeScreenGateUsesFileSettingsAndConfirmedTelegramReceipt(t *t
 	bundle, enabled, err := p4runtimecomposition.Open(p4runtimecomposition.Options{
 		Configuration: configuration, Telegram: telegramClient, Settings: preferences, Sessions: sessions, Runtime: &p4Runtime{},
 	})
-	if err != nil || !enabled || bundle == nil || bundle.RuntimeEvents == nil {
-		t.Fatalf("Open() = (%#v, %t, %v), want enabled RuntimeEvents", bundle, enabled, err)
+	if err != nil || !enabled || bundle == nil || bundle.RuntimeEvents != nil {
+		t.Fatalf("Open() = (%#v, %t, %v), want no background Screen observer", bundle, enabled, err)
 	}
 
-	const sessionID domain.SessionID = "22222222-2222-4222-8222-222222222222"
-	disabled := turnprocessing.RuntimeEventObservation{
-		OperationID: "p4-screen:1", SessionID: sessionID, MessageID: "telegram:screen:1", EventIndex: 1,
-		Event: sessionruntime.TurnEvent{Kind: sessionruntime.EventCommentary, Text: "first safe line"},
-	}
-	if err := bundle.RuntimeEvents.ObserveRuntimeEvent(context.Background(), disabled); err != nil {
-		t.Fatalf("ObserveRuntimeEvent(disabled) error = %v", err)
-	}
 	if sendPhotoCalls != 0 {
 		t.Fatalf("disabled Screen sent %d photos", sendPhotoCalls)
 	}
@@ -252,15 +244,8 @@ func TestOpenP4RuntimeScreenGateUsesFileSettingsAndConfirmedTelegramReceipt(t *t
 		t.Fatalf("reloaded Screen setting = (%#v, %v), want enabled", value, err)
 	}
 
-	enabledObservation := disabled
-	enabledObservation.OperationID = "p4-screen:2"
-	enabledObservation.EventIndex = 2
-	enabledObservation.Event.Text = "second safe line"
-	if err := bundle.RuntimeEvents.ObserveRuntimeEvent(context.Background(), enabledObservation); err != nil {
-		t.Fatalf("ObserveRuntimeEvent(enabled) error = %v", err)
-	}
-	if sendPhotoCalls != 1 {
-		t.Fatalf("enabled Screen sendPhoto calls = %d, want exact confirmed receipt delivery", sendPhotoCalls)
+	if sendPhotoCalls != 0 {
+		t.Fatalf("enabled Screen leaked %d independent event photos", sendPhotoCalls)
 	}
 }
 

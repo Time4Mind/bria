@@ -219,6 +219,32 @@ func TestUnknownHandlerEffectAdvancesOnlyAfterDurableRecoveryControl(t *testing.
 	}
 }
 
+func TestLaterUnknownCanReplaceDurablyAcceptedRecoveryControl(t *testing.T) {
+	store := newMemoryStoreWith(coordinator.Checkpoint{
+		Initialized: true, NextUpdateID: 20,
+		Recovery: &coordinator.RecoveryControl{OriginalOperationID: "status:18", PromptOperationID: "recovery:18", UpdateID: 18},
+		Outbound: &coordinator.Outbound{OperationID: "status:19", UpdateID: 19,
+			Status: coordinator.Status{ConversationID: 7, Text: "safe"},
+			Phase:  coordinator.OutboundConfirmed, Receipt: &coordinator.Receipt{MessageID: 99}},
+	})
+	update := coordinator.Update{ID: 20, Kind: coordinator.UpdateCallback, ActorID: 2,
+		ConversationID: 7, ConversationKind: "private", Text: "signed-callback",
+		CallbackQueryID: "query-20", SourceMessageID: 99}
+	source := &fakeSource{batches: [][]coordinator.Update{{update}}, pollErr: context.Canceled}
+	handler := &recoveryHandler{unknown: update.ID}
+	sender := &fakeDurableSender{}
+	err := newLoop(t, source, store, handler, sender, &fakeReadiness{}).Run(context.Background())
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Run() = %v, want continued polling after second recovery", err)
+	}
+	checkpoint := store.checkpoint()
+	if sender.enqueueCalls != 1 || checkpoint.NextUpdateID != 21 || checkpoint.Recovery == nil ||
+		checkpoint.Recovery.OriginalOperationID != "status:20" || checkpoint.Outbound.OperationID != "recovery:20" ||
+		checkpoint.Outbound.Phase != coordinator.OutboundEnqueued {
+		t.Fatalf("second recovery was not durably accepted: %#v; sends=%d", checkpoint, sender.enqueueCalls)
+	}
+}
+
 func TestConfirmedSendIsNotDuplicatedAfterRestartAndLaterSkipsCanAdvance(t *testing.T) {
 	store := newMemoryStoreWith(coordinator.Checkpoint{
 		Initialized:  true,

@@ -14,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	"bria/internal/domain"
+	"bria/internal/nativeattachment"
 	"bria/internal/sessionruntime"
 	"bria/internal/turnprocessing"
 )
@@ -74,8 +75,19 @@ func (submitter *CurrentSubmitter) SubmitCurrentWithCallbacks(ctx context.Contex
 	if submitter == nil || submitter.runtime == nil || submitter.Submitter == nil || ctx == nil || sessionID == "" || strings.TrimSpace(callbacks.MessageID) == "" {
 		return ErrInvalidConfiguration
 	}
-	if _, err := submitter.providerForSession(ctx, sessionID); err != nil {
+	provider, err := submitter.providerForSession(ctx, sessionID)
+	if err != nil {
 		return err
+	}
+	if provider == domain.ProviderClaude {
+		if len(input.Attachments) > 8 {
+			return ErrInvalidConfiguration
+		}
+		for _, attachment := range input.Attachments {
+			if _, _, err := nativeattachment.ReadPhoto(ctx, attachment.Path, attachment.Size, attachment.SHA256); err != nil {
+				return ErrProviderAttachmentsUnsupported
+			}
+		}
 	}
 	return submitter.runtime.SubmitCurrentWithCallbacks(ctx, sessionID, input, callbacks)
 }
@@ -111,9 +123,6 @@ func (submitter *Submitter) SubmitPreparedWithCallbacks(ctx context.Context, ses
 	if len(input.Attachments) == 0 {
 		return submitter.runtime.SubmitWithCallbacks(ctx, sessionID, input.Text, callbacks)
 	}
-	if provider != domain.ProviderCodex {
-		return sessionruntime.TurnResult{}, ErrProviderAttachmentsUnsupported
-	}
 	if len(input.Attachments) > 8 {
 		return sessionruntime.TurnResult{}, ErrInvalidConfiguration
 	}
@@ -130,6 +139,11 @@ func (submitter *Submitter) SubmitPreparedWithCallbacks(ctx context.Context, ses
 		path, err := submitter.resolver.ResolveAttachment(ctx, attachment.Reference)
 		if err != nil || verifyAttachment(ctx, path, attachment) != nil {
 			return sessionruntime.TurnResult{}, ErrAttachmentUnverifiable
+		}
+		if provider == domain.ProviderClaude {
+			if _, _, err := nativeattachment.ReadPhoto(ctx, path, attachment.Size, attachment.SHA256); err != nil {
+				return sessionruntime.TurnResult{}, ErrProviderAttachmentsUnsupported
+			}
 		}
 		attachments = append(attachments, sessionruntime.LocalAttachment{
 			Path: path, Size: attachment.Size, SHA256: attachment.SHA256,

@@ -1,10 +1,13 @@
 package providerinputcomposition_test
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"image"
+	"image/png"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -92,7 +95,7 @@ func TestCodexSubmitterRejectsChangedContentBeforeRuntime(t *testing.T) {
 	}
 }
 
-func TestClaudeSubmitterFailsClosedBeforeResolvingUnsupportedImage(t *testing.T) {
+func TestClaudeSubmitterFailsClosedForMissingCustody(t *testing.T) {
 	resolver := &attachmentResolver{paths: map[string]string{"photo-1": "/private/tmp/never-read"}}
 	runtime := &structuredRuntime{}
 	providers := &sessionProviders{providers: map[domain.SessionID]domain.Provider{"session-1": domain.ProviderClaude}}
@@ -103,7 +106,7 @@ func TestClaudeSubmitterFailsClosedBeforeResolvingUnsupportedImage(t *testing.T)
 	_, err = submitter.SubmitPreparedWithCallbacks(context.Background(), "session-1", turnprocessing.PreparedInput{
 		Text: "inspect", Attachments: []turnprocessing.AttachmentRef{{Reference: "photo-1", Size: 3, SHA256: strings.Repeat("a", 64)}},
 	}, sessionruntime.TurnCallbacks{MessageID: "telegram:photo:claude"})
-	if !errors.Is(err, providerinputcomposition.ErrProviderAttachmentsUnsupported) || len(resolver.resolved) != 0 || runtime.calls != 0 {
+	if !errors.Is(err, providerinputcomposition.ErrAttachmentUnverifiable) || len(resolver.resolved) != 1 || runtime.calls != 0 {
 		t.Fatalf("submit error=%v resolved=%#v runtime calls=%d", err, resolver.resolved, runtime.calls)
 	}
 	if !reflect.DeepEqual(providers.requested, []domain.SessionID{"session-1"}) {
@@ -112,7 +115,11 @@ func TestClaudeSubmitterFailsClosedBeforeResolvingUnsupportedImage(t *testing.T)
 }
 
 func TestSubmitterRoutesMixedPhotoAndTextTurnsByLogicalSession(t *testing.T) {
-	content := []byte("codex image")
+	var encoded bytes.Buffer
+	if err := png.Encode(&encoded, image.NewRGBA(image.Rect(0, 0, 2, 2))); err != nil {
+		t.Fatal(err)
+	}
+	content := encoded.Bytes()
 	path := filepath.Join(t.TempDir(), "photo.png")
 	if err := os.WriteFile(path, content, 0o600); err != nil {
 		t.Fatal(err)
@@ -144,10 +151,10 @@ func TestSubmitterRoutesMixedPhotoAndTextTurnsByLogicalSession(t *testing.T) {
 	beforeRuntime := runtime.calls
 	beforeCustody := len(resolver.resolved)
 	_, err = submitter.SubmitPreparedWithCallbacks(context.Background(), "claude-photo", photo, sessionruntime.TurnCallbacks{MessageID: "m-3"})
-	if !errors.Is(err, providerinputcomposition.ErrProviderAttachmentsUnsupported) {
+	if err != nil {
 		t.Fatalf("Claude photo error = %v", err)
 	}
-	if runtime.calls != beforeRuntime || len(resolver.resolved) != beforeCustody {
+	if runtime.calls != beforeRuntime+1 || len(resolver.resolved) != beforeCustody+1 {
 		t.Fatalf("Claude photo reached runtime/custody: runtime=%d resolved=%#v", runtime.calls, resolver.resolved)
 	}
 	wantLookups := []domain.SessionID{"codex-photo", "codex-text", "claude-text", "claude-photo"}

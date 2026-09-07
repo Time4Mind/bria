@@ -154,10 +154,14 @@ func TestProductSurfacesExposeNoClearAction(t *testing.T) {
 		ID: 9, Kind: coordinator.UpdateMessage, ActorID: owner, ConversationID: owner,
 		ConversationKind: "private", Text: "/clear",
 	})
-	if err != nil || command.Kind != coordinator.DecisionSkip {
-		t.Fatalf("literal /clear prompt = (%#v, %v), want ordinary accepted input", command, err)
+	if err != nil || command.Kind != coordinator.DecisionStatus || !strings.Contains(command.Status.Text, "Терминал CLI недоступен") {
+		t.Fatalf("literal /clear command = (%#v, %v), want explicit native-unavailable without model prompt", command, err)
 	}
-	assertSubmittedTurn(t, submitter.calls, submittedTurn{sessionID: session.ID(), text: "/clear"})
+	select {
+	case call := <-submitter.calls:
+		t.Fatalf("native /clear incorrectly reached prompt submitter: %#v", call)
+	case <-time.After(50 * time.Millisecond):
+	}
 }
 
 func assertNoClearDecision(t *testing.T, surface string, decision coordinator.Decision) {

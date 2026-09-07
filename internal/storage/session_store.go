@@ -36,12 +36,13 @@ var (
 // file. Operations on one store value are serialized, and a successful write
 // has been flushed and atomically renamed before it returns.
 type SessionStore struct {
-	mu         *sync.Mutex
-	path       string
-	byIntent   map[domain.IntentID]domain.Session
-	byID       map[domain.SessionID]domain.IntentID
-	checkpoint *coordinatorRecord
-	telegramUI *telegramstate.State
+	mu           *sync.Mutex
+	path         string
+	byIntent     map[domain.IntentID]domain.Session
+	byID         map[domain.SessionID]domain.IntentID
+	checkpoint   *coordinatorRecord
+	telegramUI   *telegramstate.State
+	deletedEmpty map[domain.SessionID]domain.Session
 }
 
 // OpenSessionStore opens and validates path. A missing file represents an empty
@@ -136,7 +137,13 @@ func (store *SessionStore) PutStartingIfAbsent(
 
 	next := cloneSessions(store.byIntent)
 	next[session.IntentID()] = session
-	if err := writeSessionFile(store.path, next, store.checkpoint, store.telegramUI); err != nil {
+	ui := telegramstate.New()
+	if store.telegramUI != nil {
+		ui = store.telegramUI.Clone()
+	}
+	// Only insertion of a new local session establishes known-empty evidence.
+	ui.Cards[session.ID()] = telegramstate.Card{SessionID: session.ID(), EmptyCloseEligible: true, Page: telegramstate.Page{Current: 1, Total: 1, FollowLatest: true}}
+	if err := writeSessionFile(store.path, next, store.checkpoint, &ui); err != nil {
 		if reloadErr := store.reload(); reloadErr != nil {
 			return domain.Session{}, false, errors.Join(
 				fmt.Errorf("persist starting session: %w", err),
@@ -146,6 +153,7 @@ func (store *SessionStore) PutStartingIfAbsent(
 		return domain.Session{}, false, fmt.Errorf("persist starting session: %w", err)
 	}
 	store.byIntent = next
+	store.telegramUI = &ui
 	store.byID[session.ID()] = session.IntentID()
 	return session, true, nil
 }
@@ -302,11 +310,28 @@ func (store *SessionStore) Replace(ctx context.Context, expected domain.Session,
 	}
 	sessions := cloneSessions(store.byIntent)
 	sessions[next.IntentID()] = next
-	if err := writeSessionFile(store.path, sessions, store.checkpoint, store.telegramUI); err != nil {
+	ui := store.telegramUI
+	// Work submitted outside Telegram is also positive content evidence.
+	// Never rely solely on a bounded presentation transcript for emptiness.
+	if ui != nil && (hasWorkStatus(current.Status()) || hasWorkStatus(next.Status())) {
+		copy := ui.Clone()
+		card := copy.Cards[next.ID()]
+		card.EmptyCloseEligible = false
+		if card.SessionID != "" {
+			copy.Cards[next.ID()] = card
+		}
+		ui = &copy
+	}
+	if err := writeSessionFile(store.path, sessions, store.checkpoint, ui); err != nil {
 		return fmt.Errorf("persist session replacement: %w", err)
 	}
 	store.byIntent = sessions
+	store.telegramUI = ui
 	return nil
+}
+
+func hasWorkStatus(status domain.SessionStatus) bool {
+	return status == domain.SessionRunning || status == domain.SessionStopping || status == domain.SessionClosingAfterWork
 }
 
 // Load rereads the durable file and returns the session with id.
@@ -648,6 +673,16 @@ func (store *SessionStore) SetCardPage(ctx context.Context, sessionID domain.Ses
 }
 
 func (store *SessionStore) AppendCardHistory(ctx context.Context, sessionID domain.SessionID, item string) error {
+	return store.appendCardHistory(ctx, sessionID, item, "")
+}
+
+// AppendCardTechnicalHistory retains one exact provider tool event. Technical
+// identity is explicit metadata and is never inferred from visible text.
+func (store *SessionStore) AppendCardTechnicalHistory(ctx context.Context, sessionID domain.SessionID, item string) error {
+	return store.appendCardHistory(ctx, sessionID, item, "tool")
+}
+
+func (store *SessionStore) appendCardHistory(ctx context.Context, sessionID domain.SessionID, item, kind string) error {
 	if sessionID == "" || item == "" {
 		return errors.New("session and history item are required")
 	}
@@ -656,15 +691,25 @@ func (store *SessionStore) AppendCardHistory(ctx context.Context, sessionID doma
 		if !ok {
 			card = telegramstate.Card{SessionID: sessionID, Page: telegramstate.Page{Current: 1, Total: 1, FollowLatest: true}}
 		}
+		card.EmptyCloseEligible = false
 		if len(card.History) >= 512 {
 			card.History = append([]string(nil), card.History[len(card.History)-511:]...)
 			if len(card.HistoryKeys) != 0 {
 				card.HistoryKeys = append([]string(nil), card.HistoryKeys[len(card.HistoryKeys)-511:]...)
 			}
+			if len(card.HistoryKinds) != 0 {
+				card.HistoryKinds = append([]string(nil), card.HistoryKinds[len(card.HistoryKinds)-511:]...)
+			}
+		}
+		if kind != "" && len(card.HistoryKinds) == 0 {
+			card.HistoryKinds = make([]string, len(card.History))
 		}
 		card.History = append(card.History, item)
 		if len(card.HistoryKeys) != 0 {
 			card.HistoryKeys = append(card.HistoryKeys, "")
+		}
+		if len(card.HistoryKinds) != 0 {
+			card.HistoryKinds = append(card.HistoryKinds, kind)
 		}
 		return state.SetCard(card)
 	})
@@ -678,10 +723,19 @@ func (store *SessionStore) SetCardPrompt(ctx context.Context, sessionID domain.S
 		return errors.New("session, prompt message, and history item are required")
 	}
 	return store.UpdateTelegramUI(ctx, func(state *telegramstate.State) error {
+		intent, exists := store.byID[sessionID]
+		if !exists {
+			return ErrSessionNotFound
+		}
+		session := store.byIntent[intent]
+		if session.Status() == domain.SessionClosing || session.Status() == domain.SessionArchived {
+			return fmt.Errorf("cannot accept request into %s session", session.Status())
+		}
 		card, ok := state.Cards[sessionID]
 		if !ok {
 			card = telegramstate.Card{SessionID: sessionID, Page: telegramstate.Page{Current: 1, Total: 1, FollowLatest: true}}
 		}
+		card.EmptyCloseEligible = false
 		if len(card.HistoryKeys) == 0 {
 			card.HistoryKeys = make([]string, len(card.History))
 		}
@@ -694,9 +748,15 @@ func (store *SessionStore) SetCardPrompt(ctx context.Context, sessionID domain.S
 		if len(card.History) >= 512 {
 			card.History = append([]string(nil), card.History[len(card.History)-511:]...)
 			card.HistoryKeys = append([]string(nil), card.HistoryKeys[len(card.HistoryKeys)-511:]...)
+			if len(card.HistoryKinds) != 0 {
+				card.HistoryKinds = append([]string(nil), card.HistoryKinds[len(card.HistoryKinds)-511:]...)
+			}
 		}
 		card.History = append(card.History, item)
 		card.HistoryKeys = append(card.HistoryKeys, messageID)
+		if len(card.HistoryKinds) != 0 {
+			card.HistoryKinds = append(card.HistoryKinds, "")
+		}
 		return state.SetCard(card)
 	})
 }
@@ -711,6 +771,30 @@ func (store *SessionStore) LoadCardHistory(ctx context.Context, sessionID domain
 		return nil, nil
 	}
 	return append([]string(nil), card.History...), nil
+}
+
+// LoadCardDisplayHistory returns an isolated presentation copy. Legacy cards
+// without kind metadata contain only ordinary entries. Hiding technical
+// actions removes only entries explicitly marked as tool events.
+func (store *SessionStore) LoadCardDisplayHistory(ctx context.Context, sessionID domain.SessionID, showTechnical bool) ([]string, error) {
+	state, err := store.LoadTelegramUI(ctx)
+	if err != nil {
+		return nil, err
+	}
+	card, ok := state.Card(sessionID)
+	if !ok {
+		return nil, nil
+	}
+	if showTechnical || len(card.HistoryKinds) == 0 {
+		return append([]string(nil), card.History...), nil
+	}
+	history := make([]string, 0, len(card.History))
+	for index, item := range card.History {
+		if card.HistoryKinds[index] != "tool" {
+			history = append(history, item)
+		}
+	}
+	return history, nil
 }
 
 type sessionFile struct {
@@ -762,6 +846,7 @@ type durableOutboundReceiptRecord struct {
 }
 
 type statusRecord struct {
+	ScreenSessionID string `json:"screen_session_id,omitempty"`
 	ConversationID  int64  `json:"conversation_id"`
 	Text            string `json:"text"`
 	RichMarkdown    bool   `json:"rich_markdown,omitempty"`
@@ -781,6 +866,8 @@ type sessionRecord struct {
 	Workdir        string                   `json:"workdir"`
 	Name           string                   `json:"name,omitempty"`
 	NameSource     domain.SessionNameSource `json:"name_source,omitempty"`
+	Model          string                   `json:"model,omitempty"`
+	Effort         string                   `json:"effort,omitempty"`
 	Status         domain.SessionStatus     `json:"status"`
 	Binding        *bindingRecord           `json:"binding,omitempty"`
 	CreatedAt      time.Time                `json:"created_at,omitempty"`
@@ -807,6 +894,8 @@ func recordFromSession(session domain.Session) sessionRecord {
 		Workdir:        snapshot.Workdir,
 		Name:           snapshot.Name,
 		NameSource:     snapshot.NameSource,
+		Model:          snapshot.Model,
+		Effort:         snapshot.Effort,
 		Status:         snapshot.Status,
 		CreatedAt:      snapshot.CreatedAt,
 		LastResumedAt:  cloneTime(snapshot.LastResumedAt),
@@ -834,6 +923,8 @@ func (record sessionRecord) restore() (domain.Session, error) {
 		Workdir:        record.Workdir,
 		Name:           record.Name,
 		NameSource:     record.NameSource,
+		Model:          record.Model,
+		Effort:         record.Effort,
 		Status:         record.Status,
 		CreatedAt:      record.CreatedAt,
 		LastResumedAt:  cloneTime(record.LastResumedAt),

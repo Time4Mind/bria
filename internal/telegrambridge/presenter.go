@@ -163,6 +163,7 @@ func (presenter *Presenter) presentKeyboard(
 				return telegram.InlineKeyboardMarkup{}, errors.New("callback recovery keyboard must contain only recovery actions")
 			}
 			if button.Action != telegramui.ActionSelectSession &&
+				!telegramui.IsSessionSurfaceAction(button.Action) &&
 				!(button.Action == telegramui.ActionResume && button.Target.SessionSlot > 0) {
 				continue
 			}
@@ -211,6 +212,7 @@ func (presenter *Presenter) presentKeyboard(
 			if telegramui.IsGlobalAction(button.Action) {
 				tokenSessionID = telegramui.GlobalSurfaceID
 			} else if button.Action == telegramui.ActionSelectSession ||
+				telegramui.IsSessionSurfaceAction(button.Action) ||
 				(button.Action == telegramui.ActionResume && button.Target.SessionSlot > 0) {
 				tokenSessionID = selectableSessionIDs[button.Target.SessionSlot-1]
 			}
@@ -520,15 +522,46 @@ func presentButton(button telegramui.Button) (string, callbacktoken.Action, int,
 			button.Target.SessionSlot > callbacktoken.MaxTarget || button.Target.InteractionChoice != 0 || button.Target.Choice != 0 {
 			return "", 0, 0, errors.New("resume button target is invalid")
 		}
-		return "Продолжить", callbacktoken.ActionResume, 0, nil
+		label := button.Label
+		if label == "" {
+			label = "Продолжить"
+		}
+		return label, callbacktoken.ActionResume, 0, nil
+	case telegramui.ActionNativeKey:
+		if button.Target.Page != 0 || button.Target.FollowLatest || button.Target.SessionSlot < 1 ||
+			button.Target.InteractionChoice != 0 || button.Target.Choice < 1 || button.Target.Choice > 8 || button.Indicator != nil {
+			return "", 0, 0, errors.New("native key button target is invalid")
+		}
+		return button.Label, callbacktoken.ActionNativeKey, button.Target.Choice, nil
+	case telegramui.ActionModelMenu, telegramui.ActionModelChoice, telegramui.ActionEffortMenu, telegramui.ActionEffortChoice:
+		if button.Target.Page != 0 || button.Target.FollowLatest || button.Target.SessionSlot < 1 ||
+			button.Target.InteractionChoice != 0 || button.Target.Choice < 0 || button.Target.Choice > callbacktoken.MaxTarget || button.Indicator != nil ||
+			((button.Action == telegramui.ActionModelChoice || button.Action == telegramui.ActionEffortChoice) && button.Target.Choice == 0) {
+			return "", 0, 0, errors.New("model selector button target is invalid")
+		}
+		actions := map[telegramui.Action]callbacktoken.Action{
+			telegramui.ActionModelMenu: callbacktoken.ActionModelMenu, telegramui.ActionModelChoice: callbacktoken.ActionModelChoice,
+			telegramui.ActionEffortMenu: callbacktoken.ActionEffortMenu, telegramui.ActionEffortChoice: callbacktoken.ActionEffortChoice,
+		}
+		return button.Label, actions[button.Action], button.Target.Choice, nil
 	case telegramui.ActionMenuSessions:
 		return presentGlobalButton(button, "Сессии", callbacktoken.ActionMenuSessions)
 	case telegramui.ActionMenuNew:
 		return presentGlobalButton(button, "➕ Новая", callbacktoken.ActionMenuNew)
 	case telegramui.ActionMenuArchive:
-		return presentGlobalButton(button, "Архив", callbacktoken.ActionMenuArchive)
+		if button.Target.Page != 0 || button.Target.FollowLatest || button.Target.SessionSlot != 0 ||
+			button.Target.InteractionChoice != 0 || button.Target.Choice < 0 || button.Target.Choice > callbacktoken.MaxTarget || button.Indicator != nil {
+			return "", 0, 0, errors.New("archive button target is invalid")
+		}
+		label := button.Label
+		if label == "" {
+			label = "Архив"
+		}
+		return label, callbacktoken.ActionMenuArchive, button.Target.Choice, nil
 	case telegramui.ActionMenuStatus:
 		return presentGlobalButton(button, "Статус", callbacktoken.ActionMenuStatus)
+	case telegramui.ActionRefreshStatus:
+		return presentGlobalButton(button, "Обновить", callbacktoken.ActionRefreshStatus)
 	case telegramui.ActionMenuSettings:
 		label := button.Label
 		if label == "" {
@@ -598,6 +631,8 @@ func presentButton(button telegramui.Button) (string, callbacktoken.Action, int,
 		return button.Label, callbacktoken.ActionSettingsCategory, button.Target.Choice, nil
 	case telegramui.ActionSettingsScreen:
 		return presentGlobalButton(button, "Screen", callbacktoken.ActionSettingsScreen)
+	case telegramui.ActionSettingsScreenCaptureLimit:
+		return presentGlobalButton(button, "Размер захвата", callbacktoken.ActionSettingsScreenCaptureLimit)
 	case telegramui.ActionSettingsDetail:
 		return presentGlobalButton(button, "Детализация", callbacktoken.ActionSettingsDetail)
 	case telegramui.ActionSettingsPageLimit:
@@ -640,6 +675,8 @@ func presentButton(button telegramui.Button) (string, callbacktoken.Action, int,
 		return presentGlobalButton(button, "Вернуть встроенную", callbacktoken.ActionSettingsPreprocessingReset)
 	case telegramui.ActionSettingsSessionNaming:
 		return presentGlobalButton(button, "Автоимя", callbacktoken.ActionSettingsSessionNaming)
+	case telegramui.ActionSettingsStandby:
+		return presentGlobalButton(button, "Ожидающая сессия", callbacktoken.ActionSettingsStandby)
 	case telegramui.ActionAuthorizeCodex:
 		return presentGlobalButton(button, "Авторизовать Codex", callbacktoken.ActionAuthorizeCodex)
 	case telegramui.ActionAuthorizeClaude:
@@ -716,6 +753,16 @@ func validPageTarget(target telegramui.ButtonTarget) bool {
 }
 func decodeFields(fields callbacktoken.Fields) (telegramui.Action, telegramui.ButtonTarget, error) {
 	switch fields.Action {
+	case callbacktoken.ActionModelMenu:
+		return telegramui.ActionModelMenu, telegramui.ButtonTarget{Choice: fields.Target}, nil
+	case callbacktoken.ActionNativeKey:
+		return telegramui.ActionNativeKey, telegramui.ButtonTarget{Choice: fields.Target}, nil
+	case callbacktoken.ActionModelChoice:
+		return telegramui.ActionModelChoice, telegramui.ButtonTarget{Choice: fields.Target}, nil
+	case callbacktoken.ActionEffortMenu:
+		return telegramui.ActionEffortMenu, telegramui.ButtonTarget{Choice: fields.Target}, nil
+	case callbacktoken.ActionEffortChoice:
+		return telegramui.ActionEffortChoice, telegramui.ButtonTarget{Choice: fields.Target}, nil
 	case callbacktoken.ActionPreviousPage:
 		return telegramui.ActionPagePrevious, telegramui.ButtonTarget{Page: fields.Target}, nil
 	case callbacktoken.ActionNextPage:
@@ -739,9 +786,11 @@ func decodeFields(fields callbacktoken.Fields) (telegramui.Action, telegramui.Bu
 	case callbacktoken.ActionMenuNew:
 		return telegramui.ActionMenuNew, telegramui.ButtonTarget{}, nil
 	case callbacktoken.ActionMenuArchive:
-		return telegramui.ActionMenuArchive, telegramui.ButtonTarget{}, nil
+		return telegramui.ActionMenuArchive, telegramui.ButtonTarget{Choice: fields.Target}, nil
 	case callbacktoken.ActionMenuStatus:
 		return telegramui.ActionMenuStatus, telegramui.ButtonTarget{}, nil
+	case callbacktoken.ActionRefreshStatus:
+		return telegramui.ActionRefreshStatus, telegramui.ButtonTarget{}, nil
 	case callbacktoken.ActionMenuSettings:
 		return telegramui.ActionMenuSettings, telegramui.ButtonTarget{}, nil
 	case callbacktoken.ActionMenuBack:
@@ -784,6 +833,8 @@ func decodeFields(fields callbacktoken.Fields) (telegramui.Action, telegramui.Bu
 		return telegramui.ActionSettingsCategory, telegramui.ButtonTarget{Choice: fields.Target}, nil
 	case callbacktoken.ActionSettingsScreen:
 		return telegramui.ActionSettingsScreen, telegramui.ButtonTarget{}, nil
+	case callbacktoken.ActionSettingsScreenCaptureLimit:
+		return telegramui.ActionSettingsScreenCaptureLimit, telegramui.ButtonTarget{}, nil
 	case callbacktoken.ActionSettingsDetail:
 		return telegramui.ActionSettingsDetail, telegramui.ButtonTarget{}, nil
 	case callbacktoken.ActionSettingsPageLimit:
@@ -826,6 +877,8 @@ func decodeFields(fields callbacktoken.Fields) (telegramui.Action, telegramui.Bu
 		return telegramui.ActionSettingsPreprocessingReset, telegramui.ButtonTarget{}, nil
 	case callbacktoken.ActionSettingsSessionNaming:
 		return telegramui.ActionSettingsSessionNaming, telegramui.ButtonTarget{}, nil
+	case callbacktoken.ActionSettingsStandby:
+		return telegramui.ActionSettingsStandby, telegramui.ButtonTarget{}, nil
 	case callbacktoken.ActionAuthorizeCodex:
 		return telegramui.ActionAuthorizeCodex, telegramui.ButtonTarget{}, nil
 	case callbacktoken.ActionAuthorizeClaude:

@@ -12,6 +12,13 @@ expected_version=$2
 case "$bin_dir" in /*) ;; *) usage ;; esac
 test "$expected_version" != dev && test -n "$expected_version" || usage
 
+if test "$(uname -s)" = Linux; then
+	command -v tmux >/dev/null 2>&1 && tmux -V >/dev/null 2>&1 || {
+		printf '%s\n' 'validate-install: tmux is required for native CLI sessions; install tmux with your system package manager, then retry' >&2
+		exit 1
+	}
+fi
+
 for binary in bria bria-codex-adapter bria-claude-adapter; do
 	test -f "$bin_dir/$binary" || { printf '%s\n' "validate-install: missing $binary" >&2; exit 1; }
 	test -x "$bin_dir/$binary" || { printf '%s\n' "validate-install: $binary is not executable" >&2; exit 1; }

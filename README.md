@@ -49,5 +49,9 @@ bin/bria run --config /absolute/path/to/config.json
 - [Проверки и критерии готовности](docs/TESTING_AND_ACCEPTANCE.md)
 - [План реализации](docs/IMPLEMENTATION_PLAN.md)
 - [Handoff: статус и следующий план](docs/STATUS_AND_NEXT.md)
+- [Tier 1: препроцессинг](docs/TIER1_PREPROCESSING_FLOW.md)
+- [Tier 1: сессии](docs/TIER1_SESSION_FLOWS.md)
+- [Пилот native CLI](docs/NATIVE_CLI_PILOT.md)
+- [Аудит незавершённых flow](docs/INCOMPLETE_FLOWS_AUDIT.md)
 
 Правила обязательной параллельной разработки несколькими агентами находятся в [AGENTS.md](AGENTS.md). Автоматическая проверка этих правил описана в [scripts/check_repo.go](scripts/check_repo.go) и запускается через [.github/workflows/context.yml](.github/workflows/context.yml).

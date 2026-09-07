@@ -22,8 +22,15 @@ func TestRenderGroupsSettingsLikeLegacyNavigation(t *testing.T) {
 		{{Label: "🤖 CLI", Action: "settings_category", Choice: int(CategoryProviders)}},
 		{{Label: "Меню", Action: "menu_back"}},
 	}
-	if surface := Render(); surface.Text != "Настройки\n\nВыберите раздел." || !reflect.DeepEqual(surface.Rows, want) {
+	if surface := Render(); !surface.RichMarkdown || !stringsContains(surface.Text, "| Раздел | Содержимое |") || !reflect.DeepEqual(surface.Rows, want) {
 		t.Fatalf("Render() = %#v, want rows %#v", surface, want)
+	}
+}
+
+func TestMissingPreferencesDisableBackgroundQuestions(t *testing.T) {
+	surface, err := RenderCategory(context.Background(), nil, nil, 16, CategoryNotifications)
+	if err != nil || !stringsContains(surface.Text, "| Фоновые вопросы | выключены |") {
+		t.Fatalf("surface=%#v err=%v", surface, err)
 	}
 }
 
@@ -33,13 +40,13 @@ func TestRenderCategoryKeepsEveryCurrentSettingInOneIntuitiveGroup(t *testing.T)
 		contains []string
 		actions  []string
 	}{
-		{CategoryCard, []string{"Содержимое карточки", "Детализация карточки: standard", "Лимит страниц: 64", "Технические действия: включены"}, []string{"settings_detail", "settings_page_limit", "settings_technical_actions", "menu_settings"}},
-		{CategorySessionButtons, []string{"Кнопки сессии", "Screen: выключен"}, []string{"settings_screen", "menu_settings"}},
-		{CategoryVoice, []string{"Распознавание речи", "Движок: parakeet"}, []string{"menu_settings"}},
-		{CategoryPreprocessing, []string{"Препроцессинг", "Состояние: выключено", "Инструкция: встроенная"}, []string{"settings_preprocessing", "settings_preprocessing_instruction", "settings_preprocessing_reset", "menu_settings"}},
-		{CategoryArchive, []string{"Сессии и архив", "Продолжать существующую: включено", "Рекомендации архива: выключены", "Срок жизни сессий: never", "Очередь: 16"}, []string{"settings_continue_existing", "settings_archive_recommendations", "settings_lifetime_never", "settings_lifetime_6h", "settings_lifetime_12h", "settings_lifetime_24h", "settings_lifetime_48h", "menu_settings"}},
-		{CategoryNotifications, []string{"Уведомления", "Фоновые вопросы: включены", "Фоновые ошибки: включены"}, []string{"settings_background_questions", "settings_background_errors", "menu_settings"}},
-		{CategoryCreation, []string{"Создание сессии", "Автоимя дешёвой моделью: выключено"}, []string{"settings_session_naming", "settings_default_provider", "settings_default_workdir", "settings_clear_creation_defaults", "menu_settings"}},
+		{CategoryCard, []string{"Содержимое карточки", "| Детализация карточки | standard |", "| Лимит страниц | 64 |", "| Технические действия | включены |"}, []string{"settings_detail", "settings_page_limit", "settings_technical_actions", "menu_settings"}},
+		{CategorySessionButtons, []string{"Кнопки сессии", "| Screen | выключено |", "| Размер захвата | 48 KiB |"}, []string{"settings_screen", "settings_screen_capture_limit", "menu_settings"}},
+		{CategoryVoice, []string{"Распознавание речи", "| Движок | parakeet |"}, []string{"menu_settings"}},
+		{CategoryPreprocessing, []string{"Препроцессинг", "| Состояние | выключено |", "| Инструкция | встроенная |"}, []string{"settings_preprocessing", "settings_preprocessing_instruction", "settings_preprocessing_reset", "menu_settings"}},
+		{CategoryArchive, []string{"Сессии и архив", "| Рекомендации архива | выключены |", "| Срок жизни сессий | never |", "| Очередь | 16 |"}, []string{"settings_archive_recommendations", "settings_lifetime_never", "settings_lifetime_6h", "settings_lifetime_12h", "settings_lifetime_24h", "settings_lifetime_48h", "menu_settings"}},
+		{CategoryNotifications, []string{"Уведомления", "| Фоновые вопросы | включены |", "| Фоновые ошибки | включены |"}, []string{"settings_background_questions", "settings_background_errors", "menu_settings"}},
+		{CategoryCreation, []string{"Создание сессии", "| Автоимя дешёвой моделью | выключено |", "| Ожидающая сессия | выключено |"}, []string{"settings_session_naming", "settings_default_provider", "settings_default_workdir", "settings_clear_creation_defaults", "settings_standby", "menu_settings"}},
 		{CategoryProviders, []string{"CLI"}, []string{"authorize_codex", "authorize_claude", "menu_settings"}},
 	}
 	for _, test := range tests {
@@ -92,6 +99,7 @@ func (settingsPreferencesStub) ToggleArchiveRecommendations(context.Context) err
 	return nil
 }
 func (settingsPreferencesStub) ToggleSessionNaming(context.Context) error { return nil }
+func (settingsPreferencesStub) ToggleStandby(context.Context) error       { return nil }
 func (settingsPreferencesStub) SetDefaultProvider(context.Context, domain.ComputerID, domain.Provider) error {
 	return nil
 }

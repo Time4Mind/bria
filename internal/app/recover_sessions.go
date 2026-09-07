@@ -17,6 +17,10 @@ type SessionRecoveryStore interface {
 	Replace(context.Context, domain.Session, domain.Session) error
 }
 
+type emptyRecoverySessionStore interface {
+	DeleteEmptyAwaitingRecovery(context.Context, domain.Session) (bool, error)
+}
+
 type SessionRecoveryResult struct {
 	Recovered        int
 	Awaiting         int
@@ -67,6 +71,21 @@ func RecoverPersistedSessionsForComputer(
 		request := recoveryRequest(session)
 		binding, startErr := starter.Start(ctx, request)
 		if startErr != nil {
+			// A failed initial/recovery start is known to have no live provider.
+			// If the session has no recorded user work, remove it instead of
+			// leaving an unusable phantom in the session picker.
+			if session.Status() == domain.SessionAwaitingRecovery {
+				if emptyStore, ok := store.(emptyRecoverySessionStore); ok {
+					deleted, deleteErr := emptyStore.DeleteEmptyAwaitingRecovery(ctx, session)
+					if deleteErr != nil {
+						return result, fmt.Errorf("delete empty failed recovery %q: %w", session.ID(), deleteErr)
+					}
+					if deleted {
+						result.FinalizedClosing++
+						continue
+					}
+				}
+			}
 			next, buildErr := awaitingRecovery(session, lifecycleNow(session))
 			if buildErr != nil {
 				return result, buildErr
@@ -92,6 +111,16 @@ func RecoverPersistedSessionsForComputer(
 					fmt.Errorf("abort mismatched recovery for %q: %w", session.ID(), abortErr),
 				)
 			}
+			if emptyStore, ok := store.(emptyRecoverySessionStore); ok {
+				deleted, deleteErr := emptyStore.DeleteEmptyAwaitingRecovery(ctx, awaiting)
+				if deleteErr != nil {
+					return result, fmt.Errorf("delete empty mismatched recovery %q: %w", session.ID(), deleteErr)
+				}
+				if deleted {
+					result.FinalizedClosing++
+					continue
+				}
+			}
 			if !awaiting.Equal(session) {
 				if replaceErr := store.Replace(ctx, session, awaiting); replaceErr != nil {
 					return result, fmt.Errorf("persist mismatched recovery for %q: %w", session.ID(), replaceErr)
@@ -110,6 +139,20 @@ func RecoverPersistedSessionsForComputer(
 		if next.Status() == domain.SessionClosing {
 			if abortErr := starter.Abort(ctx, request, binding); abortErr != nil {
 				return result, fmt.Errorf("confirm recovered closing session %q exit: %w", session.ID(), abortErr)
+			}
+			if emptyStore, ok := store.(emptyClosingSessionStore); ok {
+				if replaceErr := store.Replace(ctx, session, next); replaceErr != nil {
+					return result, fmt.Errorf("persist recovered closing session %q before finalization: %w", session.ID(), replaceErr)
+				}
+				session = next
+				deleted, deleteErr := emptyStore.DeleteEmptyClosing(ctx, next)
+				if deleteErr != nil {
+					return result, fmt.Errorf("delete recovered empty session %q: %w", session.ID(), deleteErr)
+				}
+				if deleted {
+					result.FinalizedClosing++
+					continue
+				}
 			}
 			archived, archiveErr := next.Archive(lifecycleNow(next))
 			if archiveErr != nil {

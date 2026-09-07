@@ -607,23 +607,18 @@ func (adapter *Adapter) runLoop(
 				if active == nil || !active.accepted {
 					return adapter.failCurrentAndStop(controller, active, ErrorProtocol)
 				}
+				for _, block := range event.ToolResults {
+					if err := adapter.transcriptBlock(active.requestID, block); err != nil {
+						return adapter.failCurrentAndStop(controller, active, ErrorProvider)
+					}
+				}
 			case EventAssistant:
 				if active == nil || !active.accepted || event.Assistant == nil {
 					return adapter.failCurrentAndStop(controller, active, ErrorProtocol)
 				}
 				active.assistantSeen = true
-				if event.Assistant.Text != "" {
-					if err := adapter.commentary(active.requestID, event.Assistant.Text); err != nil {
-						return adapter.failCurrentAndStop(controller, active, ErrorProvider)
-					}
-					if controller.observeExit() {
-						_ = adapter.completed(active.requestID, StatusFailed, ErrorTransport)
-						rememberCompleted(active.requestID)
-						return ErrChildExit, true
-					}
-				}
-				for _, tool := range event.Assistant.Tools {
-					if err := adapter.commentary(active.requestID, "tool: "+tool); err != nil {
+				for _, block := range event.Assistant.Blocks {
+					if err := adapter.transcriptBlock(active.requestID, block); err != nil {
 						return adapter.failCurrentAndStop(controller, active, ErrorProvider)
 					}
 					if controller.observeExit() {
@@ -754,6 +749,33 @@ func (adapter *Adapter) commentary(requestID, message string) error {
 		Kind: "commentary", Text: message,
 	}
 	if len(message) > adapter.options.MaxTextBytes || !adapter.frameFits(frame) {
+		return ErrAdapterProtocol
+	}
+	return adapter.write(frame)
+}
+
+func (adapter *Adapter) tool(requestID, name string) error {
+	return adapter.writeEvent(requestID, "tool", name, nil)
+}
+
+func (adapter *Adapter) transcriptBlock(requestID string, block TranscriptBlock) error {
+	if block.Kind != "tool" {
+		return adapter.writeEvent(requestID, block.Kind, block.Text, nil)
+	}
+	name := block.Name
+	if name == "" {
+		name = "tool"
+	}
+	return adapter.writeEvent(requestID, "tool", name, &runtimeprotocol.EventMetadata{
+		ItemID: block.ItemID, Name: block.Name, Arguments: block.Arguments, Result: block.Result, Status: block.Status,
+	})
+}
+
+func (adapter *Adapter) writeEvent(requestID, kind, text string, metadata *runtimeprotocol.EventMetadata) error {
+	frame := eventOutput{
+		Protocol: AdapterProtocolVersion, Type: "event", RequestID: requestID, Kind: kind, Text: text, EventMetadata: metadata,
+	}
+	if len(text) > adapter.options.MaxTextBytes || !adapter.frameFits(frame) {
 		return ErrAdapterProtocol
 	}
 	return adapter.write(frame)
@@ -1085,11 +1107,12 @@ type finalOutput struct {
 }
 
 type eventOutput struct {
-	Protocol  int    `json:"protocol"`
-	Type      string `json:"type"`
-	RequestID string `json:"request_id"`
-	Kind      string `json:"kind"`
-	Text      string `json:"text"`
+	Protocol      int                            `json:"protocol"`
+	Type          string                         `json:"type"`
+	RequestID     string                         `json:"request_id"`
+	Kind          string                         `json:"kind"`
+	Text          string                         `json:"text"`
+	EventMetadata *runtimeprotocol.EventMetadata `json:"event_metadata,omitempty"`
 }
 
 type completedOutput struct {

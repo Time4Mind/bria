@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -178,8 +179,13 @@ func largestPhoto(sizes []telegram.PhotoSize) telegram.PhotoSize {
 }
 
 type Sender struct {
+	screen           any
 	client           *telegram.Client
 	acknowledgements CallbackAcknowledgementRecorder
+	ackMu            sync.Mutex
+	ackActive        int
+	ackClosed        bool
+	ackDone          chan struct{}
 }
 
 type CallbackAcknowledgementState string
@@ -200,12 +206,17 @@ func NewSender(client *telegram.Client) (*Sender, error) {
 	if client == nil {
 		return nil, errors.New("Telegram client is required")
 	}
-	return &Sender{client: client}, nil
+	return &Sender{client: client, ackDone: make(chan struct{})}, nil
 }
 
 func (sender *Sender) BindCallbackAcknowledgements(recorder CallbackAcknowledgementRecorder) error {
 	if sender == nil || recorder == nil {
 		return errors.New("Telegram callback acknowledgement recorder is required")
+	}
+	sender.ackMu.Lock()
+	defer sender.ackMu.Unlock()
+	if sender.ackClosed || sender.ackActive != 0 {
+		return errors.New("Telegram callback acknowledgement lifecycle is active or closed")
 	}
 	if sender.acknowledgements != nil {
 		return errors.New("Telegram callback acknowledgement recorder is already bound")
@@ -219,14 +230,19 @@ func (sender *Sender) SendStatus(
 	status coordinator.Status,
 ) (coordinator.Receipt, error) {
 	sender.acknowledgeCallback(ctx, operationID, status.CallbackQueryID)
-	if status.RichMarkdown {
+	if status.RichMarkdown || (sender.screen != nil && status.ScreenSessionID != "") {
+		rich, png, screenReceipt, err := sender.screenMessage(ctx, status)
+		if err != nil {
+			return coordinator.Receipt{}, err
+		}
 		message, err := sender.client.SendRichMessage(ctx, telegram.SendRichMessageRequest{
-			ChatID: telegram.ChatID(status.ConversationID), RichMessage: telegram.InputRichMessage{Markdown: telegram.NormalizeRichMarkdown(status.Text)},
+			ChatID: telegram.ChatID(status.ConversationID), RichMessage: rich, PhotoPNG: png,
 			Priority: callbackPriority(status.CallbackQueryID),
 		})
 		if err != nil {
 			return coordinator.Receipt{}, fmt.Errorf("send rich Telegram status: %w", err)
 		}
+		sender.rememberScreenReceipt(screenReceipt, message)
 		return coordinator.Receipt{MessageID: int64(message.MessageID)}, nil
 	}
 	text, entities := telegramformat.Markdown(status.Text)
@@ -256,14 +272,19 @@ func (sender *Sender) SendStatusWithKeyboard(
 	}
 	sender.acknowledgeCallback(ctx, operationID, status.CallbackQueryID)
 	markup := coordinatorMarkup(keyboard)
-	if status.RichMarkdown {
+	if status.RichMarkdown || (sender.screen != nil && status.ScreenSessionID != "") {
+		rich, png, screenReceipt, err := sender.screenMessage(ctx, status)
+		if err != nil {
+			return coordinator.Receipt{}, err
+		}
 		message, err := sender.client.SendRichMessage(ctx, telegram.SendRichMessageRequest{
-			ChatID: telegram.ChatID(status.ConversationID), RichMessage: telegram.InputRichMessage{Markdown: telegram.NormalizeRichMarkdown(status.Text)}, ReplyMarkup: markup,
+			ChatID: telegram.ChatID(status.ConversationID), RichMessage: rich, PhotoPNG: png, ReplyMarkup: markup,
 			Priority: callbackPriority(status.CallbackQueryID),
 		})
 		if err != nil {
 			return coordinator.Receipt{}, fmt.Errorf("send rich Telegram status with keyboard: %w", err)
 		}
+		sender.rememberScreenReceipt(screenReceipt, message)
 		return coordinator.Receipt{MessageID: int64(message.MessageID)}, nil
 	}
 	text, entities := telegramformat.Markdown(status.Text)
@@ -292,9 +313,15 @@ func (sender *Sender) EditStatusWithKeyboard(
 	sender.acknowledgeCallback(ctx, operationID, status.CallbackQueryID)
 	markup := coordinatorMarkup(keyboard)
 	request := telegram.EditMessageTextRequest{ChatID: telegram.ChatID(status.ConversationID), MessageID: telegram.MessageID(status.SourceMessageID), ReplyMarkup: markup, Priority: callbackPriority(status.CallbackQueryID)}
-	if status.RichMarkdown {
-		rich := telegram.InputRichMessage{Markdown: telegram.NormalizeRichMarkdown(status.Text)}
+	var screenshotReceipt screenReceipt
+	if status.RichMarkdown || (sender.screen != nil && status.ScreenSessionID != "") {
+		rich, png, receipt, err := sender.screenMessage(ctx, status)
+		if err != nil {
+			return coordinator.Receipt{}, err
+		}
 		request.RichMessage = &rich
+		request.PhotoPNG = png
+		screenshotReceipt = receipt
 	} else {
 		request.Text, request.Entities = telegramformat.Markdown(status.Text)
 	}
@@ -309,6 +336,7 @@ func (sender *Sender) EditStatusWithKeyboard(
 	if message.MessageID <= 0 {
 		return coordinator.Receipt{}, errors.New("Telegram edit returned a non-positive message id")
 	}
+	sender.rememberScreenReceipt(screenshotReceipt, message)
 	return coordinator.Receipt{MessageID: int64(message.MessageID)}, nil
 }
 
@@ -316,12 +344,21 @@ func (sender *Sender) acknowledgeCallback(ctx context.Context, operationID, call
 	if callbackQueryID == "" {
 		return
 	}
+	sender.ackMu.Lock()
+	if sender.ackClosed {
+		sender.ackMu.Unlock()
+		return
+	}
+	sender.ackActive++
+	recorder := sender.acknowledgements
+	sender.ackMu.Unlock()
 	started := make(chan struct{})
 	// Callback acknowledgement is independent from the visible card transition:
 	// an expired acknowledgement does not invalidate the accepted user action.
 	go func() {
-		if sender.acknowledgements != nil {
-			allowed, err := sender.acknowledgements.BeginCallbackAcknowledgement(context.WithoutCancel(ctx), operationID, callbackQueryID)
+		defer sender.finishAcknowledgement()
+		if recorder != nil {
+			allowed, err := recorder.BeginCallbackAcknowledgement(context.WithoutCancel(ctx), operationID, callbackQueryID)
 			if err != nil || !allowed {
 				close(started)
 				return
@@ -333,12 +370,12 @@ func (sender *Sender) acknowledgeCallback(ctx context.Context, operationID, call
 			CallbackQueryID: telegram.CallbackQueryID(callbackQueryID),
 			Started:         started,
 		})
-		if sender.acknowledgements != nil {
+		if recorder != nil {
 			state := CallbackAcknowledgementConfirmed
 			if err != nil {
 				state = CallbackAcknowledgementFailed
 			}
-			_ = sender.acknowledgements.CompleteCallbackAcknowledgement(context.WithoutCancel(ctx), operationID, callbackQueryID, state)
+			_ = recorder.CompleteCallbackAcknowledgement(context.WithoutCancel(ctx), operationID, callbackQueryID, state)
 		}
 	}()
 	<-started

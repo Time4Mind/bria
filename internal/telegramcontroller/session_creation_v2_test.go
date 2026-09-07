@@ -432,7 +432,7 @@ func TestSessionCreationDefaultsCanBeChosenAndClearedThroughSettings(t *testing.
 		t.Fatalf("default provider choice = (%#v, %v)", providerChoice, err)
 	}
 	settingsSurface, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticCreateSelectClaude, UpdateID: 71})
-	if err != nil || settingsSurface.Surface == nil || !strings.Contains(settingsSurface.Surface.Text, "Backend по умолчанию (local): Claude") {
+	if err != nil || settingsSurface.Surface == nil || !strings.Contains(settingsSurface.Surface.Text, "| CLI по умолчанию | Claude |") {
 		t.Fatalf("saved default provider = (%#v, %v)", settingsSurface, err)
 	}
 
@@ -441,7 +441,7 @@ func TestSessionCreationDefaultsCanBeChosenAndClearedThroughSettings(t *testing.
 		t.Fatalf("default directory home = (%#v, %v)", directoryChoice, err)
 	}
 	settingsSurface, err = controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticCreatePick, UpdateID: 74})
-	if err != nil || settingsSurface.Surface == nil || !strings.Contains(settingsSurface.Surface.Text, "Папка по умолчанию: "+root) {
+	if err != nil || settingsSurface.Surface == nil || !strings.Contains(settingsSurface.Surface.Text, "| Папка по умолчанию | "+root+" |") {
 		t.Fatalf("saved default workdir = (%#v, %v)", settingsSurface, err)
 	}
 

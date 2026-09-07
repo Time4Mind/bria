@@ -1,5 +1,5 @@
-// Package screenproduction projects typed provider events into the bounded
-// virtual screen and, when enabled globally, sends its PNG to Telegram.
+// Package screenproduction exposes explicit native screen rendering and a
+// compatibility event projection. Event observation never sends Telegram media.
 package screenproduction
 
 import (
@@ -70,31 +70,7 @@ func (composition *Composition) ObserveRuntimeEvent(ctx context.Context, observa
 		if err := adapter.Handle(ctx, observation.Event); err != nil {
 			return err
 		}
-		preferences, err := composition.settings.Load(ctx)
-		if err != nil {
-			return err
-		}
 		entry.handled = true
-		if !preferences.ScreenEnabled {
-			entry.completed = true
-			composition.ops[observation.OperationID] = entry
-			return nil
-		}
-		snapshot, err := composition.store.Snapshot(ctx, observation.SessionID)
-		if err != nil {
-			return err
-		}
-		entry.media = snapshot.TelegramMedia()
-		composition.ops[observation.OperationID] = entry
-	}
-	receipt, err := composition.sender.SendPhoto(ctx, telegram.SendPhotoRequest{
-		ChatID: composition.chatID, FileName: entry.media.FileName, ContentType: entry.media.ContentType, Content: append([]byte(nil), entry.media.Content...),
-	})
-	if err != nil {
-		return err
-	}
-	if receipt.ChatID != composition.chatID || receipt.MessageID <= 0 {
-		return ErrInvalidReceipt
 	}
 	entry.completed = true
 	composition.ops[observation.OperationID] = entry

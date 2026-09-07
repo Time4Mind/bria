@@ -5,6 +5,7 @@ package telegramstatus
 import (
 	"context"
 	"fmt"
+	"html"
 	"sort"
 	"strings"
 	"time"
@@ -44,7 +45,7 @@ func Render(now time.Time, nodes []Node, snapshots []Snapshot) string {
 		byNode[snapshot.ComputerID] = append(byNode[snapshot.ComputerID], snapshot)
 	}
 	lines := []string{
-		"Статус",
+		"Ноды",
 		"",
 		"\u00a0",
 		"",
@@ -62,7 +63,11 @@ func Render(now time.Time, nodes []Node, snapshots []Snapshot) string {
 			name = "🔴 " + name
 		}
 		if len(quotas) == 0 {
-			lines = append(lines, fmt.Sprintf("| %s | — | — | — | %s | — |", name, age(now, node.ObservedAt)))
+			updated := age(now, node.ObservedAt)
+			if !node.Available && !node.ObservedAt.IsZero() && now.Sub(node.ObservedAt) > 72*time.Hour {
+				updated = "—"
+			}
+			lines = append(lines, fmt.Sprintf("| %s | — | — | — | %s | — |", name, updated))
 			continue
 		}
 		for _, quota := range quotas {
@@ -122,6 +127,6 @@ func firstTime(primary, fallback time.Time) time.Time {
 
 func cell(value string) string {
 	value = strings.NewReplacer("\r", " ", "\n", " ").Replace(value)
-	value = strings.ReplaceAll(value, "|", "¦")
-	return strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;").Replace(value)
+	return strings.NewReplacer("\\", "\\\\", "|", "\\|", "`", "\\`", "*", "\\*", "_", "\\_",
+		"~", "\\~", "[", "\\[", "]", "\\]").Replace(html.EscapeString(value))
 }

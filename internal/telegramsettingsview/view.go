@@ -5,7 +5,6 @@ package telegramsettingsview
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"bria/internal/domain"
 	"bria/internal/settingsport"
@@ -29,12 +28,18 @@ type Button struct {
 	Choice        int
 }
 type Surface struct {
-	Text string
-	Rows [][]Button
+	Text         string
+	RichMarkdown bool
+	Rows         [][]Button
 }
 
 func Render() Surface {
-	return Surface{Text: "Настройки\n\nВыберите раздел.", Rows: [][]Button{
+	surface := table("Настройки", "Раздел", "Содержимое",
+		Field{"Содержимое карточки", "Детализация, страницы и технические действия"},
+		Field{"Кнопки сессии", "Отображение Screen"}, Field{"Распознавание речи", "Движок распознавания"},
+		Field{"Препроцессинг", "Состояние и инструкция"}, Field{"Сессии и архив", "Рекомендации, срок жизни и очередь"},
+		Field{"Уведомления", "Фоновые вопросы и ошибки"}, Field{"Создание сессии", "Автоимя и значения по умолчанию"}, Field{"CLI", "Включение и авторизация"})
+	surface.Rows = [][]Button{
 		{{Label: "🧾 Содержимое карточки", Action: "settings_category", Choice: int(CategoryCard)}},
 		{{Label: "🎛 Кнопки сессии", Action: "settings_category", Choice: int(CategorySessionButtons)}},
 		{{Label: "🎙 Распознавание речи", Action: "settings_category", Choice: int(CategoryVoice)}},
@@ -44,7 +49,8 @@ func Render() Surface {
 		{{Label: "🛠 Создание сессии", Action: "settings_category", Choice: int(CategoryCreation)}},
 		{{Label: "🤖 CLI", Action: "settings_category", Choice: int(CategoryProviders)}},
 		{{Label: "Меню", Action: "menu_back"}},
-	}}
+	}
+	return surface
 }
 
 func RenderCategory(ctx context.Context, preferences settingsport.Preferences, providers settingsport.ProviderPreferences, queueLimit int, category Category) (Surface, error) {
@@ -53,60 +59,104 @@ func RenderCategory(ctx context.Context, preferences settingsport.Preferences, p
 		return Surface{}, err
 	}
 	var text string
+	var fields []Field
 	var rows [][]Button
 	switch category {
 	case CategoryCard:
-		text = fmt.Sprintf("🧾 Содержимое карточки\n\nДетализация карточки: %s\nЛимит страниц: %d\nТехнические действия: %s", current.CardDetail, current.CardPageLimit, state(current.ShowTechnicalActions, true))
+		text = "🧾 Содержимое карточки"
+		fields = []Field{{"Детализация карточки", current.CardDetail}, {"Лимит страниц", fmt.Sprint(current.CardPageLimit)}, {"Технические действия", state(current.ShowTechnicalActions, true)}}
 		rows = onePerRow(Button{Label: "Детализация", Action: "settings_detail"}, Button{Label: "Страницы", Action: "settings_page_limit"}, Button{Label: "Технические действия", Action: "settings_technical_actions"})
 	case CategorySessionButtons:
-		text = "🎛 Кнопки сессии\n\nScreen: " + state(current.ScreenEnabled, false)
-		rows = onePerRow(Button{Label: "Screen", Action: "settings_screen"})
+		text = "🎛 Кнопки сессии"
+		captureLimit := current.ScreenCaptureLimitKiB
+		if captureLimit == 0 {
+			captureLimit = 48
+		}
+		fields = []Field{{"Screen", state(current.ScreenEnabled, false)}, {"Размер захвата", fmt.Sprintf("%d KiB", captureLimit)}}
+		rows = onePerRow(Button{Label: "Screen", Action: "settings_screen"}, Button{Label: "Размер захвата", Action: "settings_screen_capture_limit"})
 	case CategoryVoice:
-		text = "🎙 Распознавание речи\n\nДвижок: " + current.VoiceRecognition
+		text = "🎙 Распознавание речи"
+		fields = []Field{{"Движок", current.VoiceRecognition}}
 	case CategoryPreprocessing:
-		text = "✨ Препроцессинг\n\nСостояние: " + state(current.PreprocessingEnabled, false)
+		text = "✨ Препроцессинг"
+		fields = []Field{{"Состояние", state(current.PreprocessingEnabled, false)}}
 		if current.PreprocessingInstruction == "" {
-			text += "\nИнструкция: встроенная"
+			fields = append(fields, Field{"Инструкция", "встроенная"})
 		} else {
-			text += "\nИнструкция: пользовательская"
+			fields = append(fields, Field{"Инструкция", "пользовательская"})
 		}
 		rows = onePerRow(Button{Label: "Включить / выключить", Action: "settings_preprocessing"}, Button{Label: "Изменить инструкцию", Action: "settings_preprocessing_instruction"}, Button{Label: "Вернуть встроенную", Action: "settings_preprocessing_reset"})
 	case CategoryArchive:
-		text = fmt.Sprintf("🗄 Сессии и архив\n\nПродолжать существующую: %s\nРекомендации архива: %s\nСрок жизни сессий: %s\nОчередь: %d", state(current.ContinueExisting, false), state(current.ArchiveRecommendations, true), current.SessionLifetime, current.QueueLimit)
-		rows = onePerRow(Button{Label: "Продолжение", Action: "settings_continue_existing"}, Button{Label: "Рекомендации архива", Action: "settings_archive_recommendations"})
+		text = "🗄 Сессии и архив"
+		fields = []Field{{"Рекомендации архива", state(current.ArchiveRecommendations, true)}, {"Срок жизни сессий", current.SessionLifetime}, {"Очередь", fmt.Sprint(current.QueueLimit)}}
+		rows = onePerRow(Button{Label: "Рекомендации архива", Action: "settings_archive_recommendations"})
 		rows = append(rows,
 			[]Button{{Label: "Никогда", Action: "settings_lifetime_never"}, {Label: "6 ч", Action: "settings_lifetime_6h"}, {Label: "12 ч", Action: "settings_lifetime_12h"}},
 			[]Button{{Label: "24 ч", Action: "settings_lifetime_24h"}, {Label: "48 ч", Action: "settings_lifetime_48h"}})
 	case CategoryNotifications:
-		text = fmt.Sprintf("🔔 Уведомления\n\nФоновые вопросы: %s\nФоновые ошибки: %s", state(current.NotifyBackgroundQuestions, true), state(current.NotifyBackgroundErrors, true))
+		text = "🔔 Уведомления"
+		fields = []Field{{"Фоновые вопросы", state(current.NotifyBackgroundQuestions, true)}, {"Фоновые ошибки", state(current.NotifyBackgroundErrors, true)}}
 		rows = onePerRow(Button{Label: "Вопросы", Action: "settings_background_questions"}, Button{Label: "Ошибки", Action: "settings_background_errors"})
 	case CategoryCreation:
-		text = "🛠 Создание сессии\n\nАвтоимя дешёвой моделью: " + state(current.SessionNamingEnabled, false)
+		text = "🛠 Создание сессии"
+		fields = []Field{{"Автоимя дешёвой моделью", state(current.SessionNamingEnabled, false)}}
 		if _, ok := preferences.(settingsport.CreationPreferences); ok {
+			fields = append(fields, Field{"Backend по умолчанию", defaultProviderValue(current.DefaultProviders)}, Field{"Папка по умолчанию", defaultWorkdirValue(current.DefaultWorkdirs)})
 			rows = onePerRow(Button{Label: "Автоимя", Action: "settings_session_naming"}, Button{Label: "Backend по умолчанию", Action: "settings_default_provider"}, Button{Label: "Папка по умолчанию", Action: "settings_default_workdir"}, Button{Label: "Сбросить значения по умолчанию", Action: "settings_clear_creation_defaults"})
+		}
+		fields = append(fields, Field{"Ожидающая сессия", state(current.StandbyEnabled, false)})
+		if _, ok := preferences.(settingsport.StandbyPreferences); ok {
+			rows = append(rows, []Button{{Label: "Ожидающая сессия", Action: "settings_standby"}})
 		}
 	case CategoryProviders:
 		text = "🤖 CLI"
 		if providers != nil {
-			providerRows, providerText, providerErr := providerSurface(ctx, providers)
+			providerRows, providerFields, providerErr := providerSurface(ctx, providers)
 			if providerErr != nil {
 				return Surface{}, providerErr
 			}
-			rows, text = append(rows, providerRows...), text+"\n\n"+providerText
+			rows, fields = append(rows, providerRows...), providerFields
+		}
+		if len(fields) == 0 {
+			fields = []Field{{"CLI", "не настроены"}}
 		}
 		rows = append(rows, []Button{{Label: "Авторизовать Codex", Action: "authorize_codex"}}, []Button{{Label: "Авторизовать Claude", Action: "authorize_claude"}})
 	default:
 		return Surface{}, fmt.Errorf("unknown settings category %d", category)
 	}
 	rows = append(rows, []Button{{Label: "Назад", Action: "menu_settings"}})
-	return Surface{Text: text, Rows: rows}, nil
+	surface := table(text, "Настройка", "Значение", fields...)
+	surface.Rows = rows
+	return surface, nil
+}
+
+func defaultProviderValue(values map[domain.ComputerID]domain.Provider) string {
+	if len(values) == 0 {
+		return "не задан"
+	}
+	for _, provider := range values {
+		return string(provider)
+	}
+	return "не задан"
+}
+
+func defaultWorkdirValue(values map[domain.ComputerID]string) string {
+	if len(values) == 0 {
+		return "не задана"
+	}
+	for _, workdir := range values {
+		if workdir != "" {
+			return workdir
+		}
+	}
+	return "не задана"
 }
 
 func CategoryForAction(action string) (Category, bool) {
 	switch action {
 	case "settings_detail", "settings_page_limit", "settings_technical_actions":
 		return CategoryCard, true
-	case "settings_screen":
+	case "settings_screen", "settings_screen_capture_limit":
 		return CategorySessionButtons, true
 	case "settings_preprocessing", "settings_preprocessing_instruction", "settings_preprocessing_reset":
 		return CategoryPreprocessing, true
@@ -114,7 +164,7 @@ func CategoryForAction(action string) (Category, bool) {
 		return CategoryArchive, true
 	case "settings_background_questions", "settings_background_errors":
 		return CategoryNotifications, true
-	case "settings_session_naming", "settings_default_provider", "settings_default_workdir", "settings_clear_creation_defaults":
+	case "settings_standby", "settings_session_naming", "settings_default_provider", "settings_default_workdir", "settings_clear_creation_defaults":
 		return CategoryCreation, true
 	case "settings_provider_codex", "settings_provider_claude", "authorize_codex", "authorize_claude":
 		return CategoryProviders, true
@@ -127,7 +177,7 @@ func snapshot(ctx context.Context, preferences settingsport.Preferences, queueLi
 	if preferences != nil {
 		return preferences.Snapshot(ctx)
 	}
-	return settingsport.Snapshot{ContinueExisting: true, CardDetail: "standard", CardPageLimit: 64, ShowTechnicalActions: true, NotifyBackgroundQuestions: true, NotifyBackgroundErrors: true, SessionLifetime: "never", QueueLimit: queueLimit, VoiceRecognition: "parakeet"}, nil
+	return settingsport.Snapshot{ContinueExisting: true, CardDetail: "standard", CardPageLimit: 64, ShowTechnicalActions: true, NotifyBackgroundQuestions: false, NotifyBackgroundErrors: true, SessionLifetime: "never", QueueLimit: queueLimit, VoiceRecognition: "parakeet"}, nil
 }
 
 func state(value, plural bool) string {
@@ -151,17 +201,17 @@ func onePerRow(buttons ...Button) [][]Button {
 	return rows
 }
 
-func providerSurface(ctx context.Context, providers settingsport.ProviderPreferences) ([][]Button, string, error) {
+func providerSurface(ctx context.Context, providers settingsport.ProviderPreferences) ([][]Button, []Field, error) {
 	preferences, err := providers.Snapshot(ctx)
 	if err != nil {
-		return nil, "", err
+		return nil, nil, err
 	}
 	by := map[domain.Provider]settingsport.ProviderPreference{}
 	for _, preference := range preferences {
 		by[preference.Provider] = preference
 	}
 	var rows [][]Button
-	var lines []string
+	var fields []Field
 	for _, provider := range []domain.Provider{domain.ProviderCodex, domain.ProviderClaude} {
 		preference := by[provider]
 		status, configured := "выключен", "не настроен"
@@ -172,7 +222,7 @@ func providerSurface(ctx context.Context, providers settingsport.ProviderPrefere
 			configured = "настроен"
 		}
 		rows = append(rows, []Button{{Label: string(provider), Action: "settings_provider_" + string(provider)}})
-		lines = append(lines, fmt.Sprintf("%s: %s, %s", provider, status, configured))
+		fields = append(fields, Field{string(provider), status + ", " + configured})
 	}
-	return rows, strings.Join(lines, "\n"), nil
+	return rows, fields, nil
 }

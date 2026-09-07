@@ -12,9 +12,14 @@ import (
 	"time"
 )
 
-const directoryActivityRefreshInterval = 30 * time.Second
+const directoryActivityRefreshInterval = 2 * time.Minute
 const directoryActivityDepth = 2
-const projectActivityDepth = 12
+
+// A project tree can contain generated/vendor trees even when their parent is
+// ignored. Four levels captures normal source changes while keeping the idle
+// index bounded on large workspaces.
+const projectActivityDepth = 4
+const activityScanEntryLimit = 20000
 
 type directoryActivityScanner func(context.Context, string) (time.Time, error)
 
@@ -190,6 +195,7 @@ func (index *directoryActivityIndex) sort(directories []Directory) {
 func newestTreeModification(ctx context.Context, root string) (time.Time, error) {
 	latest := time.Time{}
 	maxDepth := activityScanDepth(root)
+	entries := 0
 	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -199,6 +205,10 @@ func newestTreeModification(ctx context.Context, root string) (time.Time, error)
 				return filepath.SkipDir
 			}
 			return nil
+		}
+		entries++
+		if entries > activityScanEntryLimit {
+			return filepath.SkipDir
 		}
 		if entry.Type()&fs.ModeSymlink != 0 {
 			return nil

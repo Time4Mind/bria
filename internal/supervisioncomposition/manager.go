@@ -107,20 +107,8 @@ func (manager *Manager) RecoverStartup(ctx context.Context) (app.SessionRecovery
 	if err != nil {
 		return app.SessionRecoveryResult{}, err
 	}
-	if recorder, ok := manager.restarter.(persistedExitRecorder); ok {
-		for _, session := range sessions {
-			binding, bound := session.Binding()
-			if session.ComputerID() != manager.computer || !bound || !startupRecoverable(session.Status()) {
-				continue
-			}
-			request := app.StartSessionRequest{
-				SessionID: session.ID(), ComputerID: session.ComputerID(), Provider: session.Provider(), Workdir: session.Workdir(),
-				Mode: app.SessionStartResume, PriorBinding: &binding,
-			}
-			if err := recorder.ConfirmPersistedExit(request, binding); err != nil {
-				return app.SessionRecoveryResult{}, err
-			}
-		}
+	if err := recordPersistedExits(manager.computer, sessions, manager.restarter); err != nil {
+		return app.SessionRecoveryResult{}, err
 	}
 	handled := make(map[domain.SessionID]struct{})
 	var result app.SessionRecoveryResult
@@ -142,7 +130,11 @@ func (manager *Manager) RecoverStartup(ctx context.Context) (app.SessionRecovery
 		if err != nil {
 			if errors.Is(err, sessionsupervisor.ErrReconciliationRequired) || errors.Is(err, sessionsupervisor.ErrRecoveryExhausted) {
 				manager.report(err)
-				result.Awaiting++
+				if manager.deleteEmptyRecovery(ctx, session) {
+					result.FinalizedClosing++
+				} else {
+					result.Awaiting++
+				}
 				continue
 			}
 			return result, err
@@ -151,10 +143,14 @@ func (manager *Manager) RecoverStartup(ctx context.Context) (app.SessionRecovery
 		case recovered.Recovered:
 			result.Recovered++
 			result.Sessions = append(result.Sessions, recovered.Session)
-		case recovered.Archived:
+		case recovered.Archived || recovered.Deleted:
 			result.FinalizedClosing++
 		case recovered.AwaitingRecovery:
-			result.Awaiting++
+			if manager.deleteEmptyRecovery(ctx, recovered.Session) {
+				result.FinalizedClosing++
+			} else {
+				result.Awaiting++
+			}
 		}
 	}
 	ordinary, err := app.RecoverPersistedSessionsForComputer(ctx, manager.computer, filteredStore{Store: manager.store, excluded: handled}, manager.restarter)
@@ -164,6 +160,20 @@ func (manager *Manager) RecoverStartup(ctx context.Context) (app.SessionRecovery
 	result.SkippedRemote += ordinary.SkippedRemote
 	result.Sessions = append(result.Sessions, ordinary.Sessions...)
 	return result, err
+}
+
+func (manager *Manager) deleteEmptyRecovery(ctx context.Context, session domain.Session) bool {
+	if session.ID() == "" || session.Status() != domain.SessionAwaitingRecovery {
+		return false
+	}
+	store, ok := manager.store.(interface {
+		DeleteEmptyAwaitingRecovery(context.Context, domain.Session) (bool, error)
+	})
+	if !ok {
+		return false
+	}
+	deleted, err := store.DeleteEmptyAwaitingRecovery(ctx, session)
+	return err == nil && deleted
 }
 
 func startupRecoverable(status domain.SessionStatus) bool {
@@ -179,6 +189,24 @@ func startupRecoverable(status domain.SessionStatus) bool {
 type filteredStore struct {
 	Store
 	excluded map[domain.SessionID]struct{}
+}
+
+func (store filteredStore) DeleteEmptyClosing(ctx context.Context, session domain.Session) (bool, error) {
+	if empty, ok := store.Store.(interface {
+		DeleteEmptyClosing(context.Context, domain.Session) (bool, error)
+	}); ok {
+		return empty.DeleteEmptyClosing(ctx, session)
+	}
+	return false, nil
+}
+
+func (store filteredStore) DeleteEmptyAwaitingRecovery(ctx context.Context, session domain.Session) (bool, error) {
+	if empty, ok := store.Store.(interface {
+		DeleteEmptyAwaitingRecovery(context.Context, domain.Session) (bool, error)
+	}); ok {
+		return empty.DeleteEmptyAwaitingRecovery(ctx, session)
+	}
+	return false, nil
 }
 
 func (store filteredStore) List(ctx context.Context) ([]domain.Session, error) {

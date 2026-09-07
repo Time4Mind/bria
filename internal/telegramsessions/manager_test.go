@@ -49,8 +49,8 @@ func TestItemsActiveBackgroundArchived(t *testing.T) {
 	}
 	items := m.Items()
 	if len(items) != 3 || items[0].Kind != telegramsessions.Active || items[0].Session.ID() != "b" ||
-		items[1].Kind != telegramsessions.Background || items[1].Session.ID() != "a" ||
-		items[2].Kind != telegramsessions.Background || items[2].Session.ID() != "z" {
+		items[1].Kind != telegramsessions.Background || items[1].Session.ID() != "z" ||
+		items[2].Kind != telegramsessions.Archived || items[2].Session.ID() != "a" {
 		t.Fatalf("items = %#v", items)
 	}
 }
@@ -69,8 +69,8 @@ func TestSelectDoesNotStopBackgroundAndAllowsEveryOpenSession(t *testing.T) {
 	if got, ok := m.Session("a"); !ok || got.Status() != domain.SessionReady {
 		t.Fatal("background session was changed")
 	}
-	if err := m.Select("c"); err != nil || m.Active() != "c" {
-		t.Fatalf("starting open session was not selectable: active=%q err=%v", m.Active(), err)
+	if err := m.Select("c"); err == nil {
+		t.Fatalf("starting session was selectable")
 	}
 	if err := m.Select("d"); err == nil {
 		t.Fatal("archived session selected")
@@ -81,7 +81,7 @@ func TestNewRejectsUnknownActiveAndDuplicateUsesLatest(t *testing.T) {
 	if _, err := telegramsessions.New([]domain.Session{session(t, "a", domain.SessionReady)}, "missing"); err == nil {
 		t.Fatal("unknown active accepted")
 	}
-	m, err := telegramsessions.New([]domain.Session{session(t, "a", domain.SessionReady), session(t, "a", domain.SessionAwaitingRecovery)}, "a")
+	m, err := telegramsessions.New([]domain.Session{session(t, "a", domain.SessionReady), session(t, "a", domain.SessionAwaitingRecovery)}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,8 +91,8 @@ func TestNewRejectsUnknownActiveAndDuplicateUsesLatest(t *testing.T) {
 }
 
 func TestNewRequiresExactlyOneActiveWhenOpenSessionsExist(t *testing.T) {
-	if _, err := telegramsessions.New([]domain.Session{session(t, "a", domain.SessionStarting)}, ""); err == nil {
-		t.Fatal("New() accepted an open session list without one active session")
+	if _, err := telegramsessions.New([]domain.Session{session(t, "a", domain.SessionStarting)}, ""); err != nil {
+		t.Fatalf("New() rejected transient-only list: %v", err)
 	}
 	if _, err := telegramsessions.New([]domain.Session{session(t, "a", domain.SessionArchived)}, ""); err != nil {
 		t.Fatalf("New() rejected archive-only list without active session: %v", err)
@@ -105,14 +105,14 @@ func TestItemsClassifyTransientOpenStatesAsBackgroundAndOnlyClosedAsArchived(t *
 		session(t, "b", domain.SessionAwaitingRecovery),
 		session(t, "c", domain.SessionArchived),
 		session(t, "d", domain.SessionResumeFailed),
-	}, "a")
+	}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	items := m.Items()
 	want := map[domain.SessionID]telegramsessions.Kind{
-		"a": telegramsessions.Active,
-		"b": telegramsessions.Background,
+		"a": telegramsessions.Archived,
+		"b": telegramsessions.Archived,
 		"c": telegramsessions.Archived,
 		"d": telegramsessions.Archived,
 	}

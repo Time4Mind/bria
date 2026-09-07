@@ -404,6 +404,8 @@ type adapterRequest struct {
 	RequestID           string
 	MessageID           string
 	Text                *string
+	Model               string
+	Effort              string
 	Attachments         []runtimeprotocol.LocalAttachment
 	InteractionResponse *runtimeprotocol.InteractionResponse
 }
@@ -448,6 +450,7 @@ func decodeAdapterRequest(line []byte) (adapterRequest, error) {
 		return adapterRequest{}, ErrAdapterProtocol
 	}
 	request := adapterRequest{Protocol: decoded.Protocol, Type: string(decoded.Type), RequestID: decoded.RequestID, MessageID: decoded.MessageID, Attachments: append([]runtimeprotocol.LocalAttachment(nil), decoded.Attachments...), InteractionResponse: decoded.InteractionResponse}
+	request.Model, request.Effort = decoded.Model, decoded.Effort
 	if decoded.Type == runtimeprotocol.TypeSubmit || decoded.Type == runtimeprotocol.TypeSteer {
 		request.Text = &decoded.Text
 	}
@@ -567,6 +570,8 @@ func (session *adapterSession) runTurn(ctx context.Context, request adapterReque
 		textInput = []TextInput{{Text: *request.Text}}
 	}
 	outcome, err := session.client.StartTurn(ctx, TurnStartRequest{
+		Model:       request.Model,
+		Effort:      request.Effort,
 		ThreadID:    session.threadID,
 		MessageID:   request.MessageID,
 		Input:       textInput,
@@ -827,31 +832,19 @@ func (session *adapterSession) handleNotification(notification Notification) err
 		session.mu.Unlock()
 		return nil
 	}
-	if notification.Method != "item/completed" {
-		return nil
-	}
-	var params struct {
-		ThreadID string `json:"threadId"`
-		TurnID   string `json:"turnId"`
-		Item     struct {
-			Type  string `json:"type"`
-			Text  string `json:"text"`
-			Phase string `json:"phase"`
-		} `json:"item"`
-	}
-	if json.Unmarshal(notification.Params, &params) != nil || params.Item.Type != "agentMessage" ||
-		params.Item.Phase != "commentary" || !validAdapterText(params.Item.Text, session.maxTextBytes) {
+	item, ok := decodeTranscriptItem(notification.Method, notification.Params, session.maxTextBytes)
+	if !ok {
 		return nil
 	}
 	session.mu.Lock()
 	if session.closing || session.active == nil || session.active.turnID == "" ||
-		params.ThreadID != session.threadID || params.TurnID != session.active.turnID {
+		item.ThreadID != session.threadID || item.TurnID != session.active.turnID {
 		session.mu.Unlock()
 		return nil
 	}
 	requestID := session.active.requestID
 	session.mu.Unlock()
-	return session.writeEvent(requestID, "commentary", params.Item.Text)
+	return session.writeEventMetadata(requestID, item.Kind, item.Text, item.Metadata)
 }
 
 func (session *adapterSession) handleServerRequest(ctx context.Context, request ServerRequest) (ServerResponse, error) {
@@ -1002,14 +995,15 @@ type readyMessage struct {
 }
 
 type requestMessage struct {
-	Protocol            int    `json:"protocol"`
-	Type                string `json:"type"`
-	RequestID           string `json:"request_id"`
-	Kind                string `json:"kind,omitempty"`
-	Text                string `json:"text,omitempty"`
-	Status              string `json:"status,omitempty"`
-	ErrorCode           string `json:"error_code,omitempty"`
-	ProviderSessionName string `json:"provider_session_name,omitempty"`
+	Protocol            int                            `json:"protocol"`
+	Type                string                         `json:"type"`
+	RequestID           string                         `json:"request_id"`
+	Kind                string                         `json:"kind,omitempty"`
+	Text                string                         `json:"text,omitempty"`
+	Status              string                         `json:"status,omitempty"`
+	ErrorCode           string                         `json:"error_code,omitempty"`
+	ProviderSessionName string                         `json:"provider_session_name,omitempty"`
+	EventMetadata       *runtimeprotocol.EventMetadata `json:"event_metadata,omitempty"`
 }
 
 func (session *adapterSession) writeReady() error {
@@ -1032,8 +1026,12 @@ func (session *adapterSession) writeAccepted(requestID, messageID string) error 
 }
 
 func (session *adapterSession) writeEvent(requestID string, kind string, text string) error {
+	return session.writeEventMetadata(requestID, kind, text, nil)
+}
+
+func (session *adapterSession) writeEventMetadata(requestID string, kind string, text string, metadata *runtimeprotocol.EventMetadata) error {
 	return session.write(requestMessage{
-		Protocol: AdapterProtocolVersion, Type: "event", RequestID: requestID, Kind: kind, Text: text,
+		Protocol: AdapterProtocolVersion, Type: "event", RequestID: requestID, Kind: kind, Text: text, EventMetadata: metadata,
 	})
 }
 

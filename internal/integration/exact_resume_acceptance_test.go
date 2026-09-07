@@ -503,6 +503,9 @@ func TestRecoveryFinalizesInterruptedClosingOnlyAfterExactProcessExit(t *testing
 				if _, inserted, err := store.PutStartingIfAbsent(ctx, starting); err != nil || !inserted {
 					t.Fatalf("persist starting = (%v, %v)", inserted, err)
 				}
+				if err := store.SetCardPrompt(ctx, starting.ID(), "closing-request", "🙋‍♂ request to retain"); err != nil {
+					t.Fatal(err)
+				}
 				if err := store.Replace(ctx, starting, ready); err != nil {
 					t.Fatalf("persist ready: %v", err)
 				}

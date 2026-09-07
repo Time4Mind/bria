@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"strings"
 	"sync"
-	"time"
 
 	"bria/internal/domain"
 	"bria/internal/durableflow"
@@ -17,8 +16,6 @@ import (
 	"bria/internal/telegramcontroller"
 	"bria/internal/telegramnotify"
 )
-
-const inputSweepInterval = time.Second
 
 type InputProcessor interface {
 	ProcessDurableInput(context.Context, telegramcontroller.DurableLeasedInput, telegramcontroller.DurableInputCallbacks) (telegramcontroller.DurableInputProcessReceipt, error)
@@ -179,8 +176,6 @@ func (dispatcher InputDispatcher) Run(ctx context.Context) error {
 		}
 	}
 	wakeAll()
-	ticker := time.NewTicker(inputSweepInterval)
-	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
@@ -189,8 +184,6 @@ func (dispatcher InputDispatcher) Run(ctx context.Context) error {
 			return ctx.Err()
 		case id := <-dispatcher.Wake:
 			wakeSession(id)
-		case <-ticker.C:
-			wakeAll()
 		}
 	}
 }
@@ -233,7 +226,7 @@ func (sender TelegramOutputSender) Deliver(ctx context.Context, output durablefl
 	}
 	kind := telegramcontroller.NotificationKind(output.Kind)
 	switch kind {
-	case telegramcontroller.NotificationCommentary, telegramcontroller.NotificationQuestion, telegramcontroller.NotificationFinal, telegramcontroller.NotificationError, telegramcontroller.NotificationPromptStatus:
+	case telegramcontroller.NotificationCommentary, telegramcontroller.NotificationQuestion, telegramcontroller.NotificationFinal, telegramcontroller.NotificationError, telegramcontroller.NotificationPromptStatus, telegramcontroller.NotificationNativeScreen:
 	default:
 		return result, errors.New("durable Telegram notification kind is unsupported")
 	}
@@ -300,9 +293,9 @@ func (custody OutputCustody) AcceptOutput(ctx context.Context, output telegramco
 
 func coalescedStateKinds(kind telegramcontroller.NotificationKind) []string {
 	switch kind {
-	case telegramcontroller.NotificationCommentary, telegramcontroller.NotificationPromptStatus,
+	case telegramcontroller.NotificationCommentary, telegramcontroller.NotificationPromptStatus, telegramcontroller.NotificationNativeScreen,
 		telegramcontroller.NotificationFinal, telegramcontroller.NotificationError:
-		return []string{string(telegramcontroller.NotificationCommentary), string(telegramcontroller.NotificationPromptStatus)}
+		return []string{string(telegramcontroller.NotificationCommentary), string(telegramcontroller.NotificationPromptStatus), string(telegramcontroller.NotificationNativeScreen)}
 	default:
 		return nil
 	}
@@ -319,8 +312,6 @@ func (dispatcher OutputDispatcher) Run(ctx context.Context) error {
 	if ctx == nil || dispatcher.Flow == nil || dispatcher.Sessions == nil || dispatcher.Wake == nil || dispatcher.Report == nil {
 		return errors.New("durable output dispatcher dependencies are required")
 	}
-	ticker := time.NewTicker(inputSweepInterval)
-	defer ticker.Stop()
 	deliver := func(id domain.SessionID) {
 		for {
 			result, err := dispatcher.Flow.DeliverNextOutput(ctx, string(id))
@@ -357,8 +348,6 @@ func (dispatcher OutputDispatcher) Run(ctx context.Context) error {
 			return ctx.Err()
 		case id := <-dispatcher.Wake:
 			deliver(id)
-		case <-ticker.C:
-			deliverAll()
 		}
 	}
 }

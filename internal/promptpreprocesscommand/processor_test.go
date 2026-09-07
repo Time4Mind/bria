@@ -12,6 +12,7 @@ import (
 func TestCodexInvocationIsEphemeralAndProjectIsolated(t *testing.T) {
 	want := []string{
 		"exec", "--model", "cheap", "--sandbox", "read-only",
+		"--config", `model_reasoning_effort="low"`,
 		"--skip-git-repo-check", "--ephemeral", "--ignore-user-config", "--ignore-rules",
 		"--disable", "shell_tool", "--disable", "apps", "--disable", "browser_use",
 		"--color", "never", "-C", "/isolated", "--output-last-message", "/isolated/result", "-",

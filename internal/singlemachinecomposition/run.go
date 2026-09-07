@@ -10,7 +10,6 @@ import (
 	"bria/internal/app"
 	"bria/internal/authcomposition"
 	"bria/internal/callbacktoken"
-	"bria/internal/claudestore"
 	"bria/internal/config"
 	"bria/internal/coordinator"
 	"bria/internal/domain"
@@ -21,11 +20,13 @@ import (
 	"bria/internal/observability"
 	"bria/internal/promptpreprocess"
 	"bria/internal/promptpreprocesscommand"
+	"bria/internal/providermodels"
 	"bria/internal/providerquota"
 	"bria/internal/recoverycomposition"
 	"bria/internal/recoveryruntime"
 	"bria/internal/runtimefactory"
 	"bria/internal/safelog"
+	"bria/internal/screenproduction"
 	"bria/internal/sessioncreation"
 	"bria/internal/sessionexpiry"
 	"bria/internal/sessionid"
@@ -53,13 +54,25 @@ import (
 const controllerCloseTimeout = 5 * time.Second
 
 const (
-	sessionExpiryInterval   = time.Minute
-	safeLogCleanupInterval  = time.Minute
-	telegramCallbackTTL     = 15 * time.Minute
-	durableLeaseDuration    = time.Minute
-	telegramStatusInterval  = time.Second
-	telegramStatusBatch     = 100
-	outboundReceiptInterval = 200 * time.Millisecond
+	sessionExpiryInterval  = time.Minute
+	safeLogCleanupInterval = time.Minute
+	// Telegram cards are durable UI. Their callbacks must remain usable after
+	// long idle periods; one-time claim/state checks still protect mutating
+	// actions. The wire format stores a uint32 Unix timestamp, so stay below
+	// its 2106 limit while making the UI effectively non-expiring.
+	telegramCallbackTTL  = 79 * 365 * 24 * time.Hour
+	durableLeaseDuration = time.Minute
+	// Background status delivery is a retry safety net; normal output paths
+	// wake delivery directly, so idle polling need not reread JSON every second.
+	// Statuses are delivered immediately when enqueued; this runner only
+	// reconciles leftovers after a crash.
+	telegramStatusInterval = 30 * time.Second
+	telegramStatusBatch    = 100
+	// Receipt reconciliation is a safety net for ambiguous transport outcomes;
+	// normal callbacks wake delivery directly. Polling at 2s avoids repeatedly
+	// reparsing the full checkpoint file while keeping recovery bounded.
+	outboundReceiptInterval  = 5 * time.Second
+	supervisionSweepInterval = 10 * time.Second
 )
 
 type InstanceLock interface {
@@ -79,6 +92,7 @@ type liveConfigStarter struct {
 type asyncSessionCreator struct {
 	creator *app.SessionCreator
 	root    context.Context
+	logger  *safelog.Logger
 }
 
 func (creator asyncSessionCreator) BeginCreate(ctx context.Context, intent app.ConfirmedSessionIntent) (telegramcontroller.PendingSessionStart, error) {
@@ -95,7 +109,9 @@ func (creator asyncSessionCreator) BeginCreate(ctx context.Context, intent app.C
 	outcome := make(chan telegramcontroller.SessionStartOutcome, 1)
 	go func() {
 		defer close(outcome)
+		started := time.Now()
 		result, completeErr := creator.creator.CompleteCreate(creator.root, prepared)
+		recordSessionStartup(creator.logger, intent, time.Since(started), errors.Join(result.StartError, completeErr))
 		outcome <- telegramcontroller.SessionStartOutcome{
 			Session: result.Session, Replayed: result.Replayed, StartError: result.StartError, Err: completeErr,
 		}
@@ -242,6 +258,14 @@ func runTelegramController(
 	if err != nil {
 		return fmt.Errorf("compose provider quota service: %w", err)
 	}
+	modelConfig := configuration
+	if modelConfig.Computer == nil {
+		modelConfig.Computer = &config.ComputerConfig{ID: string(computerID)}
+	}
+	modelCatalog, err := providermodels.FromConfig(modelConfig, dependencies.Environment())
+	if err != nil {
+		return fmt.Errorf("compose model catalog: %w", err)
+	}
 
 	state, err := storage.OpenSessionStore(configuration.StatePath)
 	if err != nil {
@@ -301,6 +325,7 @@ func runTelegramController(
 	if err != nil {
 		return fmt.Errorf("compose prompt preprocessor: %w", err)
 	}
+	go promptPreprocessor.Warmup(ctx)
 	sessionNamer, err := sessionnaming.New(state, func(ctx context.Context) (bool, error) {
 		current, loadErr := preferences.Load(ctx)
 		return current.SessionNamingEnabled, loadErr
@@ -329,15 +354,24 @@ func runTelegramController(
 	if err != nil {
 		return errors.New("resolve Bria executable")
 	}
+	runtimeEnvironment := append([]string(nil), dependencies.Environment()...)
+	runtimeEnvironment = append(runtimeEnvironment, fmt.Sprintf("BRIA_SCREEN_CAPTURE_KIB=%d", effectiveSettings.ScreenCaptureLimitKiB))
 	starter, err := dependencies.ComposeRuntime(
 		configuration,
-		dependencies.Environment(),
+		runtimeEnvironment,
 		executable,
 		sessionruntime.Options{},
 	)
 	if err != nil {
 		return fmt.Errorf("compose provider runtime: %w", err)
 	}
+	defer func() {
+		if runtime, ok := starter.(interface{ Shutdown(context.Context) error }); ok {
+			cleanup, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			defer cancel()
+			returnErr = errors.Join(returnErr, runtime.Shutdown(cleanup))
+		}
+	}()
 	turnRuntime, err := turnruntimecomposition.Open(turnruntimecomposition.Options{
 		Configuration: configuration, Telegram: client, Settings: preferences, Sessions: state, Runtime: starter, Logger: safeLogger,
 	})
@@ -364,7 +398,7 @@ func runTelegramController(
 		}
 		supervision, err := supervisioncomposition.New(supervisioncomposition.Options{
 			LocalComputerID: computerID, Store: state, Waiter: waiter, Restarter: starter,
-			AcceptedTurns: durableRecovery, MaxRestartAttempts: 3, SweepInterval: time.Second,
+			AcceptedTurns: durableRecovery, MaxRestartAttempts: 3, SweepInterval: supervisionSweepInterval,
 			Now: clock, WaitBeforeRetry: waitRecoveryRetry, Report: reportRecovery,
 		})
 		if err != nil {
@@ -373,9 +407,7 @@ func runTelegramController(
 		recovery, err = supervision.RecoverStartup(ctx)
 		processSupervision = supervision
 	} else {
-		if err = supervisioncomposition.RequireSafeFallback(ctx, state); err == nil {
-			recovery, err = app.RecoverPersistedSessionsForComputer(ctx, computerID, state, starter)
-		}
+		recovery, err = supervisioncomposition.RecoverSafeFallback(ctx, computerID, state, starter)
 	}
 	if err != nil {
 		return fmt.Errorf("recover persisted sessions: %w", err)
@@ -470,6 +502,8 @@ func runTelegramController(
 	}
 	creationEnvironment.Start(ctx)
 	defer creationEnvironment.Close()
+	var transportSender *telegrambridge.Sender
+	nativeController, _ := starter.(sessionruntime.NativeController)
 	handler, err := telegramcontroller.New(
 		configuration.OwnerUserID,
 		configuration.PrivateChatID,
@@ -482,8 +516,10 @@ func runTelegramController(
 			QueueLimit: effectiveSettings.QueueLimit, Lifecycle: starter, UIState: state,
 			Settings: telegramPreferences, Providers: settingscomposition.ProviderPreferences{Store: providerPreferences},
 			CreationEnvironment:   creationEnvironment,
-			AsyncCreator:          asyncSessionCreator{creator: creator, root: ctx},
+			AsyncCreator:          asyncSessionCreator{creator: creator, root: ctx, logger: safeLogger},
 			Quotas:                quotaService,
+			Models:                modelCatalog,
+			Native:                nativeController,
 			Preprocessor:          promptPreprocessor,
 			SessionNamer:          sessionNamer,
 			PreprocessingObserver: preprocessingObserver{logger: safeLogger},
@@ -503,15 +539,29 @@ func runTelegramController(
 		if closeErr := handler.Close(closeContext); closeErr != nil {
 			returnErr = fmt.Errorf("close Telegram controller: %w", closeErr)
 		}
+		if transportSender != nil {
+			ackContext, cancelAck := context.WithTimeout(context.Background(), controllerCloseTimeout)
+			defer cancelAck()
+			returnErr = errors.Join(returnErr, transportSender.Close(ackContext))
+		}
 	}()
 
 	source, err := telegrambridge.NewSource(client)
 	if err != nil {
 		return fmt.Errorf("create Telegram update source: %w", err)
 	}
-	transportSender, err := telegrambridge.NewSender(client)
+	transportSender, err = telegrambridge.NewSender(client)
 	if err != nil {
 		return fmt.Errorf("create Telegram sender: %w", err)
+	}
+	if screens, ok := starter.(sessionruntime.NativeScreenProvider); ok {
+		screenSource, sourceErr := screenproduction.NewNativeSource(preferences, state, screens)
+		if sourceErr != nil {
+			return fmt.Errorf("create native Screen source: %w", sourceErr)
+		}
+		if err := transportSender.BindScreenSource(screenSource); err != nil {
+			return fmt.Errorf("bind native Screen source: %w", err)
+		}
 	}
 	callbackCodec, err := callbacktoken.New(callbackKey, nil, clock)
 	if err != nil {
@@ -572,6 +622,8 @@ func runTelegramController(
 	}); err != nil {
 		return fmt.Errorf("bind Telegram prompt status delivery: %w", err)
 	}
+	handler.StartNativeObserver()
+	handler.ScheduleStandby()
 	durableReporter := func(component, eventType string) func(error) {
 		return func(reportErr error) {
 			_ = safeLogger.Write(safelog.Event{
@@ -628,13 +680,19 @@ func (observer preprocessingObserver) ObservePreprocessing(_ context.Context, ob
 	if observer.logger == nil {
 		return errors.New("safe logger is required")
 	}
+	eventType, result, category := "prompt.preprocessing_failed", "fallback_original", observation.Category
+	if observation.Stage == promptpreprocess.StageComplete && observation.Category == promptpreprocess.CategorySuccess {
+		eventType, result, category = "prompt.preprocessing_completed", "processed", ""
+	} else if observation.Stage == promptpreprocess.StageCache {
+		eventType, result, category = "prompt.preprocessing_cached", observation.Category, ""
+	}
 	return observer.logger.Write(safelog.Event{
-		Class: safelog.Service, Type: "prompt.preprocessing_failed", EntityID: string(observation.SessionID),
-		Result: "fallback_original", ErrorCategory: observation.Category, Error: observation.Error,
+		Class: safelog.Service, Type: eventType, EntityID: string(observation.SessionID),
+		Result: result, ErrorCategory: category, Error: observation.Error,
 		Fields: map[string]string{
 			"computer_id": string(observation.ComputerID), "session_id": string(observation.SessionID),
 			"message_id": observation.MessageID, "provider": string(observation.Provider), "model": observation.Model,
-			"stage": observation.Stage, "attempt": strconv.Itoa(observation.Attempts),
+			"stage": observation.Stage, "attempt": strconv.Itoa(observation.Attempts), "model_evidence": observation.ModelEvidence,
 		},
 	})
 }
@@ -649,6 +707,12 @@ func Run(ctx context.Context, configPath string, dependencies Dependencies) erro
 
 // ComposeProviderRuntime derives runtime and recovery from one command snapshot.
 func ComposeProviderRuntime(configuration config.Config, environment []string, executable string, options sessionruntime.Options) (ProviderRuntime, error) {
+	if options.HandshakeTimeout == 0 {
+		options.HandshakeTimeout = 30 * time.Second
+	}
+	if options.GracefulCloseTimeout == 0 {
+		options.GracefulCloseTimeout = 10 * time.Second
+	}
 	if !configuration.ProviderEnabled(domain.ProviderCodex) && !configuration.ProviderEnabled(domain.ProviderClaude) {
 		return unavailableProviderRuntime{}, nil
 	}
@@ -671,28 +735,16 @@ func ComposeProviderRuntime(configuration config.Config, environment []string, e
 }
 
 func composeAcceptedTurnReader(configuration config.Config, commands *runtimefactory.CommandSet) (sessionruntime.AcceptedTurnReader, error) {
-	discovery, enabled := configuration.DiscoveryRuntime()
-	if !enabled {
-		return nil, nil
-	}
 	var codex, claude sessionruntime.AcceptedTurnReader
 	if configuration.ProviderEnabled(domain.ProviderCodex) {
-		specification, ok := commands.CommandSpec(domain.ProviderCodex)
-		if !ok {
-			return nil, errors.New("configured Codex recovery command is unavailable")
-		}
-		reader, err := recoveryruntime.New(specification, recoveryruntime.Options{})
+		reader, err := recoveryruntime.NewNative(configuration.StatePath+".native", domain.ProviderCodex)
 		if err != nil {
 			return nil, fmt.Errorf("compose Codex accepted-turn reader: %w", err)
 		}
 		codex = reader
 	}
 	if configuration.ProviderEnabled(domain.ProviderClaude) {
-		transcripts, err := claudestore.NewTranscriptStore(discovery.ClaudeRoot, claudestore.TranscriptStoreOptions{})
-		if err != nil {
-			return nil, fmt.Errorf("open Claude transcript root: %w", err)
-		}
-		reader, err := recoveryruntime.NewClaude(transcripts)
+		reader, err := recoveryruntime.NewNative(configuration.StatePath+".native", domain.ProviderClaude)
 		if err != nil {
 			return nil, fmt.Errorf("compose Claude accepted-turn reader: %w", err)
 		}

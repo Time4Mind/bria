@@ -29,6 +29,9 @@ type Result struct {
 	Text     string
 	Provider domain.Provider
 	Model    string
+	// ModelEvidence identifies a provider-reported model receipt, not a price
+	// ranking. Empty means Model is only the requested configuration.
+	ModelEvidence string
 }
 
 type Processor interface {
@@ -36,15 +39,16 @@ type Processor interface {
 }
 
 type Observation struct {
-	ComputerID domain.ComputerID
-	SessionID  domain.SessionID
-	MessageID  string
-	Provider   domain.Provider
-	Model      string
-	Stage      string
-	Category   string
-	Attempts   int
-	Error      string
+	ComputerID    domain.ComputerID
+	SessionID     domain.SessionID
+	MessageID     string
+	Provider      domain.Provider
+	Model         string
+	ModelEvidence string
+	Stage         string
+	Category      string
+	Attempts      int
+	Error         string
 }
 
 type Observer interface {

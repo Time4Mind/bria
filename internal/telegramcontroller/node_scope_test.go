@@ -19,6 +19,20 @@ func (stub quotaReaderStub) Snapshots(context.Context) ([]telegramstatus.Snapsho
 	return append([]telegramstatus.Snapshot(nil), stub.snapshots...), nil
 }
 
+type blockingQuotaReader struct {
+	started chan struct{}
+}
+
+func (reader *blockingQuotaReader) Snapshots(context.Context) ([]telegramstatus.Snapshot, error) {
+	return nil, nil
+}
+
+func (reader *blockingQuotaReader) Refresh(ctx context.Context) error {
+	close(reader.started)
+	<-ctx.Done()
+	return ctx.Err()
+}
+
 type nodeUIStateStub struct {
 	selected domain.ComputerID
 	active   map[domain.ComputerID]domain.SessionID
@@ -109,6 +123,9 @@ func TestStatusKeepsAgreedNodeButtonsAndAddsLegacyQuotaTable(t *testing.T) {
 		t.Fatal(err)
 	}
 	status, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticMenuStatus})
+	if nodes.Surface == nil || status.Surface == nil || nodes.Surface.Text != status.Surface.Text || nodes.Surface.RichMarkdown != status.Surface.RichMarkdown {
+		t.Fatalf("nodes and status must show identical content: nodes=%#v status=%#v", nodes.Surface, status.Surface)
+	}
 	if err != nil || status.Surface == nil || !strings.Contains(status.Surface.Text, "| Сервер | Бэк | Израсх. | Остаток | Обновлено | Сброс |") ||
 		!strings.Contains(status.Surface.Text, "| 👑 Coordinator | codex | w 50%") {
 		t.Fatalf("status = %#v, err=%v", status, err)
@@ -120,6 +137,33 @@ func TestStatusKeepsAgreedNodeButtonsAndAddsLegacyQuotaTable(t *testing.T) {
 		if nodes.Surface.Rows[index][0].Action != status.Surface.Rows[index][0].Action || nodes.Surface.Rows[index][0].Label != status.Surface.Rows[index][0].Label {
 			t.Fatalf("status button %d differs: nodes=%#v status=%#v", index, nodes.Surface.Rows[index], status.Surface.Rows[index])
 		}
+	}
+}
+
+func TestStatusRefreshDoesNotBlockNavigationOnSlowProvider(t *testing.T) {
+	reader := &blockingQuotaReader{started: make(chan struct{})}
+	controller := newController(t, nil, &memorySessions{}, nil, nil, telegramcontroller.Options{
+		CreationEnvironment: &creationEnvironmentStub{computers: []sessioncreation.Computer{{ID: "local", Name: "Coordinator"}}},
+		Quotas:              reader,
+	})
+	result, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticRefreshStatus})
+	if err != nil || result.Surface == nil {
+		t.Fatalf("refresh result = %#v, err=%v", result, err)
+	}
+	select {
+	case <-reader.started:
+	case <-time.After(time.Second):
+		t.Fatal("quota refresh was not started")
+	}
+	started := time.Now()
+	if _, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticMenuBack}); err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(started); elapsed > 100*time.Millisecond {
+		t.Fatalf("navigation blocked behind quota refresh for %s", elapsed)
+	}
+	if err := controller.Close(context.Background()); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -217,7 +261,7 @@ func TestSessionAndArchiveSurfacesAreScopedToSelectedNode(t *testing.T) {
 	archive, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{
 		Kind: telegramcontroller.SemanticMenuArchive, UpdateID: 2,
 	})
-	if err != nil || archive.Surface == nil || len(archive.Surface.Rows) != 2 ||
+	if err != nil || archive.Surface == nil || len(archive.Surface.Rows) != 3 ||
 		archive.Surface.Rows[0][0].SessionID != localArchived.ID() {
 		t.Fatalf("local archive = %#v, err=%v", archive, err)
 	}
@@ -304,7 +348,7 @@ func TestNewOnUnavailableSelectedNodeOpensNodeMenuWithoutDraft(t *testing.T) {
 	nodes, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{
 		Kind: telegramcontroller.SemanticMenuNew, UpdateID: 1,
 	})
-	if err != nil || nodes.Surface == nil || nodes.Surface.Text != "Ноды" || ui.selected != "worker" {
+	if err != nil || nodes.Surface == nil || !strings.HasPrefix(nodes.Surface.Text, "Ноды\n") || !nodes.Surface.RichMarkdown || ui.selected != "worker" {
 		t.Fatalf("unavailable selection = %#v, selected=%q, err=%v", nodes, ui.selected, err)
 	}
 }
@@ -331,7 +375,7 @@ func TestCurrentCardOnUnavailableSelectedNodeOpensNodeMenu(t *testing.T) {
 
 	environment.computers = []sessioncreation.Computer{{ID: "local", Name: "Coordinator"}}
 	result, err := controller.ProjectCurrent(context.Background(), "")
-	if err != nil || result.Surface == nil || result.Surface.Text != "Ноды" || result.Card != nil {
+	if err != nil || result.Surface == nil || !strings.HasPrefix(result.Surface.Text, "Ноды\n") || !result.Surface.RichMarkdown || result.Card != nil {
 		t.Fatalf("unavailable current projection = %#v, err=%v", result, err)
 	}
 	if ui.selected != "worker" {
@@ -406,8 +450,8 @@ func TestProviderSettingsReadAndToggleOnlySelectedNode(t *testing.T) {
 	settings, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{
 		Kind: telegramcontroller.SemanticSettingsCategory, Choice: int(telegramsettingsview.CategoryProviders),
 	})
-	if err != nil || settings.Surface == nil || !strings.Contains(settings.Surface.Text, "claude: выключен, настроен") ||
-		!strings.Contains(settings.Surface.Text, "codex: выключен, не настроен") {
+	if err != nil || settings.Surface == nil || !strings.Contains(settings.Surface.Text, "| claude | выключен, настроен |") ||
+		!strings.Contains(settings.Surface.Text, "| codex | выключен, не настроен |") {
 		t.Fatalf("worker provider settings = %#v, err=%v", settings, err)
 	}
 	if _, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{

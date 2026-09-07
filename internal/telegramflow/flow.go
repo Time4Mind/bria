@@ -55,7 +55,10 @@ type MessageResult struct {
 	Surface  *SurfaceOutput
 }
 type SurfaceOutput struct {
-	Text                 string
+	Text string
+	// NativeSessionID rebinds only an existing session's carrier on receipt;
+	// the keyboard remains a global surface with signed selectable targets.
+	NativeSessionID      domain.SessionID
 	RichMarkdown         bool
 	Keyboard             telegramui.CardKeyboard
 	SelectableSessionIDs []domain.SessionID
@@ -72,6 +75,7 @@ type TerminalOutput struct {
 	Text string
 }
 type CardOutput struct {
+	ScreenEligible       bool
 	SessionID            domain.SessionID
 	Header               string
 	Footer               string
@@ -661,6 +665,7 @@ func PrepareCardRefresh(
 	}
 	card := CardOutput{
 		SessionID: sessionID, Header: header, Projection: projection,
+		ScreenEligible:       !input.Keyboard.Archived && !input.Keyboard.CloseConfirmation && !input.Keyboard.DeleteConfirmation,
 		OptionsExpanded:      optionsExpanded,
 		SelectableSessionIDs: append([]domain.SessionID(nil), selectableSessionIDs...),
 	}
@@ -750,9 +755,14 @@ func prepareCard(
 	} else {
 		sourceMessageID = 0
 	}
+	var screenSessionID string
+	if card.ScreenEligible {
+		screenSessionID = string(card.SessionID)
+	}
 	return Prepared{
 		OperationID: operationID,
 		Status: coordinator.Status{
+			ScreenSessionID: screenSessionID,
 			ConversationID:  conversationID,
 			Text:            card.Header + projection.Card.Pages[projection.Card.View.Page-1].Content + card.Footer,
 			CallbackQueryID: callbackQueryID,
@@ -773,6 +783,9 @@ func PrepareSurface(
 	surface SurfaceOutput,
 	presenter *telegrambridge.Presenter,
 ) (Prepared, error) {
+	if err := validateNativeSurface(surface); err != nil {
+		return Prepared{}, err
+	}
 	if operationID == "" || conversationID <= 0 || surface.Text == "" || presenter == nil || len(surface.Keyboard.Rows) == 0 {
 		return Prepared{}, errors.New("surface operation identity and semantic output are required")
 	}
@@ -832,7 +845,7 @@ func PrepareSurface(
 		return Prepared{}, err
 	}
 	copySurface := cloneSurfaceOutput(surface)
-	return Prepared{OperationID: operationID, Status: coordinator.Status{ConversationID: conversationID, Text: surface.Text, RichMarkdown: surface.RichMarkdown, CallbackQueryID: callbackQueryID, SourceMessageID: sourceMessageID}, Keyboard: coordinatorKeyboard(presentation.Markup), Presentation: presentation, Surface: &copySurface, Edit: edit}, nil
+	return Prepared{OperationID: operationID, Status: coordinator.Status{ScreenSessionID: string(surface.NativeSessionID), ConversationID: conversationID, Text: surface.Text, RichMarkdown: surface.RichMarkdown, CallbackQueryID: callbackQueryID, SourceMessageID: sourceMessageID}, Keyboard: coordinatorKeyboard(presentation.Markup), Presentation: presentation, Surface: &copySurface, Edit: edit}, nil
 }
 func prepareTerminal(
 	operationID string,
@@ -1346,6 +1359,14 @@ func finalizePrepared(
 			return err
 		}
 	}
+	if prepared.Surface != nil && prepared.Surface.NativeSessionID != "" {
+		if err := validateNativeSurface(*prepared.Surface); err != nil {
+			return err
+		}
+		if err := commitNativeCarrier(ctx, uiState, prepared.Surface.NativeSessionID, carrier); err != nil {
+			return err
+		}
+	}
 	if err := telegrampipeline.BindPresentation(ctx, registry, carrier, prepared.Presentation); err != nil {
 		return fmt.Errorf("bind confirmed Telegram presentation: %w", err)
 	}
@@ -1369,10 +1390,11 @@ func commitCard(ctx context.Context, uiState telegramstate.Store, output CardOut
 		// history. Preserve the independently maintained timeline and its prompt
 		// keys while updating only carrier and view state.
 		if current, ok := state.Card(output.SessionID); ok {
+			want.EmptyCloseEligible = current.EmptyCloseEligible
 			want.History = append([]string(nil), current.History...)
 			want.HistoryKeys = append([]string(nil), current.HistoryKeys...)
-		}
-		if len(want.History) == 0 {
+			want.HistoryKinds = append([]string(nil), current.HistoryKinds...)
+		} else {
 			want.History = make([]string, len(projected.Pages))
 			for index, page := range projected.Pages {
 				want.History[index] = page.Content
@@ -1426,6 +1448,9 @@ func (store *pendingStore) register(prepared Prepared) error {
 		return errors.New("prepared Telegram card and presentation identity do not match")
 	}
 	if surfacePrepared {
+		if err := validateNativeSurface(*prepared.Surface); err != nil {
+			return err
+		}
 		interaction := prepared.Surface.InteractionSessionID != "" || prepared.Surface.InteractionRequestID != ""
 		outboundResolution := prepared.Surface.OutboundOperationID != "" || prepared.Surface.OutboundUpdateID != 0
 		recovery := prepared.Surface.Recovery != nil

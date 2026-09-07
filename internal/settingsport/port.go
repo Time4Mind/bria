@@ -11,6 +11,7 @@ import (
 type Snapshot struct {
 	ContinueExisting          bool
 	ScreenEnabled             bool
+	ScreenCaptureLimitKiB     int
 	CardDetail                string
 	CardPageLimit             int
 	ShowTechnicalActions      bool
@@ -25,6 +26,7 @@ type Snapshot struct {
 	PreprocessingEnabled      bool
 	PreprocessingInstruction  string
 	SessionNamingEnabled      bool
+	StandbyEnabled            bool
 }
 
 type Preferences interface {
@@ -53,6 +55,16 @@ type CreationPreferences interface {
 type PreprocessingPreferences interface {
 	TogglePreprocessing(context.Context) error
 	SetPreprocessingInstruction(context.Context, string) error
+}
+
+type StandbyPreferences interface {
+	ToggleStandby(context.Context) error
+}
+
+// ScreenCapturePreferences controls the bounded native terminal capture.
+// It is optional so older composition implementations remain compatible.
+type ScreenCapturePreferences interface {
+	CycleScreenCaptureLimit(context.Context) error
 }
 
 type ProviderPreference struct {

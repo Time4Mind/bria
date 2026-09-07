@@ -36,6 +36,7 @@ type Collector struct {
 	tmuxPath      string
 	serverCreated bool
 	warmed        bool
+	kimi          *kimiClient
 }
 
 func New(nodeID domain.ComputerID, spec Spec) *Collector {
@@ -43,12 +44,23 @@ func New(nodeID domain.ComputerID, spec Spec) *Collector {
 	spec.Arguments = append([]string(nil), spec.Arguments...)
 	spec.Environment = append([]string(nil), spec.Environment...)
 	return &Collector{nodeID: nodeID, spec: spec,
+		kimi:   newKimiClient(spec.Environment),
 		socket: "bria-quota-" + strconv.Itoa(os.Getpid()) + "-" + fmt.Sprintf("%x", digest[:5])}
 }
 
 func (collector *Collector) Collect(ctx context.Context) (telegramstatus.Snapshot, error) {
 	if collector == nil || collector.spec.Executable == "" || collector.spec.Environment == nil {
 		return telegramstatus.Snapshot{}, errors.New("Claude quota collector is unavailable")
+	}
+	if collector.kimi != nil {
+		if snapshot, configured, err := collector.kimi.Collect(ctx, collector.nodeID); configured {
+			if err == nil {
+				return snapshot, nil
+			}
+			// A configured Kimi endpoint is authoritative; do not open a
+			// second interactive Claude session when its usage API fails.
+			return telegramstatus.Snapshot{}, err
+		}
 	}
 	if collector.tmuxPath == "" {
 		path, err := exec.LookPath("tmux")
@@ -113,6 +125,10 @@ func (collector *Collector) waitForPrompt(ctx context.Context) error {
 		if err == nil {
 			lower := strings.ToLower(pane)
 			if strings.Contains(lower, "trust this folder") || strings.Contains(lower, "is this a project you") {
+				// Claude's current trust screen selects "No, exit" by default.
+				// Move to the affirmative row before confirming; pressing Enter
+				// directly exits and leaves usage permanently unavailable.
+				_, _ = collector.tmux(ctx, "send-keys", "-t", target(), "Down")
 				_, _ = collector.tmux(ctx, "send-keys", "-t", target(), "C-m")
 			} else if strings.Contains(pane, "? for shortcuts") {
 				return nil

@@ -78,6 +78,8 @@ func TestClientRunsPersistentThreadAndReturnsOnlyCompletedFinalAnswer(t *testing
 	}
 
 	outcome, err := client.StartTurn(context.Background(), codex.TurnStartRequest{
+		Model:     "available-model",
+		Effort:    "high",
 		ThreadID:  "thread-1",
 		MessageID: "telegram:42:8",
 		Input:     []codex.TextInput{{Text: "Reply exactly."}},
@@ -113,7 +115,7 @@ func TestClientRunsPersistentThreadAndReturnsOnlyCompletedFinalAnswer(t *testing
 		`{"id":1,"method":"initialize","params":{"clientInfo":{"name":"bria","version":"0.1.0"},"capabilities":{}}}`,
 		`{"method":"initialized","params":{}}`,
 		`{"id":2,"method":"thread/start","params":{"cwd":"/tmp/bria-codex-probe","ephemeral":false,"approvalPolicy":"never","sandbox":"read-only"}}`,
-		`{"id":3,"method":"turn/start","params":{"threadId":"thread-1","input":[{"type":"text","text":"Reply exactly."}],"clientUserMessageId":"telegram:42:8","sandboxPolicy":{"type":"readOnly","networkAccess":false}}}`,
+		`{"id":3,"method":"turn/start","params":{"model":"available-model","effort":"high","threadId":"thread-1","input":[{"type":"text","text":"Reply exactly."}],"clientUserMessageId":"telegram:42:8","sandboxPolicy":{"type":"readOnly","networkAccess":false}}}`,
 	}, "\n") + "\n"
 	if output.String() != wantOutput {
 		t.Fatalf("wire output:\n%s\nwant:\n%s", output.String(), wantOutput)

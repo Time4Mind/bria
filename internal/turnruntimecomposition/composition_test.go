@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -139,22 +140,27 @@ type wiringRuntime struct {
 	preparedCalls int
 	currentCalls  int
 	final         string
+	input         sessionruntime.StructuredInput
+	callbacks     sessionruntime.TurnCallbacks
 }
 
-func (runtime *wiringRuntime) SubmitCurrentWithCallbacks(_ context.Context, _ domain.SessionID, _ sessionruntime.StructuredInput, callbacks sessionruntime.TurnCallbacks) error {
+func (runtime *wiringRuntime) SubmitCurrentWithCallbacks(_ context.Context, _ domain.SessionID, input sessionruntime.StructuredInput, callbacks sessionruntime.TurnCallbacks) error {
 	runtime.currentCalls++
+	runtime.input, runtime.callbacks = input, callbacks
 	if callbacks.OnAccepted != nil {
 		return callbacks.OnAccepted(callbacks.MessageID)
 	}
 	return nil
 }
 
-func (runtime *wiringRuntime) Submit(context.Context, domain.SessionID, string) (sessionruntime.TurnResult, error) {
+func (runtime *wiringRuntime) Submit(_ context.Context, _ domain.SessionID, text string) (sessionruntime.TurnResult, error) {
+	runtime.input = sessionruntime.StructuredInput{Text: text}
 	return sessionruntime.TurnResult{Final: runtime.final, TerminalStatus: sessionruntime.StatusCompleted}, nil
 }
 
 func (runtime *wiringRuntime) SubmitWithCallbacks(ctx context.Context, id domain.SessionID, text string, callbacks sessionruntime.TurnCallbacks) (sessionruntime.TurnResult, error) {
 	runtime.preparedCalls++
+	runtime.callbacks = callbacks
 	if callbacks.OnAccepted != nil {
 		if err := callbacks.OnAccepted(callbacks.MessageID); err != nil {
 			return sessionruntime.TurnResult{}, err
@@ -164,7 +170,97 @@ func (runtime *wiringRuntime) SubmitWithCallbacks(ctx context.Context, id domain
 }
 
 func (runtime *wiringRuntime) SubmitStructuredWithCallbacks(ctx context.Context, id domain.SessionID, input sessionruntime.StructuredInput, callbacks sessionruntime.TurnCallbacks) (sessionruntime.TurnResult, error) {
-	return runtime.SubmitWithCallbacks(ctx, id, input.Text, callbacks)
+	result, err := runtime.SubmitWithCallbacks(ctx, id, input.Text, callbacks)
+	runtime.input = input
+	return result, err
+}
+
+func TestOpenNeverInjectsLegacyModelPreferencesWithAndWithoutP4(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		name := "plain"
+		if enabled {
+			name = "p4"
+		}
+		t.Run(name, func(t *testing.T) {
+			root := wiringCanonicalTemp(t)
+			configuration, work := wiringConfiguration(t, root)
+			if !enabled {
+				configuration.Runtime = nil
+			}
+			client, err := telegram.NewClient("123:model-wiring", wiringHTTPClient(func(*http.Request) (*http.Response, error) { return nil, errors.New("unexpected request") }), telegram.Options{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			preferences, err := settings.OpenFileStore(filepath.Join(root, "settings.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			sessions, err := storage.OpenSessionStore(filepath.Join(root, "sessions.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx := context.Background()
+			const id = domain.SessionID("11111111-1111-4111-8111-111111111111")
+			starting, err := domain.NewStartingSessionAt(id, "model", "wiring-computer", domain.ProviderCodex, work, time.Now().UTC(), domain.SessionLifetimeNever)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, _, err := sessions.PutStartingIfAbsent(ctx, starting); err != nil {
+				t.Fatal(err)
+			}
+			ready, err := starting.ReadyAt(domain.ProviderBinding{Provider: domain.ProviderCodex, SessionID: "provider", Generation: 1}, time.Now().UTC())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := sessions.Replace(ctx, starting, ready); err != nil {
+				t.Fatal(err)
+			}
+			if err := sessions.SetModelPreferences(ctx, id, "gpt-5", "high"); err != nil {
+				t.Fatal(err)
+			}
+			runtime := &wiringRuntime{}
+			bundle, err := turnruntimecomposition.Open(turnruntimecomposition.Options{Configuration: configuration, Telegram: client, Settings: preferences, Sessions: sessions, Runtime: runtime})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if enabled {
+				_, err = bundle.Submitter.(turnprocessing.PreparedTurnSubmitter).SubmitPreparedWithCallbacks(ctx, id, turnprocessing.PreparedInput{Text: "prompt"}, sessionruntime.TurnCallbacks{MessageID: "message"})
+			} else {
+				_, err = bundle.Submitter.Submit(ctx, id, "prompt")
+			}
+			if err != nil || runtime.input.Model != "" || runtime.input.Effort != "" || runtime.input.Text != "prompt" {
+				t.Fatalf("provider input=%+v error=%v", runtime.input, err)
+			}
+			if enabled && runtime.callbacks.MessageID != "message" {
+				t.Fatal("prepared callback identity lost")
+			}
+			if !enabled {
+				structured := bundle.Submitter.(interface {
+					SubmitStructuredWithCallbacks(context.Context, domain.SessionID, sessionruntime.StructuredInput, sessionruntime.TurnCallbacks) (sessionruntime.TurnResult, error)
+				})
+				input := sessionruntime.StructuredInput{Text: "image prompt", Attachments: []sessionruntime.LocalAttachment{{Path: filepath.Join(work, "image.png")}}}
+				if _, err := structured.SubmitStructuredWithCallbacks(ctx, id, input, sessionruntime.TurnCallbacks{MessageID: "structured"}); err != nil {
+					t.Fatal(err)
+				}
+				if !reflect.DeepEqual(runtime.input, input) || runtime.callbacks.MessageID != "structured" {
+					t.Fatalf("structured input changed: %+v", runtime.input)
+				}
+			}
+			accepted := ""
+			callbacks := sessionruntime.TurnCallbacks{MessageID: "native-followup", OnAccepted: func(id string) error { accepted = id; return nil }}
+			input := sessionruntime.StructuredInput{Text: "follow-up", Attachments: []sessionruntime.LocalAttachment{{Path: filepath.Join(work, "image.png")}}}
+			current, ok := bundle.Submitter.(sessionruntime.CurrentTurnSubmitter)
+			if !ok {
+				t.Fatalf("current-turn capability lost: %T", bundle.Submitter)
+			}
+			if err := current.SubmitCurrentWithCallbacks(ctx, id, input, callbacks); err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(runtime.input, input) || runtime.currentCalls != 1 || runtime.callbacks.MessageID != callbacks.MessageID || accepted != callbacks.MessageID {
+				t.Fatalf("current-turn input/callbacks changed: input=%+v calls=%d accepted=%q", runtime.input, runtime.currentCalls, accepted)
+			}
+		})
+	}
 }
 
 func wiringConfiguration(t *testing.T, root string) (config.Config, string) {

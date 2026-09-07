@@ -120,21 +120,22 @@ func (m Model) Items() []Item {
 
 func isOpen(status domain.SessionStatus) bool {
 	switch status {
-	case domain.SessionStarting,
-		domain.SessionResuming,
-		domain.SessionReady,
+	case domain.SessionReady,
 		domain.SessionRunning,
-		domain.SessionStopping,
-		domain.SessionClosingAfterWork,
-		domain.SessionAwaitingRecovery,
-		domain.SessionClosing:
+		domain.SessionStopping:
 		return true
-	case domain.SessionArchived, domain.SessionResumeFailed:
+	case domain.SessionStarting, domain.SessionResuming, domain.SessionClosingAfterWork,
+		domain.SessionAwaitingRecovery, domain.SessionClosing, domain.SessionArchived, domain.SessionResumeFailed:
 		return false
 	default:
 		return false
 	}
 }
+
+// Selectable reports whether a session can receive user input now. Transient
+// recovery/starting states are intentionally excluded: showing them as the
+// active target creates a UI that accepts input only to reject it.
+func Selectable(status domain.SessionStatus) bool { return isOpen(status) }
 
 func (m Model) Session(id domain.SessionID) (domain.Session, bool) {
 	s, ok := m.items[id]

@@ -72,6 +72,7 @@ type Decision struct {
 type KeyboardButton struct{ Text, CallbackData string }
 type KeyboardMarkup [][]KeyboardButton
 type Status struct {
+	ScreenSessionID string
 	ConversationID  int64
 	Text            string
 	RichMarkdown    bool

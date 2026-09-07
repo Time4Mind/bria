@@ -209,7 +209,7 @@ func TestPreprocessingTimeoutFallsBackWithoutSecondCall(t *testing.T) {
 	}
 }
 
-func TestIngressBypassesOnlySlashCommandsWithAtMostThreeArguments(t *testing.T) {
+func TestIngressNativeCommandsNeverEnterPromptPreprocessing(t *testing.T) {
 	ready := readySession(t, "eeeeeeee-eeee-4eee-9eee-eeeeeeeeeeee", domain.ProviderCodex, t.TempDir(), "provider-e", 1)
 	preferences := &testPreferences{settings: settingsport.Snapshot{
 		ContinueExisting: true, CardDetail: "standard", CardPageLimit: 64, ShowTechnicalActions: true,
@@ -226,20 +226,14 @@ func TestIngressBypassesOnlySlashCommandsWithAtMostThreeArguments(t *testing.T) 
 	if _, err := controller.Handle(context.Background(), coordinator.Update{ID: 599, Kind: coordinator.UpdateMessage, ActorID: 42, ConversationID: 42, ConversationKind: "private", Text: "/use " + string(ready.ID())}); err != nil {
 		t.Fatal(err)
 	}
-	for index, text := range []string{"/model one two three", "/model one two three four"} {
+	for index, text := range []string{"/custom one two three", "/custom one two three four"} {
 		_, err := controller.Handle(context.Background(), coordinator.Update{ID: int64(600 + index), Kind: coordinator.UpdateMessage, ActorID: 42, ConversationID: 42, ConversationKind: "private", Text: text})
 		if err != nil {
 			t.Fatal(err)
 		}
 	}
-	if len(accepted) != 2 {
+	if len(accepted) != 0 {
 		t.Fatalf("accepted inputs = %d", len(accepted))
-	}
-	if state, err := promptpreprocess.DecodeState(accepted[0].Payload); err != nil || state.Enabled {
-		t.Fatalf("short slash state = %#v, %v", state, err)
-	}
-	if state, err := promptpreprocess.DecodeState(accepted[1].Payload); err != nil || !state.Enabled || state.Original != "/model one two three four" {
-		t.Fatalf("long slash state = %#v, %v", state, err)
 	}
 }
 
@@ -272,6 +266,15 @@ func TestVoiceTranscriptEntersDurablePreprocessingEnvelope(t *testing.T) {
 	voice.MediaFileID = "voice-file"
 	voice.MediaDownloadAllowed = true
 	mustStatus(t, controller, voice)
+	deadline := time.After(time.Second)
+	for accepted.Payload == nil {
+		select {
+		case <-deadline:
+			t.Fatal("voice preprocessing did not reach durable input")
+		default:
+			time.Sleep(time.Millisecond)
+		}
+	}
 	state, err := promptpreprocess.DecodeState(accepted.Payload)
 	if err != nil || !state.Enabled || state.Instruction != promptpreprocess.DefaultInstruction || state.Original != "контекст\n\nраспознанный текст" {
 		t.Fatalf("voice preprocessing state = %#v, %v", state, err)

@@ -226,6 +226,11 @@ func TestCloseAwaitingRecoveryAfterRestartArchivesWithoutTrackedProcess(t *testi
 	if _, inserted, err := store.PutStartingIfAbsent(context.Background(), starting); err != nil || !inserted {
 		t.Fatalf("persist starting = (%v, %v)", inserted, err)
 	}
+	// This regression exercises archival after failed resume, not deletion of
+	// a newly created empty session. Even a pending request must be retained.
+	if err := store.SetCardPrompt(context.Background(), starting.ID(), "restart-close-request", "🙋‍♂ pending request"); err != nil {
+		t.Fatal(err)
+	}
 	if err := store.Replace(context.Background(), starting, ready); err != nil {
 		t.Fatal(err)
 	}

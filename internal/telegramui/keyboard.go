@@ -11,7 +11,22 @@ const GlobalSurfaceID = "00000000-0000-0000-0000-000000000001"
 // Action identifies a copy-independent Telegram card action.
 type Action string
 
+// IsModelSelectorAction identifies session-bound model and effort picker controls.
+func IsModelSelectorAction(action Action) bool {
+	return action == ActionModelMenu || action == ActionModelChoice || action == ActionEffortMenu || action == ActionEffortChoice
+}
+
+// IsSessionSurfaceAction identifies controls bound to a session on a shared surface.
+func IsSessionSurfaceAction(action Action) bool {
+	return IsModelSelectorAction(action) || action == ActionNativeKey
+}
+
 const (
+	ActionModelMenu                            Action = "model_menu"
+	ActionNativeKey                            Action = "native_key"
+	ActionModelChoice                          Action = "model_choice"
+	ActionEffortMenu                           Action = "effort_menu"
+	ActionEffortChoice                         Action = "effort_choice"
 	ActionPagePrevious                         Action = "page_previous"
 	ActionPageLatest                           Action = "page_latest"
 	ActionPageNext                             Action = "page_next"
@@ -25,6 +40,7 @@ const (
 	ActionMenuNew                              Action = "menu_new"
 	ActionMenuArchive                          Action = "menu_archive"
 	ActionMenuStatus                           Action = "menu_status"
+	ActionRefreshStatus                        Action = "refresh_status"
 	ActionMenuSettings                         Action = "menu_settings"
 	ActionMenuBack                             Action = "menu_back"
 	ActionMenuNodes                            Action = "menu_nodes"
@@ -46,6 +62,7 @@ const (
 	ActionCreateClaude                         Action = "create_claude"
 	ActionSettingsCategory                     Action = "settings_category"
 	ActionSettingsScreen                       Action = "settings_screen"
+	ActionSettingsScreenCaptureLimit           Action = "settings_screen_capture_limit"
 	ActionSettingsDetail                       Action = "settings_detail"
 	ActionSettingsPageLimit                    Action = "settings_page_limit"
 	ActionSettingsContinueExisting             Action = "settings_continue_existing"
@@ -67,6 +84,7 @@ const (
 	ActionSettingsPreprocessingInstruction     Action = "settings_preprocessing_instruction"
 	ActionSettingsPreprocessingReset           Action = "settings_preprocessing_reset"
 	ActionSettingsSessionNaming                Action = "settings_session_naming"
+	ActionSettingsStandby                      Action = "settings_standby"
 	ActionAuthorizeCodex                       Action = "authorize_codex"
 	ActionAuthorizeClaude                      Action = "authorize_claude"
 	ActionInteractionChoice                    Action = "interaction_choice"
@@ -94,19 +112,19 @@ const (
 
 func IsGlobalAction(action Action) bool {
 	switch action {
-	case ActionMenuSessions, ActionMenuNew, ActionMenuArchive, ActionMenuStatus, ActionMenuNodes, ActionSelectNode,
+	case ActionMenuSessions, ActionMenuNew, ActionMenuArchive, ActionMenuStatus, ActionRefreshStatus, ActionMenuNodes, ActionSelectNode,
 		ActionMenuSettings, ActionMenuBack, ActionCreateSelectCodex, ActionCreateSelectClaude,
 		ActionCreateWorkdir, ActionCreateConfirm, ActionCreateCodex, ActionCreateClaude,
 		ActionCreateChoice, ActionCreatePrevious, ActionCreateFirst, ActionCreateNext,
 		ActionCreateUp, ActionCreatePick, ActionCreateDirectoryNew, ActionCreateBack, ActionCreateFresh,
-		ActionSettingsCategory, ActionSettingsScreen, ActionSettingsDetail, ActionSettingsPageLimit, ActionSettingsContinueExisting,
+		ActionSettingsCategory, ActionSettingsScreen, ActionSettingsScreenCaptureLimit, ActionSettingsDetail, ActionSettingsPageLimit, ActionSettingsContinueExisting,
 		ActionSettingsTechnicalActions, ActionSettingsBackgroundQuestions, ActionSettingsBackgroundErrors,
 		ActionSettingsArchiveRecommendations,
 		ActionSettingsDefaultProvider, ActionSettingsDefaultWorkdir, ActionSettingsClearCreationDefaults,
 		ActionSettingsLifetimeNever, ActionSettingsLifetime6Hours, ActionSettingsLifetime12Hours,
 		ActionSettingsLifetime24Hours, ActionSettingsLifetime48Hours,
 		ActionSettingsProviderCodex, ActionSettingsProviderClaude,
-		ActionSettingsPreprocessing, ActionSettingsPreprocessingInstruction, ActionSettingsPreprocessingReset, ActionSettingsSessionNaming,
+		ActionSettingsPreprocessing, ActionSettingsPreprocessingInstruction, ActionSettingsPreprocessingReset, ActionSettingsSessionNaming, ActionSettingsStandby,
 		ActionAuthorizeCodex, ActionAuthorizeClaude:
 		// Outbound resolution is also an owner-only global surface, but its
 		// exact operation/update identity is bound server-side by the presenter.
@@ -205,13 +223,14 @@ type CardKeyboard struct {
 // SessionRowSizes lets a later presentation layer choose row widths without
 // importing the historical implementation's fixed per-row limit.
 type CardKeyboardInput struct {
-	View              PageView
-	Working           bool
-	OptionsExpanded   bool
-	Archived          bool
-	CloseConfirmation bool
-	SessionRowSizes   []int
-	SessionLabels     []string
+	View               PageView
+	Working            bool
+	OptionsExpanded    bool
+	Archived           bool
+	CloseConfirmation  bool
+	DeleteConfirmation bool
+	SessionRowSizes    []int
+	SessionLabels      []string
 }
 
 // ProjectCardKeyboard returns the required row order and wrap-around page
@@ -224,8 +243,12 @@ func ProjectCardKeyboard(input CardKeyboardInput) (CardKeyboard, error) {
 		if input.Archived || input.Working {
 			return CardKeyboard{}, fmt.Errorf("close confirmation requires an idle open session")
 		}
+		label := "Архивировать"
+		if input.DeleteConfirmation {
+			label = "Удалить"
+		}
 		return CardKeyboard{Rows: []ButtonRow{{
-			{Action: ActionClose, Target: ButtonTarget{Choice: 1}, Label: "Архивировать"},
+			{Action: ActionClose, Target: ButtonTarget{Choice: 1}, Label: label},
 			{Action: ActionClose, Target: ButtonTarget{Choice: 2}, Label: "Отмена"},
 		}}}, nil
 	}

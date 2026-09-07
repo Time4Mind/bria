@@ -77,6 +77,7 @@ type Result struct {
 	AwaitingRecovery bool
 	Recovered        bool
 	Archived         bool
+	Deleted          bool
 	RestartAttempts  int
 	Session          domain.Session
 	Reconciliation   AcceptedTurnReconciliation
@@ -120,6 +121,17 @@ func (supervisor *Supervisor) Watch(ctx context.Context, sessionID domain.Sessio
 			return Result{Stale: true, AwaitingRecovery: current.Status() == domain.SessionAwaitingRecovery, Session: current}, nil
 		}
 		if loadErr != nil {
+			if receipt, ok := supervisor.store.(interface {
+				WasEmptySessionDeleted(context.Context, domain.SessionID, domain.ProviderBinding) (bool, error)
+			}); ok {
+				deleted, receiptErr := receipt.WasEmptySessionDeleted(ctx, sessionID, observed)
+				if receiptErr != nil {
+					return Result{}, receiptErr
+				}
+				if deleted {
+					return Result{Deleted: true, Stale: true}, nil
+				}
+			}
 			return Result{}, errors.Join(fmt.Errorf("wait for provider process: %w", err), fmt.Errorf("reread session after wait failure: %w", loadErr))
 		}
 		return Result{Session: current}, fmt.Errorf("wait for provider process: %w", err)
@@ -127,6 +139,17 @@ func (supervisor *Supervisor) Watch(ctx context.Context, sessionID domain.Sessio
 
 	current, err := supervisor.store.Load(ctx, sessionID)
 	if err != nil {
+		if receipt, ok := supervisor.store.(interface {
+			WasEmptySessionDeleted(context.Context, domain.SessionID, domain.ProviderBinding) (bool, error)
+		}); ok {
+			deleted, receiptErr := receipt.WasEmptySessionDeleted(ctx, sessionID, observed)
+			if receiptErr != nil {
+				return Result{}, receiptErr
+			}
+			if deleted {
+				return Result{Deleted: true, Stale: true}, nil
+			}
+		}
 		return Result{}, fmt.Errorf("load exited session: %w", err)
 	}
 	if !hasBinding(current, observed) || !supervisable(current.Status()) {
@@ -136,6 +159,17 @@ func (supervisor *Supervisor) Watch(ctx context.Context, sessionID domain.Sessio
 		return Result{Stale: true, AwaitingRecovery: true, Session: current}, nil
 	}
 	if current.Status() == domain.SessionClosing {
+		if store, ok := supervisor.store.(interface {
+			DeleteEmptyClosing(context.Context, domain.Session) (bool, error)
+		}); ok {
+			deleted, err := store.DeleteEmptyClosing(ctx, current)
+			if err != nil {
+				return supervisor.staleAfterConflict(ctx, current, err)
+			}
+			if deleted {
+				return Result{Deleted: true, Session: current}, nil
+			}
+		}
 		archived, buildErr := archiveExited(current, supervisor.now().UTC())
 		if buildErr != nil {
 			return Result{Session: current}, fmt.Errorf("archive exited closing session: %w", buildErr)

@@ -210,7 +210,7 @@ func (scheduler *MutationScheduler) Acquire(ctx context.Context, mutation Mutati
 			return nil, ErrStopped
 		}
 		delay := scheduler.delayLocked(now, mutation)
-		probe := scheduler.state.ProbeRequired
+		probe := scheduler.state.ProbeRequired && mutation.Priority != Interactive
 		if probe && scheduler.probeInFlight {
 			notify := scheduler.notify
 			scheduler.mu.Unlock()
@@ -389,7 +389,12 @@ func (scheduler *MutationScheduler) enterCooldownLocked(now time.Time, delay tim
 }
 
 func (scheduler *MutationScheduler) delayLocked(now time.Time, mutation Mutation) time.Duration {
-	delay := scheduler.state.CooldownUntil.Sub(now)
+	delay := time.Duration(0)
+	// Transport cooldowns throttle background work, but must not delay the
+	// user's callback card update; global and class windows still apply.
+	if mutation.Priority != Interactive {
+		delay = scheduler.state.CooldownUntil.Sub(now)
+	}
 	scheduler.pruneGlobalLocked(now)
 	if !scheduler.state.LastMutationAt.IsZero() {
 		if spacing := scheduler.state.LastMutationAt.Add(globalStartInterval).Sub(now); spacing > delay {

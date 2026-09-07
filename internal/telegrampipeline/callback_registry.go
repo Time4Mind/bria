@@ -148,6 +148,13 @@ func (registry *FileCallbackRegistry) Claim(ctx context.Context, claim CallbackC
 	registry.mu.Lock()
 	defer registry.mu.Unlock()
 	ownerSessionID, presentation, found := findFileCallbackPresentation(registry.state, claim, registry.now())
+	// Telegram client transports can expose a different message-id namespace
+	// than the Bot API used to persist the carrier.  The signed token and
+	// owner/chat checks still bind the callback; when the exact carrier misses,
+	// recover a unique live presentation by token within the same chat.
+	if !found {
+		ownerSessionID, presentation, found = findFileCallbackPresentationByToken(registry.state, claim, registry.now())
+	}
 	if !found {
 		return CallbackClaimResult{Outcome: ClaimStale}, nil
 	}
@@ -173,6 +180,24 @@ func (registry *FileCallbackRegistry) Claim(ctx context.Context, claim CallbackC
 	}
 	registry.state = next
 	return fileCallbackClaimResult(ClaimAccepted, ownerSessionID, presentation), nil
+}
+
+func findFileCallbackPresentationByToken(state fileCallbackRegistryState, claim CallbackClaim, now time.Time) (domain.SessionID, fileCallbackPresentation, bool) {
+	var owner domain.SessionID
+	var match fileCallbackPresentation
+	for sessionID, candidate := range state.Presentations {
+		if candidate.Carrier.ChatID != claim.Carrier.ChatID || candidate.ExpiresAt != claim.ExpiresAt || !candidate.ExpiresAt.After(now) {
+			continue
+		}
+		if _, ok := candidate.Tokens[claim.TokenID]; !ok {
+			continue
+		}
+		if owner != "" {
+			return "", fileCallbackPresentation{}, false
+		}
+		owner, match = sessionID, candidate
+	}
+	return owner, match, owner != ""
 }
 func fileCallbackClaimResult(outcome ClaimOutcome, ownerSessionID domain.SessionID, presentation fileCallbackPresentation) CallbackClaimResult {
 	return CallbackClaimResult{

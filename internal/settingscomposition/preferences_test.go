@@ -59,8 +59,8 @@ func TestPreferencesMutationsPersistAndLocalReloadSharesOneFile(t *testing.T) {
 			}
 		}},
 		{"questions", func() error { return preferences.ToggleBackgroundQuestions(context.Background()) }, func(t *testing.T, got settings.Settings) {
-			if got.NotifyBackgroundQuestions {
-				t.Fatal("questions remained enabled")
+			if !got.NotifyBackgroundQuestions {
+				t.Fatal("questions remained disabled")
 			}
 		}},
 		{"errors", func() error { return preferences.ToggleBackgroundErrors(context.Background()) }, func(t *testing.T, got settings.Settings) {
@@ -162,11 +162,11 @@ func TestPreferencesDriveTypedControllerAndDurableFile(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = controller.Close(context.Background()) })
 	result, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticSettingsCategory, Choice: int(telegramsettingsview.CategoryArchive)})
-	if err != nil || result.Surface == nil || !strings.Contains(result.Surface.Text, "Срок жизни сессий: 12h") {
+	if err != nil || result.Surface == nil || !strings.Contains(result.Surface.Text, "| Срок жизни сессий | 12h |") {
 		t.Fatalf("archive settings surface = (%#v, %v)", result, err)
 	}
 	result, err = controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticSettingsCategory, Choice: 1})
-	if err != nil || result.Surface == nil || !strings.Contains(result.Surface.Text, "Лимит страниц: 64") {
+	if err != nil || result.Surface == nil || !strings.Contains(result.Surface.Text, "| Лимит страниц | 64 |") {
 		t.Fatalf("card settings surface = (%#v, %v)", result, err)
 	}
 	for _, action := range []telegramcontroller.SemanticActionKind{
@@ -190,8 +190,21 @@ func TestPreferencesDriveTypedControllerAndDurableFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	persisted, err := reopened.Load(context.Background())
-	if err != nil || persisted.ContinueExisting || !persisted.ScreenEnabled || persisted.CardDetail != settings.CardDetailCompact || persisted.CardPageLimit != 128 || persisted.ShowTechnicalActions || persisted.NotifyBackgroundQuestions || persisted.NotifyBackgroundErrors || !persisted.ArchiveRecommendations || !persisted.SessionNamingEnabled || !persisted.PreprocessingEnabled || persisted.PreprocessingInstruction != "clean speech" || persisted.SessionLifetime != settings.Lifetime48Hours {
+	if err != nil || persisted.ContinueExisting || !persisted.ScreenEnabled || persisted.CardDetail != settings.CardDetailCompact || persisted.CardPageLimit != 128 || persisted.ShowTechnicalActions || !persisted.NotifyBackgroundQuestions || persisted.NotifyBackgroundErrors || !persisted.ArchiveRecommendations || !persisted.SessionNamingEnabled || !persisted.PreprocessingEnabled || persisted.PreprocessingInstruction != "clean speech" || persisted.SessionLifetime != settings.Lifetime48Hours {
 		t.Fatalf("durable controller settings = %+v, %v", persisted, err)
+	}
+}
+
+func TestCycleScreenCaptureLimit(t *testing.T) {
+	preferences := settingscomposition.Preferences{Store: settings.NewMemoryStore()}
+	for _, want := range []int{64, 86, 48} {
+		if err := preferences.CycleScreenCaptureLimit(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		got, err := preferences.Store.Load(context.Background())
+		if err != nil || got.ScreenCaptureLimitKiB != want {
+			t.Fatalf("capture limit = %d, want %d (err=%v)", got.ScreenCaptureLimitKiB, want, err)
+		}
 	}
 }
 

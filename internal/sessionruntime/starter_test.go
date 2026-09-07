@@ -112,7 +112,8 @@ func TestStarterCarriesVerifiedLocalAttachmentOutsidePromptText(t *testing.T) {
 	defer func() { _ = starter.Abort(context.Background(), request, binding) }()
 	path := filepath.Join(request.Workdir, "provider-photo.png")
 	result, err := starter.SubmitStructuredWithCallbacks(context.Background(), request.SessionID, sessionruntime.StructuredInput{
-		Text: "inspect",
+		Text:  "inspect",
+		Model: "available-model", Effort: "high",
 		Attachments: []sessionruntime.LocalAttachment{{
 			Path: path, Size: 3,
 			SHA256: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
@@ -966,6 +967,8 @@ func resumeRequest(request app.StartSessionRequest, prior domain.ProviderBinding
 }
 
 type parentMessage struct {
+	Model               string                               `json:"model"`
+	Effort              string                               `json:"effort"`
 	Protocol            int                                  `json:"protocol"`
 	Type                string                               `json:"type"`
 	RequestID           string                               `json:"request_id"`
@@ -980,6 +983,12 @@ func TestSessionRuntimeHelperProcess(t *testing.T) {
 		return
 	}
 	mode := os.Args[len(os.Args)-1]
+	if mode == "startup-diagnostic" {
+		fmt.Fprintln(os.Stderr, "private-credential=must-never-escape")
+		fmt.Fprintln(os.Stderr, "bria-native-startup:bypass_forbidden")
+		fmt.Fprintln(os.Stderr, strings.Repeat("private", 20000))
+		return
+	}
 	behavior := "good"
 	if mode == "dynamic" {
 		if raw, err := os.ReadFile("behavior"); err == nil {
@@ -1041,10 +1050,14 @@ func TestSessionRuntimeHelperProcess(t *testing.T) {
 	if mode == "credential-environment" {
 		providerSessionID = os.Getenv(sessionruntime.EnvironmentProviderCredentialFile)
 	}
-	emit(map[string]any{
+	ready := map[string]any{
 		"protocol": 1, "type": "ready", "provider_session_id": providerSessionID,
 		"readiness": "protocol", "authentication": authentication,
-	})
+	}
+	if mode == "native-model" {
+		ready["model"] = "startup-model"
+	}
+	emit(ready)
 	if mode == "exit-after-ready" {
 		time.Sleep(time.Millisecond)
 		return
@@ -1079,6 +1092,15 @@ func TestSessionRuntimeHelperProcess(t *testing.T) {
 			os.Exit(33)
 		}
 		switch message.Type {
+		case "native_control":
+			if mode == "native-hang" {
+				continue
+			}
+			if mode == "native-stale" {
+				emit(map[string]any{"protocol": 1, "type": "native_snapshot", "request_id": message.RequestID, "text": "current screen", "hash": strings.Repeat("b", 64), "error_code": "stale"})
+				continue
+			}
+			emit(map[string]any{"protocol": 1, "type": "native_snapshot", "request_id": message.RequestID, "text": "native model screen", "hash": strings.Repeat("a", 64), "model": "actual-model", "interactive": true})
 		case "close":
 			if mode == "ignore-close" {
 				for {
@@ -1104,7 +1126,7 @@ func TestSessionRuntimeHelperProcess(t *testing.T) {
 				rootRequestID = message.RequestID
 				emit(map[string]any{"protocol": 1, "type": "accepted", "request_id": message.RequestID, "message_id": message.MessageID})
 			case "structured":
-				if message.Text != "inspect" || message.MessageID != "telegram:photo:1" || len(message.Attachments) != 1 ||
+				if message.Text != "inspect" || message.Model != "available-model" || message.Effort != "high" || message.MessageID != "telegram:photo:1" || len(message.Attachments) != 1 ||
 					!filepath.IsAbs(message.Attachments[0].Path) || filepath.Base(message.Attachments[0].Path) != "provider-photo.png" ||
 					strings.Contains(message.Text, message.Attachments[0].Path) {
 					os.Exit(41)

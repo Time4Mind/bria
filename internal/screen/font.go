@@ -44,6 +44,9 @@ func drawGlyph(canvas *image.Gray, x, y int, character rune, ink color.Gray) {
 	character = unicode.ToUpper(character)
 	glyph, found := glyphs[character]
 	if !found {
+		glyph, found = nativeGlyphs[character]
+	}
+	if !found {
 		glyph = glyphs['?']
 	}
 	for row, bits := range glyph {

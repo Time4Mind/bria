@@ -65,10 +65,10 @@ func (service *Service) Begin(ctx context.Context, session domain.Session, messa
 		service.mu.Unlock()
 	}
 	return func(providerName string) {
-		if name := Normalize(providerName); name != "" {
-			service.apply(ctx, session.ID(), name, domain.SessionNameProvider)
-			return
-		}
+		// Provider titles are CLI-internal metadata, never user-facing Bria
+		// session names.  Naming is either the directory fallback or the
+		// optional cheap-model result.
+		_ = providerName
 		if generated == nil {
 			return
 		}
@@ -141,6 +141,13 @@ func Normalize(value string) string {
 		})
 		if word == "" {
 			continue
+		}
+		// The user-facing automatic name is deliberately ASCII/English.  Do
+		// not leak a provider's localized title into the card header.
+		for _, character := range word {
+			if !(character >= 'A' && character <= 'Z') && !(character >= 'a' && character <= 'z') && !(character >= '0' && character <= '9') {
+				return ""
+			}
 		}
 		remaining := domain.MaxSessionNameRunes - runes
 		if len(result) > 0 {

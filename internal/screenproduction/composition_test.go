@@ -19,7 +19,7 @@ func (function photoSenderFunc) SendPhoto(ctx context.Context, request telegram.
 	return function(ctx, request)
 }
 
-func TestTypedEventsReachVirtualScreenButPhotoRequiresGlobalSettingAndExactReceipt(t *testing.T) {
+func TestTypedEventsNeverSendIndependentPhotosEvenWhenScreenEnabled(t *testing.T) {
 	preferences := settings.NewMemoryStore()
 	store, err := screen.New(screen.Options{MaxSessions: 4, MaxLines: 20, MaxColumns: 80, MaxEventBytes: 1024, MaxPNGBytes: 1 << 20})
 	if err != nil {
@@ -56,13 +56,13 @@ func TestTypedEventsReachVirtualScreenButPhotoRequiresGlobalSettingAndExactRecei
 	if err := composition.ObserveRuntimeEvent(context.Background(), enabled); err != nil {
 		t.Fatalf("ObserveRuntimeEvent(enabled) error = %v", err)
 	}
-	if len(requests) != 1 || requests[0].ChatID != 42 || requests[0].ContentType != "image/png" || len(requests[0].Content) == 0 {
-		t.Fatalf("photo requests = %#v", requests)
+	if len(requests) != 0 {
+		t.Fatalf("enabled Screen leaked %d independent event photos", len(requests))
 	}
 	if err := composition.ObserveRuntimeEvent(context.Background(), enabled); err != nil {
 		t.Fatalf("ObserveRuntimeEvent(replay) error = %v", err)
 	}
-	if len(requests) != 1 {
+	if len(requests) != 0 {
 		t.Fatalf("replayed event sent %d photos", len(requests))
 	}
 }

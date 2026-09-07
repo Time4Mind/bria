@@ -9,7 +9,7 @@ import (
 func TestPaginateSemanticHistoryKeepsOnlyConfiguredLatestWindow(t *testing.T) {
 	items := make([]string, 40)
 	for index := range items {
-		items[index] = strings.Repeat(string(rune('a'+index%26)), 3200)
+		items[index] = strings.Repeat(string(rune('a'+index%26)), 3000)
 	}
 	pages := paginateSemanticHistory(items, 32)
 	if len(pages) != 32 {
@@ -28,7 +28,7 @@ func TestPaginateSemanticHistorySplitsOversizedUTF8ItemsAtValidBoundaries(t *tes
 	}
 	joined := ""
 	for index, page := range pages {
-		if len(page.Content) > 3200 || !utf8.ValidString(page.Content) {
+		if len(page.Content) > 3000 || !utf8.ValidString(page.Content) {
 			t.Fatalf("page %d is invalid: bytes=%d", index, len(page.Content))
 		}
 		joined += page.Content

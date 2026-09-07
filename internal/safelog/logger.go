@@ -515,6 +515,8 @@ func sanitizeEvent(event Event) Event {
 			}
 			if (!numericStructuredField(key) && sensitiveKey(key) && !safeOpaqueField(key)) || !knownSafeField {
 				sanitized[safeKey] = "[REDACTED]"
+			} else if strings.EqualFold(key, "model_evidence") && event.Fields[key] != "" && event.Fields[key] != "codex_cli_header" {
+				sanitized[safeKey] = "[REDACTED]"
 			} else if numericStructuredField(key) && !safeNonNegativeDecimal(event.Fields[key]) {
 				// Timing and load counters are numeric by contract. Do not preserve
 				// signed, decimal, or overflowing caller values as labels.
@@ -546,7 +548,7 @@ func safeStructuredField(key string) bool {
 	case "action", "arch", "attempt", "component", "computer_id", "count",
 		"duration_ms", "entity_kind", "exit_code", "generation", "operation",
 		"os", "previous_state", "provider", "queue_depth", "result", "revision",
-		"message_id", "model", "session_id", "signal", "stage", "state", "status", "term", "version",
+		"message_id", "model", "model_evidence", "session_id", "signal", "stage", "state", "status", "term", "version",
 		"queue_wait_ms", "provider_accept_ms", "first_event_ms", "total_ms",
 		"http_to_headers_ms", "http_total_ms", "retry_delay_ms", "bytes",
 		"oldest_age_ms", "active_turns", "unknown_count", "failed_count":
@@ -558,7 +560,7 @@ func safeStructuredField(key string) bool {
 
 func safeOpaqueField(key string) bool {
 	switch strings.ToLower(key) {
-	case "message_id", "model", "stage":
+	case "message_id", "model", "model_evidence", "stage":
 		return true
 	default:
 		return false

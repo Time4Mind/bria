@@ -40,15 +40,22 @@ type Page struct {
 
 // Card is the durable presentation state for one logical session.
 type Card struct {
-	SessionID       domain.SessionID `json:"session_id"`
-	Carrier         Carrier          `json:"carrier"`
-	Page            Page             `json:"page"`
-	OptionsExpanded bool             `json:"options_expanded"`
-	History         []string         `json:"history,omitempty"`
+	// EmptyCloseEligible is proof that this locally created session has never
+	// received content. Missing legacy evidence is deliberately false.
+	EmptyCloseEligible bool             `json:"empty_close_eligible,omitempty"`
+	SessionID          domain.SessionID `json:"session_id"`
+	Carrier            Carrier          `json:"carrier"`
+	Page               Page             `json:"page"`
+	OptionsExpanded    bool             `json:"options_expanded"`
+	History            []string         `json:"history,omitempty"`
 	// HistoryKeys is positionally aligned with History. Empty keys identify
 	// append-only provider output; a prompt message ID lets its visible status
 	// be replaced without duplicating the user's text.
 	HistoryKeys []string `json:"history_keys,omitempty"`
+	// HistoryKinds is positionally aligned with History. "tool" identifies an
+	// exact provider tool event; empty values are ordinary history. A missing
+	// legacy slice means every retained item is ordinary.
+	HistoryKinds []string `json:"history_kinds,omitempty"`
 }
 
 // State is the complete Telegram UI state for the configured owner chat.
@@ -83,6 +90,7 @@ func (s State) Clone() State {
 	for id, card := range s.Cards {
 		card.History = append([]string(nil), card.History...)
 		card.HistoryKeys = append([]string(nil), card.HistoryKeys...)
+		card.HistoryKinds = append([]string(nil), card.HistoryKinds...)
 		clone.Cards[id] = card
 	}
 	return clone
@@ -151,6 +159,9 @@ func (s State) Validate() error {
 		if len(card.HistoryKeys) != 0 && len(card.HistoryKeys) != len(card.History) {
 			return fmt.Errorf("card %q history keys are not aligned", id)
 		}
+		if len(card.HistoryKinds) != 0 && len(card.HistoryKinds) != len(card.History) {
+			return fmt.Errorf("card %q history kinds are not aligned", id)
+		}
 		seenKeys := make(map[string]struct{}, len(card.HistoryKeys))
 		for _, key := range card.HistoryKeys {
 			if key == "" {
@@ -167,6 +178,11 @@ func (s State) Validate() error {
 		for _, item := range card.History {
 			if item == "" || !utf8.ValidString(item) || len(item) > 16384 {
 				return fmt.Errorf("card %q history item is invalid", id)
+			}
+		}
+		for _, kind := range card.HistoryKinds {
+			if kind != "" && kind != "tool" && kind != "thinking" && kind != "final" && kind != "prompt" && kind != "commentary" && kind != "question" {
+				return fmt.Errorf("card %q history kind is invalid", id)
 			}
 		}
 	}

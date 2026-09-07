@@ -15,7 +15,7 @@ import (
 
 func TestDefaultsAreProductDefaults(t *testing.T) {
 	s := Default()
-	if !s.ContinueExisting || s.ScreenEnabled || !s.ShowTechnicalActions || !s.NotifyBackgroundQuestions || !s.NotifyBackgroundErrors || s.ArchiveRecommendations || s.PreprocessingEnabled || s.PreprocessingInstruction != "" || s.SessionNamingEnabled {
+	if !s.ContinueExisting || s.ScreenEnabled || !s.ShowTechnicalActions || s.NotifyBackgroundQuestions || !s.NotifyBackgroundErrors || s.ArchiveRecommendations || s.PreprocessingEnabled || s.PreprocessingInstruction != "" || s.SessionNamingEnabled {
 		t.Fatalf("unexpected boolean defaults: %+v", s)
 	}
 	if s.CardDetail != CardDetailStandard || s.CardPageLimit != DefaultCardPages || s.SessionLifetime != Lifetime12Hours || s.VoiceRecognition != VoiceParakeet || s.QueueLimit != DefaultQueueLimit || s.RetryUndeliveredFiles {
@@ -116,8 +116,10 @@ func TestDecodeRequiresOneStrictCompleteDocument(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Decode() error = %v", err)
 	}
-	if snapshot.Revision != 7 || !reflect.DeepEqual(snapshot.Settings, Default()) {
-		t.Fatalf("Decode() = %#v, want revision 7 and product defaults", snapshot)
+	legacyExpected := Default()
+	legacyExpected.NotifyBackgroundQuestions = true // Explicit persisted legacy preference is preserved.
+	if snapshot.Revision != 7 || !reflect.DeepEqual(snapshot.Settings, legacyExpected) {
+		t.Fatalf("Decode() = %#v, want revision 7 and preserved legacy preferences", snapshot)
 	}
 	v2 := strings.Replace(document, `"version": 1`, `"version": 2, "card_page_limit": 128`, 1)
 	v2Snapshot, err := Decode(strings.NewReader(v2))
@@ -259,7 +261,7 @@ func TestEffectiveExposesCompositionContract(t *testing.T) {
 	effective := Default().Effective()
 	if effective.QueueLimit != DefaultQueueLimit || effective.SessionLifetime != Lifetime12Hours ||
 		effective.ScreenEnabled || effective.CardDetail != CardDetailStandard ||
-		!effective.NotifyBackgroundQuestions || !effective.NotifyBackgroundErrors ||
+		effective.NotifyBackgroundQuestions || !effective.NotifyBackgroundErrors ||
 		!effective.NotifyBackgroundCompletion || !effective.ShowTechnicalActions {
 		t.Fatalf("Effective() = %#v, want all contract defaults", effective)
 	}

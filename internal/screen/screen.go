@@ -307,7 +307,7 @@ func renderPNG(lines []string, options Options) ([]byte, int, int, error) {
 	white := color.Gray{Y: 255}
 	black := color.Gray{Y: 0}
 	for index := range canvas.Pix {
-		canvas.Pix[index] = white.Y
+		canvas.Pix[index] = black.Y
 	}
 	for row, line := range lines {
 		if row >= options.MaxLines {
@@ -317,7 +317,7 @@ func renderPNG(lines []string, options Options) ([]byte, int, int, error) {
 			if column >= options.MaxColumns {
 				break
 			}
-			drawGlyph(canvas, imagePadding+column*cellWidth, imagePadding+row*cellHeight, character, black)
+			drawGlyph(canvas, imagePadding+column*cellWidth, imagePadding+row*cellHeight, character, white)
 		}
 	}
 	buffer := &boundedBuffer{limit: options.MaxPNGBytes}

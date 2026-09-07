@@ -176,6 +176,7 @@ func TestCoordinatorCheckpointStorePreservesCallbackQueryID(t *testing.T) {
 	want := fullCheckpoint(coordinator.OutboundPrepared)
 	want.Outbound.Status.CallbackQueryID = "callback-opaque"
 	want.Outbound.Status.RichMarkdown = true
+	want.Outbound.Status.ScreenSessionID = "123e4567-e89b-12d3-a456-426614174000"
 	stored, err := store.Save(context.Background(), 0, want)
 	if err != nil {
 		t.Fatalf("Save() error = %v", err)

@@ -56,6 +56,28 @@ func TestExistingAdapterMessagesRemainWireCompatible(t *testing.T) {
 	}
 }
 
+func TestStructuredTranscriptEventRoundTripsWithoutChangingLegacyProjection(t *testing.T) {
+	want := AdapterMessage{
+		Protocol: Version, Type: TypeEvent, RequestID: "turn-1", Kind: "tool", Text: "Read",
+		EventMetadata: &EventMetadata{ItemID: "tool-1", Name: "Read", Arguments: `{"path":"README.md"}`, Result: "ok", Status: "completed"},
+	}
+	line, err := EncodeAdapterLine(want, Limits{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := DecodeAdapterLine(line, Limits{})
+	if err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("structured event = %#v, %v; want %#v", got, err, want)
+	}
+	if got.Kind != "tool" || got.Text != "Read" {
+		t.Fatalf("legacy projection changed: %#v", got)
+	}
+	thinking := AdapterMessage{Protocol: Version, Type: TypeEvent, RequestID: "turn-1", Kind: "thinking", Text: "checking"}
+	if _, err := EncodeAdapterLine(thinking, Limits{}); err != nil {
+		t.Fatalf("thinking event: %v", err)
+	}
+}
+
 func TestDurableMessageIdentityRoundTripsOnlyOnSubmitAcceptance(t *testing.T) {
 	parent := ParentMessage{Protocol: 1, Type: TypeSubmit, RequestID: "turn-1", MessageID: "telegram:chat:42", Text: "hello"}
 	line, err := EncodeParentLine(parent, Limits{})

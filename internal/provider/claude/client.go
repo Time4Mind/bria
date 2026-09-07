@@ -87,7 +87,18 @@ type UserReplayEvent struct {
 type AssistantEvent struct {
 	Text        string
 	Tools       []string
+	Blocks      []TranscriptBlock
 	FailureCode FailureCode
+}
+
+type TranscriptBlock struct {
+	Kind      string
+	Text      string
+	ItemID    string
+	Name      string
+	Arguments string
+	Result    string
+	Status    string
 }
 
 type ResultEvent struct {
@@ -111,6 +122,7 @@ type Event struct {
 	Init        *InitEvent
 	UserReplay  *UserReplayEvent
 	Assistant   *AssistantEvent
+	ToolResults []TranscriptBlock
 	Permission  *PermissionRequest
 	Result      *ResultEvent
 }
@@ -594,12 +606,14 @@ func decodeEvent(line []byte) (Event, phase, error) {
 				UserReplay: &UserReplayEvent{Text: text, MessageID: raw.UUID},
 			}, phaseReplay, nil
 		}
-		if !validContentBlocks(*raw.Message.Content) {
+		toolResults, valid := internalUserContent(*raw.Message.Content)
+		if !valid {
 			return Event{}, phaseTurn, ErrMalformedEvent
 		}
 		return Event{
-			Kind:      EventInternalUser,
-			SessionID: raw.SessionID,
+			Kind:        EventInternalUser,
+			SessionID:   raw.SessionID,
+			ToolResults: toolResults,
 		}, phaseTurn, nil
 	case "assistant":
 		var raw assistantWireEvent
@@ -608,17 +622,18 @@ func decodeEvent(line []byte) (Event, phase, error) {
 			return Event{}, phaseTurn, ErrMalformedEvent
 		}
 		failure := safeFailureCode(raw.Error)
-		text, tools, valid := assistantContent(*raw.Message.Content)
+		text, tools, blocks, valid := assistantContent(*raw.Message.Content)
 		if !valid {
 			return Event{}, phaseTurn, ErrMalformedEvent
 		}
 		if failure != FailureNone {
 			text = ""
+			blocks = nil
 		}
 		return Event{
 			Kind:      EventAssistant,
 			SessionID: raw.SessionID,
-			Assistant: &AssistantEvent{Text: text, Tools: tools, FailureCode: failure},
+			Assistant: &AssistantEvent{Text: text, Tools: tools, Blocks: blocks, FailureCode: failure},
 		}, phaseTurn, nil
 	case "control_request":
 		var raw controlRequestWire
@@ -680,38 +695,74 @@ func replayText(content []contentWire) (string, bool) {
 	return *text, true
 }
 
-func validContentBlocks(content []contentWire) bool {
+func internalUserContent(content []contentWire) ([]TranscriptBlock, bool) {
 	if len(content) == 0 {
-		return false
+		return nil, false
 	}
+	var results []TranscriptBlock
 	for _, block := range content {
 		if blank(block.Type) {
-			return false
+			return nil, false
 		}
+		if block.Type != "tool_result" {
+			continue
+		}
+		if blank(block.ToolUseID) {
+			return nil, false
+		}
+		status := "completed"
+		if block.IsError {
+			status = "failed"
+		}
+		results = append(results, TranscriptBlock{Kind: "tool", ItemID: block.ToolUseID, Result: displayContent(block.Content), Status: status})
 	}
-	return true
+	return results, true
 }
 
-func assistantContent(content []contentWire) (text string, tools []string, valid bool) {
+func assistantContent(content []contentWire) (text string, tools []string, blocks []TranscriptBlock, valid bool) {
 	var texts []string
 	for _, block := range content {
 		if blank(block.Type) {
-			return "", nil, false
+			return "", nil, nil, false
 		}
 		switch block.Type {
 		case "text":
 			var text *string
 			if len(block.Text) == 0 || json.Unmarshal(block.Text, &text) != nil || text == nil {
-				return "", nil, false
+				return "", nil, nil, false
 			}
 			texts = append(texts, *text)
+			blocks = append(blocks, TranscriptBlock{Kind: "commentary", Text: *text})
+		case "thinking":
+			if block.Thinking != "" {
+				blocks = append(blocks, TranscriptBlock{Kind: "thinking", Text: block.Thinking})
+			}
 		case "tool_use":
 			if !blank(block.Name) {
 				tools = append(tools, block.Name)
+				blocks = append(blocks, TranscriptBlock{
+					Kind: "tool", ItemID: block.ID, Name: block.Name,
+					Arguments: displayContent(block.Input), Status: "in_progress",
+				})
 			}
 		}
 	}
-	return strings.Join(texts, ""), tools, true
+	return strings.Join(texts, ""), tools, blocks, true
+}
+
+func displayContent(raw json.RawMessage) string {
+	if len(raw) == 0 || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return ""
+	}
+	var text string
+	if json.Unmarshal(raw, &text) == nil {
+		return text
+	}
+	var compact bytes.Buffer
+	if json.Compact(&compact, raw) != nil {
+		return ""
+	}
+	return compact.String()
 }
 
 func safeFailureCode(code string) FailureCode {
@@ -775,9 +826,15 @@ type initWireEvent struct {
 }
 
 type contentWire struct {
-	Type string          `json:"type"`
-	Text json.RawMessage `json:"text"`
-	Name string          `json:"name"`
+	Type      string          `json:"type"`
+	Text      json.RawMessage `json:"text"`
+	Name      string          `json:"name"`
+	ID        string          `json:"id"`
+	Thinking  string          `json:"thinking"`
+	Input     json.RawMessage `json:"input"`
+	ToolUseID string          `json:"tool_use_id"`
+	Content   json.RawMessage `json:"content"`
+	IsError   bool            `json:"is_error"`
 }
 
 type messageWire struct {

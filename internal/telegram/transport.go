@@ -122,6 +122,7 @@ type Message struct {
 	Video          *Video                `json:"video,omitempty"`
 	Document       *Document             `json:"document,omitempty"`
 	ReplyMarkup    *InlineKeyboardMarkup `json:"reply_markup,omitempty"`
+	RichMessage    json.RawMessage       `json:"rich_message,omitempty"`
 }
 
 type CallbackQuery struct {
@@ -160,10 +161,12 @@ type SendMessageRequest struct {
 }
 
 type InputRichMessage struct {
-	Markdown string `json:"markdown"`
+	Markdown string                  `json:"markdown"`
+	Media    []InputRichMessageMedia `json:"media,omitempty"`
 }
 
 type SendRichMessageRequest struct {
+	PhotoPNG    []byte                `json:"-"`
 	ChatID      ChatID                `json:"chat_id"`
 	RichMessage InputRichMessage      `json:"rich_message"`
 	ReplyMarkup *InlineKeyboardMarkup `json:"reply_markup,omitempty"`
@@ -171,6 +174,7 @@ type SendRichMessageRequest struct {
 }
 
 type EditMessageTextRequest struct {
+	PhotoPNG    []byte                `json:"-"`
 	ChatID      ChatID                `json:"chat_id"`
 	MessageID   MessageID             `json:"message_id"`
 	Text        string                `json:"text,omitempty"`
@@ -558,6 +562,9 @@ func (client *Client) SendMessage(
 }
 
 func (client *Client) SendRichMessage(ctx context.Context, request SendRichMessageRequest) (Message, error) {
+	if err := validateRichPhoto(request.RichMessage, request.PhotoPNG); err != nil {
+		return Message{}, err
+	}
 	if request.ChatID == 0 {
 		return Message{}, errors.New("Telegram rich send chat id is required")
 	}
@@ -570,7 +577,11 @@ func (client *Client) SendRichMessage(ctx context.Context, request SendRichMessa
 	var message Message
 	var err error
 	for {
-		err = client.call(ctx, "sendRichMessage", request, &message)
+		if len(request.PhotoPNG) > 0 {
+			err = client.callRichPhoto(ctx, "sendRichMessage", request.ChatID, 0, request.RichMessage, request.ReplyMarkup, request.Priority, request.PhotoPNG, &message)
+		} else {
+			err = client.call(ctx, "sendRichMessage", request, &message)
+		}
 		if err == nil || client.scheduler == nil || !isRateLimited(err) || ctx.Err() != nil {
 			break
 		}
@@ -758,6 +769,14 @@ func (client *Client) EditMessageText(
 	ctx context.Context,
 	request EditMessageTextRequest,
 ) (Message, error) {
+	if len(request.PhotoPNG) > 0 && request.RichMessage == nil {
+		return Message{}, errors.New("Telegram photo edit requires rich message")
+	}
+	if request.RichMessage != nil {
+		if err := validateRichPhoto(*request.RichMessage, request.PhotoPNG); err != nil {
+			return Message{}, err
+		}
+	}
 	if request.ChatID == 0 {
 		return Message{}, errors.New("Telegram edit chat id is required")
 	}
@@ -775,7 +794,12 @@ func (client *Client) EditMessageText(
 	}
 	var message Message
 	for {
-		err := client.call(ctx, "editMessageText", request, &message)
+		var err error
+		if len(request.PhotoPNG) > 0 {
+			err = client.callRichPhoto(ctx, "editMessageText", request.ChatID, request.MessageID, *request.RichMessage, request.ReplyMarkup, request.Priority, request.PhotoPNG, &message)
+		} else {
+			err = client.call(ctx, "editMessageText", request, &message)
+		}
 		if err == nil {
 			break
 		}

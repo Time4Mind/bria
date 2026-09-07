@@ -9,6 +9,7 @@ import (
 	"errors"
 	"io"
 	"os/exec"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -110,6 +111,15 @@ func (service *Service) Run(ctx context.Context) error {
 	}
 }
 
+// Refresh performs an on-demand bounded poll for the Status/Nodes buttons.
+func (service *Service) Refresh(ctx context.Context) error {
+	if service == nil {
+		return errors.New("quota service is unavailable")
+	}
+	service.collect(ctx)
+	return ctx.Err()
+}
+
 func (service *Service) collect(ctx context.Context) {
 	for _, command := range service.commands {
 		timeout := 10 * time.Second
@@ -145,30 +155,76 @@ func (service *Service) closeClaude() {
 }
 
 func collectCodex(ctx context.Context, nodeID domain.ComputerID, specification Command) (telegramstatus.Snapshot, error) {
-	arguments := append(append([]string(nil), specification.Arguments...), "app-server", "--stdio")
+	arguments := append([]string(nil), specification.Arguments...)
+	if !slices.Contains(arguments, "app-server") {
+		arguments = append(arguments, "app-server")
+	}
+	if !slices.Contains(arguments, "--stdio") {
+		arguments = append(arguments, "--stdio")
+	}
 	command := exec.CommandContext(ctx, specification.Executable, arguments...)
 	command.Env = append([]string(nil), specification.Environment...)
 	if err := processgroup.Configure(command); err != nil {
 		return telegramstatus.Snapshot{}, err
 	}
 	command.Cancel = func() error { return processgroup.KillTree(command) }
-	command.Stdin = strings.NewReader(strings.Join([]string{
-		`{"method":"initialize","id":0,"params":{"clientInfo":{"name":"bria","title":"Bria","version":"1"}}}`,
-		`{"method":"initialized","params":{}}`,
-		`{"method":"account/rateLimits/read","id":1,"params":{}}`,
-	}, "\n") + "\n")
-	output := &boundedBuffer{limit: maxOutputBytes}
-	command.Stdout, command.Stderr = output, io.Discard
-	if err := command.Run(); err != nil {
-		if ctx.Err() != nil {
-			return telegramstatus.Snapshot{}, ctx.Err()
-		}
+	stdin, err := command.StdinPipe()
+	if err != nil {
 		return telegramstatus.Snapshot{}, err
 	}
-	if output.exceeded {
-		return telegramstatus.Snapshot{}, errors.New("quota response exceeds limit")
+	defer stdin.Close()
+	stdout, err := command.StdoutPipe()
+	if err != nil {
+		return telegramstatus.Snapshot{}, err
 	}
-	return parseCodex(output.Bytes(), nodeID, time.Now().UTC())
+	defer stdout.Close()
+	command.Stderr = io.Discard
+	if err := command.Start(); err != nil {
+		return telegramstatus.Snapshot{}, err
+	}
+	defer func() {
+		_ = stdin.Close()
+		_ = processgroup.KillTree(command)
+		_ = command.Wait()
+	}()
+	scanner := bufio.NewScanner(io.LimitReader(stdout, maxOutputBytes+1))
+	scanner.Buffer(make([]byte, 4096), maxOutputBytes)
+	readResponse := func(id int) ([]byte, error) {
+		for scanner.Scan() {
+			var response struct {
+				ID    *int            `json:"id"`
+				Error json.RawMessage `json:"error"`
+			}
+			if json.Unmarshal(scanner.Bytes(), &response) != nil || response.ID == nil || *response.ID != id {
+				continue
+			}
+			if len(response.Error) != 0 && string(response.Error) != "null" {
+				return nil, errors.New("Codex quota RPC rejected")
+			}
+			return append([]byte(nil), scanner.Bytes()...), nil
+		}
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		if scanner.Err() != nil {
+			return nil, scanner.Err()
+		}
+		return nil, errors.New("Codex quota RPC ended without response")
+	}
+	if _, err := io.WriteString(stdin, `{"method":"initialize","id":0,"params":{"clientInfo":{"name":"bria","title":"Bria","version":"1"}}}`+"\n"); err != nil {
+		return telegramstatus.Snapshot{}, err
+	}
+	if _, err := readResponse(0); err != nil {
+		return telegramstatus.Snapshot{}, err
+	}
+	if _, err := io.WriteString(stdin, `{"method":"initialized","params":{}}`+"\n"+`{"method":"account/rateLimits/read","id":1,"params":{}}`+"\n"); err != nil {
+		return telegramstatus.Snapshot{}, err
+	}
+	response, err := readResponse(1)
+	if err != nil {
+		return telegramstatus.Snapshot{}, err
+	}
+	return parseCodex(response, nodeID, time.Now().UTC())
 }
 
 func parseCodex(data []byte, nodeID domain.ComputerID, collected time.Time) (telegramstatus.Snapshot, error) {

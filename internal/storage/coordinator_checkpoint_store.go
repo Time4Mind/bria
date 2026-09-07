@@ -227,6 +227,7 @@ func recordFromStoredCheckpoint(stored coordinator.StoredCheckpoint) *coordinato
 			OperationID: outbound.OperationID,
 			UpdateID:    outbound.UpdateID,
 			Status: statusRecord{
+				ScreenSessionID: outbound.Status.ScreenSessionID,
 				ConversationID:  outbound.Status.ConversationID,
 				Text:            outbound.Status.Text,
 				RichMarkdown:    outbound.Status.RichMarkdown,
@@ -277,6 +278,7 @@ func storedCheckpointFromRecord(record *coordinatorRecord) (coordinator.StoredCh
 			OperationID: record.Outbound.OperationID,
 			UpdateID:    record.Outbound.UpdateID,
 			Status: coordinator.Status{
+				ScreenSessionID: record.Outbound.Status.ScreenSessionID,
 				ConversationID:  record.Outbound.Status.ConversationID,
 				Text:            record.Outbound.Status.Text,
 				RichMarkdown:    record.Outbound.Status.RichMarkdown,

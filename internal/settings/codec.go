@@ -40,6 +40,7 @@ type settingsDocument struct {
 	Revision                  uint64            `json:"revision"`
 	ContinueExisting          bool              `json:"continue_existing"`
 	ScreenEnabled             bool              `json:"screen_enabled"`
+	ScreenCaptureLimitKiB     int               `json:"screen_capture_limit_kib,omitempty"`
 	CardDetail                CardDetail        `json:"card_detail"`
 	CardPageLimit             int               `json:"card_page_limit,omitempty"`
 	ShowTechnicalActions      bool              `json:"show_technical_actions"`
@@ -55,6 +56,7 @@ type settingsDocument struct {
 	PreprocessingEnabled      bool              `json:"preprocessing_enabled"`
 	PreprocessingInstruction  string            `json:"preprocessing_instruction"`
 	SessionNamingEnabled      bool              `json:"session_naming_enabled"`
+	StandbyEnabled            bool              `json:"standby_enabled"`
 }
 
 // Decode reads one complete settings document. Every field is explicit so a
@@ -127,6 +129,9 @@ func Decode(reader io.Reader) (Snapshot, error) {
 		}
 	}
 	snapshot := decoded.snapshot()
+	if snapshot.Settings.ScreenCaptureLimitKiB == 0 {
+		snapshot.Settings.ScreenCaptureLimitKiB = DefaultScreenCaptureLimitKiB
+	}
 	if err := snapshot.Settings.Validate(); err != nil {
 		return Snapshot{}, fmt.Errorf("validate settings: %w", err)
 	}
@@ -148,6 +153,9 @@ func inspectStrictDocument(document []byte) (map[string]struct{}, error) {
 		allowed[field] = struct{}{}
 	}
 	allowed["card_page_limit"] = struct{}{}
+	// Additive optional field: pre-feature documents keep the default OFF.
+	allowed["standby_enabled"] = struct{}{}
+	allowed["screen_capture_limit_kib"] = struct{}{}
 	for _, field := range creationDocumentFields {
 		allowed[field] = struct{}{}
 	}
@@ -199,7 +207,7 @@ func documentFromSnapshot(snapshot Snapshot) settingsDocument {
 	s := snapshot.Settings
 	return settingsDocument{
 		Version: s.Version, Revision: snapshot.Revision,
-		ContinueExisting: s.ContinueExisting, ScreenEnabled: s.ScreenEnabled,
+		ContinueExisting: s.ContinueExisting, ScreenEnabled: s.ScreenEnabled, ScreenCaptureLimitKiB: s.ScreenCaptureLimitKiB,
 		CardDetail: s.CardDetail, CardPageLimit: s.CardPageLimit, ShowTechnicalActions: s.ShowTechnicalActions,
 		NotifyBackgroundQuestions: s.NotifyBackgroundQuestions,
 		NotifyBackgroundErrors:    s.NotifyBackgroundErrors,
@@ -212,6 +220,7 @@ func documentFromSnapshot(snapshot Snapshot) settingsDocument {
 		PreprocessingEnabled:     s.PreprocessingEnabled,
 		PreprocessingInstruction: s.PreprocessingInstruction,
 		SessionNamingEnabled:     s.SessionNamingEnabled,
+		StandbyEnabled:           s.StandbyEnabled,
 	}
 }
 
@@ -220,6 +229,7 @@ func (document settingsDocument) snapshot() Snapshot {
 		Version:                   document.Version,
 		ContinueExisting:          document.ContinueExisting,
 		ScreenEnabled:             document.ScreenEnabled,
+		ScreenCaptureLimitKiB:     document.ScreenCaptureLimitKiB,
 		CardDetail:                document.CardDetail,
 		CardPageLimit:             document.CardPageLimit,
 		ShowTechnicalActions:      document.ShowTechnicalActions,
@@ -235,5 +245,6 @@ func (document settingsDocument) snapshot() Snapshot {
 		PreprocessingEnabled:      document.PreprocessingEnabled,
 		PreprocessingInstruction:  document.PreprocessingInstruction,
 		SessionNamingEnabled:      document.SessionNamingEnabled,
+		StandbyEnabled:            document.StandbyEnabled,
 	}}
 }

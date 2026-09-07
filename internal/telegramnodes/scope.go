@@ -108,7 +108,7 @@ func (scope *Scope) Restore(ctx context.Context) (domain.SessionID, error) {
 		if current != "" {
 			return current, store.SetNodeActiveSession(ctx, selected, current)
 		}
-		return current, store.SetSelectedNode(ctx, selected)
+		return current, store.ClearNodeActiveSession(ctx, selected)
 	}
 	return current, nil
 }
@@ -119,7 +119,10 @@ func (scope *Scope) Inventory(ctx context.Context) ([]sessioncreation.Computer, 
 	}
 	available, err := scope.env.AvailableComputers(ctx)
 	if err != nil {
-		return nil, err
+		// A transient capability/provider probe must not make the read-only
+		// Status/Nodes surfaces disappear. Keep the coordinator visible and
+		// let the next explicit refresh retry discovery.
+		return []sessioncreation.Computer{{ID: scope.local, Name: string(scope.local), Coordinator: true, Available: true}}, nil
 	}
 	live := make(map[domain.ComputerID]sessioncreation.Computer, len(available))
 	for _, computer := range available {
@@ -130,7 +133,7 @@ func (scope *Scope) Inventory(ctx context.Context) ([]sessioncreation.Computer, 
 	if inventory, ok := scope.env.(sessioncreation.Inventory); ok {
 		registered, err = inventory.RegisteredComputers(ctx)
 		if err != nil {
-			return nil, err
+			registered = available
 		}
 	}
 	byID := make(map[domain.ComputerID]sessioncreation.Computer, len(registered)+1)
@@ -317,7 +320,7 @@ func (scope *Scope) valid(ctx context.Context, nodeID domain.ComputerID, session
 		return false
 	}
 	session, err := scope.sessions.Load(ctx, sessionID)
-	return err == nil && session.ComputerID() == nodeID && session.Status() != domain.SessionArchived
+	return err == nil && session.ComputerID() == nodeID && selectableStatus(session.Status())
 }
 
 func (scope *Scope) firstValid(ctx context.Context, nodeID domain.ComputerID, history []domain.SessionID) domain.SessionID {
@@ -336,12 +339,21 @@ func (scope *Scope) latest(ctx context.Context, nodeID domain.ComputerID) domain
 	}
 	var latest domain.Session
 	for _, session := range sessions {
-		if session.ComputerID() == nodeID && session.Status() != domain.SessionArchived &&
+		if session.ComputerID() == nodeID && selectableStatus(session.Status()) &&
 			(latest.ID() == "" || session.StateChangedAt().After(latest.StateChangedAt())) {
 			latest = session
 		}
 	}
 	return latest.ID()
+}
+
+func selectableStatus(status domain.SessionStatus) bool {
+	switch status {
+	case domain.SessionReady, domain.SessionRunning, domain.SessionStopping:
+		return true
+	default:
+		return false
+	}
 }
 
 func promote(history []domain.SessionID, sessionID domain.SessionID) []domain.SessionID {

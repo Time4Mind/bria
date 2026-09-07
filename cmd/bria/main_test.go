@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -23,6 +25,29 @@ import (
 	"bria/internal/storage"
 	"bria/internal/telegram"
 )
+
+func TestMain(m *testing.M) {
+	// writeStatusConfig uses this executable only as an executable-path fixture,
+	// never as a real provider. A background quota probe must not recurse into tests.
+	if len(os.Args) > 1 && os.Args[1] == "app-server" {
+		os.Exit(1)
+	}
+	os.Exit(m.Run())
+}
+
+func TestStatusConfigProviderPlaceholderCannotRunTests(t *testing.T) {
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	err = exec.CommandContext(ctx, executable, "app-server", "--stdio").Run()
+	var exit *exec.ExitError
+	if ctx.Err() != nil || !errors.As(err, &exit) || exit.ExitCode() != 1 {
+		t.Fatalf("placeholder must reject provider invocation without running tests: %v", err)
+	}
+}
 
 func TestRunHelp(t *testing.T) {
 	t.Parallel()
@@ -485,14 +510,16 @@ func TestRunClosesAnExpiredRecoveredSessionDuringStartup(t *testing.T) {
 			deadline := time.Now().Add(time.Second)
 			for {
 				persisted, loadErr := state.Load(context.Background(), ready.ID())
-				if loadErr != nil {
-					t.Fatal(loadErr)
-				}
-				if persisted.Status() == domain.SessionArchived {
+				if errors.Is(loadErr, storage.ErrSessionNotFound) {
 					break
 				}
+				if loadErr != nil {
+					cancel()
+					t.Fatal(loadErr)
+				}
 				if time.Now().After(deadline) {
-					t.Fatalf("expired startup session status = %q, want archived", persisted.Status())
+					cancel()
+					t.Fatalf("expired empty startup session status = %q, want deleted without archival", persisted.Status())
 				}
 				time.Sleep(time.Millisecond)
 			}
@@ -513,6 +540,9 @@ func TestRunClosesAnExpiredRecoveredSessionDuringStartup(t *testing.T) {
 	}
 	if runtime.startCalls != 1 || runtime.abortCalls != 1 {
 		t.Fatalf("runtime calls = start %d, abort %d, want one exact recovery then one confirmed close", runtime.startCalls, runtime.abortCalls)
+	}
+	if runtime.shutdownCalls != 1 {
+		t.Fatalf("runtime shutdown calls = %d, want one awaited shutdown after canceled run", runtime.shutdownCalls)
 	}
 	persistedLog, err := os.ReadFile(filepath.Join(logDirectory, "detailed.jsonl"))
 	if err != nil {
@@ -679,8 +709,8 @@ func TestRunStatusFlowQuarantinesBacklogPersistsReceiptAndDoesNotReplay(t *testi
 	if code := runContextWithDependencies(ctx, []string{"run", "--config", configPath}, &stdout, &stderr, dependencies); code != 0 {
 		t.Fatalf("first run exit code = %d, want graceful cancellation after completed flow", code)
 	}
-	if transport.sendCalls != 1 {
-		t.Fatalf("Telegram status calls = %d, want 1", transport.sendCalls)
+	if transport.sendCalls != 2 {
+		t.Fatalf("Telegram status calls = %d, want status and native-unavailable response", transport.sendCalls)
 	}
 	if !transport.signedKeyboard || transport.unsignedKeyboard {
 		t.Fatalf("/status keyboard signed=%t unsigned=%t, want signed-only callbacks", transport.signedKeyboard, transport.unsignedKeyboard)
@@ -704,11 +734,11 @@ func TestRunStatusFlowQuarantinesBacklogPersistsReceiptAndDoesNotReplay(t *testi
 		t.Fatalf("checkpoint = %#v, want confirmed offset 81 without a block", checkpoint)
 	}
 	if checkpoint.Checkpoint.Outbound == nil || checkpoint.Checkpoint.Outbound.Receipt == nil ||
-		checkpoint.Checkpoint.Outbound.Receipt.MessageID != 901 {
+		checkpoint.Checkpoint.Outbound.Receipt.MessageID != 902 {
 		if checkpoint.Checkpoint.Outbound != nil {
-			t.Fatalf("checkpoint outbound = %#v, want durable receipt 901", *checkpoint.Checkpoint.Outbound)
+			t.Fatalf("checkpoint outbound = %#v, want durable receipt 902", *checkpoint.Checkpoint.Outbound)
 		}
-		t.Fatalf("checkpoint = %#v, want durable receipt 901", checkpoint)
+		t.Fatalf("checkpoint = %#v, want durable receipt 902", checkpoint)
 	}
 
 	transport.restart = true
@@ -720,7 +750,7 @@ func TestRunStatusFlowQuarantinesBacklogPersistsReceiptAndDoesNotReplay(t *testi
 	if code := runContextWithDependencies(restartContext, []string{"run", "--config", configPath}, &stdout, &stderr, dependencies); code != 0 {
 		t.Fatalf("restart exit code = %d, want graceful cancellation", code)
 	}
-	if transport.sendCalls != 1 {
+	if transport.sendCalls != 2 {
 		t.Fatalf("sendMessage calls after restart = %d, want no replay", transport.sendCalls)
 	}
 	if transport.restartCalls != 2 {
@@ -935,6 +965,23 @@ func TestRunNeverExecutesUnsignedRawCallbackData(t *testing.T) {
 	if mutationPath != "" {
 		t.Fatalf("raw callback reached unsafe mutation endpoint %q", mutationPath)
 	}
+	// HTTP completion is not enough: run must join the detached acknowledgement
+	// through its final durable receipt before the test/owner removes state.
+	data, err := os.ReadFile(filepath.Join(temporary, "state.json.callback-operations.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var receipt struct {
+		Acknowledgements map[string]struct {
+			Phase string `json:"phase"`
+		} `json:"acknowledgements"`
+	}
+	if err := json.Unmarshal(data, &receipt); err != nil {
+		t.Fatal(err)
+	}
+	if receipt.Acknowledgements["status:51"].Phase != "confirmed" {
+		t.Fatalf("run returned before durable callback receipt: %#v", receipt)
+	}
 }
 
 func TestRunRedactsTelegramAPIFailure(t *testing.T) {
@@ -1036,6 +1083,13 @@ func (function roundTripFunc) RoundTrip(request *http.Request) (*http.Response, 
 
 func (transport *statusFlowTransport) RoundTrip(request *http.Request) (*http.Response, error) {
 	transport.t.Helper()
+	// Fatal assertions run on HTTP worker goroutines; cancel the outer run
+	// before Goexit so a failed expectation cannot hang the entire suite.
+	defer func() {
+		if transport.t.Failed() {
+			transport.cancel()
+		}
+	}()
 	if request.URL.Scheme != "https" || request.URL.Host != "api.telegram.org" {
 		transport.t.Fatalf("Telegram destination = %s, want official TLS endpoint", request.URL.Redacted())
 	}
@@ -1118,8 +1172,18 @@ func (transport *statusFlowTransport) RoundTrip(request *http.Request) (*http.Re
 		}
 		return telegramResponse(`{"ok":true,"result":{"message_id":901,"from":{"id":600,"is_bot":true},"chat":{"id":42,"type":"private"},"text":"Bria works"}}`), nil
 	case 5:
+		transport.sendCalls++
+		if request.URL.Path != "/bot123:status-flow-secret/sendMessage" {
+			transport.t.Fatalf("fifth request path = %q, want native-unavailable sendMessage", request.URL.Path)
+		}
+		body := requestBody(transport.t, request)
+		if !strings.Contains(body, "Нет активной сессии для команды CLI") {
+			transport.t.Fatalf("native command was not explicitly rejected: %s", body)
+		}
+		return telegramResponse(`{"ok":true,"result":{"message_id":902,"from":{"id":600,"is_bot":true},"chat":{"id":42,"type":"private"},"text":"No active CLI"}}`), nil
+	case 6:
 		if request.URL.Path != "/bot123:status-flow-secret/getUpdates" {
-			transport.t.Fatalf("fifth request path = %q, want getUpdates", request.URL.Path)
+			transport.t.Fatalf("sixth request path = %q, want getUpdates", request.URL.Path)
 		}
 		transport.cancel()
 		return nil, errors.New("stop initial test poll")
@@ -1296,8 +1360,14 @@ type blockingProviderRuntime struct {
 }
 
 type expiryProviderRuntime struct {
-	startCalls int
-	abortCalls int
+	startCalls    int
+	abortCalls    int
+	shutdownCalls int
+}
+
+func (runtime *expiryProviderRuntime) Shutdown(ctx context.Context) error {
+	runtime.shutdownCalls++
+	return ctx.Err()
 }
 
 func (runtime *expiryProviderRuntime) Start(_ context.Context, request app.StartSessionRequest) (domain.ProviderBinding, error) {

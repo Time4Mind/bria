@@ -38,28 +38,31 @@ func TestCheapGeneratorUsesBoundedIsolatedPrompt(t *testing.T) {
 		if request.Text != "почини кнопку" || request.Instruction == "" {
 			t.Fatalf("request = %#v", request)
 		}
-		return promptpreprocess.Result{Text: "`Кнопка меню`"}, nil
+		return promptpreprocess.Result{Text: "`Menu button`"}, nil
 	})}
 	name, err := generator.Generate(context.Background(), "local", "session-1", "message-1", " почини кнопку ")
-	if err != nil || name != "Кнопка мен" {
+	if err != nil || name != "Menu butto" {
 		t.Fatalf("Generate() = (%q, %v)", name, err)
 	}
 }
 
-func TestNormalizeBoundsProviderTitle(t *testing.T) {
-	if got := sessionnaming.Normalize("  Исправление длинной кнопки меню  "); got != "Исправлени" {
+func TestNormalizeRequiresShortEnglishLabel(t *testing.T) {
+	if got := sessionnaming.Normalize("  Fix menu buttons  "); got != "Fix menu" {
 		t.Fatalf("Normalize() = %q", got)
+	}
+	if got := sessionnaming.Normalize("Исправление меню"); got != "" {
+		t.Fatalf("Normalize() accepted non-English label %q", got)
 	}
 }
 
-func TestServiceUsesModelFallbackButProviderTitleWins(t *testing.T) {
+func TestServiceIgnoresProviderTitleAndUsesModelFallback(t *testing.T) {
 	for _, test := range []struct {
 		provider string
 		want     string
 		source   domain.SessionNameSource
 	}{
 		{want: "Quick fix", source: domain.SessionNameModel},
-		{provider: "CLI title", want: "CLI title", source: domain.SessionNameProvider},
+		{provider: "CLI title", want: "Quick fix", source: domain.SessionNameModel},
 	} {
 		starting, err := domain.NewStartingSession("session-1", "intent-1", "local", domain.ProviderCodex, "/workspace")
 		if err != nil {

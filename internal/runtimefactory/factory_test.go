@@ -42,7 +42,7 @@ func TestMain(main *testing.M) {
 }
 
 func runRealCodexFixture() {
-	if len(os.Args) > 2 && os.Args[1] == "--" {
+	if len(os.Args) > 3 && os.Args[1] == "--native" && os.Args[2] == "--" {
 		workdir, err := os.Getwd()
 		if err != nil {
 			os.Exit(90)
@@ -53,7 +53,9 @@ func runRealCodexFixture() {
 			}
 		}
 		err = codex.RunAdapter(context.Background(), os.Stdin, os.Stdout, codex.AdapterConfig{
-			RawCommand: os.Args[2:], RawEnv: os.Environ(), Workdir: workdir,
+			// This deterministic raw-process fixture tests the factory's
+			// supervision tree, not the native terminal adapter implementation.
+			RawCommand: os.Args[3:], RawEnv: os.Environ(), Workdir: workdir,
 			ClientInfo: codex.ClientInfo{Name: "runtimefactory-nested-test", Version: "test"},
 		})
 		if err != nil {
@@ -179,19 +181,34 @@ func TestCommandSetExposesExactImmutableAdapterSpecsForRuntimeAndRecovery(t *tes
 	commands, err := runtimefactory.NewCommandSet(configuration, testEnvironment(
 		"RUNTIMEFACTORY_SAFE=preserved",
 		"BRIA_PARENT_SECRET=must-not-enter-command",
+		"BRIA_NATIVE_STATE_DIR=must-not-enter-command",
 	), briaExecutable)
 	if err != nil {
 		t.Fatalf("NewCommandSet() error = %v", err)
 	}
 
 	codexSpec, ok := commands.CommandSpec(domain.ProviderCodex)
-	if !ok || codexSpec.Path != codexAdapter || !reflect.DeepEqual(codexSpec.Args, []string{"--", rawCodex, "app-server", "--safe-codex"}) || codexSpec.ProviderCredentialFile != "" {
-		t.Fatalf("Codex CommandSpec = %#v, ok=%v", codexSpec, ok)
+	if !ok || codexSpec.Path != codexAdapter || !reflect.DeepEqual(codexSpec.Args, []string{"--native", "--", rawCodex, "app-server", "--safe-codex"}) || codexSpec.ProviderCredentialFile != "" {
+		t.Fatalf("Codex command contract mismatch, ok=%v", ok)
 	}
 	claudeSpec, ok := commands.CommandSpec(domain.ProviderClaude)
 	wantCredential := configuration.StatePath + ".claude-api-key.json"
-	if !ok || claudeSpec.Path != claudeAdapter || !reflect.DeepEqual(claudeSpec.Args, []string{"--", rawClaude, "--safe-claude"}) || claudeSpec.ProviderCredentialFile != wantCredential {
-		t.Fatalf("Claude CommandSpec = %#v, ok=%v", claudeSpec, ok)
+	if !ok || claudeSpec.Path != claudeAdapter || !reflect.DeepEqual(claudeSpec.Args, []string{"--native", "--", rawClaude, "--safe-claude"}) || claudeSpec.ProviderCredentialFile != wantCredential {
+		t.Fatalf("Claude command contract mismatch, ok=%v", ok)
+	}
+	for _, spec := range []sessionruntime.CommandSpec{codexSpec, claudeSpec} {
+		count := 0
+		for _, entry := range spec.Env {
+			if strings.HasPrefix(entry, "BRIA_NATIVE_STATE_DIR=") {
+				count++
+				if entry != "BRIA_NATIVE_STATE_DIR="+configuration.StatePath+".native" {
+					t.Fatal("native state directory differs from configuration")
+				}
+			}
+		}
+		if count != 1 {
+			t.Fatalf("native state directory entries = %d, want 1", count)
+		}
 	}
 	for _, value := range append(append([]string(nil), codexSpec.Env...), claudeSpec.Env...) {
 		if strings.Contains(value, "must-not-enter-command") {
@@ -206,8 +223,8 @@ func TestCommandSetExposesExactImmutableAdapterSpecsForRuntimeAndRecovery(t *tes
 	}
 	configuration.Providers["codex"].Command.Argv[0] = "mutated-source"
 	again, ok := commands.CommandSpec(domain.ProviderCodex)
-	if !ok || !reflect.DeepEqual(again.Args, []string{"--", rawCodex, "app-server", "--safe-codex"}) || !reflect.DeepEqual(again.Env, wantCodexEnv) {
-		t.Fatalf("CommandSpec was mutable through returned/source slices: %#v", again)
+	if !ok || !reflect.DeepEqual(again.Args, []string{"--native", "--", rawCodex, "app-server", "--safe-codex"}) || !reflect.DeepEqual(again.Env, wantCodexEnv) {
+		t.Fatal("CommandSpec was mutable through returned/source slices")
 	}
 	if _, ok := commands.CommandSpec("unknown"); ok {
 		t.Fatal("unknown provider exposed a command")
@@ -243,11 +260,11 @@ func TestConfiguredCommandSetIncludesDisabledConfiguredAndPreservesEnabledSpecs(
 	wantCodex, _ := enabled.CommandSpec(domain.ProviderCodex)
 	gotCodex, ok := configured.CommandSpec(domain.ProviderCodex)
 	if !ok || !reflect.DeepEqual(gotCodex, wantCodex) {
-		t.Fatalf("enabled Codex changed: got=%#v want=%#v", gotCodex, wantCodex)
+		t.Fatal("enabled Codex command contract changed")
 	}
 	claude, ok := configured.CommandSpec(domain.ProviderClaude)
-	if !ok || !reflect.DeepEqual(claude.Args, []string{"--", rawClaude, "--safe"}) {
-		t.Fatalf("disabled configured Claude = %#v, ok=%v", claude, ok)
+	if !ok || !reflect.DeepEqual(claude.Args, []string{"--native", "--", rawClaude, "--safe"}) {
+		t.Fatalf("disabled configured Claude command contract mismatch, ok=%v", ok)
 	}
 	for _, entry := range claude.Env {
 		if strings.Contains(entry, "secret-value") {
@@ -262,7 +279,7 @@ func TestConfiguredCommandSetIncludesDisabledConfiguredAndPreservesEnabledSpecs(
 	}
 	again, _ := configured.CommandSpec(domain.ProviderClaude)
 	if !reflect.DeepEqual(again.Args, wantClaudeArgs) || !reflect.DeepEqual(again.Env, wantClaudeEnv) {
-		t.Fatalf("configured command was mutable: %#v", again)
+		t.Fatal("configured command was mutable")
 	}
 }
 
@@ -454,7 +471,7 @@ func runAdapterHelper() {
 	}
 	expectedAdapter, err := filepath.EvalSymlinks(os.Getenv("RUNTIMEFACTORY_EXPECT_ADAPTER"))
 	if err != nil || os.Args[0] != expectedAdapter ||
-		!reflect.DeepEqual(os.Args[1:], []string{"--", os.Getenv("RUNTIMEFACTORY_EXPECT_RAW"), expectedArg}) ||
+		!reflect.DeepEqual(os.Args[1:], []string{"--native", "--", os.Getenv("RUNTIMEFACTORY_EXPECT_RAW"), expectedArg}) ||
 		os.Getenv("RUNTIMEFACTORY_SAFE") != "preserved" || os.Getenv("BRIA_PARENT_SECRET") != "" {
 		os.Exit(70)
 	}

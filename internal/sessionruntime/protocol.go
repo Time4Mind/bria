@@ -44,6 +44,8 @@ type EventKind string
 const (
 	EventCommentary EventKind = "commentary"
 	EventQuestion   EventKind = "question"
+	EventTool       EventKind = "tool"
+	EventThinking   EventKind = "thinking"
 )
 
 const (
@@ -62,8 +64,9 @@ const (
 
 // TurnEvent is one ordered, safe-to-display non-final provider event.
 type TurnEvent struct {
-	Kind EventKind
-	Text string
+	Kind     EventKind
+	Text     string
+	Metadata *runtimeprotocol.EventMetadata
 }
 
 // TurnResult is publishable only when Submit returns a nil error. On every
@@ -143,6 +146,8 @@ type InteractiveSubmitter interface {
 type LocalAttachment = runtimeprotocol.LocalAttachment
 type StructuredInput struct {
 	Text        string
+	Model       string
+	Effort      string
 	Attachments []LocalAttachment
 }
 type StructuredSubmitter interface {

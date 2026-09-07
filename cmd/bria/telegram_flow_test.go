@@ -144,7 +144,7 @@ func TestTelegramControllerFlowAdapterMapsSurfaceTargetsAndMessageCards(t *testi
 	if callback.Surface == nil || !reflect.DeepEqual(callback.Surface.SelectableSessionIDs, []domain.SessionID{sessionID}) {
 		t.Fatalf("surface targets = %#v", callback.Surface)
 	}
-	wantResume := telegramui.Button{Action: telegramui.ActionResume, Target: telegramui.ButtonTarget{SessionSlot: 1}}
+	wantResume := telegramui.Button{Action: telegramui.ActionResume, Target: telegramui.ButtonTarget{SessionSlot: 1}, Label: "resume"}
 	if got := callback.Surface.Keyboard.Rows[0][0]; !reflect.DeepEqual(got, wantResume) {
 		t.Fatalf("resume button = %#v, want %#v", got, wantResume)
 	}

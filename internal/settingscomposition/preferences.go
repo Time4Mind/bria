@@ -27,7 +27,7 @@ func (p Preferences) Snapshot(ctx context.Context) (settingsport.Snapshot, error
 		return settingsport.Snapshot{}, err
 	}
 	return settingsport.Snapshot{
-		ContinueExisting: current.ContinueExisting, ScreenEnabled: current.ScreenEnabled,
+		ContinueExisting: current.ContinueExisting, ScreenEnabled: current.ScreenEnabled, ScreenCaptureLimitKiB: current.ScreenCaptureLimitKiB,
 		CardDetail: string(current.CardDetail), CardPageLimit: current.CardPageLimit, ShowTechnicalActions: current.ShowTechnicalActions,
 		NotifyBackgroundQuestions: current.NotifyBackgroundQuestions,
 		NotifyBackgroundErrors:    current.NotifyBackgroundErrors,
@@ -39,14 +39,31 @@ func (p Preferences) Snapshot(ctx context.Context) (settingsport.Snapshot, error
 		PreprocessingEnabled:     current.PreprocessingEnabled,
 		PreprocessingInstruction: current.PreprocessingInstruction,
 		SessionNamingEnabled:     current.SessionNamingEnabled,
+		StandbyEnabled:           current.StandbyEnabled,
 	}, nil
 }
 
 func (p Preferences) ToggleContinueExisting(ctx context.Context) error {
 	return p.update(ctx, func(current *settings.Settings) { current.ContinueExisting = !current.ContinueExisting })
 }
+
+func (p Preferences) ToggleStandby(ctx context.Context) error {
+	return p.update(ctx, func(current *settings.Settings) { current.StandbyEnabled = !current.StandbyEnabled })
+}
 func (p Preferences) ToggleScreen(ctx context.Context) error {
 	return p.update(ctx, func(current *settings.Settings) { current.ScreenEnabled = !current.ScreenEnabled })
+}
+func (p Preferences) CycleScreenCaptureLimit(ctx context.Context) error {
+	return p.update(ctx, func(current *settings.Settings) {
+		switch current.ScreenCaptureLimitKiB {
+		case 48:
+			current.ScreenCaptureLimitKiB = 64
+		case 64:
+			current.ScreenCaptureLimitKiB = 86
+		default:
+			current.ScreenCaptureLimitKiB = 48
+		}
+	})
 }
 func (p Preferences) ToggleCardDetail(ctx context.Context) error {
 	return p.update(ctx, func(current *settings.Settings) {

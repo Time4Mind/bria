@@ -75,6 +75,8 @@ type Options struct {
 }
 
 type Starter struct {
+	launchMu           sync.RWMutex
+	shuttingDown       bool
 	commands           map[domain.Provider]verifiedCommand
 	handshakeTimeout   time.Duration
 	closeTimeout       time.Duration
@@ -85,9 +87,10 @@ type Starter struct {
 	maxReconciledTurns int
 	requestSequence    atomic.Uint64
 
-	mu         sync.Mutex
-	processes  map[domain.SessionID]*processRecord
-	tombstones map[domain.SessionID]processTombstone
+	mu            sync.Mutex
+	processes     map[domain.SessionID]*processRecord
+	tombstones    map[domain.SessionID]processTombstone
+	nativeUpdates chan domain.SessionID
 }
 
 type verifiedCommand struct {
@@ -101,20 +104,29 @@ type processTombstone struct {
 }
 
 type processRecord struct {
-	request    app.StartSessionRequest
-	command    *exec.Cmd
-	stdin      io.WriteCloser
-	output     chan wireResult
-	outputEOF  chan struct{}
-	readerStop chan struct{}
-	done       chan struct{}
+	startupDiagnostic startupDiagnostic
+	stderrDone        chan struct{}
+	request           app.StartSessionRequest
+	command           *exec.Cmd
+	stdin             io.WriteCloser
+	output            chan wireResult
+	outputEOF         chan struct{}
+	readerStop        chan struct{}
+	done              chan struct{}
 
-	writeMu        sync.Mutex
-	turnMu         sync.Mutex
-	turn           *activeTurn
-	lifecycleMu    sync.Mutex
-	reaping        bool
-	readerStopOnce sync.Once
+	writeMu         sync.Mutex
+	nativeMu        sync.Mutex
+	nativeModel     string
+	nativeWaiters   map[string]chan wireResult
+	nativeIdentity  string
+	nativeScreen    NativeSnapshot
+	hasNativeScreen bool
+	nativeNotify    func()
+	turnMu          sync.Mutex
+	turn            *activeTurn
+	lifecycleMu     sync.Mutex
+	reaping         bool
+	readerStopOnce  sync.Once
 
 	generation uint64
 	binding    domain.ProviderBinding
@@ -135,6 +147,10 @@ type steerWaiter struct {
 }
 
 type wireMessage struct {
+	FullText            string
+	Hash                string
+	Model               string
+	Interactive         bool
 	Protocol            int
 	Type                string
 	ProviderSessionID   string
@@ -145,6 +161,7 @@ type wireMessage struct {
 	MessageID           string
 	Kind                EventKind
 	Text                string
+	EventMetadata       *runtimeprotocol.EventMetadata
 	Status              string
 	ErrorCode           string
 	InteractionRequest  *runtimeprotocol.InteractionRequest
@@ -161,6 +178,8 @@ type submitEnvelope struct {
 	Type        string            `json:"type"`
 	RequestID   string            `json:"request_id"`
 	Text        string            `json:"text"`
+	Model       string            `json:"model,omitempty"`
+	Effort      string            `json:"effort,omitempty"`
 	MessageID   string            `json:"message_id,omitempty"`
 	Attachments []LocalAttachment `json:"attachments,omitempty"`
 }
@@ -272,6 +291,11 @@ func NewStarter(commands map[domain.Provider]CommandSpec, options Options) (*Sta
 // Start directly executes one adapter in the exact requested directory and
 // binds only after protocol-level readiness. This never implies authentication.
 func (starter *Starter) Start(ctx context.Context, request app.StartSessionRequest) (domain.ProviderBinding, error) {
+	starter.launchMu.RLock()
+	defer starter.launchMu.RUnlock()
+	if starter.shuttingDown {
+		return domain.ProviderBinding{}, errors.New("provider runtime is shutting down")
+	}
 	if err := validateRequest(request); err != nil {
 		return domain.ProviderBinding{}, err
 	}
@@ -343,10 +367,12 @@ func (starter *Starter) Start(ctx context.Context, request app.StartSessionReque
 		}
 	}
 	record := &processRecord{
-		request: request, command: command, stdin: stdin,
+		stderrDone: make(chan struct{}),
+		request:    request, command: command, stdin: stdin,
 		output: make(chan wireResult, 32), outputEOF: make(chan struct{}),
 		readerStop: make(chan struct{}), done: make(chan struct{}),
-		generation: generation,
+		generation:   generation,
+		nativeNotify: func() { starter.notifyNativeScreen(request.SessionID) },
 	}
 	starter.processes[request.SessionID] = record
 	starter.mu.Unlock()
@@ -355,8 +381,13 @@ func (starter *Starter) Start(ctx context.Context, request app.StartSessionReque
 		starter.removeFailedRecord(request.SessionID, record)
 		return domain.ProviderBinding{}, fmt.Errorf("start provider process: %w", err)
 	}
-	go func() { _, _ = io.Copy(io.Discard, stderr) }()
-	go readOutput(stdout, starter.maxLineBytes, record.output, record.outputEOF, record.readerStop)
+	go func() {
+		defer close(record.stderrDone)
+		defer stderr.Close()
+		_, _ = io.Copy(&record.startupDiagnostic, stderr)
+		record.startupDiagnostic.finish()
+	}()
+	go readOutput(stdout, starter.maxLineBytes, record.output, record.outputEOF, record.readerStop, record.dispatchNative)
 	go starter.reapOnOutputEnd(record)
 
 	timer := time.NewTimer(starter.handshakeTimeout)
@@ -366,15 +397,15 @@ func (starter *Starter) Start(ctx context.Context, request app.StartSessionReque
 	case result, open := <-record.output:
 		if !open {
 			starter.killWaitAndRemove(record)
-			return domain.ProviderBinding{}, errors.New("provider process exited before readiness")
+			return domain.ProviderBinding{}, record.startupDiagnostic.wrap(errors.New("provider process exited before readiness"))
 		}
 		first = result
 	case <-record.done:
 		starter.removeFailedRecord(request.SessionID, record)
-		return domain.ProviderBinding{}, errors.New("provider process exited before readiness")
+		return domain.ProviderBinding{}, record.startupDiagnostic.wrap(errors.New("provider process exited before readiness"))
 	case <-timer.C:
 		starter.killWaitAndRemove(record)
-		return domain.ProviderBinding{}, fmt.Errorf("provider readiness timed out after %s", starter.handshakeTimeout)
+		return domain.ProviderBinding{}, record.startupDiagnostic.wrap(fmt.Errorf("provider readiness timed out after %s", starter.handshakeTimeout))
 	case <-ctx.Done():
 		starter.killWaitAndRemove(record)
 		return domain.ProviderBinding{}, fmt.Errorf("wait for provider readiness: %w", ctx.Err())
@@ -382,7 +413,7 @@ func (starter *Starter) Start(ctx context.Context, request app.StartSessionReque
 	if first.err != nil || validateReady(first.message) != nil ||
 		(request.Mode == app.SessionStartResume && first.message.ProviderSessionID != request.PriorBinding.SessionID) {
 		starter.killWaitAndRemove(record)
-		return domain.ProviderBinding{}, fmt.Errorf("%w: invalid readiness message", ErrProtocol)
+		return domain.ProviderBinding{}, record.startupDiagnostic.wrap(fmt.Errorf("%w: invalid readiness message", ErrProtocol))
 	}
 
 	binding := domain.ProviderBinding{
@@ -397,6 +428,11 @@ func (starter *Starter) Start(ctx context.Context, request app.StartSessionReque
 		return domain.ProviderBinding{}, errors.New("provider process exited during readiness")
 	default:
 		record.binding = binding
+		record.nativeMu.Lock()
+		if record.nativeModel == "" {
+			record.nativeModel = first.message.Model
+		}
+		record.nativeMu.Unlock()
 		delete(starter.tombstones, request.SessionID)
 	}
 	starter.mu.Unlock()
@@ -421,6 +457,9 @@ func (starter *Starter) SubmitStructuredWithCallbacks(ctx context.Context, sessi
 }
 
 func (starter *Starter) submitWithCallbacks(ctx context.Context, sessionID domain.SessionID, input StructuredInput, callbacks TurnCallbacks) (TurnResult, error) {
+	if err := runtimeprotocol.ValidateModelSelection(input.Model, input.Effort); err != nil {
+		return TurnResult{}, err
+	}
 	if strings.TrimSpace(string(sessionID)) == "" {
 		return TurnResult{}, errors.New("logical session id is required")
 	}
@@ -457,7 +496,7 @@ func (starter *Starter) submitWithCallbacks(ctx context.Context, sessionID domai
 	record.turn = turn
 	record.turnMu.Unlock()
 
-	if err := starter.writeContext(ctx, record, submitEnvelope{Protocol: ProtocolVersion, Type: "submit", RequestID: requestID, Text: input.Text, MessageID: callbacks.MessageID, Attachments: input.Attachments}); err != nil {
+	if err := starter.writeContext(ctx, record, submitEnvelope{Protocol: ProtocolVersion, Type: "submit", RequestID: requestID, Text: input.Text, Model: input.Model, Effort: input.Effort, MessageID: callbacks.MessageID, Attachments: input.Attachments}); err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return TurnResult{}, err
 		}
@@ -506,7 +545,7 @@ func (starter *Starter) submitWithCallbacks(ctx context.Context, sessionID domai
 				if !accepted || finalSeen || len(result.Events) >= starter.maxTurnEvents || validateEvent(message, starter.maxTextBytes) != nil {
 					return starter.protocolTurnFailure(record, requestID)
 				}
-				event := TurnEvent{Kind: message.Kind, Text: message.Text}
+				event := TurnEvent{Kind: message.Kind, Text: message.Text, Metadata: message.EventMetadata}
 				if callbacks.OnEvent != nil {
 					if err := callbacks.OnEvent(event); err != nil {
 						starter.killAndWait(record)
@@ -610,6 +649,9 @@ func (starter *Starter) submitWithCallbacks(ctx context.Context, sessionID domai
 // SubmitCurrentWithCallbacks writes one provider-neutral steer request and
 // returns only after the adapter echoes its durable message identity.
 func (starter *Starter) SubmitCurrentWithCallbacks(ctx context.Context, sessionID domain.SessionID, input StructuredInput, callbacks TurnCallbacks) error {
+	if input.Model != "" || input.Effort != "" {
+		return runtimeprotocol.ErrProtocol
+	}
 	if strings.TrimSpace(string(sessionID)) == "" || !utf8.ValidString(input.Text) || len(input.Text) > starter.maxTextBytes ||
 		callbacks.MessageID == "" || callbacks.OnAccepted == nil {
 		return errors.New("current-turn input is invalid")
@@ -816,7 +858,7 @@ func (starter *Starter) Abort(ctx context.Context, request app.StartSessionReque
 	return nil
 }
 
-func readOutput(stdout io.ReadCloser, maxLineBytes int, output chan<- wireResult, outputEOF chan<- struct{}, stop <-chan struct{}) {
+func readOutput(stdout io.ReadCloser, maxLineBytes int, output chan<- wireResult, outputEOF chan<- struct{}, stop <-chan struct{}, dispatchNative func(wireMessage) bool) {
 	defer close(output)
 	defer close(outputEOF)
 	defer stdout.Close()
@@ -824,6 +866,15 @@ func readOutput(stdout io.ReadCloser, maxLineBytes int, output chan<- wireResult
 	scanner.Buffer(make([]byte, min(maxLineBytes, 4096)), maxLineBytes)
 	for scanner.Scan() {
 		message, err := decodeWire(scanner.Bytes())
+		if err == nil && message.Type == string(runtimeprotocol.TypeReady) {
+			dispatchNative(message)
+		}
+		if err == nil && (message.Type == string(runtimeprotocol.TypeNativeSnapshot) || message.Type == string(runtimeprotocol.TypeNativeObservation)) {
+			if dispatchNative(message) {
+				continue
+			}
+			err = ErrProtocol
+		}
 		select {
 		case output <- wireResult{message: message, err: err}:
 		case <-stop:
@@ -847,11 +898,13 @@ func decodeWire(line []byte) (wireMessage, error) {
 		return wireMessage{}, ErrProtocol
 	}
 	return wireMessage{
+		Hash: decoded.Hash, FullText: decoded.FullText, Model: decoded.Model, Interactive: decoded.Interactive,
 		Protocol: decoded.Protocol, Type: string(decoded.Type), ProviderSessionID: decoded.ProviderSessionID,
 		ProviderSessionName: decoded.ProviderSessionName,
 		Readiness:           decoded.Readiness, Authentication: AuthenticationState(decoded.Authentication),
 		RequestID: decoded.RequestID, MessageID: decoded.MessageID, Kind: EventKind(decoded.Kind), Text: decoded.Text,
-		Status: decoded.Status, ErrorCode: decoded.ErrorCode, InteractionRequest: decoded.InteractionRequest,
+		EventMetadata: decoded.EventMetadata,
+		Status:        decoded.Status, ErrorCode: decoded.ErrorCode, InteractionRequest: decoded.InteractionRequest,
 		InteractionID: decoded.InteractionID,
 	}, nil
 }
@@ -876,7 +929,7 @@ func validateReady(message wireMessage) error {
 }
 
 func validateEvent(message wireMessage, maxTextBytes int) error {
-	if message.Kind != EventCommentary && message.Kind != EventQuestion {
+	if message.Kind != EventCommentary && message.Kind != EventQuestion && message.Kind != EventTool && message.Kind != EventThinking {
 		return ErrProtocol
 	}
 	return validateText(message.Text, maxTextBytes)
@@ -1181,6 +1234,9 @@ func (starter *Starter) reapOnOutputEnd(record *processRecord) {
 }
 
 func (starter *Starter) finalizeReap(record *processRecord) {
+	if record.stderrDone != nil {
+		<-record.stderrDone
+	}
 	record.turnMu.Lock()
 	if turn := record.turn; turn != nil {
 		turn.terminalErr = errors.New("provider process exited before turn terminal")

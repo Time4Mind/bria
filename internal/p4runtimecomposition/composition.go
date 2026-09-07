@@ -11,8 +11,6 @@ import (
 	"bria/internal/inputcomposition"
 	"bria/internal/mediaproduction"
 	"bria/internal/providerinputcomposition"
-	"bria/internal/screen"
-	"bria/internal/screenproduction"
 	"bria/internal/sessionruntime"
 	"bria/internal/settings"
 	"bria/internal/speech/parakeet"
@@ -87,15 +85,9 @@ func Open(options Options) (*Bundle, bool, error) {
 	if err != nil {
 		return nil, true, fmt.Errorf("compose attachment provider router: %w", err)
 	}
-	store, err := screen.New(screen.Options{MaxSessions: screenMaxSessions, MaxLines: screenMaxLines, MaxColumns: screenMaxColumns, MaxEventBytes: screenMaxEventBytes, MaxPNGBytes: screenMaxPNGBytes})
-	if err != nil {
-		return nil, true, fmt.Errorf("compose Screen store: %w", err)
-	}
-	events, err := screenproduction.Open(screenproduction.Config{Store: store, Settings: options.Settings, Sender: options.Telegram, ChatID: telegram.ChatID(options.Configuration.PrivateChatID)})
-	if err != nil {
-		return nil, true, fmt.Errorf("compose Screen delivery: %w", err)
-	}
-	return &Bundle{InputPreparer: inputs, Attachments: inputs, Submitter: submitter, RuntimeEvents: events, Finals: options.Finals}, true, nil
+	// Screen is an active-card attachment from the native cache, not an
+	// inference-event observer or a producer of independent background photos.
+	return &Bundle{InputPreparer: inputs, Attachments: inputs, Submitter: submitter, Finals: options.Finals}, true, nil
 }
 
 type sessionProviders struct{ store *storage.SessionStore }

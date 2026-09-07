@@ -56,10 +56,14 @@ func (controller *Controller) projectSettingsSurface(ctx context.Context, surfac
 			if value := strings.TrimSpace(current.DefaultWorkdirs[nodeID]); value != "" {
 				workdir = value
 			}
-			surface.Text += "\nНода: " + string(nodeID) +
-				"\nBackend по умолчанию (" + string(nodeID) + "): " + provider +
-				"\nПапка по умолчанию: " + workdir
+			surface = telegramsettingsview.AppendFields(surface,
+				telegramsettingsview.Field{Name: "Нода", Value: string(nodeID)},
+				telegramsettingsview.Field{Name: "CLI по умолчанию", Value: provider},
+				telegramsettingsview.Field{Name: "Папка по умолчанию", Value: workdir})
+			if hint := controller.StandbyError(nodeID); hint != "" {
+				surface = telegramsettingsview.AppendFields(surface, telegramsettingsview.Field{Name: "Ожидающая сессия: ошибка", Value: hint})
+			}
 		}
 	}
-	return SemanticActionResult{Surface: &SemanticSurface{Text: surface.Text, Rows: rows}}, nil
+	return SemanticActionResult{Surface: &SemanticSurface{Text: surface.Text, RichMarkdown: surface.RichMarkdown, Rows: rows}}, nil
 }

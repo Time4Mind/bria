@@ -57,9 +57,12 @@ func Open(options Options) (*Bundle, error) {
 	if err != nil {
 		return nil, fmt.Errorf("compose artifact runtime: %w", err)
 	}
-	bundle := &Bundle{Submitter: options.Runtime, artifacts: artifacts}
+	// CLI-native controls own model/effort. Historical Bria preferences must
+	// never silently override the selection made in the terminal.
+	runtime := options.Runtime
+	bundle := &Bundle{Submitter: runtime, artifacts: artifacts}
 	if _, enabled := options.Configuration.P4Runtime(); enabled {
-		structuredRuntime, ok := options.Runtime.(providerinputcomposition.Runtime)
+		structuredRuntime, ok := runtime.(providerinputcomposition.Runtime)
 		if !ok {
 			return nil, errors.New("configured P4 provider runtime does not support structured input")
 		}

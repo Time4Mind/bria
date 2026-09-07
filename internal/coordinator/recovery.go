@@ -15,7 +15,7 @@ type UnknownRecoveryHandler interface {
 }
 
 func (loop *Loop) enqueueRecoveryPrompt(ctx context.Context, stored StoredCheckpoint, update Update, control RecoveryControl, prompt Decision) (StoredCheckpoint, error) {
-	if stored.Checkpoint.Recovery != nil {
+	if stored.Checkpoint.Recovery != nil && stored.Checkpoint.NextUpdateID <= stored.Checkpoint.Recovery.UpdateID {
 		return StoredCheckpoint{}, fmt.Errorf("%w for recovery operation %q", ErrDeliveryUnknown, stored.Checkpoint.Recovery.OriginalOperationID)
 	}
 	durable, ok := loop.sender.(DurableStatusSender)

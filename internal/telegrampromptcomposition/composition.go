@@ -39,8 +39,25 @@ type Deliverer struct {
 func (deliverer Deliverer) Deliver(ctx context.Context, notification telegramcontroller.Notification, operationID string) (telegramnotify.DeliveryReceipt, error) {
 	receipt := telegramnotify.DeliveryReceipt{OperationID: operationID, State: telegramnotify.DeliveryUnknown}
 	if deliverer.Controller == nil || deliverer.Cards == nil || deliverer.Presenter == nil || deliverer.Sender == nil ||
-		notification.Kind != telegramcontroller.NotificationPromptStatus || notification.SessionID == "" || operationID == "" {
+		(notification.Kind != telegramcontroller.NotificationPromptStatus && notification.Kind != telegramcontroller.NotificationNativeScreen) || notification.SessionID == "" || operationID == "" {
 		return receipt, errors.New("prompt status delivery identity is invalid")
+	}
+	if notification.Kind == telegramcontroller.NotificationNativeScreen {
+		if view, ok := deliverer.Controller.(interface {
+			NativeDeliveryContext(context.Context, domain.SessionID) (context.Context, context.CancelFunc, bool)
+		}); ok {
+			guarded, cancel, visible := view.NativeDeliveryContext(ctx, notification.SessionID)
+			defer cancel()
+			if !visible {
+				receipt.State, receipt.Suppressed = telegramnotify.DeliveryConfirmed, true
+				return receipt, nil
+			}
+			ctx = guarded
+		}
+	}
+	if visibility, ok := deliverer.Controller.(interface{ NativeScreenVisible(domain.SessionID) bool }); ok && !visibility.NativeScreenVisible(notification.SessionID) {
+		receipt.State, receipt.Suppressed = telegramnotify.DeliveryConfirmed, true
+		return receipt, nil
 	}
 	state, err := deliverer.Cards.Load(ctx)
 	if err != nil {
@@ -56,6 +73,17 @@ func (deliverer Deliverer) Deliver(ctx context.Context, notification telegramcon
 		return receipt, nil
 	}
 	result, err := deliverer.Controller.ProjectCurrent(ctx, notification.SessionID)
+	if err == nil && result.Surface != nil && result.Surface.NativeSessionID == notification.SessionID {
+		if notification.Kind == telegramcontroller.NotificationNativeScreen {
+			return deliverer.deliverNativeSurface(ctx, operationID, notification.SessionID, stored.Carrier, *result.Surface)
+		}
+		// Prompt state is already durable. Do not replace an explicitly shown
+		// CLI screen or invalidate its keys with an unrelated history refresh.
+		receipt.State = telegramnotify.DeliveryConfirmed
+		receipt.Suppressed = true
+		receipt.Parts = []telegramnotify.PartReceipt{{PartID: operationID + ":stored", MessageID: stored.Carrier.MessageID}}
+		return receipt, nil
+	}
 	if err != nil || result.Card == nil {
 		return receipt, errors.Join(err, errors.New("project active prompt card"))
 	}
@@ -69,6 +97,7 @@ func (deliverer Deliverer) Deliver(ctx context.Context, notification telegramcon
 		telegramui.CardProjectionInput{Pages: pages, View: view, Keyboard: telegramui.CardKeyboardInput{
 			View: view, Working: card.Working, Archived: card.Archived, OptionsExpanded: card.OptionsExpanded,
 			SessionRowSizes: append([]int(nil), card.SessionRowSizes...),
+			SessionLabels:   append([]string(nil), card.SelectableSessionLabels...),
 		}}, card.Header+"\n\n", card.OptionsExpanded, card.SelectableSessionIDs, deliverer.Presenter)
 	if err != nil {
 		return receipt, err

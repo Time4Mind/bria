@@ -49,6 +49,17 @@ case "$version" in ""|dev|.*|*..*|*[!0-9A-Za-z._+-]*) usage ;; esac
 test -d "$release_dir" || { printf '%s\n' 'install-release: release directory is unavailable' >&2; exit 1; }
 test -d "$install_root" || { printf '%s\n' 'install-release: install root must already exist' >&2; exit 1; }
 
+# Check before creating receipts, extracting candidates, or moving pointers.
+# Host package-manager mutations are intentionally left to the administrator.
+case "$platform" in
+	linux|wsl)
+		command -v tmux >/dev/null 2>&1 && tmux -V >/dev/null 2>&1 || {
+			printf '%s\n' 'install-release: tmux is required for native CLI sessions; install tmux with your system package manager, then retry' >&2
+			exit 1
+		}
+		;;
+esac
+
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 archive_name=bria_${version}_${artifact_os}_${arch}.tar.gz
 verify_staged_release() {

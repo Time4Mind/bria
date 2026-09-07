@@ -8,9 +8,10 @@ import (
 )
 
 const (
-	FormatVersion     = 5
-	DefaultQueueLimit = 32
-	DefaultCardPages  = 64
+	FormatVersion                = 5
+	DefaultQueueLimit            = 32
+	DefaultCardPages             = 64
+	DefaultScreenCaptureLimitKiB = 48
 )
 
 type CardDetail string
@@ -38,6 +39,7 @@ type Settings struct {
 	Version                   int               `json:"version"`
 	ContinueExisting          bool              `json:"continue_existing"`
 	ScreenEnabled             bool              `json:"screen_enabled"`
+	ScreenCaptureLimitKiB     int               `json:"screen_capture_limit_kib"`
 	CardDetail                CardDetail        `json:"card_detail"`
 	CardPageLimit             int               `json:"card_page_limit"`
 	ShowTechnicalActions      bool              `json:"show_technical_actions"`
@@ -53,11 +55,13 @@ type Settings struct {
 	PreprocessingEnabled      bool              `json:"preprocessing_enabled"`
 	PreprocessingInstruction  string            `json:"preprocessing_instruction"`
 	SessionNamingEnabled      bool              `json:"session_naming_enabled"`
+	StandbyEnabled            bool              `json:"standby_enabled"`
 }
 
 type Effective struct {
 	ContinueExisting           bool
 	ScreenEnabled              bool
+	ScreenCaptureLimitKiB      int
 	CardDetail                 CardDetail
 	CardPageLimit              int
 	ShowTechnicalActions       bool
@@ -74,16 +78,18 @@ type Effective struct {
 	PreprocessingEnabled       bool
 	PreprocessingInstruction   string
 	SessionNamingEnabled       bool
+	StandbyEnabled             bool
 }
 
 func Default() Settings {
-	return Settings{Version: FormatVersion, ContinueExisting: true, ScreenEnabled: false, CardDetail: CardDetailStandard, CardPageLimit: DefaultCardPages, ShowTechnicalActions: true, NotifyBackgroundQuestions: true, NotifyBackgroundErrors: true, SessionLifetime: Lifetime12Hours, QueueLimit: DefaultQueueLimit, VoiceRecognition: VoiceParakeet, RetryUndeliveredFiles: false, ArchiveRecommendations: false, DefaultProviders: map[string]string{}, DefaultWorkdirs: map[string]string{}}
+	return Settings{Version: FormatVersion, ContinueExisting: true, ScreenEnabled: false, ScreenCaptureLimitKiB: DefaultScreenCaptureLimitKiB, CardDetail: CardDetailStandard, CardPageLimit: DefaultCardPages, ShowTechnicalActions: true, NotifyBackgroundQuestions: false, NotifyBackgroundErrors: true, SessionLifetime: Lifetime12Hours, QueueLimit: DefaultQueueLimit, VoiceRecognition: VoiceParakeet, RetryUndeliveredFiles: false, ArchiveRecommendations: false, DefaultProviders: map[string]string{}, DefaultWorkdirs: map[string]string{}}
 }
 
 func (s Settings) Effective() Effective {
 	return Effective{
 		ContinueExisting:           s.ContinueExisting,
 		ScreenEnabled:              s.ScreenEnabled,
+		ScreenCaptureLimitKiB:      s.ScreenCaptureLimitKiB,
 		CardDetail:                 s.CardDetail,
 		CardPageLimit:              s.CardPageLimit,
 		ShowTechnicalActions:       s.ShowTechnicalActions,
@@ -100,6 +106,7 @@ func (s Settings) Effective() Effective {
 		PreprocessingEnabled:       s.PreprocessingEnabled,
 		PreprocessingInstruction:   s.PreprocessingInstruction,
 		SessionNamingEnabled:       s.SessionNamingEnabled,
+		StandbyEnabled:             s.StandbyEnabled,
 	}
 }
 
@@ -112,6 +119,9 @@ func (s Settings) Validate() error {
 	}
 	if s.CardPageLimit != 32 && s.CardPageLimit != 64 && s.CardPageLimit != 128 {
 		return errors.New("card page limit must be 32, 64, or 128")
+	}
+	if s.ScreenCaptureLimitKiB != 48 && s.ScreenCaptureLimitKiB != 64 && s.ScreenCaptureLimitKiB != 86 {
+		return errors.New("screen capture limit must be 48, 64, or 86 KiB")
 	}
 	switch s.SessionLifetime {
 	case LifetimeNever, Lifetime6Hours, Lifetime12Hours, Lifetime24Hours, Lifetime48Hours:

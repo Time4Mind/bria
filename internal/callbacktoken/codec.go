@@ -121,6 +121,14 @@ const (
 	ActionSettingsPreprocessingInstruction     Action = 76
 	ActionSettingsPreprocessingReset           Action = 77
 	ActionSettingsSessionNaming                Action = 78
+	ActionModelMenu                            Action = 79
+	ActionModelChoice                          Action = 80
+	ActionEffortMenu                           Action = 81
+	ActionEffortChoice                         Action = 82
+	ActionNativeKey                            Action = 83
+	ActionSettingsStandby                      Action = 84
+	ActionRefreshStatus                        Action = 85
+	ActionSettingsScreenCaptureLimit           Action = 86
 )
 
 // Fields is the semantic callback payload. SessionID identifies the selected
@@ -242,20 +250,22 @@ func (c *Codec) Decode(token string) (Fields, error) {
 
 func validAction(action Action) bool {
 	switch action {
+	case ActionNativeKey, ActionModelMenu, ActionModelChoice, ActionEffortMenu, ActionEffortChoice:
+		return true
 	case ActionPreviousPage, ActionNextPage, ActionLatestPage, ActionSelectSession,
 		ActionStop, ActionClose, ActionOptions, ActionScreen, ActionResume,
-		ActionMenuSessions, ActionMenuNew, ActionMenuArchive, ActionMenuStatus,
+		ActionMenuSessions, ActionMenuNew, ActionMenuArchive, ActionMenuStatus, ActionRefreshStatus,
 		ActionMenuSettings, ActionMenuBack, ActionCreateSelectCodex, ActionCreateSelectClaude,
 		ActionCreateWorkdir, ActionCreateConfirm, ActionCreateCodex, ActionCreateClaude,
 		ActionSettingsCategory, ActionMenuNodes, ActionSelectNode,
-		ActionSettingsScreen, ActionSettingsDetail, ActionSettingsPageLimit, ActionSettingsContinueExisting,
+		ActionSettingsScreen, ActionSettingsScreenCaptureLimit, ActionSettingsDetail, ActionSettingsPageLimit, ActionSettingsContinueExisting,
 		ActionSettingsTechnicalActions, ActionSettingsBackgroundQuestions, ActionSettingsBackgroundErrors,
 		ActionSettingsArchiveRecommendations,
 		ActionSettingsDefaultProvider, ActionSettingsDefaultWorkdir, ActionSettingsClearCreationDefaults,
 		ActionSettingsLifetimeNever, ActionSettingsLifetime6Hours, ActionSettingsLifetime12Hours,
 		ActionSettingsLifetime24Hours, ActionSettingsLifetime48Hours,
 		ActionSettingsProviderCodex, ActionSettingsProviderClaude, ActionAuthorizeCodex, ActionAuthorizeClaude,
-		ActionSettingsPreprocessing, ActionSettingsPreprocessingInstruction, ActionSettingsPreprocessingReset, ActionSettingsSessionNaming:
+		ActionSettingsPreprocessing, ActionSettingsPreprocessingInstruction, ActionSettingsPreprocessingReset, ActionSettingsSessionNaming, ActionSettingsStandby:
 		return true
 	case ActionCreateChoice, ActionCreatePrevious, ActionCreateFirst, ActionCreateNext,
 		ActionCreateUp, ActionCreatePick, ActionCreateDirectoryNew, ActionCreateBack, ActionCreateFresh:
@@ -276,6 +286,12 @@ func validAction(action Action) bool {
 
 func validTarget(action Action, target int) bool {
 	switch action {
+	case ActionNativeKey:
+		return target >= 1 && target <= 8
+	case ActionModelMenu, ActionEffortMenu:
+		return target >= 0 && target <= MaxTarget
+	case ActionModelChoice, ActionEffortChoice:
+		return target > 0 && target <= MaxTarget
 	case ActionPreviousPage, ActionNextPage:
 		return target > 0 && target <= MaxTarget
 	case ActionCreateChoice:
@@ -284,15 +300,17 @@ func validTarget(action Action, target int) bool {
 		return target > 0 && target <= MaxTarget
 	case ActionSelectNode:
 		return target > 0 && target <= MaxTarget
+	case ActionMenuArchive:
+		return target >= 0 && target <= MaxTarget
 	case ActionInteractionChoice:
 		return target > 0 && target <= MaxTarget
 	case ActionClose:
 		return target >= 0 && target <= 2
 	case ActionLatestPage, ActionSelectSession, ActionStop, ActionOptions, ActionScreen, ActionResume, ActionMenuNodes,
-		ActionMenuSessions, ActionMenuNew, ActionMenuArchive, ActionMenuStatus,
+		ActionMenuSessions, ActionMenuNew, ActionMenuStatus, ActionRefreshStatus,
 		ActionMenuSettings, ActionMenuBack, ActionCreateSelectCodex, ActionCreateSelectClaude,
 		ActionCreateWorkdir, ActionCreateConfirm, ActionCreateCodex, ActionCreateClaude,
-		ActionSettingsScreen, ActionSettingsDetail, ActionSettingsPageLimit, ActionSettingsContinueExisting,
+		ActionSettingsScreen, ActionSettingsScreenCaptureLimit, ActionSettingsDetail, ActionSettingsPageLimit, ActionSettingsContinueExisting,
 		ActionSettingsTechnicalActions, ActionSettingsBackgroundQuestions, ActionSettingsBackgroundErrors,
 		ActionSettingsArchiveRecommendations,
 		ActionSettingsDefaultProvider, ActionSettingsDefaultWorkdir, ActionSettingsClearCreationDefaults,
@@ -300,7 +318,7 @@ func validTarget(action Action, target int) bool {
 		ActionSettingsLifetime24Hours, ActionSettingsLifetime48Hours,
 		ActionSettingsProviderCodex, ActionSettingsProviderClaude, ActionAuthorizeCodex, ActionAuthorizeClaude:
 		return target == 0
-	case ActionSettingsPreprocessing, ActionSettingsPreprocessingInstruction, ActionSettingsPreprocessingReset, ActionSettingsSessionNaming:
+	case ActionSettingsPreprocessing, ActionSettingsPreprocessingInstruction, ActionSettingsPreprocessingReset, ActionSettingsSessionNaming, ActionSettingsStandby:
 		return target == 0
 	case ActionCreatePrevious, ActionCreateFirst, ActionCreateNext,
 		ActionCreateUp, ActionCreatePick, ActionCreateDirectoryNew, ActionCreateBack, ActionCreateFresh:
