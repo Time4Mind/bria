@@ -13,7 +13,7 @@ const testID = "12345678-1234-4234-9234-123456789abc"
 
 func TestBuildNativeTransports(t *testing.T) {
 	plan, err := Build(domain.ProviderCodex, []string{"codex", "app-server", "--stdio", "-m", "gpt-test", "--sandbox", "read-only"}, "/work", testID)
-	want := []string{"codex", "-m", "gpt-test", "--dangerously-bypass-approvals-and-sandbox", "--no-alt-screen", "--cd", "/work", "resume", testID}
+	want := []string{"codex", "-m", "gpt-test", "--ask-for-approval", "on-request", "--sandbox", "workspace-write", "--no-alt-screen", "--cd", "/work", "resume", testID}
 	if err != nil || !reflect.DeepEqual(plan.Command, want) || plan.SessionID != testID {
 		t.Fatalf("plan=%#v err=%v", plan, err)
 	}

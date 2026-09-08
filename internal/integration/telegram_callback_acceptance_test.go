@@ -24,7 +24,13 @@ import (
 // is deliberately counted: acknowledging twice makes the real Bot API return
 // an error and used to turn an otherwise successful click into a crash-loop.
 func TestTelegramCallbackEditIsOneInPlaceOperation(t *testing.T) {
-	httpClient := &callbackHTTPClient{}
+	releaseAcknowledgements := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releaseAcknowledgements) }) }
+	httpClient := &callbackHTTPClient{
+		acknowledgementStarted:  make(chan string, 2),
+		releaseAcknowledgements: releaseAcknowledgements,
+	}
 	client, err := telegram.NewClient("123:test-token", httpClient, telegram.Options{})
 	if err != nil {
 		t.Fatal(err)
@@ -33,6 +39,14 @@ func TestTelegramCallbackEditIsOneInPlaceOperation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() {
+		release()
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		if err := sender.Close(ctx); err != nil {
+			t.Errorf("join callback acknowledgements: %v", err)
+		}
+	})
 	keyboard := coordinator.KeyboardMarkup{{
 		{Text: "‹", CallbackData: "pg:prev"},
 		{Text: "1/1", CallbackData: "pg:jump"},
@@ -42,33 +56,47 @@ func TestTelegramCallbackEditIsOneInPlaceOperation(t *testing.T) {
 		{Text: "≡ Меню", CallbackData: "ft:more"},
 	}}
 
-	_, err = sender.SendStatusWithKeyboard(context.Background(), "", coordinator.Status{
+	operationContext, cancelOperation := context.WithTimeout(context.Background(), time.Second)
+	defer cancelOperation()
+	_, err = sender.SendStatusWithKeyboard(operationContext, "", coordinator.Status{
 		ConversationID: 42, Text: "card", CallbackQueryID: "q1", SourceMessageID: 77,
 	}, &keyboard)
 	if err != nil {
 		t.Fatalf("send card: %v", err)
 	}
-	if httpClient.answerCalls != 1 {
-		t.Fatalf("callback answers after send = %d, want 1", httpClient.answerCalls)
+	// Both visible operations must return while the HTTP acknowledgements are
+	// still blocked. Callback completion must not gate a card transition.
+	httpClient.waitForAcknowledgement(t, "q1")
+	afterSend := httpClient.snapshot()
+	if afterSend.answerCalls != 1 {
+		t.Fatalf("callback answers after send = %d, want 1", afterSend.answerCalls)
 	}
-	if httpClient.sendCalls != 1 || httpClient.lastSend.ChatID != 42 {
-		t.Fatalf("send calls/body = %d/%#v, want one message to chat 42", httpClient.sendCalls, httpClient.lastSend)
+	if afterSend.sendCalls != 1 || afterSend.lastSend.ChatID != 42 {
+		t.Fatalf("send calls/body = %d/%#v, want one message to chat 42", afterSend.sendCalls, afterSend.lastSend)
 	}
-	if got := httpClient.lastSend.ReplyMarkup.InlineKeyboard[0][2].CallbackData; got != "pg:next" {
+	if got := afterSend.lastSend.ReplyMarkup.InlineKeyboard[0][2].CallbackData; got != "pg:next" {
 		t.Fatalf("next callback = %q, want pg:next", got)
 	}
 
-	_, err = sender.EditStatusWithKeyboard(context.Background(), "", coordinator.Status{
+	_, err = sender.EditStatusWithKeyboard(operationContext, "", coordinator.Status{
 		ConversationID: 42, Text: "card page 2", CallbackQueryID: "q2", SourceMessageID: 77,
 	}, &keyboard)
 	if err != nil {
 		t.Fatalf("edit card: %v", err)
 	}
-	if httpClient.answerCalls != 2 {
-		t.Fatalf("callback answers after edit = %d, want one per callback", httpClient.answerCalls)
+	httpClient.waitForAcknowledgement(t, "q2")
+	release()
+	completionContext, cancelCompletion := context.WithTimeout(context.Background(), time.Second)
+	defer cancelCompletion()
+	if err := sender.Close(completionContext); err != nil {
+		t.Fatalf("complete callback acknowledgements: %v", err)
 	}
-	if httpClient.editCalls != 1 || httpClient.lastEdit.MessageID != 77 || httpClient.lastEdit.Text != "card page 2" {
-		t.Fatalf("edit calls/body = %d/%#v, want one in-place edit of message 77", httpClient.editCalls, httpClient.lastEdit)
+	afterEdit := httpClient.snapshot()
+	if afterEdit.answerCalls != 2 {
+		t.Fatalf("callback answers after edit = %d, want one per callback", afterEdit.answerCalls)
+	}
+	if afterEdit.sendCalls != 1 || afterEdit.editCalls != 1 || afterEdit.lastEdit.MessageID != 77 || afterEdit.lastEdit.Text != "card page 2" {
+		t.Fatalf("send/edit calls/body = %d/%d/%#v, want one in-place edit of message 77", afterEdit.sendCalls, afterEdit.editCalls, afterEdit.lastEdit)
 	}
 }
 
@@ -197,6 +225,13 @@ func (s *flowSessions) Load(context.Context, domain.SessionID) (domain.Session, 
 }
 
 type callbackHTTPClient struct {
+	mu sync.Mutex
+	callbackHTTPObservation
+	acknowledgementStarted  chan string
+	releaseAcknowledgements <-chan struct{}
+}
+
+type callbackHTTPObservation struct {
 	answerCalls int
 	sendCalls   int
 	editCalls   int
@@ -206,25 +241,68 @@ type callbackHTTPClient struct {
 
 func (c *callbackHTTPClient) Do(request *http.Request) (*http.Response, error) {
 	defer request.Body.Close()
+	callbackID, err := c.record(request)
+	if err != nil {
+		return nil, err
+	}
+	body := `{"ok":true,"result":{"message_id":77,"from":{"id":9,"is_bot":true,"first_name":"Bria"},"chat":{"id":42,"type":"private"},"text":"ok"}}`
+	if callbackID != "" {
+		select {
+		case c.acknowledgementStarted <- callbackID:
+		case <-request.Context().Done():
+			return nil, request.Context().Err()
+		}
+		select {
+		case <-c.releaseAcknowledgements:
+		case <-request.Context().Done():
+			return nil, request.Context().Err()
+		}
+		body = `{"ok":true,"result":true}`
+	}
+	return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}, nil
+}
+
+func (c *callbackHTTPClient) record(request *http.Request) (string, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	switch {
 	case strings.HasSuffix(request.URL.Path, "/answerCallbackQuery"):
+		var answer telegram.AnswerCallbackQueryRequest
+		if err := json.NewDecoder(request.Body).Decode(&answer); err != nil {
+			return "", err
+		}
 		c.answerCalls++
+		return string(answer.CallbackQueryID), nil
 	case strings.HasSuffix(request.URL.Path, "/sendMessage"):
 		c.sendCalls++
 		if err := json.NewDecoder(request.Body).Decode(&c.lastSend); err != nil {
-			return nil, err
+			return "", err
 		}
 	case strings.HasSuffix(request.URL.Path, "/editMessageText"):
 		c.editCalls++
 		if err := json.NewDecoder(request.Body).Decode(&c.lastEdit); err != nil {
-			return nil, err
+			return "", err
 		}
 	default:
-		return nil, io.ErrUnexpectedEOF
+		return "", io.ErrUnexpectedEOF
 	}
-	body := `{"ok":true,"result":{"message_id":77,"from":{"id":9,"is_bot":true,"first_name":"Bria"},"chat":{"id":42,"type":"private"},"text":"ok"}}`
-	if strings.HasSuffix(request.URL.Path, "/answerCallbackQuery") {
-		body = `{"ok":true,"result":true}`
+	return "", nil
+}
+
+func (c *callbackHTTPClient) snapshot() callbackHTTPObservation {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.callbackHTTPObservation
+}
+
+func (c *callbackHTTPClient) waitForAcknowledgement(t *testing.T, want string) {
+	t.Helper()
+	select {
+	case got := <-c.acknowledgementStarted:
+		if got != want {
+			t.Fatalf("callback acknowledgement = %q, want %q", got, want)
+		}
+	case <-time.After(time.Second):
+		t.Fatalf("callback acknowledgement %q did not start", want)
 	}
-	return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}, nil
 }

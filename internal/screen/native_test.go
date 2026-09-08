@@ -7,10 +7,31 @@ import (
 	"fmt"
 	"image/png"
 	"strings"
+	"sync"
 	"testing"
 
 	"bria/internal/screen"
 )
+
+func TestNativeRenderConcurrentCallsPreserveExactPNG(t *testing.T) {
+	const terminal = "\x1b[31mОшибка\x1b[0m\n\n› next"
+	want, err := screen.RenderNative(context.Background(), terminal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var workers sync.WaitGroup
+	for range 8 {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			got, err := screen.RenderNative(context.Background(), terminal)
+			if err != nil || !bytes.Equal(got, want) {
+				t.Errorf("concurrent screenshot changed: %v", err)
+			}
+		}()
+	}
+	workers.Wait()
+}
 
 func TestNativeRenderPreservesCyrillicAndBounds(t *testing.T) {
 	actual, err := screen.RenderNative(context.Background(), "Привет")

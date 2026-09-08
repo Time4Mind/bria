@@ -39,6 +39,7 @@ func (c *Controller) StartNativeObserver() {
 				}
 			case <-ticker.C:
 			}
+			c.autoApproveNativeScreens(c.rootContext, reader)
 			c.refreshNativeObservation(c.rootContext, reader)
 		}
 	}()

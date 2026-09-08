@@ -2,66 +2,26 @@ package screen
 
 import (
 	"context"
-	"errors"
-	"strings"
-	"unicode/utf8"
+
+	"bria/internal/nativerender"
 )
 
 const (
-	DefaultNativeCaptureKiB = 48
-	NativeMaxPNGBytes       = 1 << 20
+	DefaultNativeCaptureKiB = nativerender.DefaultNativeCaptureKiB
+	NativeMaxPNGBytes       = nativerender.NativeMaxPNGBytes
 )
 
-var ErrInvalidNativeOptions = errors.New("invalid native screen options")
+var ErrInvalidNativeOptions = nativerender.ErrInvalidNativeOptions
 
-// NativeOptions controls only the bounded terminal payload. CaptureKiB is
-// intentionally limited to the three owner-approved settings values.
-type NativeOptions struct {
-	CaptureKiB int
-}
+// NativeOptions preserves the native screenshot API for screen consumers.
+type NativeOptions = nativerender.NativeOptions
 
-// RenderNative rasterizes an explicitly selected native terminal capture. It
-// does not read a terminal or build a fake terminal from provider events. Raw
-// content is bounded, never logged or persisted, and returned only as a PNG.
+// RenderNative rasterizes the selected terminal capture without accessing a PTY.
 func RenderNative(ctx context.Context, text string) ([]byte, error) {
-	return RenderNativeWithOptions(ctx, text, NativeOptions{})
+	return nativerender.RenderNative(ctx, text)
 }
 
-// RenderNativeWithOptions rasterizes the newest bounded terminal payload. If
-// the encoded PNG exceeds Telegram's rich-photo limit, the oldest rendered
-// rows are removed until the newest useful payload fits.
+// RenderNativeWithOptions renders the newest bounded ANSI terminal payload.
 func RenderNativeWithOptions(ctx context.Context, text string, options NativeOptions) ([]byte, error) {
-	if ctx == nil || !utf8.ValidString(text) {
-		return nil, ErrEventTooLarge
-	}
-	limits, err := nativeLimitsFor(options)
-	if err != nil {
-		return nil, err
-	}
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	text = strings.ReplaceAll(text, "\r\n", "\n")
-	text = trimNativeCapture(text, limits.captureBytes)
-	png, _, _, err := renderNativeANSI(strings.TrimRight(text, "\n"), limits)
-	if contextErr := ctx.Err(); contextErr != nil {
-		return nil, contextErr
-	}
-	return png, err
-}
-
-func trimNativeCapture(text string, maxBytes int) string {
-	if len(text) <= maxBytes {
-		return text
-	}
-	start := len(text) - maxBytes
-	for start < len(text) && !utf8.RuneStart(text[start]) {
-		start++
-	}
-	// Prefer a complete terminal row. This also prevents a raw byte cut from
-	// exposing the tail of a CSI/OSC sequence as printable screenshot text.
-	if newline := strings.IndexByte(text[start:], '\n'); newline >= 0 {
-		start += newline + 1
-	}
-	return text[start:]
+	return nativerender.RenderNativeWithOptions(ctx, text, options)
 }

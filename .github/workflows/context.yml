@@ -23,7 +23,11 @@ jobs:
           cache: false
 
       - name: Run full stage 1 checks
-        run: make check-full
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y tmux
+          make prepare-deps
+          make check-full
 
       - name: Verify repository-policy mutation coverage
         run: go test ./scripts -run 'TestPolicyChecker|TestLinkChecker|TestFilenameChecker'

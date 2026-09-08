@@ -5,10 +5,9 @@ package settingscomposition
 import (
 	"context"
 	"errors"
-	"strings"
 
-	"bria/internal/config"
 	"bria/internal/domain"
+	"bria/internal/providerpreferences"
 	"bria/internal/settings"
 	"bria/internal/settingsport"
 )
@@ -18,6 +17,7 @@ import (
 type Preferences struct{ Store settings.Store }
 
 var _ settingsport.Preferences = Preferences{}
+var _ settingsport.AutoApprovalPreferences = Preferences{}
 
 func (p Preferences) Snapshot(ctx context.Context) (settingsport.Snapshot, error) {
 	if p.Store == nil {
@@ -41,6 +41,7 @@ func (p Preferences) Snapshot(ctx context.Context) (settingsport.Snapshot, error
 		PreprocessingInstruction: current.PreprocessingInstruction,
 		SessionNamingEnabled:     current.SessionNamingEnabled,
 		StandbyEnabled:           current.StandbyEnabled,
+		AutoApproveCommands:      current.AutoApproveCommands,
 	}, nil
 }
 
@@ -50,6 +51,9 @@ func (p Preferences) ToggleContinueExisting(ctx context.Context) error {
 
 func (p Preferences) ToggleStandby(ctx context.Context) error {
 	return p.update(ctx, func(current *settings.Settings) { current.StandbyEnabled = !current.StandbyEnabled })
+}
+func (p Preferences) ToggleAutoApproveCommands(ctx context.Context) error {
+	return p.update(ctx, func(current *settings.Settings) { current.AutoApproveCommands = !current.AutoApproveCommands })
 }
 func (p Preferences) ToggleScreen(ctx context.Context) error {
 	return p.update(ctx, func(current *settings.Settings) { current.ScreenEnabled = !current.ScreenEnabled })
@@ -158,75 +162,5 @@ func (p Preferences) update(ctx context.Context, mutate func(*settings.Settings)
 	return p.Store.Update(ctx, func(current *settings.Settings) error { mutate(current); return nil })
 }
 
-// ProviderPreferences exposes only provider capability flags and changes them
-// through config.FileStore's atomic SetProviderEnabled path. It never reads or
-// writes credentials.
-type ProviderPreferences struct{ Store config.Store }
-
-var _ settingsport.ProviderPreferences = ProviderPreferences{}
-
-func (p ProviderPreferences) Snapshot(ctx context.Context) ([]settingsport.ProviderPreference, error) {
-	if p.Store == nil {
-		return nil, errors.New("provider configuration store is required")
-	}
-	snapshot, err := p.Store.Current(ctx)
-	if err != nil {
-		return nil, err
-	}
-	capabilities := snapshot.Config.ProviderCapabilities()
-	result := make([]settingsport.ProviderPreference, 0, len(capabilities))
-	for _, capability := range capabilities {
-		result = append(result, settingsport.ProviderPreference{Provider: capability.Provider, Enabled: capability.Enabled, Configured: capability.Configured})
-	}
-	return result, nil
-}
-
-func (p ProviderPreferences) ToggleProvider(ctx context.Context, provider domain.Provider) error {
-	if p.Store == nil {
-		return errors.New("provider configuration store is required")
-	}
-	for attempt := 0; attempt < 8; attempt++ {
-		snapshot, err := p.Store.Current(ctx)
-		if err != nil {
-			return err
-		}
-		_, err = p.Store.SetProviderEnabled(ctx, snapshot.Revision, provider, !snapshot.Config.ProviderEnabled(provider))
-		if !errors.Is(err, config.ErrRevisionConflict) {
-			return err
-		}
-	}
-	return config.ErrRevisionConflict
-}
-
-// RenameNode updates only the non-secret display metadata in the local config.
-// It is intentionally exposed through the provider/config composition so the
-// Telegram controller does not depend on a concrete config store.
-func (p ProviderPreferences) RenameNode(ctx context.Context, nodeID domain.ComputerID, name string) error {
-	name = strings.TrimSpace(name)
-	if name == "" || len([]rune(name)) > 64 {
-		return errors.New("имя ноды должно содержать от 1 до 64 символов")
-	}
-	if p.Store == nil {
-		return errors.New("provider configuration store is required")
-	}
-	for attempt := 0; attempt < 8; attempt++ {
-		snapshot, err := p.Store.Current(ctx)
-		if err != nil {
-			return err
-		}
-		if snapshot.Config.Computer == nil || domain.ComputerID(snapshot.Config.Computer.ID) != nodeID {
-			return errors.New("нода не найдена в локальной конфигурации")
-		}
-		next := snapshot.Config
-		computer := *snapshot.Config.Computer
-		computer.Name = name
-		next.Computer = &computer
-		if _, err = p.Store.CompareAndSwap(ctx, snapshot.Revision, next); err == nil {
-			return nil
-		}
-		if !errors.Is(err, config.ErrRevisionConflict) {
-			return err
-		}
-	}
-	return errors.New("не удалось сохранить имя ноды из-за конфликта конфигурации")
-}
+// ProviderPreferences retains the composition API for the provider/config adapter.
+type ProviderPreferences = providerpreferences.ProviderPreferences

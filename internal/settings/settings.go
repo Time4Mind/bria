@@ -56,6 +56,7 @@ type Settings struct {
 	PreprocessingInstruction  string            `json:"preprocessing_instruction"`
 	SessionNamingEnabled      bool              `json:"session_naming_enabled"`
 	StandbyEnabled            bool              `json:"standby_enabled"`
+	AutoApproveCommands       bool              `json:"auto_approve_commands"`
 }
 
 type Effective struct {
@@ -79,10 +80,11 @@ type Effective struct {
 	PreprocessingInstruction   string
 	SessionNamingEnabled       bool
 	StandbyEnabled             bool
+	AutoApproveCommands        bool
 }
 
 func Default() Settings {
-	return Settings{Version: FormatVersion, ContinueExisting: true, ScreenEnabled: false, ScreenCaptureLimitKiB: DefaultScreenCaptureLimitKiB, CardDetail: CardDetailStandard, CardPageLimit: DefaultCardPages, ShowTechnicalActions: true, NotifyBackgroundQuestions: false, NotifyBackgroundErrors: true, SessionLifetime: Lifetime12Hours, QueueLimit: DefaultQueueLimit, VoiceRecognition: VoiceParakeet, RetryUndeliveredFiles: false, ArchiveRecommendations: false, DefaultProviders: map[string]string{}, DefaultWorkdirs: map[string]string{}}
+	return Settings{Version: FormatVersion, ContinueExisting: true, ScreenEnabled: false, ScreenCaptureLimitKiB: DefaultScreenCaptureLimitKiB, CardDetail: CardDetailStandard, CardPageLimit: DefaultCardPages, ShowTechnicalActions: true, NotifyBackgroundQuestions: false, NotifyBackgroundErrors: true, SessionLifetime: Lifetime12Hours, QueueLimit: DefaultQueueLimit, VoiceRecognition: VoiceParakeet, RetryUndeliveredFiles: false, ArchiveRecommendations: false, DefaultProviders: map[string]string{}, DefaultWorkdirs: map[string]string{}, AutoApproveCommands: true}
 }
 
 func (s Settings) Effective() Effective {
@@ -107,6 +109,7 @@ func (s Settings) Effective() Effective {
 		PreprocessingInstruction:   s.PreprocessingInstruction,
 		SessionNamingEnabled:       s.SessionNamingEnabled,
 		StandbyEnabled:             s.StandbyEnabled,
+		AutoApproveCommands:        s.AutoApproveCommands,
 	}
 }
 

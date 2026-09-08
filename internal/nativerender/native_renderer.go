@@ -1,4 +1,4 @@
-package screen
+package nativerender
 
 // Native renderer: a bounded terminal capture rendered with an embedded
 // monospace font. Unlike the event projection used by Store, this preserves

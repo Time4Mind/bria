@@ -1,0 +1,24 @@
+  Would you like to run the following command?
+
+  Environment: local
+
+  Reason: Разрешить один read-only TrackerClient get_issue для live-описания EXAMPLEPRJX-1001 с выводом только длины и безопасного
+  preview?
+
+  $ cat /Users/test-user/.agents/skills/tracker/SKILL.md >/dev/null && PYTHONPYCACHEPREFIX=/private/tmp/tracker-pycache python3 -c 'import
+  sys,json,re; sys.path.insert(0,"/Users/test-user/.agents/skills/tracker/scripts"); from tracker_client import ExampleTrackerClient;
+  t=ExampleTrackerClient(); x=t.get_issue("EXAMPLEPRJX-1001"); d=str(x.get("description") or "");
+  d=re.sub(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}","[redacted-email]",d); d=re.sub(r"(?<!\d)(?:\+?\d[\d
+  ()-]{7,}\d)(?!\d)","[redacted-phone]",d); d=" ".join(d.split());
+  print(json.dumps({"key":x.get("key"),"description_length":len(d),"preview":d[:180]},ensure_ascii=False))'
+
+› 1. Yes, proceed (y)
+  2. Yes, and don't ask again for commands that start with `cat /Users/test-user/.agents/skills/tracker/SKILL.md >/dev/null &&
+     PYTHONPYCACHEPREFIX=/private/tmp/tracker-pycache python3 -c 'import sys,json,re; sys.path.insert(0,"/Users/test-user/.agents/skills/
+     tracker/scripts"); from tracker_client import ExampleTrackerClient; t=ExampleTrackerClient(); x=t.get_issue("EXAMPLEPRJX-1001");
+     d=str(x.get("description") or ""); d=re.sub(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}","[redacted-email]",d); d=re.sub(r"(?<!
+     \d)(?:\+?\d[\d ()-]{7,}\d)(?!\d)","[redacted-phone]",d); d=" ".join(d.split());
+     print(json.dumps({"key":x.get("key"),"description_length":len(d),"preview":d[:180]},ensure_ascii=False))'` (p)
+  3. No, and tell Codex what to do differently (esc)
+
+  Press enter to confirm or esc to cancel

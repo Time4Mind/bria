@@ -6,17 +6,13 @@ import (
 	"fmt"
 
 	"bria/internal/domain"
+	"bria/internal/nativecontrolport"
 	"bria/internal/runtimeprotocol"
 )
 
-type NativeRequest struct{ Command, Key, ExpectedHash string }
-type NativeSnapshot struct {
-	Text, FullText, Hash, Model string
-	Interactive                 bool
-}
-type NativeController interface {
-	NativeControl(context.Context, domain.SessionID, NativeRequest) (NativeSnapshot, error)
-}
+type NativeRequest = nativecontrolport.Request
+type NativeSnapshot = nativecontrolport.Snapshot
+type NativeController = nativecontrolport.Controller
 
 // NativeModelProvider reads metadata confirmed by the exact live adapter
 // generation. It never captures a terminal or waits for provider I/O.
@@ -68,6 +64,9 @@ func (starter *Starter) NativeControl(ctx context.Context, id domain.SessionID, 
 	if !bound {
 		return NativeSnapshot{}, ErrSessionNotTracked
 	}
+	if request.ExpectedProviderSessionID != "" && (request.ExpectedProviderSessionID != record.binding.SessionID || request.ExpectedGeneration != record.binding.Generation) {
+		return NativeSnapshot{}, ErrNativeStale
+	}
 	waiter := make(chan wireResult, 1)
 	record.nativeMu.Lock()
 	if record.nativeWaiters == nil {
@@ -86,7 +85,7 @@ func (starter *Starter) NativeControl(ctx context.Context, id domain.SessionID, 
 	select {
 	case result := <-waiter:
 		message := result.message
-		snapshot := NativeSnapshot{Text: message.Text, FullText: message.FullText, Hash: message.Hash, Model: message.Model, Interactive: message.Interactive}
+		snapshot := NativeSnapshot{Text: message.Text, FullText: message.FullText, Hash: message.Hash, Model: message.Model, Interactive: message.Interactive, ProviderSessionID: record.binding.SessionID, Generation: record.binding.Generation}
 		if len(snapshot.Text) > starter.maxTextBytes {
 			starter.killAndWait(record)
 			return NativeSnapshot{}, ErrTextTooLarge
@@ -121,7 +120,7 @@ func (record *processRecord) dispatchNative(message wireMessage) bool {
 	}
 	select {
 	case waiter <- wireResult{message: message}:
-		record.nativeScreen = NativeSnapshot{Text: message.Text, FullText: message.FullText, Hash: message.Hash, Model: message.Model, Interactive: message.Interactive}
+		record.nativeScreen = NativeSnapshot{Text: message.Text, FullText: message.FullText, Hash: message.Hash, Model: message.Model, Interactive: message.Interactive, ProviderSessionID: record.binding.SessionID, Generation: record.binding.Generation}
 		record.hasNativeScreen = true
 		if message.Model != "" {
 			record.nativeModel = message.Model

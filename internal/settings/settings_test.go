@@ -3,6 +3,7 @@ package settings
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -15,7 +16,7 @@ import (
 
 func TestDefaultsAreProductDefaults(t *testing.T) {
 	s := Default()
-	if !s.ContinueExisting || s.ScreenEnabled || !s.ShowTechnicalActions || s.NotifyBackgroundQuestions || !s.NotifyBackgroundErrors || s.ArchiveRecommendations || s.PreprocessingEnabled || s.PreprocessingInstruction != "" || s.SessionNamingEnabled {
+	if !s.ContinueExisting || s.ScreenEnabled || !s.ShowTechnicalActions || s.NotifyBackgroundQuestions || !s.NotifyBackgroundErrors || s.ArchiveRecommendations || s.PreprocessingEnabled || s.PreprocessingInstruction != "" || s.SessionNamingEnabled || !s.AutoApproveCommands || !s.Effective().AutoApproveCommands {
 		t.Fatalf("unexpected boolean defaults: %+v", s)
 	}
 	if s.CardDetail != CardDetailStandard || s.CardPageLimit != DefaultCardPages || s.SessionLifetime != Lifetime12Hours || s.VoiceRecognition != VoiceParakeet || s.QueueLimit != DefaultQueueLimit || s.RetryUndeliveredFiles {
@@ -23,6 +24,45 @@ func TestDefaultsAreProductDefaults(t *testing.T) {
 	}
 	if err := s.Validate(); err != nil {
 		t.Fatalf("default validation: %v", err)
+	}
+}
+
+func TestAutoApproveCommandsPersistsOffAcrossReopenAndLegacyDefaultsOn(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	store, err := OpenFileStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Update(context.Background(), func(s *Settings) error {
+		s.AutoApproveCommands = false
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := OpenFileStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := reopened.Load(context.Background())
+	if err != nil || got.AutoApproveCommands {
+		t.Fatalf("reopened settings=%#v err=%v", got, err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil || !bytes.Contains(data, []byte(`"auto_approve_commands": false`)) {
+		t.Fatalf("persisted auto approval field missing: err=%v data=%s", err, data)
+	}
+	var document map[string]json.RawMessage
+	if err := json.Unmarshal(data, &document); err != nil {
+		t.Fatal(err)
+	}
+	delete(document, "auto_approve_commands")
+	legacyData, err := json.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy, err := Decode(bytes.NewReader(legacyData))
+	if err != nil || !legacy.Settings.AutoApproveCommands {
+		t.Fatalf("legacy settings=%#v err=%v", legacy, err)
 	}
 }
 

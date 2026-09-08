@@ -1,14 +1,13 @@
 package sessionruntime
 
-import "bria/internal/domain"
+import (
+	"bria/internal/domain"
+	"bria/internal/nativecontrolport"
+)
 
-// NativeScreenProvider exposes a cached exact live-process snapshot. Reading it
-// never sends keys, captures a terminal, or waits for provider I/O. Updates are
-// coalescible hints, not a history stream; consumers always reread NativeScreen.
-type NativeScreenProvider interface {
-	NativeScreen(domain.SessionID) (NativeSnapshot, bool)
-	NativeScreenUpdates() <-chan domain.SessionID
-}
+// NativeScreenProvider exposes cached snapshots; coalesced updates are hints,
+// not history. Reading a snapshot never captures a terminal or sends input.
+type NativeScreenProvider = nativecontrolport.ScreenProvider
 
 func (starter *Starter) NativeScreen(id domain.SessionID) (NativeSnapshot, bool) {
 	starter.mu.Lock()
@@ -27,7 +26,9 @@ func (starter *Starter) NativeScreen(id domain.SessionID) (NativeSnapshot, bool)
 	if record.nativeIdentity != record.binding.SessionID {
 		return NativeSnapshot{}, false
 	}
-	return record.nativeScreen, record.hasNativeScreen
+	snapshot := record.nativeScreen
+	snapshot.Generation = record.binding.Generation
+	return snapshot, record.hasNativeScreen
 }
 
 func (starter *Starter) NativeScreenUpdates() <-chan domain.SessionID {
@@ -63,7 +64,7 @@ func (record *processRecord) observeNative(message wireMessage) bool {
 		record.nativeMu.Unlock()
 		return false
 	}
-	next := NativeSnapshot{Text: message.Text, FullText: message.FullText, Hash: message.Hash, Model: message.Model, Interactive: message.Interactive}
+	next := NativeSnapshot{Text: message.Text, FullText: message.FullText, Hash: message.Hash, Model: message.Model, Interactive: message.Interactive, ProviderSessionID: message.ProviderSessionID, Generation: record.generation}
 	changed := !record.hasNativeScreen || next != record.nativeScreen
 	record.nativeScreen = next
 	record.hasNativeScreen = true

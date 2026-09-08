@@ -21,9 +21,13 @@ func TestNativeMigrationKeepsExactPackageBoundaries(t *testing.T) {
 		path    string
 		imports []string
 	}{
-		{"internal/nativeadapter", []string{"internal/domain", "internal/nativeattachment", "internal/nativecli", "internal/nativeterminal", "internal/nativetranscript", "internal/runtimeprotocol"}},
+		{"internal/nativeadapter", []string{"internal/domain", "internal/nativeattachment", "internal/nativecapture", "internal/nativecli", "internal/nativeterminal", "internal/nativetranscript", "internal/runtimeprotocol"}},
+		{"internal/nativecapture", nil},
 		{"internal/nativeattachment", nil},
-		{"internal/nativecli", []string{"internal/domain"}},
+		{"internal/nativecli", []string{"internal/domain", "internal/nativeapproval"}},
+		{"internal/nativeapproval", nil},
+		{"internal/nativecontrolport", []string{"internal/domain"}},
+		{"internal/nativeapprovalflow", []string{"internal/domain", "internal/nativeapproval", "internal/nativecontrolport"}},
 		{"internal/nativeterminal", nil},
 		{"internal/nativetranscript", []string{"internal/runtimeprotocol"}},
 	} {
@@ -578,7 +582,7 @@ func TestArchitectureCheckerRegistersCurrentCompositionBoundaries(t *testing.T) 
 		{
 			path:           "internal/p4runtimecomposition",
 			responsibility: "compose opt-in P4 media and Screen runtime adapters",
-			imports:        []string{"internal/config", "internal/domain", "internal/inputcomposition", "internal/mediaproduction", "internal/providerinputcomposition", "internal/screen", "internal/screenproduction", "internal/sessionruntime", "internal/settings", "internal/speech/parakeet", "internal/storage", "internal/telegram", "internal/turnprocessing"},
+			imports:        []string{"internal/config", "internal/documentproduction", "internal/domain", "internal/inputcomposition", "internal/mediaproduction", "internal/providerinputcomposition", "internal/screen", "internal/screenproduction", "internal/sessionruntime", "internal/settings", "internal/speech/parakeet", "internal/storage", "internal/telegram", "internal/turnprocessing"},
 			limit:          200,
 		},
 		{
@@ -831,6 +835,24 @@ func TestArchitectureCheckerCapsCoherentCustodyResponsibilities(t *testing.T) {
 		{path: "internal/nativeadapter", limit: 850},
 		{path: "internal/nativeattachment", limit: 100},
 		{path: "internal/nativecli", limit: 600},
+		{path: "internal/nativeapproval", limit: 380},
+		{path: "internal/nativecontrolport", limit: 60},
+		{path: "internal/nativeapprovalflow", limit: 150},
+		{path: "internal/nativecapture", limit: 60},
+		{path: "internal/documentproduction", limit: 100},
+		{path: "internal/providerpreferences", limit: 100},
+		{path: "internal/settingscodec", limit: 150},
+		{path: "internal/telegramcallbackview", limit: 500},
+		{path: "internal/telegramhistory", limit: 100},
+		{path: "internal/telegramrich", limit: 100},
+		{path: "internal/nativerender", limit: 550},
+		{path: "internal/nativescreencache", limit: 400},
+		{path: "internal/telegramturnhelpers", limit: 375},
+		{path: "internal/mediaproduction", limit: 800},
+		{path: "internal/screen", limit: 750},
+		{path: "internal/screenproduction", limit: 200},
+		{path: "internal/settings", limit: 800},
+		{path: "internal/settingscomposition", limit: 200},
 		{path: "internal/runtimeprotocol", limit: 1150},
 		{path: "internal/telegrampromptcomposition", limit: 225},
 		{path: "internal/telegramsettingsview", limit: 280},
@@ -1510,7 +1532,7 @@ func TestArchitectureCheckerRegistersFrozenProductionPackagePolicies(t *testing.
 		{
 			path:           "internal/screenproduction",
 			responsibility: "project typed provider events and active native session snapshots into virtual screen and optional Telegram media",
-			imports:        []string{"internal/domain", "internal/screen", "internal/sessionruntime", "internal/settings", "internal/telegram", "internal/turnprocessing"},
+			imports:        []string{"internal/domain", "internal/nativescreencache", "internal/screen", "internal/sessionruntime", "internal/settings", "internal/telegram", "internal/turnprocessing"},
 			limit:          200,
 		},
 		{
@@ -1565,7 +1587,7 @@ func TestArchitectureCheckerFrozenProductionPoliciesEnforceEdgesAndReleaseBlocke
 	}{
 		{path: "internal/artifactcomposition", imports: []string{"internal/artifactproduction", "internal/turnprocessing"}},
 		{path: "internal/inputcomposition", imports: []string{"internal/mediaproduction", "internal/turnprocessing"}},
-		{path: "internal/screenproduction", imports: []string{"internal/domain", "internal/screen", "internal/sessionruntime", "internal/settings", "internal/telegram", "internal/turnprocessing"}},
+		{path: "internal/screenproduction", imports: []string{"internal/domain", "internal/nativescreencache", "internal/screen", "internal/sessionruntime", "internal/settings", "internal/telegram", "internal/turnprocessing"}},
 		{path: "internal/containerpreflight", imports: []string{"internal/config"}, evidence: "platform_docker_executor"},
 		{path: "internal/recoveryruntime", imports: []string{"internal/claudestore", "internal/domain", "internal/processgroup", "internal/runtimeprotocol", "internal/sessionruntime"}},
 		{path: "internal/updatecomposition", imports: []string{"internal/update", "internal/updateflow", "internal/updateinstall"}, evidence: "update_and_forced_rollback"},
@@ -1695,7 +1717,7 @@ func TestArchitectureCheckerExtendsStorageAndRecoveryRuntimeEdges(t *testing.T) 
 	}{
 		{
 			path:    "internal/storage",
-			imports: []string{"internal/archiveimport", "internal/cardtranscript", "internal/coordinator", "internal/domain", "internal/telegramstate"},
+			imports: []string{"internal/archiveimport", "internal/cardtranscript", "internal/coordinator", "internal/domain", "internal/telegramhistory", "internal/telegramstate"},
 		},
 		{
 			path:    "internal/recoveryruntime",
@@ -1737,7 +1759,7 @@ func TestArchitectureCheckerRegistersSettingsAndProviderInputPolicies(t *testing
 		{
 			path:           "internal/settingscomposition",
 			responsibility: "compose neutral Telegram settings ports with canonical local settings and configuration stores",
-			imports:        []string{"internal/config", "internal/domain", "internal/settings", "internal/settingsport"},
+			imports:        []string{"internal/domain", "internal/providerpreferences", "internal/settings", "internal/settingsport"},
 			limit:          200,
 		},
 		{

@@ -8,6 +8,11 @@ on:
 permissions:
   contents: read
 
+env:
+  GOMODCACHE: ${{ github.workspace }}/.cache/go-mod
+  GOCACHE: ${{ github.workspace }}/.cache/go-build
+  TMPDIR: /tmp
+
 jobs:
   test-native:
     strategy:
@@ -24,6 +29,16 @@ jobs:
         with:
           go-version-file: go.mod
           cache: false
+      - name: Prepare native test dependencies
+        run: |
+          printf 'TMPDIR=%s\n' "$(cd /tmp && pwd -P)" >> "$GITHUB_ENV"
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            sudo apt-get update
+            sudo apt-get install -y tmux
+          elif ! command -v tmux >/dev/null; then
+            brew install tmux
+          fi
+          make prepare-deps
       - name: Test native runtime
         env:
           GOENV: "off"
@@ -67,6 +82,8 @@ jobs:
         with:
           go-version-file: go.mod
           cache: false
+      - name: Prepare pinned Go modules
+        run: make prepare-deps
       - name: Cross-compile executable trio
         env:
           GOENV: "off"

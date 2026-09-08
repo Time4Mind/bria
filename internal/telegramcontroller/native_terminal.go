@@ -8,6 +8,7 @@ import (
 	"bria/internal/coordinator"
 	"bria/internal/domain"
 	"bria/internal/sessionruntime"
+	"bria/internal/telegramturnhelpers"
 )
 
 // Observe only the exact generation's runtime cache. Rendering must not query
@@ -43,10 +44,10 @@ func (c *Controller) isNativeInput(update coordinator.Update) bool {
 		case "/menu", "/sessions", "/status", "/stop":
 			return false
 		}
-		if _, _, ok := parseNew(text); ok {
+		if _, _, ok := telegramturnhelpers.ParseNew(text); ok {
 			return false
 		}
-		if _, ok := parseUse(text); ok {
+		if _, ok := telegramturnhelpers.ParseUse(text); ok {
 			return false
 		}
 		return true

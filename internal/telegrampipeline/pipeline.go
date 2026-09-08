@@ -527,7 +527,7 @@ func PlanAcceptedCallback(callback AcceptedCallback) (CallbackPlan, error) {
 		effect = EffectToggleSettingsScreen
 	case telegramui.ActionSettingsDetail:
 		effect = EffectToggleSettingsDetail
-	case telegramui.ActionSettingsPageLimit, telegramui.ActionSettingsScreenCaptureLimit, telegramui.ActionSettingsContinueExisting,
+	case telegramui.ActionSettingsPageLimit, telegramui.ActionSettingsScreenCaptureLimit, telegramui.ActionSettingsAutoApproveCommands, telegramui.ActionSettingsContinueExisting,
 		telegramui.ActionSettingsTechnicalActions, telegramui.ActionSettingsBackgroundQuestions,
 		telegramui.ActionSettingsBackgroundErrors, telegramui.ActionSettingsArchiveRecommendations,
 		telegramui.ActionSettingsDefaultProvider, telegramui.ActionSettingsDefaultWorkdir, telegramui.ActionSettingsClearCreationDefaults,

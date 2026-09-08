@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"bria/internal/config"
+	"bria/internal/documentproduction"
 	"bria/internal/domain"
 	"bria/internal/inputcomposition"
 	"bria/internal/mediaproduction"
@@ -68,7 +69,7 @@ func Open(options Options) (*Bundle, bool, error) {
 		VoiceBytes: limits.VoiceBytes, PhotoBytes: limits.PhotoBytes, PreparedBytes: int(limits.TranscriptBytes),
 		Parakeet:       parakeet.Command{Executable: command.Executable, ModelPath: command.ModelPath, Arguments: append([]string(nil), command.Argv...), Environment: []string{}, MaxTranscriptBytes: limits.TranscriptBytes, MaxDiagnosticBytes: limits.DiagnosticBytes},
 		DocumentMode:   mediaproduction.DocumentsPrepare,
-		DocumentPolicy: mediaproduction.TextDocumentPolicy{Downloader: options.Telegram, MaxBytes: limits.TranscriptBytes},
+		DocumentPolicy: documentproduction.TextDocumentPolicy{Downloader: options.Telegram, MaxBytes: limits.TranscriptBytes},
 	})
 	if err != nil {
 		return nil, true, fmt.Errorf("compose media runtime: %w", err)

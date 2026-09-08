@@ -5,6 +5,7 @@ import (
 	"bria/internal/cardtranscript"
 	"bria/internal/coordinator"
 	"bria/internal/domain"
+	"bria/internal/nativeapprovalflow"
 	"bria/internal/promptpreprocess"
 	"bria/internal/sessioncreation"
 	"bria/internal/sessionruntime"
@@ -15,17 +16,16 @@ import (
 	"bria/internal/telegramsettings"
 	"bria/internal/telegramsettingsview"
 	"bria/internal/telegramstatus"
+	"bria/internal/telegramturnhelpers"
 	"bria/internal/turnprocessing"
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
-	"unicode/utf8"
 )
 
 const defaultQueueLimit = 16
@@ -260,6 +260,7 @@ const (
 	SemanticSettingsCategory                 SemanticActionKind = "settings_category"
 	SemanticSettingsScreen                   SemanticActionKind = "settings_screen"
 	SemanticSettingsScreenCaptureLimit       SemanticActionKind = "settings_screen_capture_limit"
+	SemanticSettingsAutoApproveCommands      SemanticActionKind = "settings_auto_approve_commands"
 	SemanticSettingsDetail                   SemanticActionKind = "settings_detail"
 	SemanticSettingsPageLimit                SemanticActionKind = "settings_page_limit"
 	SemanticSettingsContinueExisting         SemanticActionKind = "settings_continue_existing"
@@ -432,7 +433,7 @@ func (controller *Controller) handleSemanticMessage(ctx context.Context, update 
 		result.Card = &card
 		return result, cardErr
 	}
-	if _, _, ok := parseNew(text); ok {
+	if _, _, ok := telegramturnhelpers.ParseNew(text); ok {
 		controller.mu.Lock()
 		active := controller.active
 		controller.mu.Unlock()
@@ -442,7 +443,7 @@ func (controller *Controller) handleSemanticMessage(ctx context.Context, update 
 			return result, cardErr
 		}
 	}
-	if sessionID, ok := parseUse(text); ok {
+	if sessionID, ok := telegramturnhelpers.ParseUse(text); ok {
 		if _, loadErr := controller.sessions.Load(ctx, sessionID); loadErr == nil {
 			card, cardErr := controller.semanticCard(ctx, sessionID, true)
 			result.Card = &card
@@ -575,7 +576,7 @@ func isGlobalSemanticAction(kind SemanticActionKind) bool {
 		SemanticCreateWorkdir, SemanticCreateConfirm, SemanticCreateCodex, SemanticCreateClaude,
 		SemanticCreateChoice, SemanticCreatePrevious, SemanticCreateFirst, SemanticCreateNext,
 		SemanticCreateUp, SemanticCreatePick, SemanticCreateDirectoryNew, SemanticCreateBack, SemanticCreateFresh,
-		SemanticSettingsCategory, SemanticSettingsScreen, SemanticSettingsScreenCaptureLimit, SemanticSettingsDetail, SemanticSettingsPageLimit, SemanticSettingsContinueExisting,
+		SemanticSettingsCategory, SemanticSettingsScreen, SemanticSettingsScreenCaptureLimit, SemanticSettingsAutoApproveCommands, SemanticSettingsDetail, SemanticSettingsPageLimit, SemanticSettingsContinueExisting,
 		SemanticSettingsTechnicalActions, SemanticSettingsBackgroundQuestions, SemanticSettingsBackgroundErrors,
 		SemanticSettingsArchiveRecommendations,
 		SemanticSettingsDefaultProvider, SemanticSettingsDefaultWorkdir, SemanticSettingsClearCreationDefaults,
@@ -592,6 +593,11 @@ func isGlobalSemanticAction(kind SemanticActionKind) bool {
 }
 func (controller *Controller) handleGlobalSemanticAction(ctx context.Context, action SemanticAction) (SemanticActionResult, error) {
 	switch action.Kind {
+	case SemanticSettingsAutoApproveCommands:
+		if err := controller.toggleNativeAutoApprovals(ctx); err != nil {
+			return SemanticActionResult{}, err
+		}
+		return controller.settingsCategorySemanticResult(ctx, telegramsettingsview.CategoryProviders)
 	case SemanticMenuSessions:
 		controller.clearNodeBack()
 		return controller.openSessionsSemanticResult(ctx)
@@ -701,7 +707,7 @@ func (controller *Controller) handleGlobalSemanticAction(ctx context.Context, ac
 			return SemanticActionResult{}, errors.New("settings action has no category")
 		}
 		if action.Kind == SemanticSettingsProviderCodex || action.Kind == SemanticSettingsProviderClaude {
-			controller.invalidatePreprocessor()
+			controller.preparation.Invalidate(controller.currentNodeID())
 		}
 		if action.Kind == SemanticSettingsStandby {
 			controller.ScheduleStandby()
@@ -730,7 +736,7 @@ func (controller *Controller) handleGlobalSemanticAction(ctx context.Context, ac
 		if err := telegramsettings.Apply(ctx, controller.settings, controller.scopedProviderPreferences(), string(action.Kind)); err != nil {
 			return SemanticActionResult{}, err
 		}
-		controller.invalidatePreprocessor()
+		controller.preparation.Invalidate(controller.currentNodeID())
 		return controller.settingsCategorySemanticResult(ctx, telegramsettingsview.CategoryPreprocessing)
 	case SemanticAuthorizeCodex, SemanticAuthorizeClaude:
 		provider := domain.ProviderCodex
@@ -941,7 +947,7 @@ func (controller *Controller) submitAuthorization(ctx context.Context, update co
 		controller.pendingAuthorization = nil
 	}
 	controller.mu.Unlock()
-	controller.invalidatePreprocessor()
+	controller.preparation.Invalidate(controller.currentNodeID())
 	return controller.status(authorizationProviderName(challenge.Provider) + " авторизован. Сообщение с секретом удалено."), nil
 }
 func authorizationProviderName(provider domain.Provider) string {
@@ -975,7 +981,7 @@ func (controller *Controller) consumeAuthorizationMessage(ctx context.Context, u
 		if binding.Provider != domain.ProviderCodex && binding.Provider != domain.ProviderClaude {
 			return coordinator.Decision{}, true, errors.New("authorization tombstone has invalid provider")
 		}
-		controller.invalidatePreprocessor()
+		controller.preparation.Invalidate(controller.currentNodeID())
 		return controller.status(authorizationProviderName(binding.Provider) + " авторизован. Сообщение с секретом удалено."), true, nil
 	}
 	return controller.status("Авторизация не подтверждена. Сообщение с секретом удалено."), true, nil
@@ -1152,8 +1158,7 @@ type Controller struct {
 	settings                        Preferences
 	providerPreferences             ProviderPreferences
 	stopper                         sessionruntime.TurnStopper
-	inputPreparer                   InputPreparer
-	allowDocumentInput              bool
+	preparation                     telegramturnhelpers.Preparation
 	durableInput                    DurableInputCustody
 	durableOutput                   DurableOutputCustody
 	interactions                    InteractionHandler
@@ -1199,6 +1204,7 @@ type Controller struct {
 	quotaRefreshInFlight            bool
 	models                          ModelCatalog
 	native                          sessionruntime.NativeController
+	nativeApprovals                 nativeapprovalflow.Flow
 	nativeSnapshots                 map[domain.SessionID]sessionruntime.NativeSnapshot
 	nativeOverlay                   domain.SessionID
 	nativeCardVisible               bool
@@ -1206,10 +1212,7 @@ type Controller struct {
 	nativeViewCancel                context.CancelFunc
 	nativeObserverStarted           bool
 	nodeBackSession                 domain.SessionID
-	preprocessor                    promptpreprocess.Processor
 	sessionNamer                    SessionNamer
-	preprocessingObserver           promptpreprocess.Observer
-	preprocessingTimeout            time.Duration
 	preprocessingInstructionPending bool
 	nodeRenamePending               bool
 	creationPreferenceMode          string
@@ -1283,51 +1286,54 @@ func New(
 		localComputerID: localComputerID, creator: creator, sessions: sessions,
 		submitter: submitter, notifier: notifier, lifecycle: options.Lifecycle,
 		queueLimit: queueLimit, rootContext: rootContext, cancelRoot: cancelRoot,
-		uiState:               options.UIState,
-		settings:              options.Settings,
-		providerPreferences:   options.Providers,
-		stopper:               options.Stopper,
-		inputPreparer:         options.InputPreparer,
-		allowDocumentInput:    options.AllowDocumentInput,
-		durableInput:          options.DurableInput,
-		durableOutput:         options.DurableOutput,
-		interactions:          options.Interactions,
-		interactionText:       options.InteractionText,
-		authorization:         options.Authorization,
-		asyncCreator:          options.AsyncCreator,
-		archivedResumer:       options.ArchivedResumer,
-		asyncResumer:          options.AsyncResumer,
-		sessionCloser:         options.SessionCloser,
-		turnLifecycle:         options.TurnLifecycle,
-		attachments:           options.Attachments,
-		runtimeEvents:         options.RuntimeEvents,
-		finals:                options.Finals,
-		outputFailures:        options.OutputFailures,
-		closeDone:             make(chan struct{}),
-		live:                  make(map[domain.SessionID]domain.Session),
-		pending:               make(map[domain.SessionID]domain.Session),
-		workers:               make(map[domain.SessionID]*sessionWorker),
-		created:               make(map[domain.SessionID]createdProcess),
-		history:               make(map[domain.SessionID][]string),
-		page:                  make(map[domain.SessionID]int),
-		followLatest:          make(map[domain.SessionID]bool),
-		optionsExpanded:       make(map[domain.SessionID]bool),
-		closeConfirmation:     make(map[domain.SessionID]bool),
-		deliveryFailures:      make(map[domain.SessionID]NotificationFailure),
-		promptIndexes:         make(map[domain.SessionID]map[string]int),
-		runtimeTail:           make(map[domain.SessionID]map[string]int),
-		promptSessions:        make(map[string]domain.SessionID),
-		nodes:                 nodes,
-		createFlow:            sessioncreation.New(),
-		creationEnvironment:   options.CreationEnvironment,
-		quotas:                options.Quotas,
-		models:                options.Models,
-		native:                options.Native,
-		nativeSnapshots:       make(map[domain.SessionID]sessionruntime.NativeSnapshot),
-		preprocessor:          options.Preprocessor,
-		sessionNamer:          options.SessionNamer,
-		preprocessingObserver: options.PreprocessingObserver,
-		preprocessingTimeout:  preprocessingTimeout,
+		uiState:             options.UIState,
+		settings:            options.Settings,
+		providerPreferences: options.Providers,
+		stopper:             options.Stopper,
+		durableInput:        options.DurableInput,
+		durableOutput:       options.DurableOutput,
+		interactions:        options.Interactions,
+		interactionText:     options.InteractionText,
+		authorization:       options.Authorization,
+		asyncCreator:        options.AsyncCreator,
+		archivedResumer:     options.ArchivedResumer,
+		asyncResumer:        options.AsyncResumer,
+		sessionCloser:       options.SessionCloser,
+		turnLifecycle:       options.TurnLifecycle,
+		attachments:         options.Attachments,
+		runtimeEvents:       options.RuntimeEvents,
+		finals:              options.Finals,
+		outputFailures:      options.OutputFailures,
+		closeDone:           make(chan struct{}),
+		live:                make(map[domain.SessionID]domain.Session),
+		pending:             make(map[domain.SessionID]domain.Session),
+		workers:             make(map[domain.SessionID]*sessionWorker),
+		created:             make(map[domain.SessionID]createdProcess),
+		history:             make(map[domain.SessionID][]string),
+		page:                make(map[domain.SessionID]int),
+		followLatest:        make(map[domain.SessionID]bool),
+		optionsExpanded:     make(map[domain.SessionID]bool),
+		closeConfirmation:   make(map[domain.SessionID]bool),
+		deliveryFailures:    make(map[domain.SessionID]NotificationFailure),
+		promptIndexes:       make(map[domain.SessionID]map[string]int),
+		runtimeTail:         make(map[domain.SessionID]map[string]int),
+		promptSessions:      make(map[string]domain.SessionID),
+		nodes:               nodes,
+		createFlow:          sessioncreation.New(),
+		creationEnvironment: options.CreationEnvironment,
+		quotas:              options.Quotas,
+		models:              options.Models,
+		native:              options.Native,
+		nativeSnapshots:     make(map[domain.SessionID]sessionruntime.NativeSnapshot),
+		sessionNamer:        options.SessionNamer,
+		preparation: telegramturnhelpers.Preparation{
+			Settings:           options.Settings,
+			Processor:          options.Preprocessor,
+			Observer:           options.PreprocessingObserver,
+			Timeout:            preprocessingTimeout,
+			InputPreparer:      options.InputPreparer,
+			AllowDocumentInput: options.AllowDocumentInput,
+		},
 	}
 	for _, session := range options.Recovered {
 		if session.Status() == domain.SessionReady {
@@ -1438,23 +1444,23 @@ func (controller *Controller) Handle(
 	if decision, handled := controller.consumeCreateDraftWorkdir(update); handled {
 		return decision, nil
 	}
-	if provider, workdir, ok := parseNew(text); ok {
+	if provider, workdir, ok := telegramturnhelpers.ParseNew(text); ok {
 		decision, err := controller.create(ctx, update.ID, controller.currentNodeID(), provider, workdir)
 		if errors.Is(err, errProviderUnavailable) {
 			return controller.status(unavailableNewSessionSurface().Text), nil
 		}
 		return decision, err
 	}
-	if sessionID, ok := parseUse(text); ok {
+	if sessionID, ok := telegramturnhelpers.ParseUse(text); ok {
 		return controller.use(ctx, sessionID)
 	}
 	controller.mu.Lock()
 	activeSession := controller.active
 	controller.mu.Unlock()
 	messageID := "telegram-update:" + strconv.FormatInt(update.ID, 10)
-	promptText := joinPromptParts(update.Text, update.Caption)
+	promptText := telegramturnhelpers.JoinPromptParts(update.Text, update.Caption)
 	if promptText == "" {
-		promptText = mediaPromptLabel(update.MediaKind)
+		promptText = telegramturnhelpers.MediaPromptLabel(update.MediaKind)
 	}
 	if update.MediaKind == "voice" {
 		// A default session is a preparation slot: the first request must
@@ -1481,7 +1487,7 @@ func (controller *Controller) Handle(
 			return controller.status("Не удалось сохранить запрос. Он не отправлен CLI."), nil
 		}
 	}
-	prepared, rejection := controller.prepareInput(ctx, update)
+	prepared, rejection := controller.preparation.Prepare(ctx, update)
 	if rejection != "" {
 		controller.setPromptState(ctx, activeSession, messageID, promptText, "🙅‍♂")
 		return coordinator.Decision{Kind: coordinator.DecisionSkip}, nil
@@ -1490,12 +1496,12 @@ func (controller *Controller) Handle(
 		promptText = prepared.Text
 		controller.setPromptState(ctx, activeSession, messageID, promptText, "🙋‍♂")
 	}
-	payload := controller.preprocessingPayload(ctx, prepared.Text)
+	payload := controller.preparation.Payload(ctx, prepared.Text)
 	return controller.enqueue(ctx, update.ID, update.SourceMessageID, prepared, payload), nil
 }
 
 func (controller *Controller) prepareAndEnqueueVoice(ctx context.Context, update coordinator.Update, sessionID domain.SessionID, messageID, promptText string) {
-	prepared, rejection := controller.prepareInput(ctx, update)
+	prepared, rejection := controller.preparation.Prepare(ctx, update)
 	if rejection != "" {
 		controller.setPromptState(ctx, sessionID, messageID, promptText, "🙅‍♂")
 		controller.notifyPromptCard(ctx, sessionID, messageID, "🙅‍♂")
@@ -1511,7 +1517,7 @@ func (controller *Controller) prepareAndEnqueueVoice(ctx context.Context, update
 		// later preprocessing/provider states in order.
 		controller.notifyPromptCard(ctx, sessionID, messageID, "🙋‍♂")
 	}
-	payload := controller.preprocessingPayload(ctx, prepared.Text)
+	payload := controller.preparation.Payload(ctx, prepared.Text)
 	controller.enqueue(ctx, update.ID, update.SourceMessageID, prepared, payload)
 }
 
@@ -1526,21 +1532,6 @@ func (controller *Controller) notifyPromptCard(ctx context.Context, sessionID do
 		Kind:           NotificationPromptStatus,
 		Text:           emoji,
 	})
-}
-
-func mediaPromptLabel(kind string) string {
-	switch kind {
-	case "voice":
-		return "Голосовое сообщение"
-	case "photo":
-		return "Фотография"
-	case "video":
-		return "Видео"
-	case "document":
-		return "Документ"
-	default:
-		return "Сообщение"
-	}
 }
 
 func (controller *Controller) consumePreprocessingInstruction(ctx context.Context, update coordinator.Update) (coordinator.Decision, bool, error) {
@@ -1563,7 +1554,7 @@ func (controller *Controller) consumePreprocessingInstruction(ctx context.Contex
 	controller.mu.Lock()
 	controller.preprocessingInstructionPending = false
 	controller.mu.Unlock()
-	controller.invalidatePreprocessor()
+	controller.preparation.Invalidate(controller.currentNodeID())
 	return controller.status("Инструкция препроцессинга сохранена."), true, nil
 }
 
@@ -1590,176 +1581,6 @@ func (controller *Controller) consumeNodeRename(ctx context.Context, update coor
 	return controller.status("Имя ноды сохранено."), true, nil
 }
 
-func (controller *Controller) preprocessingPayload(ctx context.Context, text string) []byte {
-	text = strings.TrimSpace(text)
-	if text == "" || controller.settings == nil {
-		return []byte(text)
-	}
-	snapshot, err := controller.settings.Snapshot(ctx)
-	if err != nil || !snapshot.PreprocessingEnabled || promptpreprocess.Bypass(text) {
-		return []byte(text)
-	}
-	payload, err := promptpreprocess.Encode(snapshot.PreprocessingInstruction, text)
-	if err != nil {
-		return []byte(text)
-	}
-	return payload
-}
-
-func (controller *Controller) processPreprocessing(ctx context.Context, session domain.Session, messageID string, payload []byte) (string, bool, []byte) {
-	state, err := promptpreprocess.DecodeState(payload)
-	if err != nil {
-		controller.observePreprocessingFailure(ctx, session, messageID, promptpreprocess.Result{}, "decode", "invalid_input", err)
-		return strings.TrimSpace(string(payload)), true, nil
-	}
-	if !state.Enabled {
-		return strings.TrimSpace(state.Original), false, nil
-	}
-	if state.Prepared {
-		if controller.preprocessingObserver != nil {
-			_ = controller.preprocessingObserver.ObservePreprocessing(context.WithoutCancel(ctx), promptpreprocess.CachedObservation(promptpreprocess.Request{ComputerID: session.ComputerID(), SessionID: session.ID(), MessageID: messageID}, state.Failed))
-		}
-		return state.Processed, state.Failed, nil
-	}
-	if controller.preprocessor == nil {
-		err = errors.New("preprocessor is unavailable")
-		controller.observePreprocessingFailure(ctx, session, messageID, promptpreprocess.Result{}, "select", "unavailable", err)
-		prepared, _ := promptpreprocess.MarkPrepared(payload, state.Original, true)
-		return state.Original, true, prepared
-	}
-	preprocessContext, cancel := context.WithTimeout(ctx, controller.preprocessingTimeout)
-	result, processErr := controller.preprocessor.Process(preprocessContext, promptpreprocess.Request{
-		ComputerID: session.ComputerID(), SessionID: session.ID(), MessageID: messageID,
-		Instruction: state.Instruction, Text: state.Original,
-	})
-	cancel()
-	var validationErr error
-	if processErr == nil {
-		validationErr = promptpreprocess.ValidateResult(state.Original, result.Text)
-		processErr = validationErr
-	}
-	if processErr != nil {
-		category := "provider"
-		stage := "invoke"
-		if errors.Is(processErr, context.DeadlineExceeded) || errors.Is(preprocessContext.Err(), context.DeadlineExceeded) {
-			category = "timeout"
-		} else if validationErr != nil {
-			category = "invalid_output"
-			stage = "validate"
-		}
-		controller.observePreprocessingFailure(ctx, session, messageID, result, stage, category, processErr)
-		prepared, _ := promptpreprocess.MarkPrepared(payload, state.Original, true)
-		return state.Original, true, prepared
-	}
-	cleaned := strings.TrimSpace(result.Text)
-	if controller.preprocessingObserver != nil {
-		_ = controller.preprocessingObserver.ObservePreprocessing(context.WithoutCancel(ctx), promptpreprocess.SuccessObservation(promptpreprocess.Request{ComputerID: session.ComputerID(), SessionID: session.ID(), MessageID: messageID}, result))
-	}
-	prepared, _ := promptpreprocess.MarkPrepared(payload, cleaned, false)
-	return cleaned, false, prepared
-}
-
-func (controller *Controller) observePreprocessingFailure(ctx context.Context, session domain.Session, messageID string, result promptpreprocess.Result, stage, category string, processErr error) {
-	if controller.preprocessingObserver == nil {
-		return
-	}
-	_ = controller.preprocessingObserver.ObservePreprocessing(context.WithoutCancel(ctx), promptpreprocess.Observation{
-		ComputerID: session.ComputerID(), SessionID: session.ID(), MessageID: messageID,
-		Provider: result.Provider, Model: result.Model, ModelEvidence: result.ModelEvidence, Stage: stage, Category: category,
-		Attempts: 1, Error: processErr.Error(),
-	})
-}
-
-func (controller *Controller) invalidatePreprocessor() {
-	if invalidator, ok := controller.preprocessor.(promptpreprocess.Invalidator); ok {
-		invalidator.Invalidate(controller.currentNodeID())
-	}
-}
-func (controller *Controller) prepareInput(ctx context.Context, update coordinator.Update) (PreparedInput, string) {
-	base := joinPromptParts(update.Text, update.Caption)
-	if update.MediaKind == "" {
-		if base == "" {
-			return PreparedInput{}, "В сообщении нет текста или поддерживаемого вложения."
-		}
-		return PreparedInput{Text: base}, ""
-	}
-	input := IncomingInput{
-		Kind: update.MediaKind, FileID: update.MediaFileID,
-		FileUniqueID: update.MediaFileUniqueID, FileSize: update.MediaFileSize,
-		MIMEType: update.MediaMIMEType, DurationSeconds: update.MediaDurationSeconds,
-		Width: update.MediaWidth, Height: update.MediaHeight,
-		DownloadPermitted: update.MediaDownloadAllowed,
-	}
-	switch input.Kind {
-	case "video":
-		metadata := "Видео без загрузки"
-		if input.DurationSeconds > 0 {
-			metadata += fmt.Sprintf(", длительность %d сек.", input.DurationSeconds)
-		}
-		if input.Width > 0 && input.Height > 0 {
-			metadata += fmt.Sprintf(", размер %dx%d", input.Width, input.Height)
-		}
-		return PreparedInput{Text: joinPromptParts(base, metadata)}, ""
-	case "document":
-		if !controller.allowDocumentInput {
-			return PreparedInput{}, "Обработка документов не разрешена настройками Bria."
-		}
-	case "voice", "photo":
-		if !input.DownloadPermitted {
-			return PreparedInput{}, "Загрузка этого вложения не разрешена."
-		}
-	default:
-		return PreparedInput{}, "Этот тип вложения пока не поддерживается."
-	}
-	if controller.inputPreparer == nil {
-		return PreparedInput{}, "Обработчик этого вложения не настроен."
-	}
-	if structured, ok := controller.inputPreparer.(StructuredInputPreparer); ok {
-		prepared, err := structured.PrepareStructured(ctx, input)
-		if err != nil || validatePreparedInput(prepared) != nil {
-			return PreparedInput{}, "Не удалось безопасно подготовить вложение."
-		}
-		prepared.Text = joinPromptParts(base, prepared.Text)
-		return prepared, ""
-	}
-	prepared, err := controller.inputPreparer.Prepare(ctx, input)
-	if err != nil {
-		return PreparedInput{}, "Не удалось безопасно подготовить вложение."
-	}
-	prepared = strings.TrimSpace(prepared)
-	if prepared == "" {
-		return PreparedInput{}, "Вложение не содержит данных для запроса."
-	}
-	return PreparedInput{Text: joinPromptParts(base, prepared)}, ""
-}
-func validatePreparedInput(input PreparedInput) error {
-	if strings.TrimSpace(input.Text) == "" && len(input.Attachments) == 0 {
-		return errors.New("prepared input is empty")
-	}
-	for _, attachment := range input.Attachments {
-		if strings.TrimSpace(attachment.Reference) == "" || attachment.Reference != strings.TrimSpace(attachment.Reference) ||
-			filepath.IsAbs(attachment.Reference) || strings.ContainsAny(attachment.Reference, `/\\`) || attachment.Size <= 0 || len(attachment.SHA256) != 64 {
-			return errors.New("prepared attachment reference is invalid")
-		}
-		for _, character := range attachment.SHA256 {
-			if !strings.ContainsRune("0123456789abcdef", character) {
-				return errors.New("prepared attachment digest is invalid")
-			}
-		}
-	}
-	return nil
-}
-func joinPromptParts(parts ...string) string {
-	result := make([]string, 0, len(parts))
-	for _, part := range parts {
-		part = strings.TrimSpace(part)
-		if part == "" || (len(result) > 0 && result[len(result)-1] == part) {
-			continue
-		}
-		result = append(result, part)
-	}
-	return strings.Join(result, "\n\n")
-}
 func (controller *Controller) handleCallback(ctx context.Context, update coordinator.Update) (coordinator.Decision, error) {
 	if update.CallbackQueryID == "" || update.SourceMessageID <= 0 {
 		return coordinator.Decision{Kind: coordinator.DecisionSkip}, nil
@@ -3010,17 +2831,7 @@ func (controller *Controller) enqueueSession(ctx context.Context, updateID, sour
 			controller.setPromptState(ctx, sessionID, messageID, input.Text, "🙅‍♂")
 			return coordinator.Decision{Kind: coordinator.DecisionSkip}
 		}
-		receipt, err := controller.durableInput.Accept(ctx, SessionInput{
-			SessionID:   sessionID,
-			MessageID:   messageID,
-			Payload:     append([]byte(nil), payload...),
-			Attachments: append([]AttachmentRef(nil), input.Attachments...),
-		})
-		if err != nil {
-			controller.setPromptState(ctx, sessionID, messageID, input.Text, "🙅‍♂")
-			return coordinator.Decision{Kind: coordinator.DecisionSkip}
-		}
-		if receipt.SessionID != sessionID || receipt.MessageID != messageID || receipt.Sequence == 0 {
+		if err := telegramturnhelpers.AcceptInput(ctx, controller.durableInput, sessionID, messageID, input, payload); err != nil {
 			controller.setPromptState(ctx, sessionID, messageID, input.Text, "🙅‍♂")
 			return coordinator.Decision{Kind: coordinator.DecisionSkip}
 		}
@@ -3038,7 +2849,7 @@ func (controller *Controller) enqueueSession(ctx context.Context, updateID, sour
 		controller.setPromptState(ctx, sessionID, messageID, input.Text, "🙅‍♂")
 		return coordinator.Decision{Kind: coordinator.DecisionSkip}
 	}
-	processed, preprocessingFailed, _ := controller.processPreprocessing(ctx, session, messageID, payload)
+	processed, preprocessingFailed, _ := controller.preparation.Process(ctx, session, messageID, payload)
 	input.Text = processed
 	if state, decodeErr := promptpreprocess.DecodeState(payload); decodeErr == nil && state.Enabled {
 		controller.publishPreprocessingState(ctx, sessionID, messageID, input.Text, preprocessingFailed)
@@ -3161,30 +2972,13 @@ func (controller *Controller) ProcessDurableInput(
 	receipt := DurableInputProcessReceipt{
 		SessionID: input.SessionID, MessageID: input.MessageID, Sequence: input.Sequence,
 	}
-	_, promptText, preprocessingEnabled, decodeErr := promptpreprocess.Decode(input.Payload)
-	prepared := PreparedInput{Text: promptText, Attachments: append([]AttachmentRef(nil), input.Attachments...)}
-	if input.SessionID == "" || strings.TrimSpace(input.MessageID) == "" || input.Sequence == 0 ||
-		!utf8.Valid(input.Payload) || decodeErr != nil || validatePreparedInput(prepared) != nil {
-		return receipt, errors.New("durable leased input is invalid")
+	promptText, preprocessingEnabled, err := telegramturnhelpers.ValidateLeasedInput(input, callbacks)
+	if err != nil {
+		return receipt, err
 	}
-	if callbacks.OnAccepted == nil {
-		return receipt, errors.New("durable input acceptance callback is required")
-	}
-	if _, ok := controller.submitter.(sessionruntime.InteractiveSubmitter); !ok {
-		if _, structured := controller.submitter.(PreparedTurnSubmitter); !structured {
-			controller.publishPromptState(ctx, input.SessionID, input.MessageID, promptText, "🙅‍♂")
-			return receipt, errors.New("provider does not expose exact durable acceptance")
-		}
-	}
-	if len(input.Attachments) != 0 {
-		if _, ok := controller.submitter.(PreparedTurnSubmitter); !ok {
-			controller.publishPromptState(ctx, input.SessionID, input.MessageID, promptText, "🙅‍♂")
-			return receipt, errors.New("provider does not support structured attachments")
-		}
-		if controller.attachments == nil {
-			controller.publishPromptState(ctx, input.SessionID, input.MessageID, promptText, "🙅‍♂")
-			return receipt, errors.New("attachment custody lifecycle is not configured")
-		}
+	if err := telegramturnhelpers.ValidateProvider(controller.submitter, controller.attachments, input); err != nil {
+		controller.publishPromptState(ctx, input.SessionID, input.MessageID, promptText, "🙅‍♂")
+		return receipt, err
 	}
 	controller.mu.Lock()
 	worker := controller.workers[input.SessionID]
@@ -3210,19 +3004,10 @@ func (controller *Controller) ProcessDurableInput(
 		controller.publishPromptState(ctx, input.SessionID, input.MessageID, promptText, "🙅‍♂")
 		return receipt, errors.New("durable input session is not live")
 	}
-	promptText, preprocessingFailed, preparedPayload := controller.processPreprocessing(ctx, session, input.MessageID, input.Payload)
-	if len(preparedPayload) != 0 {
-		if callbacks.OnPrepared == nil {
-			controller.publishProcessedPromptState(ctx, input.SessionID, input.MessageID, promptText, "🙅‍♂", preprocessingFailed)
-			return receipt, errors.New("durable preprocessing callback is required")
-		}
-		if err := callbacks.OnPrepared(ctx, DurableInputPreparation{
-			SessionID: input.SessionID, MessageID: input.MessageID, Sequence: input.Sequence,
-			Payload: append([]byte(nil), preparedPayload...),
-		}); err != nil {
-			controller.publishProcessedPromptState(ctx, input.SessionID, input.MessageID, promptText, "🙅‍♂", preprocessingFailed)
-			return receipt, fmt.Errorf("persist durable preprocessing result: %w", err)
-		}
+	promptText, preprocessingFailed, preparedPayload := controller.preparation.Process(ctx, session, input.MessageID, input.Payload)
+	if err := telegramturnhelpers.PersistPrepared(ctx, input, preparedPayload, callbacks); err != nil {
+		controller.publishProcessedPromptState(ctx, input.SessionID, input.MessageID, promptText, "🙅‍♂", preprocessingFailed)
+		return receipt, err
 	}
 	if preprocessingEnabled {
 		controller.publishPreprocessingState(ctx, input.SessionID, input.MessageID, promptText, preprocessingFailed)
@@ -3728,41 +3513,4 @@ func requestFromSession(session domain.Session) app.StartSessionRequest {
 		SessionID: session.ID(), ComputerID: session.ComputerID(),
 		Provider: session.Provider(), Workdir: session.Workdir(),
 	}
-}
-func parseNew(text string) (domain.Provider, string, bool) {
-	parts := strings.SplitN(text, " ", 3)
-	if len(parts) != 3 || parts[0] != "/new" {
-		return "", "", false
-	}
-	workdir := strings.TrimSpace(parts[2])
-	if workdir == "" || !filepath.IsAbs(workdir) {
-		return "", "", false
-	}
-	provider := domain.Provider(parts[1])
-	if provider != domain.ProviderCodex && provider != domain.ProviderClaude {
-		return "", "", false
-	}
-	return provider, workdir, true
-}
-func parseUse(text string) (domain.SessionID, bool) {
-	parts := strings.Fields(text)
-	if len(parts) != 2 || parts[0] != "/use" || !canonicalUUID(parts[1]) {
-		return "", false
-	}
-	return domain.SessionID(parts[1]), true
-}
-func canonicalUUID(value string) bool {
-	if len(value) != 36 || value != strings.ToLower(value) ||
-		value[8] != '-' || value[13] != '-' || value[18] != '-' || value[23] != '-' {
-		return false
-	}
-	for index, character := range value {
-		if index == 8 || index == 13 || index == 18 || index == 23 {
-			continue
-		}
-		if (character < '0' || character > '9') && (character < 'a' || character > 'f') {
-			return false
-		}
-	}
-	return true
 }

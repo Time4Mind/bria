@@ -1,0 +1,24 @@
+  Would you like to run the following command?
+
+  Environment: local
+
+  Reason: Разрешить второй узкий read-only запрос к той же Wiki-странице, чтобы получить только content и last_revision_id для
+  live-подтверждения?
+
+  $ PYTHONPYCACHEPREFIX=/private/tmp/wiki-pycache python3 -c 'import sys,json;
+  sys.path.insert(0,"/Users/test-user/.agents/skills/wiki/scripts"); from wiki_client import WikiClient; w=WikiClient();
+  slug="doc/example-doc-team/example-team-handbook/how-to-configure-a-demo-item";
+  p=w.get_page(slug=slug,fields=["content","last_revision_id"]); c=p.get("content") or "";
+  print(json.dumps({"slug":slug,"id":p.get("id"),"title":p.get("title"),"last_revision_id":p.get("last_revision_id"),"content_chars":len(c
+  ),"content_preview":" ".join(c.split())[:240]},ensure_ascii=False,default=str))'
+
+› 1. Yes, proceed (y)
+  2. Yes, and don't ask again for commands that start with `PYTHONPYCACHEPREFIX=/private/tmp/wiki-pycache python3 -c 'import sys,json;
+     sys.path.insert(0,"/Users/test-user/.agents/skills/wiki/scripts"); from wiki_client import WikiClient; w=WikiClient(); slug="doc/
+     example-doc-team/example-team-handbook/how-to-configure-a-demo-item";
+     p=w.get_page(slug=slug,fields=["content","last_revision_id"]); c=p.get("content") or "";
+     print(json.dumps({"slug":slug,"id":p.get("id"),"title":p.get("title"),"last_revision_id":p.get("last_revision_id"),"content_chars":le
+     n(c),"content_preview":" ".join(c.split())[:240]},ensure_ascii=False,default=str))'` (p)
+  3. No, and tell Codex what to do differently (esc)
+
+  Press enter to confirm or esc to cancel

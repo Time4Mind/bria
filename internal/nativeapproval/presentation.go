@@ -1,4 +1,4 @@
-package nativecli
+package nativeapproval
 
 import (
 	"regexp"
@@ -7,19 +7,18 @@ import (
 
 var interactiveHeading = regexp.MustCompile(`(?i)^(?:select\s|choose\s|settings:|do you want to\s|would you like to\s|hooks need review|restore the code|this command requires approval|bash command$|[☐✔☒])`)
 var interactiveOption = regexp.MustCompile(`^[>›❯▶↑↓]?\s*\d+\.\s`)
-var terminalCSI = regexp.MustCompile("\x1b\\[[0-?]*[ -/]*[@-~]")
 
 // Extract the last actual picker, not historical status/account panels above
 // it. Mobile layout follows legacy: option blocks, no terminal frame, bounded
 // tail. Full raw-screen identity remains the adapter's responsibility.
-func interactiveContent(text string) (string, bool) {
+func InteractiveContent(text string) (string, bool) {
 	text = terminalCSI.ReplaceAllString(strings.ReplaceAll(text, "\r", ""), "")
 	lines := strings.Split(text, "\n")
 	top, bottom, option := -1, -1, -1
 	for i := range lines {
 		lines[i] = strings.TrimSpace(strings.Trim(strings.TrimSpace(lines[i]), "│┃║"))
 		line := lines[i]
-		if interactiveHeading.MatchString(line) {
+		if interactiveHeading.MatchString(line) && !strings.HasPrefix(line, "✔ You approved codex to run ") {
 			top, bottom = i, -1
 		}
 		if option < 0 && interactiveOption.MatchString(line) {

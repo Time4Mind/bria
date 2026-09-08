@@ -1,0 +1,21 @@
+  Would you like to run the following command?
+
+  Environment: local
+
+  Reason: Разрешить один bounded read-only запрос к YT test для проверки existence, schema и row_count двух точных таблиц из workdir?
+
+  $ PYTHONPYCACHEPREFIX=/private/tmp/yt-pycache YT_PROXY=test python3 -c 'import json,yt.wrapper as yt;
+  paths=["//home/demo-analytics/examples/owner/sample_v1/example_events/2026-08-01","//home/demo-analytics/examples/owner/synthetic_record
+  nts/2026-08-01"]; out=[]; bad=("phone","email","user","login","name","fio","passport","address","comment","token");
+  for p in paths:
+   e=yt.exists(p); d={"path":p,"exists":bool(e)}
+   if e:
+    s=yt.get(p+"/@schema"); d["schema_columns"]=[x.get("name") for x in s if not any(b in x.get("name","").lower() for b in bad)][:30];
+  d["row_count"]=yt.get(p+"/@row_count") if yt.exists(p+"/@row_count") else None
+   out.append(d)
+  print(json.dumps(out,ensure_ascii=False,default=str))'
+
+› 1. Yes, proceed (y)
+  2. No, and tell Codex what to do differently (esc)
+
+  Press enter to confirm or esc to cancel

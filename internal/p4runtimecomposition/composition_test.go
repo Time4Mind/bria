@@ -36,6 +36,15 @@ func TestOpenWithoutRuntimeP4IsDisabledWithoutDependenciesOrFilesystemWrites(t *
 }
 
 func TestOpenExplicitP4RuntimeRoutesOpaquePhotoCustodyToCodexRuntime(t *testing.T) {
+	testP4AttachmentCustodyToCodexRuntime(t, "photo", "image/jpeg")
+}
+
+func TestOpenExplicitP4RuntimeRoutesDocumentCustodyToCodexRuntime(t *testing.T) {
+	testP4AttachmentCustodyToCodexRuntime(t, "document", "text/markdown")
+}
+
+func testP4AttachmentCustodyToCodexRuntime(t *testing.T, kind, mimeType string) {
+	t.Helper()
 	const (
 		token       = "987654:p4-photo-test"
 		photoID     = "telegram-photo-id"
@@ -116,8 +125,8 @@ func TestOpenExplicitP4RuntimeRoutesOpaquePhotoCustodyToCodexRuntime(t *testing.
 		t.Fatalf("InputPreparer %T does not expose structured public seam", bundle.InputPreparer)
 	}
 	prepared, err := structuredPreparer.PrepareStructured(context.Background(), turnprocessing.IncomingInput{
-		Kind: "photo", FileID: photoID, FileUniqueID: photoUnique, FileSize: int64(len(photo)),
-		MIMEType: "image/jpeg", Width: 640, Height: 480, DownloadPermitted: true,
+		Kind: kind, FileID: photoID, FileUniqueID: photoUnique, FileSize: int64(len(photo)),
+		MIMEType: mimeType, Width: 640, Height: 480, DownloadPermitted: true,
 	})
 	if err != nil {
 		t.Fatalf("PrepareStructured(photo) error = %v", err)

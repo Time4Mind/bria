@@ -5,8 +5,6 @@ package nativeadapter
 import (
 	"bufio"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -18,11 +16,11 @@ import (
 	"unicode/utf8"
 
 	"bria/internal/domain"
+	"bria/internal/nativecapture"
 	"bria/internal/nativecli"
 	"bria/internal/nativeterminal"
 	"bria/internal/nativetranscript"
 	"bria/internal/runtimeprotocol"
-	"bria/internal/screen"
 )
 
 type Config struct {
@@ -85,7 +83,7 @@ func Run(ctx context.Context, input io.ReadCloser, output io.Writer, config Conf
 	}
 	a := &adapter{config: config, term: term, output: output, id: state.SessionID, model: state.Model, receipts: map[string]string{}}
 	if a.config.ScreenCaptureLimitKiB == 0 {
-		a.config.ScreenCaptureLimitKiB = screen.DefaultNativeCaptureKiB
+		a.config.ScreenCaptureLimitKiB = nativecapture.DefaultLimitKiB
 	}
 	defer func() { returnErr = errors.Join(returnErr, a.cleanupAttachments()) }()
 	if err = a.loadReceipts(); err != nil {
@@ -226,13 +224,13 @@ func (a *adapter) control(ctx context.Context, r runtimeprotocol.ParentMessage) 
 	if err != nil {
 		return err
 	}
-	hash := screenHash(before)
+	hash := nativecapture.Hash(before)
 	code := ""
 	if fields := strings.Fields(r.Command); len(fields) > 0 {
 		switch fields[0] {
 		case "/new", "/clear", "/resume", "/fork":
 			text := "Смена сессии выполняется через кнопки Bria: «Новая» или «Архив». Команда не отправлена: текущая привязка CLI сохранена."
-			return a.emit(runtimeprotocol.AdapterMessage{Type: runtimeprotocol.TypeNativeSnapshot, RequestID: r.RequestID, Text: text, Hash: screenHash(text), Model: a.model, ErrorCode: "unavailable"})
+			return a.emit(runtimeprotocol.AdapterMessage{Type: runtimeprotocol.TypeNativeSnapshot, RequestID: r.RequestID, Text: text, Hash: nativecapture.Hash(text), Model: a.model, ErrorCode: "unavailable"})
 		}
 	}
 	if r.ExpectedHash != "" && r.ExpectedHash != hash {
@@ -242,8 +240,15 @@ func (a *adapter) control(ctx context.Context, r runtimeprotocol.ParentMessage) 
 			err = a.term.Input(ctx, r.Command)
 		}
 		if r.Key != "" {
-			keys := map[string]string{"up": "Up", "down": "Down", "left": "Left", "right": "Right", "enter": "Enter", "escape": "Escape", "tab": "Tab", "space": "Space"}
-			err = a.term.Key(ctx, keys[r.Key])
+			if r.Key == "approve_once" {
+				err = nativecli.ApproveCommand(ctx, a.term, before)
+				if err != nil {
+					code, err = "unavailable", nil
+				}
+			} else {
+				keys := map[string]string{"up": "Up", "down": "Down", "left": "Left", "right": "Right", "enter": "Enter", "escape": "Escape", "tab": "Tab", "space": "Space"}
+				err = a.term.Key(ctx, keys[r.Key])
+			}
 		}
 		if err != nil {
 			return err
@@ -268,8 +273,8 @@ func (a *adapter) control(ctx context.Context, r runtimeprotocol.ParentMessage) 
 		}
 	}
 	parsed := nativecli.ParseScreen(text)
-	fullText := boundedScreen(text, a.config.ScreenCaptureLimitKiB)
-	rawHash := screenHash(fullText)
+	fullText := nativecapture.Bound(text, a.config.ScreenCaptureLimitKiB)
+	rawHash := nativecapture.Hash(fullText)
 	if parsed.Interactive {
 		text = parsed.Content
 	}
@@ -278,7 +283,7 @@ func (a *adapter) control(ctx context.Context, r runtimeprotocol.ParentMessage) 
 	}
 	maxBytes := a.config.ScreenCaptureLimitKiB * 1024
 	if maxBytes <= 0 {
-		maxBytes = screen.DefaultNativeCaptureKiB * 1024
+		maxBytes = nativecapture.DefaultLimitKiB * 1024
 	}
 	if len(text) > maxBytes {
 		text = text[len(text)-maxBytes:]
@@ -288,11 +293,6 @@ func (a *adapter) control(ctx context.Context, r runtimeprotocol.ParentMessage) 
 	}
 	return a.emit(runtimeprotocol.AdapterMessage{Type: runtimeprotocol.TypeNativeSnapshot, RequestID: r.RequestID, Text: text, FullText: fullText, Hash: rawHash, Model: a.model, Interactive: parsed.Interactive, ErrorCode: code})
 }
-func screenHash(text string) string {
-	sum := sha256.Sum256([]byte(text))
-	return hex.EncodeToString(sum[:])
-}
-
 func childEnvironment(environment []string) []string {
 	result := make([]string, 0, len(environment))
 	for _, value := range environment {
@@ -494,7 +494,7 @@ func Main(ctx context.Context, provider domain.Provider, args []string, input io
 	if mode != "new" && mode != "resume" || mode == "new" && resume != "" || mode == "resume" && resume == "" {
 		return fmt.Errorf("native start identity invalid")
 	}
-	limit := screen.DefaultNativeCaptureKiB
+	limit := nativecapture.DefaultLimitKiB
 	if raw := os.Getenv("BRIA_SCREEN_CAPTURE_KIB"); raw != "" {
 		if parsed, parseErr := strconv.Atoi(raw); parseErr == nil {
 			limit = parsed

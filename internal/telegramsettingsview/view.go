@@ -125,6 +125,10 @@ func RenderCategory(ctx context.Context, preferences settingsport.Preferences, p
 		if len(fields) == 0 {
 			fields = []Field{{"CLI", "не настроены"}}
 		}
+		if _, ok := preferences.(settingsport.AutoApprovalPreferences); ok {
+			fields = append(fields, Field{"Автоподтверждение Codex", state(current.AutoApproveCommands, false)})
+			rows = append(rows, []Button{{Label: "Автоподтверждение Codex", Action: "settings_auto_approve_commands"}})
+		}
 		rows = append(rows, []Button{{Label: "Авторизовать Codex", Action: "authorize_codex"}}, []Button{{Label: "Авторизовать Claude", Action: "authorize_claude"}})
 	default:
 		return Surface{}, fmt.Errorf("unknown settings category %d", category)
@@ -171,7 +175,7 @@ func CategoryForAction(action string) (Category, bool) {
 		return CategoryNotifications, true
 	case "settings_standby", "settings_session_naming", "settings_default_provider", "settings_default_workdir", "settings_clear_creation_defaults", "settings_rename_node":
 		return CategoryCreation, true
-	case "settings_provider_codex", "settings_provider_claude", "authorize_codex", "authorize_claude":
+	case "settings_provider_codex", "settings_provider_claude", "authorize_codex", "authorize_claude", "settings_auto_approve_commands":
 		return CategoryProviders, true
 	default:
 		return 0, false
@@ -182,7 +186,7 @@ func snapshot(ctx context.Context, preferences settingsport.Preferences, queueLi
 	if preferences != nil {
 		return preferences.Snapshot(ctx)
 	}
-	return settingsport.Snapshot{ContinueExisting: true, CardDetail: "standard", CardPageLimit: 64, ShowTechnicalActions: true, NotifyBackgroundQuestions: false, NotifyBackgroundErrors: true, SessionLifetime: "never", QueueLimit: queueLimit, VoiceRecognition: "parakeet"}, nil
+	return settingsport.Snapshot{ContinueExisting: true, CardDetail: "standard", CardPageLimit: 64, ShowTechnicalActions: true, NotifyBackgroundQuestions: false, NotifyBackgroundErrors: true, SessionLifetime: "never", QueueLimit: queueLimit, VoiceRecognition: "parakeet", AutoApproveCommands: true}, nil
 }
 
 func state(value, plural bool) string {

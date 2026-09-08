@@ -160,6 +160,32 @@ func (t *Terminal) Capture(ctx context.Context) (string, error) {
 	return t.run(ctx, nil, "capture-pane", "-p", "-t", "cli:0.0")
 }
 
+// Expand grows only this private CLI's canvas, recovering collapsed approvals.
+// It preserves width and never shrinks a canvas or sends an input key.
+func (t *Terminal) Expand(ctx context.Context, rows int) error {
+	if rows < 40 || rows > 256 {
+		return errors.New("unsupported terminal height")
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.closed {
+		return errors.New("native terminal closed")
+	}
+	value, err := t.run(ctx, nil, "display-message", "-p", "-t", "cli:0.0", "#{window_height}")
+	if err != nil {
+		return err
+	}
+	current, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil {
+		return err
+	}
+	if current >= rows {
+		return nil
+	}
+	_, err = t.run(ctx, nil, "resize-window", "-t", "cli:0", "-y", strconv.Itoa(rows))
+	return err
+}
+
 func (t *Terminal) Input(ctx context.Context, text string) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()

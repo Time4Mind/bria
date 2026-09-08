@@ -16,6 +16,7 @@ import (
 
 	"bria/internal/archiveimport"
 	"bria/internal/domain"
+	"bria/internal/telegramhistory"
 	"bria/internal/telegramstate"
 )
 
@@ -692,31 +693,7 @@ func (store *SessionStore) appendCardHistory(ctx context.Context, sessionID doma
 			card = telegramstate.Card{SessionID: sessionID, Page: telegramstate.Page{Current: 1, Total: 1, FollowLatest: true}}
 		}
 		card.EmptyCloseEligible = false
-		if len(card.History) >= 512 {
-			card.History = append([]string(nil), card.History[len(card.History)-511:]...)
-			if len(card.HistoryKeys) != 0 {
-				card.HistoryKeys = append([]string(nil), card.HistoryKeys[len(card.HistoryKeys)-511:]...)
-			}
-			if len(card.HistoryKinds) != 0 {
-				card.HistoryKinds = append([]string(nil), card.HistoryKinds[len(card.HistoryKinds)-511:]...)
-			}
-			if len(card.HistoryTurnKeys) != 0 {
-				card.HistoryTurnKeys = append([]string(nil), card.HistoryTurnKeys[len(card.HistoryTurnKeys)-511:]...)
-			}
-		}
-		if kind != "" && len(card.HistoryKinds) == 0 {
-			card.HistoryKinds = make([]string, len(card.History))
-		}
-		card.History = append(card.History, item)
-		if len(card.HistoryKeys) != 0 {
-			card.HistoryKeys = append(card.HistoryKeys, "")
-		}
-		if len(card.HistoryKinds) != 0 {
-			card.HistoryKinds = append(card.HistoryKinds, kind)
-		}
-		if len(card.HistoryTurnKeys) != 0 {
-			card.HistoryTurnKeys = append(card.HistoryTurnKeys, "")
-		}
+		telegramhistory.Append(&card, item, kind)
 		return state.SetCard(card)
 	})
 }
@@ -732,50 +709,8 @@ func (store *SessionStore) InsertCardTypedHistoryAfterPrompt(ctx context.Context
 		if !ok {
 			return ErrSessionNotFound
 		}
-		index := -1
-		for i, key := range card.HistoryTurnKeys {
-			if key == promptID {
-				index = i
-			}
-		}
-		// The first event has no turn-key anchor yet; subsequent events use the
-		// last event of the same turn to preserve provider event order.
-		if index >= 0 {
-			// continue with the latest same-turn index
-		} else {
-			for i, key := range card.HistoryKeys {
-				if key == promptID {
-					index = i
-				}
-			}
-		}
-		if index < 0 {
-			return fmt.Errorf("prompt history anchor %q not found", promptID)
-		}
-		insert := index + 1
-		card.History = append(card.History, "")
-		copy(card.History[insert+1:], card.History[insert:])
-		card.History[insert] = item
-		if len(card.HistoryKeys) != 0 {
-			card.HistoryKeys = append(card.HistoryKeys, "")
-			copy(card.HistoryKeys[insert+1:], card.HistoryKeys[insert:])
-			card.HistoryKeys[insert] = ""
-		}
-		if len(card.HistoryKinds) != 0 || kind != "" {
-			if len(card.HistoryKinds) == 0 {
-				card.HistoryKinds = make([]string, len(card.History)-1)
-			}
-			card.HistoryKinds = append(card.HistoryKinds, "")
-			copy(card.HistoryKinds[insert+1:], card.HistoryKinds[insert:])
-			card.HistoryKinds[insert] = kind
-		}
-		if len(card.HistoryTurnKeys) != 0 || promptID != "" {
-			if len(card.HistoryTurnKeys) == 0 {
-				card.HistoryTurnKeys = make([]string, len(card.History)-1)
-			}
-			card.HistoryTurnKeys = append(card.HistoryTurnKeys, "")
-			copy(card.HistoryTurnKeys[insert+1:], card.HistoryTurnKeys[insert:])
-			card.HistoryTurnKeys[insert] = promptID
+		if err := telegramhistory.InsertAfterPrompt(&card, promptID, item, kind); err != nil {
+			return err
 		}
 		return state.SetCard(card)
 	})

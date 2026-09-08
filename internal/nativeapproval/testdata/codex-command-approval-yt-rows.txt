@@ -1,0 +1,18 @@
+  Would you like to run the following command?
+
+  Environment: local
+
+  Reason: Разрешить bounded read-only выборку максимум трёх строк по безопасным неперсональным колонкам из двух уже проверенных YT-таблиц?
+
+  $ PYTHONPYCACHEPREFIX=/private/tmp/yt-pycache YT_PROXY=test python3 -c 'import json,yt.wrapper as yt;
+  specs=[("//home/demo-analytics/examples/owner/sample_v1/example_events/2026-08-01",["day_dttm","country","geo_city","category"]),("//hom
+  e/demo-analytics/examples/owner/synthetic_recordnts/2026-08-01",["amount","currency","payment_status","payment_type"] )]; out=[]
+  for p,cols in specs:
+   rows=list(yt.read_table(yt.TablePath(p,columns=cols,start_index=0,end_index=3)))
+   out.append({"path":p,"columns":cols,"rows":rows})
+  print(json.dumps(out,ensure_ascii=False,default=str))'
+
+› 1. Yes, proceed (y)
+  2. No, and tell Codex what to do differently (esc)
+
+  Press enter to confirm or esc to cancel

@@ -7,15 +7,24 @@ REVISION ?=
 RELEASE_KEY_ID ?=
 RELEASE_SIGNING_KEY_FILE ?=
 RELEASE_TRUST_FILE ?=
+GOCACHE ?= $(CURDIR)/.cache/go-build
+GOMODCACHE ?= $(CURDIR)/.cache/go-mod
+export GOCACHE GOMODCACHE
 export VERSION DIST_DIR SOURCE_DATE_EPOCH REVISION RELEASE_KEY_ID RELEASE_SIGNING_KEY_FILE RELEASE_TRUST_FILE GO
 
 GO_ENV = env GOENV=off GOTOOLCHAIN=local GOWORK=off GOPROXY=off GOSUMDB=off \
-	GOCACHE="$(CURDIR)/.cache/go-build" \
-	GOMODCACHE="$(CURDIR)/.cache/go-mod" \
+	GOCACHE="$(GOCACHE)" \
+	GOMODCACHE="$(GOMODCACHE)" \
 	CGO_ENABLED=0
-GO_RACE_ENV = $(GO_ENV) CGO_ENABLED=1
+GO_RACE_ENV = $(GO_ENV) CGO_ENABLED=1 GORACE=atexit_sleep_ms=0
 
-.PHONY: check check-policy check-format check-architecture check-test check-race check-vet check-operational check-full build release release-evidence release-supply-chain release-verify
+.PHONY: prepare-deps check check-policy check-format check-architecture check-test check-race check-vet check-operational check-full build release release-evidence release-supply-chain release-verify
+
+# Explicit online preparation. All check/build targets remain offline and use
+# the same cache; go.sum verification is never disabled during acquisition.
+prepare-deps:
+	$(GO_ENV) GOPROXY=https://proxy.golang.org,direct GOSUMDB=sum.golang.org $(GO) mod download
+	$(GO_ENV) $(GO) mod verify
 
 check: check-policy check-format check-architecture check-test check-vet check-operational
 

@@ -17,6 +17,11 @@ func validateNativeControl(message ParentMessage, limits Limits) error {
 		}
 	}
 	switch message.Key {
+	case "approve_once":
+		if message.ExpectedHash == "" {
+			return ErrProtocol
+		}
+		return nil
 	case "", "up", "down", "left", "right", "enter", "escape", "tab", "space":
 		return nil
 	default:

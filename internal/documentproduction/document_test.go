@@ -1,4 +1,4 @@
-package mediaproduction
+package documentproduction
 
 import (
 	"context"

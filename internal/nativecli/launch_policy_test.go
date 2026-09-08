@@ -27,7 +27,7 @@ func TestRootClaudeUsesAllowedAutoModeWithoutFakingSandbox(t *testing.T) {
 		}
 	}
 	plan, err := BuildWithPolicy(domain.ProviderCodex, []string{"/fixture/codex"}, "/work", testID, LaunchPolicy{Root: true})
-	if err != nil || !strings.Contains(strings.Join(plan.Command, " "), "--dangerously-bypass-approvals-and-sandbox") {
+	if err != nil || !strings.Contains(strings.Join(plan.Command, " "), "--ask-for-approval on-request --sandbox workspace-write") {
 		t.Fatal("Claude fallback altered Codex")
 	}
 }

@@ -1,4 +1,4 @@
-package screenproduction
+package nativescreencache
 
 import (
 	"testing"

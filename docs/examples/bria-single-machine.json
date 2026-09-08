@@ -1,0 +1,15 @@
+{
+  "owner_user_id": 1,
+  "private_chat_id": 1,
+  "bot_username": "examplebot",
+  "state_path": "/absolute/path/bria-state.json",
+  "telegram_token": {"env_var": "BRIA_TELEGRAM_TOKEN"},
+  "callback_key": {"secret_file": "/absolute/path/bria-callback.key"},
+  "providers": {
+    "codex": {
+      "enabled": false,
+      "command": {"exec": "/absolute/path/to/codex", "argv": []}
+    },
+    "claude": {"enabled": false}
+  }
+}

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 
+	"bria/internal/nativescreencache"
 	"bria/internal/screen"
 	"bria/internal/settings"
 	"bria/internal/telegram"
@@ -15,7 +16,7 @@ import (
 )
 
 var (
-	ErrInvalidConfiguration = errors.New("screen production configuration is invalid")
+	ErrInvalidConfiguration = nativescreencache.ErrInvalidConfiguration
 	ErrInvalidReceipt       = errors.New("screen production Telegram receipt is invalid")
 )
 

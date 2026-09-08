@@ -13,3 +13,17 @@ func TestNormalizeRichMarkdownCompactsTable(t *testing.T) {
 		t.Fatalf("normalized table = %q", got)
 	}
 }
+
+func TestNormalizeRichMarkdownPreservesEscapesAndNonTables(t *testing.T) {
+	cases := []struct{ input, want string }{
+		{"Before\n| A | B |\n|:---|---:|\n| x\\|y |  |\nAfter", "Before\n\n| <sub>A</sub> | <sub>B</sub> |\n|:---|---:|\n| <sub>x\\|y</sub> |  |\nAfter"},
+		{"| ordinary | text |\n| not | separator |", "| ordinary | text |\n| not | separator |"},
+		{"plain\ntext", "plain\ntext"},
+		{"", ""},
+	}
+	for _, tc := range cases {
+		if got := telegram.NormalizeRichMarkdown(tc.input); got != tc.want {
+			t.Errorf("normalize %q = %q, want %q", tc.input, got, tc.want)
+		}
+	}
+}

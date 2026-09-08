@@ -3,6 +3,7 @@ package telegramcontroller_test
 import (
 	"context"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -11,6 +12,25 @@ import (
 	"bria/internal/settingsport"
 	"bria/internal/telegramcontroller"
 )
+
+// Standby reads preferences asynchronously even when it is disabled. Keep the
+// display toggle and snapshot on the same lock while exercising projections.
+type displayPreferences struct {
+	testPreferences
+	mu sync.RWMutex
+}
+
+func (p *displayPreferences) Snapshot(context.Context) (telegramcontroller.PreferenceSnapshot, error) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.settings, nil
+}
+
+func (p *displayPreferences) setTechnicalActions(show bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.settings.ShowTechnicalActions = show
+}
 
 type typedProjectionState struct {
 	projectionUIState
@@ -33,11 +53,11 @@ func TestTechnicalDisplayReadsPersistedKindsAfterControllerRestart(t *testing.T)
 	ctx := context.Background()
 	ready := readySession(t, "11111111-1111-4111-9111-111111111111", domain.ProviderCodex, "/work", "provider", 1)
 	state := &typedProjectionState{projectionUIState: projectionUIState{history: map[domain.SessionID][]string{ready.ID(): {"commentary", "stored tool", "👨‍💻 user text"}}}, technical: map[int]bool{1: true}}
-	settings := &testPreferences{settings: settingsport.Snapshot{CardPageLimit: 64, CardDetail: "standard"}}
+	settings := &displayPreferences{testPreferences: testPreferences{settings: settingsport.Snapshot{CardPageLimit: 64, CardDetail: "standard"}}}
 	c := newController(t, nil, newLockedSessions(ready), nil, nil, telegramcontroller.Options{Recovered: []domain.Session{ready}, UIState: state, Settings: settings})
 	defer c.Close(ctx)
 	for _, show := range []bool{false, true} {
-		settings.settings.ShowTechnicalActions = show
+		settings.setTechnicalActions(show)
 		r, err := c.ProjectCurrent(ctx, ready.ID())
 		if err != nil || r.Card == nil || strings.Contains(r.Card.Pages[0].Content, "stored tool") != show || !strings.Contains(r.Card.Pages[0].Content, "commentary") {
 			t.Fatalf("persisted kind projection show=%t: %+v %v", show, r, err)
@@ -51,7 +71,7 @@ func TestTechnicalDisplayReadsPersistedKindsAfterControllerRestart(t *testing.T)
 func TestTechnicalDisplayToggleFiltersOnlyTypedToolsAndKeepsHistory(t *testing.T) {
 	ctx := context.Background()
 	ready := readySession(t, "11111111-1111-4111-9111-111111111111", domain.ProviderCodex, "/work", "provider", 1)
-	settings := &testPreferences{settings: settingsport.Snapshot{CardPageLimit: 64, CardDetail: "standard", ShowTechnicalActions: false}}
+	settings := &displayPreferences{testPreferences: testPreferences{settings: settingsport.Snapshot{CardPageLimit: 64, CardDetail: "standard", ShowTechnicalActions: false}}}
 	state := &projectionUIState{history: make(map[domain.SessionID][]string)}
 	done := make(chan struct{}, 1)
 	c := newController(t, nil, newLockedSessions(ready), submitterFunc(func(context.Context, domain.SessionID, string) (sessionruntime.TurnResult, error) {
@@ -72,7 +92,7 @@ func TestTechnicalDisplayToggleFiltersOnlyTypedToolsAndKeepsHistory(t *testing.T
 		t.Fatal("turn did not finish")
 	}
 	for _, show := range []bool{false, true, false} {
-		settings.settings.ShowTechnicalActions = show
+		settings.setTechnicalActions(show)
 		r, err := c.ProjectCurrent(ctx, ready.ID())
 		if err != nil || r.Card == nil {
 			t.Fatalf("projection: %+v %v", r, err)

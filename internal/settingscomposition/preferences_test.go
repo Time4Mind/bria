@@ -150,6 +150,29 @@ func TestPreferencesMutationsPersistAndLocalReloadSharesOneFile(t *testing.T) {
 	}
 }
 
+func TestAutoApprovalPreferenceTogglesAndPersists(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	store, err := settings.OpenFileStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	preferences := settingscomposition.Preferences{Store: store}
+	if snapshot, err := preferences.Snapshot(context.Background()); err != nil || !snapshot.AutoApproveCommands {
+		t.Fatalf("default snapshot=%#v err=%v", snapshot, err)
+	}
+	if err := preferences.ToggleAutoApproveCommands(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := settings.OpenFileStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := (settingscomposition.Preferences{Store: reopened}).Snapshot(context.Background())
+	if err != nil || snapshot.AutoApproveCommands {
+		t.Fatalf("reopened snapshot=%#v err=%v", snapshot, err)
+	}
+}
+
 func TestPreferencesDriveTypedControllerAndDurableFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "settings.json")
 	store, err := settings.OpenFileStore(path)

@@ -908,6 +908,7 @@ func TestVoiceShowsQueuedCardStateBeforeRecognitionCompletes(t *testing.T) {
 	ready := readySession(t, "88888888-8888-4888-9888-888888888888", domain.ProviderCodex, t.TempDir(), "provider-8", 1)
 	entered := make(chan struct{})
 	release := make(chan struct{})
+	defer close(release)
 	notifications := make(chan telegramcontroller.Notification, 4)
 	preparer := inputPreparerFunc(func(_ context.Context, input telegramcontroller.IncomingInput) (string, error) {
 		if input.Kind != "voice" {
@@ -947,7 +948,6 @@ func TestVoiceShowsQueuedCardStateBeforeRecognitionCompletes(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("queued status was not published before recognition completed")
 	}
-	close(release)
 	select {
 	case result := <-done:
 		if result.Card == nil || !strings.Contains(result.Card.Pages[0].Content, "🙋‍♂") {
@@ -1296,6 +1296,7 @@ func TestInteractiveSubmitStreamsEventOnceAndResolvesCorrelatedInteraction(t *te
 func TestProcessDurableInputCommitsExactAcceptanceBeforeEventsAndCompletion(t *testing.T) {
 	ready := readySession(t, "33333333-3333-4333-9333-333333333333", domain.ProviderCodex, t.TempDir(), "provider-3", 1)
 	order := make([]string, 0, 3)
+	completed := make(chan struct{})
 	interactive := &interactiveSubmitter{submitWithCallbacks: func(_ context.Context, id domain.SessionID, text string, callbacks sessionruntime.TurnCallbacks) (sessionruntime.TurnResult, error) {
 		if id != ready.ID() || text != "durable text" || callbacks.MessageID != "telegram-update:301" {
 			t.Fatalf("provider input = %q/%q/%q", id, text, callbacks.MessageID)
@@ -1309,7 +1310,12 @@ func TestProcessDurableInputCommitsExactAcceptanceBeforeEventsAndCompletion(t *t
 		}
 		return sessionruntime.TurnResult{TerminalStatus: sessionruntime.StatusCompleted, Final: "done"}, nil
 	}}
-	controller := newController(t, creatorFunc(nil), &memorySessions{byID: map[domain.SessionID]domain.Session{ready.ID(): ready}}, interactive, notifierFunc(func(context.Context, telegramcontroller.Notification) error { return nil }), telegramcontroller.Options{Recovered: []domain.Session{ready}})
+	controller := newController(t, creatorFunc(nil), &memorySessions{byID: map[domain.SessionID]domain.Session{ready.ID(): ready}}, interactive, notifierFunc(func(_ context.Context, notification telegramcontroller.Notification) error {
+		if notification.Kind == telegramcontroller.NotificationFinal {
+			close(completed)
+		}
+		return nil
+	}), telegramcontroller.Options{Recovered: []domain.Session{ready}})
 	t.Cleanup(func() { _ = controller.Close(context.Background()) })
 	receipt, err := controller.ProcessDurableInput(context.Background(), telegramcontroller.DurableLeasedInput{
 		SessionID: ready.ID(), MessageID: "telegram-update:301", Sequence: 7, Payload: []byte("durable text"),
@@ -1324,6 +1330,11 @@ func TestProcessDurableInputCommitsExactAcceptanceBeforeEventsAndCompletion(t *t
 		t.Fatalf("ProcessDurableInput() = (%#v, %v)", receipt, err)
 	}
 	want := []string{"custody-accepted", "provider-after-accepted"}
+	select {
+	case <-completed:
+	case <-time.After(time.Second):
+		t.Fatal("accepted turn did not complete")
+	}
 	if !reflect.DeepEqual(order, want) {
 		t.Fatalf("effect order = %#v, want %#v", order, want)
 	}
@@ -1492,10 +1503,13 @@ func TestDurableTurnObserversUseStableTypedIdentityAndCannotCorruptCompletion(t 
 	var observed telegramcontroller.RuntimeEventObservation
 	var final telegramcontroller.FinalObservation
 	var outputs []telegramcontroller.OutgoingNotification
+	continueTurn := make(chan struct{})
+	completed := make(chan struct{})
 	interactive := &interactiveSubmitter{submitWithCallbacks: func(_ context.Context, _ domain.SessionID, _ string, callbacks sessionruntime.TurnCallbacks) (sessionruntime.TurnResult, error) {
 		if err := callbacks.OnAccepted(callbacks.MessageID); err != nil {
 			return sessionruntime.TurnResult{}, err
 		}
+		<-continueTurn
 		if err := callbacks.OnEvent(sessionruntime.TurnEvent{Kind: sessionruntime.EventCommentary, Text: "working"}); err != nil {
 			return sessionruntime.TurnResult{}, err
 		}
@@ -1514,16 +1528,30 @@ func TestDurableTurnObserversUseStableTypedIdentityAndCannotCorruptCompletion(t 
 			}),
 			DurableOutput: durableOutputFunc(func(_ context.Context, output telegramcontroller.OutgoingNotification) (telegramcontroller.OutputReceipt, error) {
 				outputs = append(outputs, output)
+				if output.OperationID == "telegram-update:113:final" {
+					close(completed)
+				}
 				return telegramcontroller.OutputReceipt{Inserted: true, SessionID: output.SessionID, OperationID: output.OperationID, Sequence: uint64(len(outputs))}, nil
 			}),
 		})
 	t.Cleanup(func() { _ = controller.Close(context.Background()) })
 	input := telegramcontroller.DurableLeasedInput{SessionID: ready.ID(), MessageID: "telegram-update:113", Sequence: 1, Payload: []byte("go")}
-	receipt, err := controller.ProcessDurableInput(context.Background(), input, telegramcontroller.DurableInputCallbacks{
+	acceptanceContext, cancelAcceptance := context.WithTimeout(context.Background(), time.Second)
+	defer cancelAcceptance()
+	receipt, err := controller.ProcessDurableInput(acceptanceContext, input, telegramcontroller.DurableInputCallbacks{
 		OnAccepted: func(context.Context, telegramcontroller.DurableInputAcceptance) error { return nil },
 	})
-	if err != nil || receipt.Completion != telegramcontroller.DurableInputSucceeded {
+	close(continueTurn)
+	if err != nil || !receipt.Accepted || receipt.Completion != telegramcontroller.DurableInputSucceeded {
 		t.Fatalf("ProcessDurableInput() = (%#v, %v)", receipt, err)
+	}
+	select {
+	case <-completed:
+	case <-time.After(time.Second):
+		t.Fatal("accepted turn did not publish its final output")
+	}
+	if err := controller.Close(context.Background()); err != nil {
+		t.Fatal(err)
 	}
 	if observed.OperationID != "telegram-update:113:event:1" || observed.SessionID != ready.ID() || observed.MessageID != input.MessageID ||
 		observed.Event.Kind != sessionruntime.EventCommentary || observed.Event.Text != "working" {
@@ -2675,6 +2703,11 @@ func TestNotifierFailureIsRecordedUnknownWithoutAutomaticRetry(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("notification failure was not recorded")
+	}
+	// Recording happens inside Notify; join the worker before checking the
+	// controller's subsequent publication of the durable failure receipt.
+	if err := controller.Close(context.Background()); err != nil {
+		t.Fatal(err)
 	}
 	failure, ok := controller.DeliveryFailure(ready.ID())
 	if !ok || !failure.DurablyRecorded || failure.State != telegramcontroller.DeliveryUnknown {

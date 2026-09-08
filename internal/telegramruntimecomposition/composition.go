@@ -182,6 +182,8 @@ func semanticActionFromPlan(plan telegrampipeline.CallbackPlan) (telegramcontrol
 		kind = telegramcontroller.SemanticSettingsScreen
 	case telegramui.ActionSettingsScreenCaptureLimit:
 		kind = telegramcontroller.SemanticSettingsScreenCaptureLimit
+	case telegramui.ActionSettingsAutoApproveCommands:
+		kind = telegramcontroller.SemanticSettingsAutoApproveCommands
 	case telegramui.ActionSettingsDetail:
 		kind = telegramcontroller.SemanticSettingsDetail
 	case telegramui.ActionSettingsPageLimit:
@@ -308,7 +310,7 @@ func callbackEffectForAction(action telegramui.Action) telegrampipeline.Callback
 		return telegrampipeline.EffectToggleSettingsScreen
 	case telegramui.ActionSettingsDetail:
 		return telegrampipeline.EffectToggleSettingsDetail
-	case telegramui.ActionSettingsPageLimit, telegramui.ActionSettingsContinueExisting,
+	case telegramui.ActionSettingsPageLimit, telegramui.ActionSettingsAutoApproveCommands, telegramui.ActionSettingsContinueExisting,
 		telegramui.ActionSettingsTechnicalActions, telegramui.ActionSettingsBackgroundQuestions,
 		telegramui.ActionSettingsBackgroundErrors, telegramui.ActionSettingsLifetimeNever,
 		telegramui.ActionSettingsArchiveRecommendations,
@@ -485,6 +487,8 @@ func telegramUIAction(action telegramcontroller.SemanticActionKind) (telegramui.
 		return telegramui.ActionSettingsScreen, nil
 	case telegramcontroller.SemanticSettingsScreenCaptureLimit:
 		return telegramui.ActionSettingsScreenCaptureLimit, nil
+	case telegramcontroller.SemanticSettingsAutoApproveCommands:
+		return telegramui.ActionSettingsAutoApproveCommands, nil
 	case telegramcontroller.SemanticSettingsDetail:
 		return telegramui.ActionSettingsDetail, nil
 	case telegramcontroller.SemanticSettingsPageLimit:

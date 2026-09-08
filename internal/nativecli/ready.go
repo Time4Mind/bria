@@ -2,6 +2,7 @@ package nativecli
 
 import (
 	"bria/internal/domain"
+	"bria/internal/nativeapproval"
 	"context"
 	"errors"
 	"regexp"
@@ -15,21 +16,34 @@ type Terminal interface {
 	Key(context.Context, string) error
 }
 
+func ApproveCommand(ctx context.Context, terminal Terminal, screen string) error {
+	request, ok := nativeapproval.ParseCodexCommandApproval(screen)
+	if !ok {
+		return errors.New("not an active command approval")
+	}
+	return nativeapproval.AcceptCodexCommandOnce(ctx, terminal, request.Fingerprint)
+}
+
 type State struct {
 	SessionID, Model   string
 	Content            string
 	Ready, Interactive bool
+	CommandApproval    *nativeapproval.CodexCommandApproval
+	ApprovalIncomplete bool
 }
 
 var sessionLine = regexp.MustCompile(`(?im)\bsession(?:\s+id)?\s*:\s*([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\b`)
 
 func ParseScreen(text string) State {
-	state := State{}
+	state := State{ApprovalIncomplete: nativeapproval.NeedsExpansion(text)}
+	if approval, ok := nativeapproval.ParseCodexCommandApproval(text); ok {
+		state.CommandApproval = &approval
+	}
 	if m := sessionLine.FindStringSubmatch(text); len(m) > 1 {
 		state.SessionID = strings.ToLower(m[1])
 	}
 	state.Model = screenModel(text)
-	state.Content, state.Interactive = interactiveContent(text)
+	state.Content, state.Interactive = nativeapproval.InteractiveContent(text)
 	lines := strings.Split(text, "\n")
 	composer := -1
 	for index, line := range lines {

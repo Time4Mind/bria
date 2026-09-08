@@ -74,13 +74,26 @@ func runNativeFixture() {
 	}
 	fmt.Print("\x1b[2J\x1b[H›\n")
 	scanner := bufio.NewScanner(os.Stdin)
+	approvalPending := false
 	for scanner.Scan() {
 		text := strings.TrimSpace(strings.TrimLeft(scanner.Text(), "\x1b"))
+		if approvalPending && text == "" {
+			approvalPending = false
+			fmt.Print("\x1b[2J\x1b[H✔ You approved codex to run fixture this time\nfixture result\n›\n")
+			continue
+		}
 		switch text {
 		case "/status":
 			fmt.Printf("\x1b[2J\x1b[HSession: %s\nModel: gpt-fixture\n›\n", fixtureSession)
 		case "/model":
 			fmt.Print("\x1b[2J\x1b[HSelect a model\nModel: gpt-fixture\nEnter to select · Esc to cancel\n")
+		case "/approval-full", "/approval-collapsed":
+			approvalPending = true
+			preview := "Environment: local\nReason: bounded fixture\n$ fixture\n"
+			if text == "/approval-collapsed" {
+				preview = "[… 1000 lines] ctrl + a view all\n"
+			}
+			fmt.Print("\x1b[2J\x1b[HWould you like to run the following command?\n\n" + preview + "\n› 1. Yes, proceed (y)\n2. No, and tell Codex what to do differently (esc)\n\nPress enter to confirm or esc to cancel\n")
 		case "screen-only":
 			fmt.Print("\x1b[2J\x1b[HFinished on screen, no transcript receipt\n›\n")
 		case "async-picker":

@@ -19,6 +19,7 @@ import (
 	"unicode/utf8"
 
 	"bria/internal/domain"
+	"bria/internal/nativerender"
 	"bria/internal/sessionruntime"
 )
 
@@ -27,8 +28,8 @@ var (
 	ErrInvalidSession       = errors.New("screen session identity is invalid")
 	ErrUnknownSession       = errors.New("screen session does not exist")
 	ErrSessionLimit         = errors.New("screen session limit reached")
-	ErrInvalidEvent         = errors.New("screen typed runtime event is invalid")
-	ErrEventTooLarge        = errors.New("screen typed runtime event exceeds its bound")
+	ErrInvalidEvent         = nativerender.ErrInvalidEvent
+	ErrEventTooLarge        = nativerender.ErrEventTooLarge
 	ErrSnapshotTooLarge     = errors.New("screen PNG exceeds its bound")
 )
 

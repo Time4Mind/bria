@@ -60,6 +60,13 @@ func Build(provider domain.Provider, rawCommand []string, workdir, resumeID stri
 				i++
 			}
 			if values[key] {
+				value := strings.TrimPrefix(arg, key+"=")
+				if !equals {
+					value = rawCommand[i]
+				}
+				if provider == domain.ProviderCodex && (key == "-c" || key == "--config") && codexOwnedPolicyOverride(value) {
+					continue
+				}
 				command = append(command, arg)
 				if !equals {
 					command = append(command, rawCommand[i])
@@ -75,7 +82,7 @@ func Build(provider domain.Provider, rawCommand []string, workdir, resumeID stri
 	}
 	plan := Plan{Provider: provider, SessionID: strings.ToLower(resumeID), Workdir: filepath.Clean(workdir)}
 	if provider == domain.ProviderCodex {
-		command = append(command, "--dangerously-bypass-approvals-and-sandbox", "--no-alt-screen", "--cd", workdir)
+		command = append(command, "--ask-for-approval", "on-request", "--sandbox", "workspace-write", "--no-alt-screen", "--cd", workdir)
 		if resumeID != "" {
 			command = append(command, "resume", resumeID)
 		}
@@ -96,4 +103,13 @@ func Build(provider domain.Provider, rawCommand []string, workdir, resumeID stri
 	}
 	plan.Command = command
 	return plan, nil
+}
+
+// Conflicting inline values must not rely on CLI-version-specific precedence.
+// Model/tool configuration remains provider-owned; Bria owns these two knobs
+// so an OFF auto-approval setting cannot be neutralized by a legacy launch arg.
+func codexOwnedPolicyOverride(value string) bool {
+	key, _, ok := strings.Cut(value, "=")
+	key = strings.Trim(strings.TrimSpace(key), "\"'")
+	return ok && (key == "approval_policy" || key == "sandbox_mode")
 }

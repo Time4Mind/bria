@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 
 	"bria/internal/domain"
@@ -73,6 +74,29 @@ func TestRenderCategoryKeepsEveryCurrentSettingInOneIntuitiveGroup(t *testing.T)
 	}
 }
 
+func TestProviderCategoryShowsAutoApprovalToggleAndRoutesAction(t *testing.T) {
+	preferences := autoApprovalPreferencesStub{}
+	surface, err := RenderCategory(context.Background(), preferences, nil, 16, CategoryProviders)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !stringsContains(surface.Text, "| Автоподтверждение Codex | включено |") {
+		t.Fatalf("surface text=%q", surface.Text)
+	}
+	var actions []string
+	for _, row := range surface.Rows {
+		for _, button := range row {
+			actions = append(actions, button.Action)
+		}
+	}
+	if !stringsContains(strings.Join(actions, ","), "settings_auto_approve_commands") {
+		t.Fatalf("actions=%v", actions)
+	}
+	if category, ok := CategoryForAction("settings_auto_approve_commands"); !ok || category != CategoryProviders {
+		t.Fatalf("category=(%v,%v)", category, ok)
+	}
+}
+
 func stringsContains(text, fragment string) bool {
 	for start := 0; start+len(fragment) <= len(text); start++ {
 		if text[start:start+len(fragment)] == fragment {
@@ -83,6 +107,14 @@ func stringsContains(text, fragment string) bool {
 }
 
 type settingsPreferencesStub struct{}
+
+type autoApprovalPreferencesStub struct{ settingsPreferencesStub }
+
+func (autoApprovalPreferencesStub) Snapshot(context.Context) (settingsport.Snapshot, error) {
+	return settingsport.Snapshot{ContinueExisting: true, CardDetail: "standard", CardPageLimit: 64, ShowTechnicalActions: true, NotifyBackgroundQuestions: true, NotifyBackgroundErrors: true, SessionLifetime: "never", QueueLimit: 16, VoiceRecognition: "parakeet", AutoApproveCommands: true}, nil
+}
+
+func (autoApprovalPreferencesStub) ToggleAutoApproveCommands(context.Context) error { return nil }
 
 func (settingsPreferencesStub) Snapshot(context.Context) (settingsport.Snapshot, error) {
 	return settingsport.Snapshot{ContinueExisting: true, CardDetail: "standard", CardPageLimit: 64, ShowTechnicalActions: true, NotifyBackgroundQuestions: true, NotifyBackgroundErrors: true, SessionLifetime: "never", QueueLimit: 16, VoiceRecognition: "parakeet"}, nil

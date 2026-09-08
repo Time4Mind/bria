@@ -12,6 +12,7 @@ import (
 	"sync"
 	"testing"
 
+	"bria/internal/documentproduction"
 	"bria/internal/mediaflow"
 	"bria/internal/mediaproduction"
 	"bria/internal/speech/parakeet"
@@ -494,6 +495,51 @@ func TestPhotoCustodyCreatesIndependentDurableReferencesConcurrently(t *testing.
 	}
 }
 
+func TestRuntimeDocumentPolicyUsesDefaultCustodyAndPreservesExplicitAttacher(t *testing.T) {
+	for _, explicit := range []bool{false, true} {
+		t.Run(fmt.Sprintf("explicit=%t", explicit), func(t *testing.T) {
+			downloader := downloaderFunc(func(context.Context, telegram.DownloadMediaRequest) (telegram.DownloadedMedia, error) {
+				return telegram.DownloadedMedia{File: telegram.File{FileID: "doc"}, Content: []byte("document")}, nil
+			})
+			policy := documentproduction.TextDocumentPolicy{Downloader: downloader, MaxBytes: 64}
+			var explicitCustody *mediaproduction.PhotoCustody
+			if explicit {
+				var err error
+				explicitCustody, err = mediaproduction.OpenPhotoCustody(filepath.Join(canonicalTempDir(t), "explicit"), 64)
+				if err != nil {
+					t.Fatal(err)
+				}
+				policy.Attacher = explicitCustody
+			}
+			runtime := openTestRuntime(t, downloader, mediaproduction.DocumentsPrepare, policy)
+			prepared, err := runtime.Preparer.PrepareStructured(context.Background(), telegramcontroller.IncomingInput{
+				Kind: "document", FileID: "doc", FileSize: 8, DownloadPermitted: true,
+			})
+			if err != nil || prepared.Text != "" || len(prepared.Attachments) != 1 {
+				t.Fatalf("PrepareStructured(document) = %#v, %v", prepared, err)
+			}
+			custody := runtime.Photos
+			if explicit {
+				custody = explicitCustody
+			}
+			ref := prepared.Attachments[0].Reference
+			path, err := custody.ResolveAttachment(context.Background(), ref)
+			if err != nil {
+				t.Fatal(err)
+			}
+			stored, err := os.ReadFile(path)
+			if err != nil || string(stored) != "document" {
+				t.Fatalf("document custody = %#v, %v", stored, err)
+			}
+			if explicit {
+				if _, err := runtime.Photos.ResolveAttachment(context.Background(), ref); !errors.Is(err, mediaproduction.ErrPhotoUnavailable) {
+					t.Fatalf("default custody unexpectedly used: %v", err)
+				}
+			}
+		})
+	}
+}
+
 func TestRuntimeRequiresExplicitDocumentPolicy(t *testing.T) {
 	downloader := downloaderFunc(func(context.Context, telegram.DownloadMediaRequest) (telegram.DownloadedMedia, error) {
 		t.Fatal("document used Telegram downloader")
@@ -504,6 +550,10 @@ func TestRuntimeRequiresExplicitDocumentPolicy(t *testing.T) {
 	}
 	if _, err := openRuntime(t, downloader, mediaproduction.DocumentsPrepare, nil); !errors.Is(err, mediaproduction.ErrInvalidConfiguration) {
 		t.Fatalf("Open(custom without policy) error = %v", err)
+	}
+	var missingPolicy *documentproduction.TextDocumentPolicy
+	if _, err := openRuntime(t, downloader, mediaproduction.DocumentsPrepare, missingPolicy); !errors.Is(err, mediaproduction.ErrInvalidConfiguration) {
+		t.Fatalf("Open(typed nil policy) error = %v", err)
 	}
 	policy := documentPolicyFunc(func(_ context.Context, input telegramcontroller.IncomingInput) (string, error) {
 		return "document:" + input.FileID, nil

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"net/http"
@@ -20,6 +21,7 @@ import (
 	"bria/internal/domain"
 	"bria/internal/parakeetinstall"
 	"bria/internal/safelog"
+	"bria/internal/sessioncreation"
 	"bria/internal/sessionruntime"
 	"bria/internal/settings"
 	"bria/internal/storage"
@@ -27,9 +29,17 @@ import (
 )
 
 func TestMain(m *testing.M) {
+	// Keep the guard regression bounded even when a provider invocation falls
+	// through: the child may run only a sentinel, never the application suite.
+	if os.Getenv("CMD_BRIA_PROVIDER_GUARD_PROBE") == "1" {
+		if err := flag.Set("test.run", "^TestProviderPlaceholderSuiteEntry$"); err != nil {
+			os.Exit(74)
+		}
+	}
 	// writeStatusConfig uses this executable only as an executable-path fixture,
-	// never as a real provider. A background quota probe must not recurse into tests.
-	if len(os.Args) > 1 && os.Args[1] == "app-server" {
+	// never as a real provider. Background quota and preprocessing warm-up
+	// commands must both exit before entering the application test suite.
+	if len(os.Args) > 1 && (os.Args[1] == "app-server" || os.Args[1] == "exec") {
 		os.Exit(1)
 	}
 	os.Exit(m.Run())
@@ -40,13 +50,65 @@ func TestStatusConfigProviderPlaceholderCannotRunTests(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	err = exec.CommandContext(ctx, executable, "app-server", "--stdio").Run()
-	var exit *exec.ExitError
-	if ctx.Err() != nil || !errors.As(err, &exit) || exit.ExitCode() != 1 {
-		t.Fatalf("placeholder must reject provider invocation without running tests: %v", err)
+	for _, invocation := range []struct {
+		name string
+		args []string
+	}{
+		{"quota", []string{"app-server", "--stdio"}},
+		{"preprocessing", []string{"exec", "--model", "gpt-5.6-luna", "--sandbox", "read-only", "--ephemeral", "--output-last-message", filepath.Join(t.TempDir(), "result"), "-"}},
+	} {
+		t.Run(invocation.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			command := exec.CommandContext(ctx, executable, invocation.args...)
+			command.Env = append(os.Environ(), "CMD_BRIA_PROVIDER_GUARD_PROBE=1")
+			command.Stdin = strings.NewReader("synthetic preprocessing input")
+			output, err := command.CombinedOutput()
+			var exit *exec.ExitError
+			if ctx.Err() != nil || !errors.As(err, &exit) || exit.ExitCode() != 1 || len(output) != 0 {
+				t.Fatalf("placeholder must reject provider invocation without running tests: %v, output=%q", err, output)
+			}
+		})
 	}
+}
+
+func TestProviderPlaceholderSuiteEntry(t *testing.T) {
+	if os.Getenv("CMD_BRIA_PROVIDER_GUARD_PROBE") == "1" {
+		fmt.Fprintln(os.Stderr, "provider invocation entered the test suite")
+		os.Exit(73)
+	}
+}
+
+func TestCommandDependenciesIsolateDirectoryDiscoveryFromInheritedHome(t *testing.T) {
+	inherited := t.TempDir()
+	t.Setenv("HOME", inherited)
+	dependencies := testCommandDependencies(t, nil)
+	browser, err := sessioncreation.NewLocalBrowser("fixture", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer browser.Close()
+	home, err := browser.Home(context.Background(), "fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	inherited, err = filepath.EvalSymlinks(inherited)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if home == inherited {
+		t.Fatal("application fixture would scan the inherited home directory")
+	}
+	for _, entry := range dependencies.environment() {
+		if strings.HasPrefix(entry, "HOME=") {
+			providerHome, err := filepath.EvalSymlinks(strings.TrimPrefix(entry, "HOME="))
+			if err != nil || providerHome != home {
+				t.Fatalf("provider and directory browser fixture homes differ: %v", err)
+			}
+			return
+		}
+	}
+	t.Fatal("fixture provider environment has no HOME")
 }
 
 func TestRunHelp(t *testing.T) {
@@ -1325,6 +1387,13 @@ func requestBody(t *testing.T, request *http.Request) string {
 func testCommandDependencies(t *testing.T, httpClient telegram.HTTPClient) commandDependencies {
 	t.Helper()
 	directory := t.TempDir()
+	// The real local directory browser starts during controller composition.
+	// Keep its activity scan and provider discovery inside this test's home.
+	home := filepath.Join(directory, "home")
+	if err := os.Mkdir(home, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
 	briaExecutable := filepath.Join(directory, "bria")
 	for _, path := range []string{
 		briaExecutable,

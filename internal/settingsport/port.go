@@ -27,6 +27,7 @@ type Snapshot struct {
 	PreprocessingInstruction  string
 	SessionNamingEnabled      bool
 	StandbyEnabled            bool
+	AutoApproveCommands       bool
 }
 
 type Preferences interface {
@@ -59,6 +60,11 @@ type PreprocessingPreferences interface {
 
 type StandbyPreferences interface {
 	ToggleStandby(context.Context) error
+}
+
+// AutoApprovalPreferences extends settings without changing existing mocks.
+type AutoApprovalPreferences interface {
+	ToggleAutoApproveCommands(context.Context) error
 }
 
 // NodeRenamer optionally persists the display name of a computer node.

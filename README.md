@@ -15,6 +15,7 @@ Bria - личный Telegram-интерфейс для работы с сесс�
 Локальная сборка и проверка текущего состояния:
 
 ```sh
+make prepare-deps # one-time online module download with checksum verification
 make check-full
 bin/bria --help
 bin/bria version
@@ -23,6 +24,9 @@ bin/bria check-config --config /absolute/path/to/config.json
 bin/bria check-telegram --config /absolute/path/to/config.json
 bin/bria run --config /absolute/path/to/config.json
 ```
+
+`prepare-deps` заполняет тот же `GOMODCACHE`, который затем используют offline-проверки
+и сборка. Можно явно задать `GOMODCACHE=/absolute/path`; для native-тестов нужен `tmux`.
 
 `make check-full` собирает три соседних исполняемых файла: `bin/bria`, `bin/bria-codex-adapter` и `bin/bria-claude-adapter`. `install-parakeet` для роли `combined` или `executor` устанавливает отсутствующий `ffmpeg`, скачивает pinned runtime NeMo-Speech.cpp и модель, проверяет точные размер и SHA-256 и создаёт локальный wrapper по путям из versioned config; для `coordinator` команда является no-op. Установка release вызывает её до `check-config`. `check-config` проверяет локальную конфигурацию, секретные файлы и композицию исполнителей без обращения к Telegram. `check-telegram` выполняет только проверку идентичности бота через `getMe` и не забирает очередь обновлений. `run` захватывает блокировку экземпляра и запускает рабочий Telegram loop; при первом запуске он устанавливает сохраняемый backlog fence, поэтому это уже не безвредная проверка конфигурации.
 
@@ -52,6 +56,8 @@ bin/bria run --config /absolute/path/to/config.json
 - [Tier 1: препроцессинг](docs/TIER1_PREPROCESSING_FLOW.md)
 - [Tier 1: сессии](docs/TIER1_SESSION_FLOWS.md)
 - [Пилот native CLI](docs/NATIVE_CLI_PILOT.md)
+- [Конфигурация Bria и сравнение запуска с CCBot](docs/CONFIGURATION.md)
+- [Подтверждения Luna: живые кейсы и парсинг](docs/LUNA_APPROVAL_CASES.md)
 - [Аудит незавершённых flow](docs/INCOMPLETE_FLOWS_AUDIT.md)
 
 Правила обязательной параллельной разработки несколькими агентами находятся в [AGENTS.md](AGENTS.md). Автоматическая проверка этих правил описана в [scripts/check_repo.go](scripts/check_repo.go) и запускается через [.github/workflows/context.yml](.github/workflows/context.yml).

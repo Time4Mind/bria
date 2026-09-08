@@ -7,33 +7,11 @@ import (
 	"fmt"
 	"io"
 	"unicode/utf8"
+
+	"bria/internal/settingscodec"
 )
 
 const MaxDocumentBytes = 64 << 10
-
-var requiredDocumentFields = []string{
-	"version",
-	"revision",
-	"continue_existing",
-	"screen_enabled",
-	"card_detail",
-	"show_technical_actions",
-	"notify_background_questions",
-	"notify_background_errors",
-	"session_lifetime",
-	"queue_limit",
-	"voice_recognition",
-	"retry_undelivered_files",
-}
-
-var creationDocumentFields = []string{
-	"archive_recommendations",
-	"default_providers",
-	"default_workdirs",
-}
-
-var preprocessingDocumentFields = []string{"preprocessing_enabled", "preprocessing_instruction"}
-var namingDocumentFields = []string{"session_naming_enabled"}
 
 type settingsDocument struct {
 	Version                   int               `json:"version"`
@@ -57,6 +35,7 @@ type settingsDocument struct {
 	PreprocessingInstruction  string            `json:"preprocessing_instruction"`
 	SessionNamingEnabled      bool              `json:"session_naming_enabled"`
 	StandbyEnabled            bool              `json:"standby_enabled"`
+	AutoApproveCommands       bool              `json:"auto_approve_commands"`
 }
 
 // Decode reads one complete settings document. Every field is explicit so a
@@ -75,7 +54,7 @@ func Decode(reader io.Reader) (Snapshot, error) {
 	if !utf8.Valid(document) {
 		return Snapshot{}, errors.New("settings must be valid UTF-8")
 	}
-	seen, err := inspectStrictDocument(document)
+	seen, err := settingscodec.Inspect(document)
 	if err != nil {
 		return Snapshot{}, fmt.Errorf("validate settings JSON: %w", err)
 	}
@@ -96,6 +75,9 @@ func Decode(reader io.Reader) (Snapshot, error) {
 	if decoded.Revision == 0 {
 		return Snapshot{}, errors.New("settings revision must be positive")
 	}
+	if err := settingscodec.RequireVersionFields(seen, decoded.Version); err != nil {
+		return Snapshot{}, fmt.Errorf("validate settings JSON: %w", err)
+	}
 	if decoded.Version >= 1 && decoded.Version < 3 {
 		decoded.Version = FormatVersion
 		if decoded.CardPageLimit == 0 {
@@ -107,26 +89,11 @@ func Decode(reader io.Reader) (Snapshot, error) {
 		if decoded.DefaultWorkdirs == nil {
 			decoded.DefaultWorkdirs = map[string]string{}
 		}
-	} else if decoded.Version == 3 {
-		for _, field := range creationDocumentFields {
-			if _, ok := seen[field]; !ok {
-				return Snapshot{}, fmt.Errorf("validate settings JSON: missing field %q", field)
-			}
-		}
+	} else if decoded.Version == 3 || decoded.Version == 4 {
 		decoded.Version = FormatVersion
-	} else if decoded.Version == 4 {
-		for _, field := range append(creationDocumentFields, preprocessingDocumentFields...) {
-			if _, ok := seen[field]; !ok {
-				return Snapshot{}, fmt.Errorf("validate settings JSON: missing field %q", field)
-			}
-		}
-		decoded.Version = FormatVersion
-	} else if decoded.Version == FormatVersion {
-		for _, field := range append(append(creationDocumentFields, preprocessingDocumentFields...), namingDocumentFields...) {
-			if _, ok := seen[field]; !ok {
-				return Snapshot{}, fmt.Errorf("validate settings JSON: missing field %q", field)
-			}
-		}
+	}
+	if _, ok := seen["auto_approve_commands"]; !ok {
+		decoded.AutoApproveCommands = true
 	}
 	snapshot := decoded.snapshot()
 	if snapshot.Settings.ScreenCaptureLimitKiB == 0 {
@@ -136,71 +103,6 @@ func Decode(reader io.Reader) (Snapshot, error) {
 		return Snapshot{}, fmt.Errorf("validate settings: %w", err)
 	}
 	return snapshot, nil
-}
-
-func inspectStrictDocument(document []byte) (map[string]struct{}, error) {
-	decoder := json.NewDecoder(bytes.NewReader(document))
-	token, err := decoder.Token()
-	if err != nil {
-		return nil, err
-	}
-	if delimiter, ok := token.(json.Delim); !ok || delimiter != '{' {
-		return nil, errors.New("settings must be a JSON object")
-	}
-	seen := make(map[string]struct{}, len(requiredDocumentFields))
-	allowed := make(map[string]struct{}, len(requiredDocumentFields))
-	for _, field := range requiredDocumentFields {
-		allowed[field] = struct{}{}
-	}
-	allowed["card_page_limit"] = struct{}{}
-	// Additive optional field: pre-feature documents keep the default OFF.
-	allowed["standby_enabled"] = struct{}{}
-	allowed["screen_capture_limit_kib"] = struct{}{}
-	for _, field := range creationDocumentFields {
-		allowed[field] = struct{}{}
-	}
-	for _, field := range preprocessingDocumentFields {
-		allowed[field] = struct{}{}
-	}
-	for _, field := range namingDocumentFields {
-		allowed[field] = struct{}{}
-	}
-	for decoder.More() {
-		keyToken, err := decoder.Token()
-		if err != nil {
-			return nil, err
-		}
-		key, ok := keyToken.(string)
-		if !ok {
-			return nil, errors.New("settings field name must be a string")
-		}
-		if _, duplicate := seen[key]; duplicate {
-			return nil, fmt.Errorf("duplicate field %q", key)
-		}
-		seen[key] = struct{}{}
-		if _, known := allowed[key]; !known {
-			return nil, fmt.Errorf("unknown field %q", key)
-		}
-		var value json.RawMessage
-		if err := decoder.Decode(&value); err != nil {
-			return nil, err
-		}
-	}
-	if _, err := decoder.Token(); err != nil {
-		return nil, err
-	}
-	for _, field := range requiredDocumentFields {
-		if _, ok := seen[field]; !ok {
-			return nil, fmt.Errorf("missing field %q", field)
-		}
-	}
-	if _, err := decoder.Token(); !errors.Is(err, io.EOF) {
-		if err == nil {
-			return nil, errors.New("trailing JSON value")
-		}
-		return nil, err
-	}
-	return seen, nil
 }
 
 func documentFromSnapshot(snapshot Snapshot) settingsDocument {
@@ -221,6 +123,7 @@ func documentFromSnapshot(snapshot Snapshot) settingsDocument {
 		PreprocessingInstruction: s.PreprocessingInstruction,
 		SessionNamingEnabled:     s.SessionNamingEnabled,
 		StandbyEnabled:           s.StandbyEnabled,
+		AutoApproveCommands:      s.AutoApproveCommands,
 	}
 }
 
@@ -246,5 +149,6 @@ func (document settingsDocument) snapshot() Snapshot {
 		PreprocessingInstruction:  document.PreprocessingInstruction,
 		SessionNamingEnabled:      document.SessionNamingEnabled,
 		StandbyEnabled:            document.StandbyEnabled,
+		AutoApproveCommands:       document.AutoApproveCommands,
 	}}
 }

@@ -36,7 +36,7 @@ func TestDurablePreprocessingPersistsCleanedTextBeforeProviderAcceptance(t *test
 	}
 	ui := &projectionUIState{}
 	providerText := ""
-	notifications := make(chan telegramcontroller.Notification, 2)
+	notifications := make(chan telegramcontroller.Notification, 3)
 	interactive := &interactiveSubmitter{submitWithCallbacks: func(_ context.Context, _ domain.SessionID, text string, callbacks sessionruntime.TurnCallbacks) (sessionruntime.TurnResult, error) {
 		providerText = text
 		if err := callbacks.OnAccepted(callbacks.MessageID); err != nil {
@@ -77,12 +77,20 @@ func TestDurablePreprocessingPersistsCleanedTextBeforeProviderAcceptance(t *test
 	if err != nil || !receipt.Accepted || providerText != "cleaned prompt" {
 		t.Fatalf("durable preprocessing = (%#v, %v), provider text %q", receipt, err, providerText)
 	}
-	if history := ui.history[ready.ID()]; len(history) < 1 || !strings.HasPrefix(history[0], "👨") || !strings.Contains(history[0], "cleaned prompt") {
-		t.Fatalf("card history = %#v", history)
-	}
 	first, second := <-notifications, <-notifications
 	if first.OperationID != "telegram-update:501:prompt-status:preprocessed" || second.OperationID != "telegram-update:501:prompt-status:👨‍💻" {
 		t.Fatalf("prompt transition notifications = %#v, %#v", first, second)
+	}
+	select {
+	case final := <-notifications:
+		if final.Kind != telegramcontroller.NotificationFinal {
+			t.Fatalf("completion notification = %#v", final)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("accepted turn did not complete")
+	}
+	if history := ui.history[ready.ID()]; len(history) < 1 || !strings.HasPrefix(history[0], "👨") || !strings.Contains(history[0], "cleaned prompt") {
+		t.Fatalf("card history = %#v", history)
 	}
 }
 
@@ -243,7 +251,7 @@ func TestVoiceTranscriptEntersDurablePreprocessingEnvelope(t *testing.T) {
 		ContinueExisting: true, CardDetail: "standard", CardPageLimit: 64, ShowTechnicalActions: true,
 		SessionLifetime: "never", QueueLimit: 32, VoiceRecognition: "parakeet", PreprocessingEnabled: true,
 	}}
-	var accepted telegramcontroller.SessionInput
+	acceptedInputs := make(chan telegramcontroller.SessionInput, 1)
 	controller := newController(t, nil, &memorySessions{byID: map[domain.SessionID]domain.Session{ready.ID(): ready}}, nil, nil,
 		telegramcontroller.Options{
 			Recovered: []domain.Session{ready}, Settings: preferences,
@@ -254,7 +262,7 @@ func TestVoiceTranscriptEntersDurablePreprocessingEnvelope(t *testing.T) {
 				return "распознанный текст", nil
 			}),
 			DurableInput: durableInputFunc(func(_ context.Context, input telegramcontroller.SessionInput) (telegramcontroller.InputReceipt, error) {
-				accepted = input
+				acceptedInputs <- input
 				return telegramcontroller.InputReceipt{Inserted: true, SessionID: input.SessionID, MessageID: input.MessageID, Sequence: 1}, nil
 			}),
 		})
@@ -266,14 +274,11 @@ func TestVoiceTranscriptEntersDurablePreprocessingEnvelope(t *testing.T) {
 	voice.MediaFileID = "voice-file"
 	voice.MediaDownloadAllowed = true
 	mustStatus(t, controller, voice)
-	deadline := time.After(time.Second)
-	for accepted.Payload == nil {
-		select {
-		case <-deadline:
-			t.Fatal("voice preprocessing did not reach durable input")
-		default:
-			time.Sleep(time.Millisecond)
-		}
+	var accepted telegramcontroller.SessionInput
+	select {
+	case accepted = <-acceptedInputs:
+	case <-time.After(time.Second):
+		t.Fatal("voice preprocessing did not reach durable input")
 	}
 	state, err := promptpreprocess.DecodeState(accepted.Payload)
 	if err != nil || !state.Enabled || state.Instruction != promptpreprocess.DefaultInstruction || state.Original != "контекст\n\nраспознанный текст" {
