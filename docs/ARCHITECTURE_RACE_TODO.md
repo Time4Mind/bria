@@ -86,7 +86,7 @@ not relaxed. The rejected gate is not acceptance evidence.
 | A25.F1.2 | main/steer journal and next-input/card continuity | locally verified; actual runtime/store/main+steer/B-once race PASS 13.843s, independent repeat x3 PASS 42.140s |
 | A25.F1.3 | safe error/recovery diagnostics and documentation | locally verified; controller to physical JSONL exact operation/parent refs and private sentinel absence, cancellable notices; main fresh scoped race PASS 5.347s |
 | A25.F1.4 | complete local gate/build/review | complete: final make check-full PASS 18:40 UTC; independent helper/storage and notification/correlation approvals; physical trio verified below |
-| A25.R3 | conditional push/restart after full completion | in progress; 4d82381 pushed/remote verified, CI-found exit-drain fix now locally verified; follow-up full gate/CI then exact install/restart/postflight remain |
+| A25.R3 | conditional push/restart after full completion | complete; source00b26a7 remote verified, both CI workflows PASS, installed exact trio and restarted service; live process/lock/identity/recovery/data postflight below |
 
 Release preflight (2026-09-08 18:34 UTC): origin Time4Mind/bria main remains
 24921b7ebcab9b23a16683253f9a4461c84b01ac. Exact source manifest has 268 paths
@@ -181,6 +181,45 @@ bria SHA256 8ad43ff93c38f02eddeb52dc5ef50f54afe0f7804387228a66d6ca5cdbed415d;
 both adapter hashes unchanged from above. Config check PASS. Exact follow-up
 source set: starter.go, new exit_drain_test.go, cmd runtime_failure_log_regression_test.go,
 this todo and STATUS_AND_NEXT.md. New commit/remote CI still required before install.
+
+### Revision7 release completed - 2026-09-08 19:01 UTC / 22:01 MSK
+
+Source follow-up00b26a7209f8def24ffae971a0b5168d30659f10 pushed and reread in
+origin/main. [Stage1](https://github.com/Time4Mind/bria/actions/runs/34265856808)
+PASS3m58s; [platform matrix](https://github.com/Time4Mind/bria/actions/runs/34265856861)
+PASS including native macOS/Linux, four cross-builds and Docker. The previous
+macOS failure was fixed, not masked by rerun. No further product changes.
+
+Bounded install started18:59:13 UTC after fresh tool approval: exactly three
+verified binaries copied to the new20260908-final-save-retry directory; old
+PID89657 exited, current symlink atomically replaced, same launchd plist bootstrapped.
+No manual config/state/journal writes, dependency installs, deletion of old
+release/data or unrelated services. No new rollback backup was made.
+
+Postflight: gui/501/com.time4mind.bria.v2 stays running/PID89675/runs1/no exit;
+oldPID absent, only newPID owns the existing instance lock. Installed version and
+all three SHA256 values equal the final local build (bria8ad43ff..., adapters above).
+Config/plist/settings bytes unchanged. Two live Codex adapter children use the
+exact new release directory. Installed binary getMe returns expected bot identity.
+
+Repeated physical JSON comparison with preflight copies preserves all5 session
+identities,5 cards,135 ordered existing history items and all15 completed input
+records byte-for-value, with unchanged settings. State now has3 ready/2 archived,
+no awaiting_recovery: the previous emergency session recovered automatically.
+Fresh logs: telegram.flow_ready18:59:16.777769 UTC, two startup_recovery/recovered
+events18:59:18.115546 and18:59:18.917541. No fresh classified error in the observed
+post-start window. This is bounded postflight, not perpetual monitoring.
+Independent Bernoulli postflight18:59:13-19:00:54 UTC confirms the same values,
+zero fresh errors and unchanged full telegram_ui. The formerly awaiting Codex
+session retains its native identity, generation advances1->2, recovery target clears.
+Log retention reduced old records; comparisons use only the post-start cutoff.
+
+All current requested implementation/release obligations are complete. This record
+is the final documentation-only follow-up; it does not change installed code.
+Boundary: no live disk fault was injected, no new user prompt or outgoing test
+message was sent, and Telegram card appearance was not manually inspected.
+Local actual HTTP/store/runtime regressions cover those changed flows; readiness
+and recovery logs do not independently prove the owner's visible card interaction.
 
 ### Current release condition audit - 2026-09-08
 
