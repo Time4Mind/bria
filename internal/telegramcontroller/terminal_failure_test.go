@@ -22,11 +22,11 @@ func TestTerminalFailureRequiresAcceptedProofAndSuccessfulFinalization(t *testin
 	}{
 		{"failed", sessionruntime.StatusFailed, "", telegramcontroller.DurableInputTerminalFailed},
 		{"interrupted", sessionruntime.StatusInterrupted, "", telegramcontroller.DurableInputTerminalFailed},
-		{"unknown", "", "", telegramcontroller.DurableInputUnknown},
+		{"unknown", "", "", telegramcontroller.DurableInputCompletion("awaiting_recovery")},
 		{"lifecycle-failure", sessionruntime.StatusFailed, "finish", telegramcontroller.DurableInputFailed},
 		{"invalid-finished-state", sessionruntime.StatusFailed, "state", telegramcontroller.DurableInputFailed},
 		{"close-failure", sessionruntime.StatusFailed, "close", telegramcontroller.DurableInputFailed},
-		{"history-failure", sessionruntime.StatusFailed, "history", telegramcontroller.DurableInputUnknown},
+		{"history-failure", sessionruntime.StatusFailed, "history", telegramcontroller.DurableInputCompletion("awaiting_recovery")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ready := readySession(t, "aaaaaaaa-aaaa-4aaa-9aaa-aaaaaaaaaaaa", domain.ProviderCodex, t.TempDir(), "provider-a", 1)
@@ -179,7 +179,7 @@ func testTerminalCustody(t *testing.T, fail bool) {
 	seen := map[string]bool{}
 	want := telegramcontroller.DurableInputTerminalFailed
 	if fail {
-		want = telegramcontroller.DurableInputUnknown
+		want = telegramcontroller.DurableInputCompletion("awaiting_recovery")
 	}
 	for len(seen) < 2 {
 		select {

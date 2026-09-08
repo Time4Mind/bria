@@ -172,7 +172,7 @@ func testDeferredInputRecovery(t *testing.T, mode string) {
 	}
 	select {
 	case receipt := <-completed:
-		if receipt.MessageID != "A" || receipt.Completion != telegramcontroller.DurableInputUnknown {
+		if receipt.MessageID != "A" || receipt.Completion != telegramcontroller.DurableInputCompletion("awaiting_recovery") {
 			t.Fatalf("A completion=%+v", receipt)
 		}
 	case <-ctx.Done():
@@ -197,7 +197,7 @@ func testDeferredInputRecovery(t *testing.T, mode string) {
 	}
 	select {
 	case receipt := <-bCompleted:
-		if receipt.MessageID != "B" || receipt.Completion != telegramcontroller.DurableInputUnknown {
+		if receipt.MessageID != "B" || receipt.Completion != telegramcontroller.DurableInputCompletion("awaiting_recovery") {
 			t.Fatalf("new generation completion=%+v", receipt)
 		}
 	case <-ctx.Done():

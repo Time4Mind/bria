@@ -41,7 +41,11 @@ func TestAsyncCompletionDuringProcessorReturnPreservesTerminal(t *testing.T) {
 				t.Fatal(err)
 			}
 			inputs, err := openJournal(t, path).Inputs(ctx, "s")
-			if err != nil || len(inputs) != 1 || inputs[0].Phase != messagejournal.InputPhase(outcome) {
+			want := messagejournal.InputPhase(outcome)
+			if outcome == durableflow.InputProcessUnknown {
+				want = messagejournal.InputAccepted
+			}
+			if err != nil || len(inputs) != 1 || inputs[0].Phase != want {
 				t.Fatalf("lost terminal: %#v %v", inputs, err)
 			}
 			if _, err := journal.LeaseNextInput(ctx, "s", "other", time.Unix(999, 0), time.Minute); !errors.Is(err, messagejournal.ErrNoAvailable) {
@@ -88,7 +92,11 @@ func lateCompletionRequiresAcceptance(t *testing.T, terminal durableflow.InputPr
 				t.Fatal("missing process failure")
 			}
 			before, err := openJournal(t, path).Inputs(ctx, "s")
-			if err != nil || len(before) != 1 || before[0].Phase != messagejournal.InputUnknown {
+			wantBefore := messagejournal.InputUnknown
+			if accepted {
+				wantBefore = messagejournal.InputAccepted
+			}
+			if err != nil || len(before) != 1 || before[0].Phase != wantBefore {
 				t.Fatalf("before: %#v %v", before, err)
 			}
 			lateErr := late(ctx, receipt)

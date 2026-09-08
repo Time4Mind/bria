@@ -3,10 +3,13 @@ package durableflow
 import (
 	"context"
 
-	"bria/internal/messagejournal"
+	"bria/internal/acceptedinput"
 )
 
-func (flow *Flow) commitRecoveredInput(ctx context.Context, input messagejournal.Input, resolution AcceptedResolution) error {
-	_, err := flow.journal.ResolveAcceptedInput(ctx, input.SessionID, input.MessageID, input.Sequence, messagejournal.InputPhase(resolution))
-	return err
+// RootInputReady checks fresh-root admission without changing live steering leases.
+func (flow *Flow) RootInputReady(ctx context.Context, sessionID, messageID string, sequence uint64) (bool, error) {
+	if flow == nil {
+		return false, ErrInvalidHandoff
+	}
+	return acceptedinput.RootReady(ctx, flow.journal, sessionID, messageID, sequence)
 }

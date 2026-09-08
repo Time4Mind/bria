@@ -203,7 +203,7 @@ func TestProcessNextInputPersistsPreparationBeforeAcceptance(t *testing.T) {
 	}
 }
 
-func TestProcessNextInputSealsCrashAfterAcceptanceAsUnknown(t *testing.T) {
+func TestProcessNextInputPreservesAcceptanceAfterCrash(t *testing.T) {
 	journal := openJournal(t, filepath.Join(t.TempDir(), "journal.json"))
 	flow := newFlow(t, journal, nil, nil, time.Unix(10, 0))
 	if _, err := flow.EnqueueInput(context.Background(), "session-a", "message-a", []byte("hello")); err != nil {
@@ -216,11 +216,11 @@ func TestProcessNextInputSealsCrashAfterAcceptanceAsUnknown(t *testing.T) {
 		return durableflow.InputProcessResult{SessionID: input.SessionID, MessageID: input.MessageID, Sequence: input.Sequence}, errors.New("provider connection lost")
 	})
 	result, err := flow.ProcessNextInput(context.Background(), "session-a", processor)
-	if err == nil || result.State != durableflow.InputProcessUnknown {
-		t.Fatalf("ProcessNextInput() = (%#v, %v), want unknown", result, err)
+	if err == nil || result.State != durableflow.InputProcessAccepted {
+		t.Fatalf("ProcessNextInput() = (%#v, %v), want accepted", result, err)
 	}
 	inputs, readErr := journal.Inputs(context.Background(), "session-a")
-	if readErr != nil || len(inputs) != 1 || inputs[0].Phase != messagejournal.InputUnknown {
+	if readErr != nil || len(inputs) != 1 || inputs[0].Phase != messagejournal.InputAccepted {
 		t.Fatalf("crash state = (%#v, %v)", inputs, readErr)
 	}
 }
@@ -454,7 +454,7 @@ func TestReconcileAcceptedInputsPersistsProviderHistoryOutcomes(t *testing.T) {
 		t.Fatalf("ReconcileAcceptedInputs() = %#v, %v", results, err)
 	}
 	inputs, err := openJournal(t, path).Inputs(context.Background(), "session-a")
-	if err != nil || len(inputs) != 3 || inputs[0].Phase != messagejournal.InputCompleted || inputs[1].Phase != messagejournal.InputFailed || inputs[2].Phase != messagejournal.InputUnknown {
+	if err != nil || len(inputs) != 3 || inputs[0].Phase != messagejournal.InputCompleted || inputs[1].Phase != messagejournal.InputFailed || inputs[2].Phase != messagejournal.InputAccepted || results[2].Resolution != "accepted" {
 		t.Fatalf("reconciled durable phases = %#v, %v", inputs, err)
 	}
 	if _, err := openJournal(t, path).LeaseNextInput(context.Background(), "session-a", "other", time.Unix(999, 0), time.Minute); !errors.Is(err, messagejournal.ErrNoAvailable) {
@@ -462,7 +462,7 @@ func TestReconcileAcceptedInputsPersistsProviderHistoryOutcomes(t *testing.T) {
 	}
 }
 
-func TestReconcileAcceptedInputRejectsMismatchedHistoryReceiptAsUnknown(t *testing.T) {
+func TestReconcileAcceptedInputRejectsMismatchedHistoryWithoutLosingAcceptance(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "journal.json")
 	journal := openJournal(t, path)
 	if _, _, err := journal.EnqueueInput(context.Background(), "session-a", "m1", []byte("body")); err != nil {
@@ -484,11 +484,11 @@ func TestReconcileAcceptedInputRejectsMismatchedHistoryReceiptAsUnknown(t *testi
 	})
 	flow := newFlow(t, journal, nil, nil, time.Unix(221, 0))
 	results, err := flow.ReconcileAcceptedInputs(context.Background(), "session-a", resolver)
-	if !errors.Is(err, durableflow.ErrInvalidResolution) || len(results) != 1 || results[0].Resolution != durableflow.AcceptedUnknown {
+	if !errors.Is(err, durableflow.ErrInvalidResolution) || len(results) != 1 || results[0].Resolution != "accepted" {
 		t.Fatalf("mismatched reconciliation = %#v, %v", results, err)
 	}
 	inputs, readErr := openJournal(t, path).Inputs(context.Background(), "session-a")
-	if readErr != nil || len(inputs) != 1 || inputs[0].Phase != messagejournal.InputUnknown {
+	if readErr != nil || len(inputs) != 1 || inputs[0].Phase != messagejournal.InputAccepted {
 		t.Fatalf("mismatched reconciliation phase = %#v, %v", inputs, readErr)
 	}
 }

@@ -48,7 +48,7 @@ func Read(raw string) (string, bool) {
 // Bound counts Unicode scalars, with explicit and inserted newlines sharing
 // one line budget. It never appends a truncation notice to content.
 func Bound(text string, budget int) (string, bool) {
-	if budget != 5 && budget != 10 && budget != 20 && budget != 40 {
+	if budget != 3 && budget != 5 && budget != 10 && budget != 20 && budget != 40 {
 		budget = 10
 	}
 	var result strings.Builder

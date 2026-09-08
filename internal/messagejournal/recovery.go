@@ -25,7 +25,7 @@ func (journal *Journal) transitionInputOutcome(ctx context.Context, sessionID, m
 		if sequence != 0 && record.Sequence != sequence {
 			return ErrInvalidTransition
 		}
-		if record.Phase == outcome {
+		if record.Phase == outcome || record.Phase == InputAccepted && outcome == InputUnknown {
 			return errNoMutation
 		}
 		if record.Phase != from && !(sequence != 0 && from == InputAccepted && (record.Phase == InputUnknown || record.Phase == InputFailed && outcome == InputTerminalFailed)) {

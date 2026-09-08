@@ -83,7 +83,7 @@ var mandatoryInvariants = []string{
 	"проверка доказательств и явное описание неопределённости;",
 	"быстрые профильные проверки во время разработки и полный набор перед выпуском;",
 	"проверка физического результата;",
-	"точная bounded последовательность и точные цели с terminal criterion, одно явное подтверждение на действие или bounded sequence, действующее до terminal criterion и включающее необходимые commit, push и CI-fix iterations, выполнение только согласованного scope, повторное чтение после каждого существенного внешнего write и новое подтверждение для новых, расширенных или destructive targets, deploy, изменений secrets и исходящих messages.",
+	"точная bounded последовательность и точные цели с terminal criterion, явное подтверждение на действие или bounded sequence (включая узкое standing authorization для Bria), действующее до terminal criterion и включающее необходимые commit, push и CI-fix iterations, выполнение только согласованного scope, повторное чтение после каждого существенного внешнего write и новое подтверждение для новых, расширенных или destructive targets, deploy вне standing authorization, изменений secrets и исходящих messages.",
 }
 
 // requiredPolicyClauses protects the operational meaning of the policy. Short
@@ -164,12 +164,18 @@ var requiredPolicyClauses = map[string][]string{
 		"Публикация, отправка сообщений, изменение удалённого репозитория, установка, перезапуск, удаление данных и другие видимые или труднообратимые действия разрешены только в явно согласованном объёме.",
 		"До внешнего write:",
 		"1. Показать точную bounded последовательность действий, точные цели и terminal criterion.",
-		"2. Получить одно явное подтверждение на отдельное действие или bounded sequence. Подтверждение bounded sequence действует до указанного terminal criterion и включает необходимые commit, push и CI-fix iterations.",
+		"2. Получить одно явное подтверждение на отдельное действие или bounded sequence, если оно ещё не дано, в том числе standing authorization ниже. Подтверждение bounded sequence действует до указанного terminal criterion и включает необходимые commit, push и CI-fix iterations.",
 		"3. Выполнить только этот согласованный scope.",
 		"4. После каждого существенного внешнего write повторно прочитать целевое состояние и проверить фактический результат.",
 		"Новые или расширенные targets требуют нового подтверждения.",
-		"Deploy, изменения secrets, исходящие messages и любое destructive действие, включая destructive write к уже перечисленной цели, всегда требуют нового подтверждения, даже если они заранее перечислены.",
+		"Deploy вне standing authorization ниже, изменения secrets, исходящие messages и любое destructive действие, включая destructive write к уже перечисленной цели, всегда требуют нового подтверждения, даже если они заранее перечислены.",
 		"Неопределённый сетевой ответ не считать ни успехом, ни отказом: сначала безопасно перечитать состояние, затем решать вопрос о повторе.",
+		"По явному указанию Артёма от 2026-09-08 для обычной явно запрошенной разработки Bria действует standing authorization: после полного завершения задачи владелец объединения автоматически выполняет согласованный выпуск без повторного запроса подтверждения. Review, диагностика и незавершённая задача не запускают выпуск; явные ограничения пользователя local-only, no-push или запрет restart имеют приоритет.",
+		"Разрешённые targets: только текущий репозиторий Time4Mind/bria, обычный commit и push в его origin/main без force, и установка/перезапуск существующего локального сервиса gui/501/com.time4mind.bria.v2 на текущей машине. Другие клоны, репозитории, hosts и services не получают разрешения автоматически.",
+		"До записи владелец объединения read-only проверяет фактические origin, ветку, service и пути установки, показывает точный manifest изменений и артефактов, bounded последовательность и terminal criterion. Git и deploy выполняет только владелец объединения последовательно; read-only исполнители не выполняют mutations.",
+		"Последовательность выпуска: закрыть все обязательства задачи и проверить физический результат; выполнить полный make check-full; проверить и commit только согласованный manifest; выполнить обычный push в origin/main; дождаться успешных обязательных CI для точного текущего SHA; установить проверенные бинарники и перезапустить только указанный существующий Bria service. Необходимые CI-fix iterations в рамках задачи включены; изменённую версию снова полностью проверить до установки.",
+		"После каждого существенного write повторно read-only проверить целевое состояние. Terminal criterion: remote HEAD соответствует проверенному commit, обязательные CI этого SHA зелёные, установленные версии и hashes совпадают с проверенными артефактами, process/lock и свежие безопасные логи подтверждают healthy service, пользовательские settings/session/history/journal сохранены. Не выдавать непроверенный live-сценарий за доказанный.",
+		"Standing authorization не разрешает изменения secrets, config/state, исходящие messages, destructive операции или расширение targets; для них нужно отдельное явное разрешение. Ограничения и запросы разрешений инструментов более высокого приоритета сохраняются; этот текст их не обходит.",
 	},
 }
 
@@ -1439,7 +1445,7 @@ var packagePolicies = map[string]packagePolicy{
 	"internal/durablecomposition": {
 		responsibility: "compose durable message custody and accepted-turn reconciliation",
 		allowedImports: []string{
-			"internal/domain", "internal/durableflow", "internal/durableinputbridge", "internal/messagejournal", "internal/sessionruntime", "internal/sessionsupervisor", "internal/telegramcontroller", "internal/telegramnotify",
+			"internal/acceptedrecovery", "internal/domain", "internal/durableflow", "internal/durableinputbridge", "internal/messagejournal", "internal/sessionruntime", "internal/sessionsupervisor", "internal/telegramcontroller", "internal/telegramnotify", "internal/turnprocessing",
 		},
 		maxProductionLines: 500,
 	},
@@ -1477,8 +1483,18 @@ var packagePolicies = map[string]packagePolicy{
 	},
 	"internal/durableflow": {
 		responsibility:     "process durable ordered message journal work",
-		allowedImports:     []string{"internal/messagejournal"},
+		allowedImports:     []string{"internal/acceptedinput", "internal/messagejournal"},
 		maxProductionLines: 700,
+	},
+	"internal/acceptedinput": {
+		responsibility:     "verify exact input custody and commit observed provider acceptance",
+		allowedImports:     []string{"internal/messagejournal"},
+		maxProductionLines: 200,
+	},
+	"internal/acceptedrecovery": {
+		responsibility:     "reconcile exact accepted history and fence archived session resume",
+		allowedImports:     []string{"internal/domain", "internal/durableflow", "internal/sessionruntime", "internal/sessionsupervisor"},
+		maxProductionLines: 300,
 	},
 	"internal/executor": {
 		responsibility:       "execute coordinator commands on an owning computer",

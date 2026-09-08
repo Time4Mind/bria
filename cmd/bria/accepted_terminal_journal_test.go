@@ -77,12 +77,24 @@ func (s *terminalJournalStore) restoreFinalAttempt(ctx context.Context, save fun
 }
 
 func TestAcceptedTerminalJournalWaitsForPersistedFinal(t *testing.T) {
-	for _, mode := range []string{"completed", "steer", "eof", "store-failure", "store-failure-closing"} {
+	for _, mode := range []string{"completed", "steer", "eof", "steer-eof", "store-failure", "store-failure-steer", "store-failure-closing"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 			defer cancel()
 			base, sessions := acceptedProofFixture(t)
 			id := sessions[0].ID()
+			if mode == "steer-eof" {
+				snapshot := sessions[0].Snapshot()
+				snapshot.Binding = &domain.ProviderBinding{Provider: domain.ProviderCodex, SessionID: "00000000-0000-4000-8000-000000000077", Generation: 1}
+				native, err := domain.RestoreSession(snapshot)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := base.Replace(ctx, sessions[0], native); err != nil {
+					t.Fatal(err)
+				}
+				sessions[0] = native
+			}
 			store := &terminalJournalStore{SessionStore: base, fail: strings.HasPrefix(mode, "store-failure"), entered: make(chan error, 1), release: make(chan struct{})}
 			var once sync.Once
 			release := func() { once.Do(func() { close(store.release) }) }
@@ -145,7 +157,7 @@ func TestAcceptedTerminalJournalWaitsForPersistedFinal(t *testing.T) {
 				}
 			}
 			process(messages[0])
-			if mode == "steer" {
+			if strings.Contains(mode, "steer") {
 				messages = append(messages, "terminal-steer")
 				process(messages[1])
 			}
@@ -159,7 +171,7 @@ func TestAcceptedTerminalJournalWaitsForPersistedFinal(t *testing.T) {
 			// The synthetic adapter releases its chosen terminal only on this
 			// protocol request. No local files, sleeps or provider are used as gates.
 			_ = starter.StopCurrent(ctx, id)
-			if mode != "eof" {
+			if !strings.HasSuffix(mode, "eof") {
 				select {
 				case err := <-store.entered:
 					if (err != nil) != store.fail {
@@ -179,8 +191,8 @@ func TestAcceptedTerminalJournalWaitsForPersistedFinal(t *testing.T) {
 			}
 			wantPhase := string(messagejournal.InputCompleted)
 			wantStatus := domain.SessionReady
-			if mode == "eof" || store.fail {
-				wantPhase = string(messagejournal.InputUnknown)
+			if strings.HasSuffix(mode, "eof") || store.fail {
+				wantPhase = string(messagejournal.InputAccepted)
 				wantStatus = domain.SessionRunning
 				if mode == "store-failure-closing" {
 					wantStatus = domain.SessionClosingAfterWork
@@ -216,7 +228,7 @@ func TestAcceptedTerminalJournalWaitsForPersistedFinal(t *testing.T) {
 			if err != nil || current.Status() != wantStatus {
 				t.Errorf("terminal %s: durable session=%s want=%s err=%v", mode, current.Status(), wantStatus, err)
 			}
-			wantFinal := mode != "eof" && !store.fail
+			wantFinal := !strings.HasSuffix(mode, "eof") && !store.fail
 			assertTerminalJournalFinal(t, ctx, sessions[0].Workdir(), id, wantFinal)
 			wantNotices := int32(0)
 			if wantFinal {
@@ -225,11 +237,14 @@ func TestAcceptedTerminalJournalWaitsForPersistedFinal(t *testing.T) {
 			if got := finals.Load(); got != wantNotices {
 				t.Errorf("final notifications=%d want=%d", got, wantNotices)
 			}
-			// An unknown accepted input must not become a replayable lease.
+			// Unresolved acceptance must survive shutdown without becoming replayable.
 			if _, err := flow.ProcessNextInput(ctx, string(id), processor); !errors.Is(err, messagejournal.ErrNoAvailable) {
 				t.Errorf("second dispatch=%v, want no available input (no replay)", err)
 			}
 			assertTerminalJournalPhase(t, ctx, journalPath, id, messages, wantPhase)
+			if mode == "steer-eof" {
+				assertAcceptedRestartArchiveLateFinal(t, ctx, sessions[0], journalPath, messages)
+			}
 		})
 	}
 }
@@ -319,7 +334,11 @@ func TestAcceptedTerminalJournalAdapterProcess(t *testing.T) {
 			os.Exit(81)
 		}
 	}
-	emit(map[string]any{"protocol": 1, "type": "ready", "provider_session_id": "provider-" + os.Getenv("BRIA_SESSION_ID"), "readiness": "protocol", "authentication": "unknown"})
+	providerID := "provider-" + os.Getenv("BRIA_SESSION_ID")
+	if mode == "steer-eof" {
+		providerID = "00000000-0000-4000-8000-000000000077"
+	}
+	emit(map[string]any{"protocol": 1, "type": "ready", "provider_session_id": providerID, "readiness": "protocol", "authentication": "unknown"})
 	scanner := bufio.NewScanner(os.Stdin)
 	rootRequest := ""
 	for scanner.Scan() {
@@ -344,7 +363,7 @@ func TestAcceptedTerminalJournalAdapterProcess(t *testing.T) {
 			}
 			emit(map[string]any{"protocol": 1, "type": "accepted", "request_id": message.RequestID, "message_id": message.MessageID})
 		case "interrupt":
-			if mode == "eof" {
+			if strings.HasSuffix(mode, "eof") {
 				os.Exit(1)
 			}
 			emit(map[string]any{"protocol": 1, "type": "final", "request_id": rootRequest, "text": "SYNTHETIC_TERMINAL_FINAL"})

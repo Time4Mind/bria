@@ -32,14 +32,16 @@ func TestLateExactFailureProofUnblocksLegacyFailedAndUnknownWithoutReplay(t *tes
 			if _, err := journal.LeaseNextInput(ctx, "s", "worker", time.Unix(10, 0), time.Minute); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := journal.MarkInputAccepted(ctx, "s", "a", "worker"); err != nil {
+			if prior == messagejournal.InputUnknown {
+				_, err = journal.MarkInputDeliveryUnknown(ctx, "s", "a", "worker")
+			} else {
+				_, err = journal.MarkInputAccepted(ctx, "s", "a", "worker")
+			}
+			if err != nil {
 				t.Fatal(err)
 			}
 			if prior == messagejournal.InputFailed {
 				_, err = journal.FailInput(ctx, "s", "a")
-			}
-			if prior == messagejournal.InputUnknown {
-				_, err = journal.MarkInputUnknown(ctx, "s", "a")
 			}
 			if err != nil {
 				t.Fatal(err)

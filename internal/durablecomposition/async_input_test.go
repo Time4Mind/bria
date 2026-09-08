@@ -13,6 +13,7 @@ import (
 	"bria/internal/durableflow"
 	"bria/internal/messagejournal"
 	"bria/internal/telegramcontroller"
+	"bria/internal/turnprocessing"
 )
 
 type asyncProcessor func(context.Context, telegramcontroller.DurableLeasedInput, telegramcontroller.DurableInputCallbacks) (telegramcontroller.DurableInputProcessReceipt, error)
@@ -88,12 +89,15 @@ func TestPendingAcceptanceRetainsJournalUntilExactAsyncCompletion(t *testing.T) 
 				}
 				assertPhase(messagejournal.InputAccepted)
 			}
-			// Recovery can seal unknown before the original continuation completes.
+			// An uncertain observation cannot erase acceptance. Only root
+			// admission blocks later work; the lease seam still permits steers.
 			if _, err = journal.MarkInputUnknown(ctx, "s", "first"); err != nil {
 				t.Fatal(err)
 			}
-			if _, err = journal.LeaseNextInput(ctx, "s", "other", time.Unix(999, 0), time.Minute); !errors.Is(err, messagejournal.ErrNoAvailable) {
-				t.Fatalf("unknown replay/unblock: %v", err)
+			assertPhase(messagejournal.InputAccepted)
+			custody := durablecomposition.InputCustody{Flow: flow}
+			if err = custody.CheckRootInput(ctx, telegramcontroller.DurableLeasedInput{SessionID: "s", MessageID: "later", Sequence: 3}); !errors.Is(err, turnprocessing.ErrInputDeferred) {
+				t.Fatalf("accepted pending root admitted: %v", err)
 			}
 			cancelled, cancel := context.WithCancel(ctx)
 			cancel()
@@ -110,7 +114,7 @@ func TestPendingAcceptanceRetainsJournalUntilExactAsyncCompletion(t *testing.T) 
 					t.Fatal(err)
 				}
 			}
-			want := messagejournal.InputUnknown
+			want := messagejournal.InputAccepted
 			if terminal == telegramcontroller.DurableInputSucceeded {
 				want = messagejournal.InputCompleted
 			}

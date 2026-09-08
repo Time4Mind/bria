@@ -111,7 +111,9 @@ func (manager *Manager) RecoverStartup(ctx context.Context) (app.SessionRecovery
 	handled := make(map[domain.SessionID]struct{})
 	var result app.SessionRecoveryResult
 	for _, session := range sessions {
-		if session.ComputerID() != manager.computer || !sessionrecoverycontrol.HazardousRecovery(session) {
+		target, _ := session.RecoveryTarget()
+		ready := session.Status() == domain.SessionReady || session.Status() == domain.SessionAwaitingRecovery && target == domain.SessionReady
+		if session.ComputerID() != manager.computer || !sessionrecoverycontrol.HazardousRecovery(session) && !ready {
 			continue
 		}
 		binding, bound := session.Binding()
@@ -129,9 +131,8 @@ func (manager *Manager) RecoverStartup(ctx context.Context) (app.SessionRecovery
 		if err != nil {
 			if errors.Is(err, sessionsupervisor.ErrReconciliationRequired) || errors.Is(err, sessionsupervisor.ErrRecoveryExhausted) {
 				manager.report(err)
-				if manager.control.DeleteUnrecoverableRecovery(ctx, session) {
-					result.FinalizedClosing++
-				} else if manager.control.DeleteEmptyRecovery(ctx, session) {
+				// Empty card history does not prove absent input custody.
+				if !errors.Is(err, sessionsupervisor.ErrReconciliationRequired) && (manager.control.DeleteUnrecoverableRecovery(ctx, session) || manager.control.DeleteEmptyRecovery(ctx, session)) {
 					result.FinalizedClosing++
 				} else {
 					result.Awaiting++

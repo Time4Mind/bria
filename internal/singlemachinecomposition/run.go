@@ -385,6 +385,7 @@ func runTelegramController(
 	var recovery app.SessionRecoveryResult
 	var processSupervision contextRunner = idleRunner{}
 	var sessionRecoverer telegramcontroller.SessionRecoverer
+	var resumeReconciler *durablecomposition.AcceptedTurnReconciler
 	waiter, canWait := starter.(sessionruntime.ProcessSupervisor)
 	reader, canReconcile := starter.(sessionruntime.AcceptedTurnReader)
 	if canWait && canReconcile {
@@ -395,6 +396,7 @@ func runTelegramController(
 		durableRecovery := durablecomposition.AcceptedTurnReconciler{Flow: flow, FinalRestorer: state, Histories: map[domain.Provider]sessionsupervisor.AcceptedTurnReconciler{
 			domain.ProviderCodex: providerHistory, domain.ProviderClaude: providerHistory,
 		}}
+		resumeReconciler = &durableRecovery
 		reportRecovery := func(reportErr error) {
 			_ = safeLogger.Write(safelog.Event{Class: safelog.Critical, Type: "session.recovery_failed", ErrorCategory: "session_recovery", Error: reportErr.Error(), Fields: map[string]string{"component": "sessionsupervisor", "operation": "recover"}})
 		}
@@ -427,9 +429,13 @@ func runTelegramController(
 	if err != nil {
 		return fmt.Errorf("create session service: %w", err)
 	}
-	archivedResumer, err := app.NewArchivedSessionResumer(state, starter, sessionLifetime, clock)
+	baseArchivedResumer, err := app.NewArchivedSessionResumer(state, starter, sessionLifetime, clock)
 	if err != nil {
 		return fmt.Errorf("create archived session resumer: %w", err)
+	}
+	var archivedResumer telegramcontroller.ArchivedResumer = baseArchivedResumer
+	if resumeReconciler != nil {
+		archivedResumer = durablecomposition.GuardedArchivedResumer{Base: baseArchivedResumer, Sessions: state, Reconciler: *resumeReconciler}
 	}
 	sessionCloser, err := app.NewSessionCloser(state, starter, clock)
 	if err != nil {

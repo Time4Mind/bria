@@ -13,9 +13,10 @@ import (
 const Separator = "\n\n\u00a0\n\n"
 
 type Block struct {
-	Kind      string
-	Text      string
-	ToolLines int // Zero and unsupported values select the default ten lines.
+	Kind         string
+	Text         string
+	CommandLines int // Zero and unsupported values select ten command lines.
+	ToolLines    int // Zero and unsupported values select ten output lines.
 }
 
 // Tool updates share an ID; a result enriches its call, never another tool.
@@ -52,7 +53,7 @@ func RenderBlocks(blocks []Block) []Block {
 		case "thinking":
 			text = details("∴ thinking", html.EscapeString(text))
 		case "tool":
-			text = renderTool(text, block.ToolLines)
+			text = renderTool(text, block.CommandLines, block.ToolLines)
 		default:
 			text = NormalizeMarkdown(text)
 		}
@@ -95,7 +96,7 @@ func mergeTools(blocks []Block) []Block {
 	return result
 }
 
-func renderTool(text string, lineLimit int) string {
+func renderTool(text string, commandLines, outputLines int) string {
 	tool, valid := tooltext.Decode(text)
 	if !valid || tool.Name == "" {
 		return html.EscapeString(limit(text, 64))
@@ -108,21 +109,28 @@ func renderTool(text string, lineLimit int) string {
 		status = "✗"
 	}
 	summary := html.EscapeString(limit(status+" "+tool.Name, 64))
-	body := tool.Arguments
-	if tool.Output != "" {
+	body, commandCut := tooltext.Bound(tool.Arguments, displayBudget(commandLines))
+	output, outputCut := tooltext.Bound(tool.Output, displayBudget(outputLines))
+	if output != "" {
 		if body != "" {
 			body += tooltext.Separator
 		}
-		body += tool.Output
+		body += output
 	}
 	if body == "" && !tool.Truncated {
 		return summary
 	}
-	body, cut := tooltext.Bound(body, lineLimit)
-	if cut || tool.Truncated {
+	if commandCut || outputCut || tool.Truncated {
 		body += "\n" + tooltext.Notice
 	}
 	return details(summary, html.EscapeString(body))
+}
+
+func displayBudget(lines int) int {
+	if lines == 3 || lines == 5 || lines == 20 {
+		return lines
+	}
+	return 10
 }
 
 func details(summary, body string) string {

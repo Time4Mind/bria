@@ -2,6 +2,7 @@ package telegramcontroller_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -14,16 +15,35 @@ import (
 	"bria/internal/telegramcontroller"
 )
 
+type commandLinePreferences struct {
+	testPreferences
+	err error
+}
+
+func (p *commandLinePreferences) CycleTechnicalCommandLines(context.Context) error { return p.err }
+
+func TestCommandLineSettingsFailureReachesCaller(t *testing.T) {
+	want := errors.New("settings write rejected")
+	prefs := &commandLinePreferences{err: want}
+	c := newController(t, nil, newLockedSessions(), nil, nil, telegramcontroller.Options{Settings: prefs})
+	t.Cleanup(func() { _ = c.Close(context.Background()) })
+	_, err := c.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: "settings_technical_command_lines"})
+	if !errors.Is(err, want) {
+		t.Fatalf("command-line persistence error = %v, want %v", err, want)
+	}
+}
+
 func TestTechnicalLinesReachBothTypedProjectionPaths(t *testing.T) {
 	for _, persisted := range []bool{true, false} {
 		t.Run(fmt.Sprint(persisted), func(t *testing.T) {
 			ctx := context.Background()
 			ready := readySession(t, "11111111-1111-4111-9111-111111111111", domain.ProviderCodex, "/work", "provider", 1)
-			var lines []string
+			var lines, commands []string
 			for i := 1; i <= 41; i++ {
 				lines = append(lines, fmt.Sprintf("ROW%02d", i))
+				commands = append(commands, fmt.Sprintf("CMD%02d", i))
 			}
-			tool := cardtranscript.EncodeTool(cardtranscript.Tool{ID: "tool-1", Name: "read", Output: strings.Join(lines, "\n"), Status: "completed"})
+			tool := cardtranscript.EncodeTool(cardtranscript.Tool{ID: "tool-1", Name: "read", Arguments: strings.Join(commands, "\n"), Output: strings.Join(lines, "\n"), Status: "completed"})
 			state := &finalPageState{blocks: []cardtranscript.Block{{Kind: "tool", Text: tool}, {Kind: "final", Text: "FINAL"}}}
 			prefs := &displayPreferences{testPreferences: testPreferences{settings: settingsport.Snapshot{CardPageLimit: 64, CardDetail: "standard", ShowTechnicalActions: true}}}
 			options := telegramcontroller.Options{Recovered: []domain.Session{ready}, Settings: prefs}
@@ -50,9 +70,14 @@ func TestTechnicalLinesReachBothTypedProjectionPaths(t *testing.T) {
 					t.Fatal("turn timeout")
 				}
 			}
-			for _, limit := range []int{5, 10, 20, 40, 0} {
+			for _, limit := range []int{3, 5, 10, 20, 0} {
+				commandLimit := 3
+				if limit == 3 {
+					commandLimit = 5
+				}
 				prefs.mu.Lock()
 				prefs.settings.TechnicalOutputLines = limit
+				prefs.settings.TechnicalCommandLines = commandLimit
 				prefs.mu.Unlock()
 				want := limit
 				if want == 0 {
@@ -74,9 +99,12 @@ func TestTechnicalLinesReachBothTypedProjectionPaths(t *testing.T) {
 					if !strings.Contains(text, fmt.Sprintf("ROW%02d", want)) || strings.Contains(text, fmt.Sprintf("ROW%02d", want+1)) || !strings.Contains(text, "FINAL") {
 						t.Errorf("%s limit=%d ignored: %s", name, limit, text)
 					}
+					if !strings.Contains(text, fmt.Sprintf("CMD%02d", commandLimit)) || strings.Contains(text, fmt.Sprintf("CMD%02d", commandLimit+1)) {
+						t.Errorf("%s command limit=%d ignored: %s", name, commandLimit, text)
+					}
 				}
 			}
-			if state.blocks[0].ToolLines != 0 || state.blocks[0].Text != tool {
+			if state.blocks[0].ToolLines != 0 || state.blocks[0].CommandLines != 0 || state.blocks[0].Text != tool {
 				t.Fatal("projection mutated persisted block")
 			}
 		})

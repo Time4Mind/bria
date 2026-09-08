@@ -13,6 +13,21 @@ import (
 	"bria/internal/turnprocessing"
 )
 
+// WakeReadyInput is called only after the controller installs live state.
+func WakeReadyInput(custody turnprocessing.DurableInputCustody, session domain.Session) {
+	if waker, ok := custody.(turnprocessing.DurableInputWaker); ok && session.Status() == domain.SessionReady {
+		waker.WakeSession(session.ID())
+	}
+}
+
+// CheckRootInput consults optional custody admission only for a fresh root.
+func CheckRootInput(ctx context.Context, custody turnprocessing.DurableInputCustody, input turnprocessing.DurableLeasedInput) error {
+	if guard, ok := custody.(turnprocessing.DurableRootInputGuard); ok {
+		return guard.CheckRootInput(ctx, input)
+	}
+	return nil
+}
+
 // ValidateLeasedInput rejects malformed envelopes before invoking any provider.
 func ValidateLeasedInput(input turnprocessing.DurableLeasedInput, callbacks turnprocessing.DurableInputCallbacks) (string, bool, error) {
 	_, text, enabled, err := promptpreprocess.Decode(input.Payload)

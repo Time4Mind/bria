@@ -69,6 +69,7 @@ const (
 	ActionSettingsContinueExisting             Action = "settings_continue_existing"
 	ActionSettingsTechnicalActions             Action = "settings_technical_actions"
 	ActionSettingsTechnicalOutputLines         Action = "settings_technical_output_lines"
+	ActionSettingsTechnicalCommandLines        Action = "settings_technical_command_lines"
 	ActionSettingsBackgroundQuestions          Action = "settings_background_questions"
 	ActionSettingsBackgroundErrors             Action = "settings_background_errors"
 	ActionSettingsArchiveRecommendations       Action = "settings_archive_recommendations"
@@ -120,7 +121,7 @@ func IsGlobalAction(action Action) bool {
 		ActionCreateChoice, ActionCreatePrevious, ActionCreateFirst, ActionCreateNext,
 		ActionCreateUp, ActionCreatePick, ActionCreateDirectoryNew, ActionCreateBack, ActionCreateFresh,
 		ActionSettingsCategory, ActionSettingsScreen, ActionSettingsScreenCaptureLimit, ActionSettingsAutoApproveCommands, ActionSettingsDetail, ActionSettingsPageLimit, ActionSettingsContinueExisting,
-		ActionSettingsTechnicalActions, ActionSettingsTechnicalOutputLines, ActionSettingsBackgroundQuestions, ActionSettingsBackgroundErrors,
+		ActionSettingsTechnicalActions, ActionSettingsTechnicalOutputLines, ActionSettingsTechnicalCommandLines, ActionSettingsBackgroundQuestions, ActionSettingsBackgroundErrors,
 		ActionSettingsArchiveRecommendations,
 		ActionSettingsDefaultProvider, ActionSettingsDefaultWorkdir, ActionSettingsClearCreationDefaults,
 		ActionSettingsLifetimeNever, ActionSettingsLifetime6Hours, ActionSettingsLifetime12Hours,

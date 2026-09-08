@@ -35,7 +35,7 @@ func (supervisor *Supervisor) RecoverPersisted(ctx context.Context, sessionID do
 	if !ok || target == domain.SessionStarting {
 		return result, errors.New("persisted recovery target is unavailable")
 	}
-	if needsAcceptedTurnReconciliation(target) {
+	if needsAcceptedTurnReconciliation(target) || supervisor.reconciler != nil && target == domain.SessionReady {
 		if supervisor.reconciler == nil {
 			return result, ErrReconciliationRequired
 		}

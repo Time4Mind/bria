@@ -20,10 +20,31 @@ func renderedTool(t *testing.T, tool cardtranscript.Tool) string {
 	return cardtranscript.Render([]cardtranscript.Block{{Kind: "tool", Text: string(raw)}})[0]
 }
 
+func TestToolCommandAndOutputEachKeepDefaultBudget(t *testing.T) {
+	encoded := cardtranscript.EncodeTool(cardtranscript.Tool{Name: "exec", Arguments: strings.Repeat("a", 1100), Output: strings.Repeat("界", 1100)})
+	got := spoilerBody(t, cardtranscript.Render([]cardtranscript.Block{{Kind: "tool", Text: encoded}})[0])
+	command := strings.TrimSuffix(strings.Repeat(strings.Repeat("a", 100)+"\n", 10), "\n")
+	output := strings.TrimSuffix(strings.Repeat(strings.Repeat("界", 100)+"\n", 10), "\n")
+	want := command + tooltext.Separator + output + "\n" + tooltext.Notice
+	if got != want {
+		t.Fatalf("independent default budgets: command present=%v output present=%v", strings.Contains(got, command), strings.Contains(got, output))
+	}
+}
+
+func TestEncodeAndRenderTwentyOneCommandAndOutputLines(t *testing.T) {
+	encoded := cardtranscript.EncodeTool(cardtranscript.Tool{Name: "exec", Arguments: strings.Repeat("a", 2100), Output: strings.Repeat("界", 2100)})
+	body := spoilerBody(t, cardtranscript.Render([]cardtranscript.Block{{Kind: "tool", Text: encoded, CommandLines: 20, ToolLines: 20}})[0])
+	command := strings.TrimSuffix(strings.Repeat(strings.Repeat("a", 100)+"\n", 20), "\n")
+	output := strings.TrimSuffix(strings.Repeat(strings.Repeat("界", 100)+"\n", 20), "\n")
+	if body != command+tooltext.Separator+output+"\n"+tooltext.Notice {
+		t.Fatal("encoding erased separately budgeted command or output")
+	}
+}
+
 func TestToolAllBudgetsAfterStoredNativeContent(t *testing.T) {
-	for _, choice := range []int{0, 5, 10, 20, 40, -1, 7} {
+	for _, choice := range []int{0, 3, 5, 10, 20, 40, -1, 7} {
 		budget := choice
-		if budget != 5 && budget != 20 && budget != 40 {
+		if budget != 3 && budget != 5 && budget != 20 {
 			budget = 10
 		}
 		for _, overflow := range []bool{false, true} {
@@ -46,18 +67,27 @@ func TestToolAllBudgetsAfterStoredNativeContent(t *testing.T) {
 	}
 }
 
-func TestStoredToolUsesOneArgumentsAndOutputBudget(t *testing.T) {
-	encoded := cardtranscript.EncodeTool(cardtranscript.Tool{Name: "exec", Arguments: strings.Repeat("a", 100), Output: strings.Repeat("b", 4000)})
-	got := spoilerBody(t, cardtranscript.Render([]cardtranscript.Block{{Kind: "tool", Text: encoded, ToolLines: 5}})[0])
-	want := strings.Repeat("a", 100) + "\n\n---\n\n" + strings.Repeat("b", 100) + "\n… (truncated)"
-	if got != want {
-		t.Fatalf("shared budget: %q", got)
-	}
-	encoded = cardtranscript.EncodeTool(cardtranscript.Tool{Name: "exec", Arguments: strings.Repeat("a", 4000), Output: "hidden output"})
-	got = spoilerBody(t, cardtranscript.Render([]cardtranscript.Block{{Kind: "tool", Text: encoded, ToolLines: 40}})[0])
-	want = strings.TrimSuffix(strings.Repeat(strings.Repeat("a", 100)+"\n", 40), "\n") + "\n… (truncated)"
-	if got != want {
-		t.Fatal("output stole arguments budget or truncation notice missing")
+func TestToolCommandAndOutputBudgetsAreIndependent(t *testing.T) {
+	choices := []int{0, 3, 5, 10, 20, -1, 7, 40}
+	for _, command := range choices {
+		for _, output := range choices {
+			budget := func(n int) int {
+				if n == 3 || n == 5 || n == 20 {
+					return n
+				}
+				return 10
+			}
+			// Old readable JSON exercises renderer bounds independently of storage.
+			raw, _ := json.Marshal(cardtranscript.Tool{Name: "exec", Encoding: "text-v1", Arguments: strings.Repeat("🙂", 2001), Output: strings.Repeat("界", 2001)})
+			got := spoilerBody(t, cardtranscript.Render([]cardtranscript.Block{{Kind: "tool", Text: string(raw), CommandLines: command, ToolLines: output}})[0])
+			lines := func(glyph string, count int) string {
+				return strings.TrimSuffix(strings.Repeat(strings.Repeat(glyph, 100)+"\n", count), "\n")
+			}
+			want := lines("🙂", budget(command)) + tooltext.Separator + lines("界", budget(output)) + "\n" + tooltext.Notice
+			if got != want {
+				t.Fatalf("command=%d output=%d independent postwrap budgets changed", command, output)
+			}
+		}
 	}
 }
 
@@ -81,14 +111,43 @@ func TestOldCallAndNewResultKeepExactLongIdentity(t *testing.T) {
 	}
 }
 
-func TestStoredToolFortyUnicodeLinesSurvivePagination(t *testing.T) {
+func TestPairedToolBudgetsKeepIdentityAndTransportNotice(t *testing.T) {
+	command := "`\\n` <cmd>\r\n\n" + strings.Repeat("🙂", 101)
+	output := "& <result>\n\n" + strings.Repeat("界", 101)
+	call := cardtranscript.EncodeTool(cardtranscript.Tool{ID: "A", Name: "exec", Arguments: command, Status: "running"})
+	result := cardtranscript.EncodeTool(cardtranscript.Tool{ID: "A", Output: output, Truncated: true, Status: "completed"})
+	other := cardtranscript.EncodeTool(cardtranscript.Tool{ID: "B", Name: "other", Output: "unrelated"})
+	blocks := []cardtranscript.Block{
+		{Kind: "tool", Text: call, CommandLines: 3, ToolLines: 5},
+		{Kind: "tool", Text: other, CommandLines: 20, ToolLines: 20},
+		{Kind: "tool", Text: result, CommandLines: 3, ToolLines: 5},
+	}
+	got := cardtranscript.Render(blocks)
+	want := "`\\n` <cmd>\n\n" + strings.Repeat("🙂", 100) + tooltext.Separator + "& <result>\n\n" + strings.Repeat("界", 100) + "\n界\n" + tooltext.Notice
+	if len(got) != 2 || spoilerBody(t, got[0]) != want || spoilerBody(t, got[1]) != "unrelated" {
+		t.Fatal("paired identity or independent explicit/wrapped lines changed")
+	}
+	if strings.Contains(got[0], "<cmd>") || !strings.Contains(got[0], "&lt;cmd&gt;") || !strings.Contains(got[0], "✓ exec") {
+		t.Fatal("literal escaping or completed status changed")
+	}
+	if blocks[0].Text != call || blocks[2].Text != result {
+		t.Fatal("render mutated stored history")
+	}
+	// A transport loss still needs a notice when both retained fields fit.
+	short := cardtranscript.EncodeTool(cardtranscript.Tool{Name: "exec", Arguments: "cmd", Output: "result", Truncated: true})
+	if body := spoilerBody(t, cardtranscript.Render([]cardtranscript.Block{{Kind: "tool", Text: short, CommandLines: 3, ToolLines: 3}})[0]); body != "cmd"+tooltext.Separator+"result\n"+tooltext.Notice {
+		t.Fatal("transport truncation notice lost")
+	}
+}
+
+func TestStoredToolTwentyPlusTwentyUnicodeLinesSurvivePagination(t *testing.T) {
 	for _, glyph := range []string{"🙂", "界", "<", "\x01"} {
 		t.Run(glyph, func(t *testing.T) {
-			encoded := cardtranscript.EncodeTool(cardtranscript.Tool{ID: strings.Repeat("i", 1024), Name: "exec", Output: strings.Repeat(glyph, 4000)})
+			encoded := cardtranscript.EncodeTool(cardtranscript.Tool{ID: strings.Repeat("i", 1024), Name: "exec", Arguments: strings.Repeat(glyph, 2000), Output: strings.Repeat(glyph, 2000)})
 			if len(encoded) > 16384 || !json.Valid([]byte(encoded)) {
 				t.Fatal("invalid persisted envelope")
 			}
-			blocks := cardtranscript.RenderBlocks([]cardtranscript.Block{{Kind: "tool", Text: encoded, ToolLines: 40}})
+			blocks := cardtranscript.RenderBlocks([]cardtranscript.Block{{Kind: "tool", Text: encoded, CommandLines: 20, ToolLines: 20}})
 			pages := cardtranscript.Paginate(blocks, 32)
 			var restored strings.Builder
 			for _, page := range pages {
@@ -97,7 +156,8 @@ func TestStoredToolFortyUnicodeLinesSurvivePagination(t *testing.T) {
 				}
 				restored.WriteString(spoilerBody(t, page.Content))
 			}
-			want := strings.TrimSuffix(strings.Repeat(strings.Repeat(glyph, 100)+"\n", 40), "\n")
+			part := strings.TrimSuffix(strings.Repeat(strings.Repeat(glyph, 100)+"\n", 20), "\n")
+			want := part + tooltext.Separator + part
 			if restored.String() != want {
 				t.Fatalf("lost stored content: got %d runes, want %d", utf8.RuneCountInString(restored.String()), utf8.RuneCountInString(want))
 			}

@@ -46,8 +46,8 @@ const (
 	AcceptedTurnUnknown   AcceptedTurnOutcome = "unknown"
 )
 
-// ReconciledAcceptedTurn is a durable receipt. Unknown deliberately remains a
-// blocking terminal journal state; the supervisor never submits it again.
+// ReconciledAcceptedTurn is an observation, not a journal phase. Unknown means
+// terminal proof is pending; a durable acceptance must remain accepted.
 type ReconciledAcceptedTurn struct {
 	MessageID string
 	Outcome   AcceptedTurnOutcome
@@ -188,7 +188,7 @@ func (supervisor *Supervisor) Watch(ctx context.Context, sessionID domain.Sessio
 		return supervisor.staleAfterConflict(ctx, current, err)
 	}
 	result := Result{AwaitingRecovery: true, Session: awaiting}
-	if needsAcceptedTurnReconciliation(current.Status()) {
+	if needsAcceptedTurnReconciliation(current.Status()) || supervisor.reconciler != nil && current.Status() == domain.SessionReady {
 		if supervisor.reconciler == nil {
 			return result, ErrReconciliationRequired
 		}

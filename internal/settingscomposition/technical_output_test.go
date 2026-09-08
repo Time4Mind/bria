@@ -30,7 +30,7 @@ func TestTechnicalOutputLinesPublicUICyclePersists(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for index, want := range []int{10, 20, 40, 5, 10} {
+	for index, want := range []int{10, 20, 3, 5, 10} {
 		if index > 0 {
 			result, err = c.HandleSemanticAction(ctx, telegramcontroller.SemanticAction{Kind: "settings_technical_output_lines"})
 			if err != nil {

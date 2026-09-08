@@ -46,6 +46,18 @@ func Apply(ctx context.Context, preferences settingsport.Preferences, providers 
 		return preferences.CycleCardPageLimit(ctx)
 	case "settings_technical_actions":
 		return preferences.ToggleTechnicalActions(ctx)
+	case "settings_technical_output_lines":
+		output, ok := preferences.(settingsport.TechnicalOutputPreferences)
+		if !ok {
+			return errors.New("technical output settings are not configured")
+		}
+		return output.CycleTechnicalOutputLines(ctx)
+	case "settings_technical_command_lines":
+		command, ok := preferences.(settingsport.TechnicalCommandPreferences)
+		if !ok {
+			return errors.New("technical command settings are not configured")
+		}
+		return command.CycleTechnicalCommandLines(ctx)
 	case "settings_background_questions":
 		return preferences.ToggleBackgroundQuestions(ctx)
 	case "settings_background_errors":

@@ -23,6 +23,7 @@ type settingsDocument struct {
 	CardPageLimit             int               `json:"card_page_limit,omitempty"`
 	ShowTechnicalActions      bool              `json:"show_technical_actions"`
 	TechnicalOutputLines      int               `json:"technical_output_lines"`
+	TechnicalCommandLines     int               `json:"technical_command_lines"`
 	NotifyBackgroundQuestions bool              `json:"notify_background_questions"`
 	NotifyBackgroundErrors    bool              `json:"notify_background_errors"`
 	SessionLifetime           SessionLifetime   `json:"session_lifetime"`
@@ -102,6 +103,13 @@ func Decode(reader io.Reader) (Snapshot, error) {
 	if _, ok := seen["technical_output_lines"]; !ok {
 		decoded.TechnicalOutputLines = DefaultTechnicalOutputLines
 	}
+	// Only documents without the separate command preference are legacy.
+	if _, ok := seen["technical_command_lines"]; !ok {
+		if decoded.TechnicalOutputLines == 40 {
+			decoded.TechnicalOutputLines = 20
+		}
+		decoded.TechnicalCommandLines = decoded.TechnicalOutputLines
+	}
 	snapshot := decoded.snapshot()
 	if snapshot.Settings.ScreenCaptureLimitKiB == 0 {
 		snapshot.Settings.ScreenCaptureLimitKiB = DefaultScreenCaptureLimitKiB
@@ -119,6 +127,7 @@ func documentFromSnapshot(snapshot Snapshot) settingsDocument {
 		ContinueExisting: s.ContinueExisting, ScreenEnabled: s.ScreenEnabled, ScreenCaptureLimitKiB: s.ScreenCaptureLimitKiB,
 		CardDetail: s.CardDetail, CardPageLimit: s.CardPageLimit, ShowTechnicalActions: s.ShowTechnicalActions,
 		TechnicalOutputLines:      s.TechnicalOutputLines,
+		TechnicalCommandLines:     s.TechnicalCommandLines,
 		NotifyBackgroundQuestions: s.NotifyBackgroundQuestions,
 		NotifyBackgroundErrors:    s.NotifyBackgroundErrors,
 		SessionLifetime:           s.SessionLifetime, QueueLimit: s.QueueLimit,
@@ -145,6 +154,7 @@ func (document settingsDocument) snapshot() Snapshot {
 		CardPageLimit:             document.CardPageLimit,
 		ShowTechnicalActions:      document.ShowTechnicalActions,
 		TechnicalOutputLines:      document.TechnicalOutputLines,
+		TechnicalCommandLines:     document.TechnicalCommandLines,
 		NotifyBackgroundQuestions: document.NotifyBackgroundQuestions,
 		NotifyBackgroundErrors:    document.NotifyBackgroundErrors,
 		SessionLifetime:           document.SessionLifetime,

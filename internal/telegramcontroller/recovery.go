@@ -9,6 +9,7 @@ import (
 	"bria/internal/coordinator"
 	"bria/internal/domain"
 	"bria/internal/telegramcontrolport"
+	"bria/internal/telegramturnhelpers"
 )
 
 type SessionRecoverer = telegramcontrolport.SessionRecoverer
@@ -30,6 +31,7 @@ func (c *Controller) RefreshRecoveryCard(ctx context.Context, id domain.SessionI
 		c.ensureWorkerLocked(id)
 	}
 	c.mu.Unlock()
+	telegramturnhelpers.WakeReadyInput(c.durableInput, current)
 	c.notify(ctx, Notification{OperationID: fmt.Sprintf("recovery-state:%s:%d", id, time.Now().UnixNano()), ConversationID: c.ownerPrivateChatID, SessionID: id, Kind: NotificationPromptStatus, Text: "session-state"})
 }
 
@@ -66,13 +68,17 @@ func (c *Controller) resumeOrRecover(ctx context.Context, id domain.SessionID) (
 		notice := "Исход предыдущего запроса пока не подтверждён. История сохранена; запрос не переотправлен."
 		if recoverErr == nil && loadErr == nil && recovered.Equal(stored) && recovered.ID() == id && recovered.Status() == domain.SessionReady {
 			c.mu.Lock()
-			if !c.closed {
+			updated := !c.closed
+			if updated {
 				c.live[id] = recovered
 				c.page[id] = 0
 				c.followLatest[id] = true
 				c.ensureWorkerLocked(id)
 			}
 			c.mu.Unlock()
+			if updated {
+				telegramturnhelpers.WakeReadyInput(c.durableInput, recovered)
+			}
 			notice = "Сессия восстановлена без повторной отправки запроса."
 		}
 		c.mu.Lock()

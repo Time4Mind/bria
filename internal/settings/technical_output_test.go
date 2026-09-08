@@ -24,6 +24,9 @@ func TestTechnicalOutputLinesOldVersionsAndReload(t *testing.T) {
 					if err := json.Unmarshal([]byte(choice), &want); err != nil {
 						t.Fatal(err)
 					}
+					if want == 40 {
+						want = 20
+					}
 				}
 				path := filepath.Join(t.TempDir(), "settings.json")
 				if err := os.WriteFile(path, []byte(document), 0600); err != nil {
@@ -76,12 +79,7 @@ func TestTechnicalOutputLinesOldVersionsAndReload(t *testing.T) {
 						t.Fatal(err)
 					}
 					_, err := reopened.Reload(ctx)
-					if value == "40" {
-						if err != nil {
-							t.Fatal(err)
-						}
-						want = 40
-					} else if err == nil {
+					if err == nil {
 						t.Fatalf("accepted invalid line limit %s", value)
 					}
 					current, err := reopened.Load(ctx)

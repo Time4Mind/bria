@@ -141,6 +141,7 @@ const (
 	SemanticSettingsContinueExisting         = telegramsemantic.SemanticSettingsContinueExisting
 	SemanticSettingsTechnicalActions         = telegramsemantic.SemanticSettingsTechnicalActions
 	SemanticSettingsTechnicalOutputLines     = telegramsemantic.SemanticSettingsTechnicalOutputLines
+	SemanticSettingsTechnicalCommandLines    = telegramsemantic.SemanticSettingsTechnicalCommandLines
 	SemanticSettingsBackgroundQuestions      = telegramsemantic.SemanticSettingsBackgroundQuestions
 	SemanticSettingsBackgroundErrors         = telegramsemantic.SemanticSettingsBackgroundErrors
 	SemanticSettingsArchiveRecommendations   = telegramsemantic.SemanticSettingsArchiveRecommendations
@@ -508,9 +509,8 @@ func (controller *Controller) handleGlobalSemanticAction(ctx context.Context, ac
 			return SemanticActionResult{Surface: unavailableNewSessionSurface()}, nil
 		}
 		return controller.confirmCreateDraft(ctx, action.UpdateID)
-	case SemanticSettingsTechnicalOutputLines:
-		return controller.cycleTechnicalOutputLines(ctx)
 	case SemanticSettingsScreen, SemanticSettingsScreenCaptureLimit, SemanticSettingsDetail, SemanticSettingsPageLimit, SemanticSettingsContinueExisting, SemanticSettingsTechnicalActions,
+		SemanticSettingsTechnicalOutputLines, SemanticSettingsTechnicalCommandLines,
 		SemanticSettingsBackgroundQuestions, SemanticSettingsBackgroundErrors,
 		SemanticSettingsArchiveRecommendations, SemanticSettingsSessionNaming, SemanticSettingsStandby,
 		SemanticSettingsLifetimeNever, SemanticSettingsLifetime6Hours, SemanticSettingsLifetime12Hours,
@@ -1874,6 +1874,7 @@ func (controller *Controller) ResumeArchived(ctx context.Context, sessionID doma
 	if err := controller.persistActive(ctx, resumed.ID()); err != nil {
 		return coordinator.Decision{}, fmt.Errorf("persist resumed active session: %w", err)
 	}
+	telegramturnhelpers.WakeReadyInput(controller.durableInput, resumed)
 	return controller.cardDecision(ctx, resumed.ID(), "")
 }
 
@@ -2202,6 +2203,7 @@ func (controller *Controller) awaitResumedSession(
 			binding: binding,
 		}
 		controller.mu.Unlock()
+		telegramturnhelpers.WakeReadyInput(controller.durableInput, outcome.Session)
 	}
 }
 func (controller *Controller) asyncStartFailed(sessionID domain.SessionID, text string, previousActive domain.SessionID) {
@@ -2574,17 +2576,12 @@ func (controller *Controller) publishProcessedPromptState(ctx context.Context, s
 	return nil
 }
 func acceptsDurableInput(status domain.SessionStatus) bool {
-	switch status {
-	case domain.SessionStarting, domain.SessionResuming:
-		return true
-	default:
-		return false
-	}
+	return status == domain.SessionStarting || status == domain.SessionResuming
 }
 
 // ProcessDurableInput processes one exact leased journal input through the
-// same turn/lifecycle path as the in-memory worker. The provider acceptance is
-// not acknowledged in memory: OnAccepted must first commit durable custody.
+// same turn/lifecycle path as the in-memory worker. Early success needs custody;
+// an exact provider ACK survives custody failure as awaiting recovery.
 func (controller *Controller) ProcessDurableInput(
 	ctx context.Context,
 	input DurableLeasedInput,
@@ -2660,15 +2657,18 @@ func (controller *Controller) ProcessDurableInput(
 				if accepted || messageID != input.MessageID {
 					return errors.New("provider returned invalid current-turn acceptance")
 				}
-				if err := callbacks.OnAccepted(ctx, DurableInputAcceptance{SessionID: input.SessionID, MessageID: input.MessageID, Sequence: input.Sequence}); err != nil {
-					return err
-				}
 				accepted = true
+				acceptanceErr := callbacks.OnAccepted(ctx, DurableInputAcceptance{SessionID: input.SessionID, MessageID: input.MessageID, Sequence: input.Sequence})
 				controller.publishProcessedPromptState(context.WithoutCancel(ctx), input.SessionID, input.MessageID, promptText, "👨‍💻", preprocessingFailed)
-				return nil
+				return acceptanceErr
 			},
 		})
 		receipt.Accepted = accepted
+		if accepted && err != nil {
+			receipt.Completion = DurableInputAwaitingRecovery
+			ticket.Finish(err)
+			return receipt, err
+		}
 		if err != nil || !accepted {
 			controller.publishProcessedPromptState(context.WithoutCancel(ctx), input.SessionID, input.MessageID, promptText, "🙅‍♂", preprocessingFailed)
 			err = errors.Join(err, errors.New("provider did not accept current-turn input"))
@@ -2684,6 +2684,9 @@ func (controller *Controller) ProcessDurableInput(
 	if err := worker.waitFinalization(ctx); err != nil {
 		return receipt, err
 	}
+	if err := telegramturnhelpers.CheckRootInput(ctx, controller.durableInput, input); err != nil {
+		return receipt, err
+	}
 	current, err := controller.sessions.Load(ctx, input.SessionID)
 	if err != nil {
 		return receipt, err
@@ -2697,6 +2700,7 @@ func (controller *Controller) ProcessDurableInput(
 	}
 	acceptedSignal := make(chan struct{}, 1)
 	resultSignal := make(chan DurableInputProcessReceipt, 1)
+	var acceptanceErr error // Published by resultSignal; never read on early ACK.
 	admission := turnadmission.NewAdmission()
 	turnContext, cancelTurn := context.WithCancel(context.WithoutCancel(ctx))
 	stopTurnOnRootCancellation := context.AfterFunc(controller.rootContext, cancelTurn)
@@ -2713,12 +2717,13 @@ func (controller *Controller) ProcessDurableInput(
 				return errors.New("provider repeated durable acceptance")
 			}
 			acceptedOnce = true
-			if err := callbacks.OnAccepted(callbackCtx, DurableInputAcceptance{
+			acceptanceErr = callbacks.OnAccepted(callbackCtx, DurableInputAcceptance{
 				SessionID: input.SessionID, MessageID: input.MessageID, Sequence: input.Sequence,
-			}); err != nil {
-				return err
-			}
+			})
 			controller.publishProcessedPromptState(context.WithoutCancel(callbackCtx), input.SessionID, input.MessageID, promptText, "👨‍💻", preprocessingFailed)
+			if acceptanceErr != nil {
+				return acceptanceErr
+			}
 			acceptedSignal <- struct{}{}
 			return nil
 		})
@@ -2740,7 +2745,7 @@ func (controller *Controller) ProcessDurableInput(
 			controller.publishProcessedPromptState(context.WithoutCancel(ctx), input.SessionID, input.MessageID, promptText, "🙅‍♂", preprocessingFailed)
 			return receipt, errors.New("provider did not durably accept input")
 		}
-		return receipt, nil
+		return receipt, acceptanceErr
 	case <-ctx.Done():
 		cancelTurn()
 		controller.publishProcessedPromptState(context.WithoutCancel(ctx), input.SessionID, input.MessageID, promptText, "🙅‍♂", preprocessingFailed)
@@ -2883,6 +2888,9 @@ func (worker *sessionWorker) runTurnWithAcceptance(
 				completion = DurableInputUnknown
 				worker.notifyTurnError(turn.messageID+":custody-error", "Не удалось сохранить исход вложений. Очередь приостановлена.")
 			}
+		}
+		if wasAccepted && completion == DurableInputUnknown {
+			completion = DurableInputAwaitingRecovery
 		}
 		admission.Seal()
 		terminal.Resolve(string(completion))

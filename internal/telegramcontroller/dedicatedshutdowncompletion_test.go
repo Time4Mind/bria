@@ -108,7 +108,7 @@ func TestShutdownCompletionWaitsForMainAndSteerTerminal(t *testing.T) {
 			release()
 			want := telegramcontroller.DurableInputTerminalFailed
 			if mode != "interrupted" {
-				want = telegramcontroller.DurableInputUnknown
+				want = telegramcontroller.DurableInputCompletion("awaiting_recovery")
 			}
 			seen := map[string]bool{}
 			for len(seen) < 2 {

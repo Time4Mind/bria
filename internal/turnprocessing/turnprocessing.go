@@ -86,17 +86,18 @@ type DurableInputPreparation struct {
 type DurableInputCompletion string
 
 const (
-	DurableInputSucceeded      DurableInputCompletion = "succeeded"
-	DurableInputFailed         DurableInputCompletion = "failed"
-	DurableInputTerminalFailed DurableInputCompletion = "terminal_failed"
-	DurableInputPending        DurableInputCompletion = "pending"
-	DurableInputUnknown        DurableInputCompletion = "unknown"
+	DurableInputSucceeded        DurableInputCompletion = "succeeded"
+	DurableInputFailed           DurableInputCompletion = "failed"
+	DurableInputTerminalFailed   DurableInputCompletion = "terminal_failed"
+	DurableInputPending          DurableInputCompletion = "pending"
+	DurableInputAwaitingRecovery DurableInputCompletion = "awaiting_recovery"
+	DurableInputUnknown          DurableInputCompletion = "unknown"
 )
 
 type DurableInputCallbacks struct {
 	OnPrepared func(context.Context, DurableInputPreparation) error
 	OnAccepted func(context.Context, DurableInputAcceptance) error
-	// OnCompleted runs after durable acceptance and the actual terminal result,
+	// OnCompleted reports a terminal or awaiting-recovery outcome after acceptance,
 	// potentially after ProcessDurableInput has returned its pending receipt.
 	OnCompleted func(context.Context, DurableInputProcessReceipt) error
 }
@@ -109,6 +110,17 @@ type DurableInputProcessReceipt struct {
 }
 type DurableInputCustody interface {
 	Accept(context.Context, SessionInput) (InputReceipt, error)
+}
+
+// DurableRootInputGuard checks prior custody before starting a fresh root.
+// Live steers bypass it; ErrInputDeferred denotes an exact, unsent input.
+type DurableRootInputGuard interface {
+	CheckRootInput(context.Context, DurableLeasedInput) error
+}
+
+// DurableInputWaker nonblockingly schedules custody after committed Ready is live.
+type DurableInputWaker interface {
+	WakeSession(domain.SessionID)
 }
 
 type InteractionHandler interface {
@@ -198,14 +210,13 @@ func Execute(ctx context.Context, submitter sessionruntime.Submitter, interactio
 			if messageID != request.MessageID {
 				return errors.New("provider accepted a different durable message")
 			}
+			// Exact provider ACK remains evidence even if local custody fails.
+			execution.Accepted = true
 			if callbacks.MarkInputAccepted != nil {
 				if err := callbacks.MarkInputAccepted(ctx); err != nil {
 					return err
 				}
 			}
-			// Durable acceptance cannot be undone by a later attachment custody
-			// failure. Keep it visible so the caller treats the outcome as unknown.
-			execution.Accepted = true
 			for _, attachment := range request.Input.Attachments {
 				if attachments == nil {
 					return errors.New("attachment custody lifecycle is not configured")

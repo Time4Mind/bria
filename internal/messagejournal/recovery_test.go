@@ -24,10 +24,7 @@ func TestUnknownResolutionRequiresExactTupleAndNeverRequeues(t *testing.T) {
 	if _, err = journal.LeaseNextInput(ctx, "s", "worker", time.Unix(200, 0), time.Minute); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = journal.MarkInputAccepted(ctx, "s", "m", "worker"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err = journal.MarkInputUnknown(ctx, "s", "m"); err != nil {
+	if _, err = journal.MarkInputDeliveryUnknown(ctx, "s", "m", "worker"); err != nil {
 		t.Fatal(err)
 	}
 	journal = openJournal(t, path, testLimits())

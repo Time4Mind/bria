@@ -11,7 +11,7 @@ import (
 	"bria/internal/messagejournal"
 )
 
-func TestKnownUnsentDeferredInputRemainsPendingBehindUnknownUntilRecovery(t *testing.T) {
+func TestKnownUnsentDeferredInputRemainsPendingBehindAcceptedUntilRecovery(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "journal.json")
 	journal := openJournal(t, path)
@@ -43,11 +43,11 @@ func TestKnownUnsentDeferredInputRemainsPendingBehindUnknownUntilRecovery(t *tes
 	}
 	journal = openJournal(t, path)
 	inputs, err := journal.Inputs(ctx, "s")
-	if err != nil || len(inputs) != 3 || inputs[0].Phase != messagejournal.InputUnknown || inputs[1].Phase != messagejournal.InputPending || inputs[1].Lease.Owner != "" || inputs[2].Phase != messagejournal.InputPending {
+	if err != nil || len(inputs) != 3 || inputs[0].Phase != messagejournal.InputAccepted || inputs[1].Phase != messagejournal.InputPending || inputs[1].Lease.Owner != "" || inputs[2].Phase != messagejournal.InputPending {
 		t.Fatalf("unsent B lost custody: %#v %v", inputs, err)
 	}
-	if _, err := journal.LeaseNextInput(ctx, "s", "later", time.Unix(100, 0), time.Minute); !errors.Is(err, messagejournal.ErrNoAvailable) {
-		t.Fatalf("unknown A did not block: %v", err)
+	if ready, err := rootInputReady(flow, ctx, "s", "b", 2); err != nil || ready {
+		t.Fatalf("accepted A admitted new root: %v %v", ready, err)
 	}
 	if _, err := journal.ResolveAcceptedInput(ctx, "s", "a", first.Sequence, messagejournal.InputTerminalFailed); err != nil {
 		t.Fatal(err)
@@ -87,11 +87,15 @@ func TestAcceptedOrMismatchedReceiptMustNeverReleaseDeferredLease(t *testing.T) 
 				return result, nil
 			})
 			result, err := flow.ProcessNextInput(ctx, "s", processor)
-			if result.State != durableflow.InputProcessUnknown || err == nil {
+			want := messagejournal.InputUnknown
+			if mode == "accepted" {
+				want = messagejournal.InputAccepted
+			}
+			if string(result.State) != string(want) || err == nil {
 				t.Fatalf("invalid deferral: %#v %v", result, err)
 			}
 			inputs, err := openJournal(t, path).Inputs(ctx, "s")
-			if err != nil || len(inputs) != 1 || inputs[0].Phase != messagejournal.InputUnknown {
+			if err != nil || len(inputs) != 1 || inputs[0].Phase != want {
 				t.Fatalf("unsafe requeue: %#v %v", inputs, err)
 			}
 			if _, err := journal.LeaseNextInput(ctx, "s", "other", time.Unix(100, 0), time.Minute); !errors.Is(err, messagejournal.ErrNoAvailable) {

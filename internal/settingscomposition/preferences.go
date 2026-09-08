@@ -19,6 +19,7 @@ type Preferences struct{ Store settings.Store }
 var _ settingsport.Preferences = Preferences{}
 var _ settingsport.AutoApprovalPreferences = Preferences{}
 var _ settingsport.TechnicalOutputPreferences = Preferences{}
+var _ settingsport.TechnicalCommandPreferences = Preferences{}
 
 func (p Preferences) Snapshot(ctx context.Context) (settingsport.Snapshot, error) {
 	if p.Store == nil {
@@ -32,6 +33,7 @@ func (p Preferences) Snapshot(ctx context.Context) (settingsport.Snapshot, error
 		ContinueExisting: current.ContinueExisting, ScreenEnabled: current.ScreenEnabled, ScreenCaptureLimitKiB: current.ScreenCaptureLimitKiB,
 		CardDetail: string(current.CardDetail), CardPageLimit: current.CardPageLimit, ShowTechnicalActions: current.ShowTechnicalActions,
 		TechnicalOutputLines:      current.TechnicalOutputLines,
+		TechnicalCommandLines:     current.TechnicalCommandLines,
 		NotifyBackgroundQuestions: current.NotifyBackgroundQuestions,
 		NotifyBackgroundErrors:    current.NotifyBackgroundErrors,
 		SessionLifetime:           string(current.SessionLifetime), QueueLimit: current.QueueLimit,
@@ -99,17 +101,26 @@ func (p Preferences) ToggleTechnicalActions(ctx context.Context) error {
 
 func (p Preferences) CycleTechnicalOutputLines(ctx context.Context) error {
 	return p.update(ctx, func(current *settings.Settings) {
-		switch current.TechnicalOutputLines {
-		case 5:
-			current.TechnicalOutputLines = 10
-		case 10:
-			current.TechnicalOutputLines = 20
-		case 20:
-			current.TechnicalOutputLines = 40
-		default:
-			current.TechnicalOutputLines = 5
-		}
+		current.TechnicalOutputLines = nextTechnicalLines(current.TechnicalOutputLines)
 	})
+}
+func (p Preferences) CycleTechnicalCommandLines(ctx context.Context) error {
+	return p.update(ctx, func(current *settings.Settings) {
+		current.TechnicalCommandLines = nextTechnicalLines(current.TechnicalCommandLines)
+	})
+}
+
+func nextTechnicalLines(current int) int {
+	switch current {
+	case 3:
+		return 5
+	case 5:
+		return 10
+	case 10:
+		return 20
+	default:
+		return 3
+	}
 }
 func (p Preferences) ToggleBackgroundQuestions(ctx context.Context) error {
 	return p.update(ctx, func(current *settings.Settings) {

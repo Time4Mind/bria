@@ -191,7 +191,7 @@ func semanticActionFromPlan(plan telegrampipeline.CallbackPlan) (telegramcontrol
 		kind = telegramcontroller.SemanticSettingsPageLimit
 	case telegramui.ActionSettingsContinueExisting:
 		kind = telegramcontroller.SemanticSettingsContinueExisting
-	case telegramui.ActionSettingsTechnicalActions, telegramui.ActionSettingsTechnicalOutputLines:
+	case telegramui.ActionSettingsTechnicalActions, telegramui.ActionSettingsTechnicalOutputLines, telegramui.ActionSettingsTechnicalCommandLines:
 		kind = telegramcontroller.SemanticActionKind(plan.Action)
 	case telegramui.ActionSettingsBackgroundQuestions:
 		kind = telegramcontroller.SemanticSettingsBackgroundQuestions
@@ -312,7 +312,7 @@ func callbackEffectForAction(action telegramui.Action) telegrampipeline.Callback
 	case telegramui.ActionSettingsDetail:
 		return telegrampipeline.EffectToggleSettingsDetail
 	case telegramui.ActionSettingsPageLimit, telegramui.ActionSettingsAutoApproveCommands, telegramui.ActionSettingsContinueExisting,
-		telegramui.ActionSettingsTechnicalActions, telegramui.ActionSettingsTechnicalOutputLines, telegramui.ActionSettingsBackgroundQuestions,
+		telegramui.ActionSettingsTechnicalActions, telegramui.ActionSettingsTechnicalOutputLines, telegramui.ActionSettingsTechnicalCommandLines, telegramui.ActionSettingsBackgroundQuestions,
 		telegramui.ActionSettingsBackgroundErrors, telegramui.ActionSettingsLifetimeNever,
 		telegramui.ActionSettingsArchiveRecommendations,
 		telegramui.ActionSettingsDefaultProvider, telegramui.ActionSettingsDefaultWorkdir, telegramui.ActionSettingsClearCreationDefaults,
@@ -496,7 +496,7 @@ func telegramUIAction(action telegramcontroller.SemanticActionKind) (telegramui.
 		return telegramui.ActionSettingsPageLimit, nil
 	case telegramcontroller.SemanticSettingsContinueExisting:
 		return telegramui.ActionSettingsContinueExisting, nil
-	case telegramcontroller.SemanticSettingsTechnicalActions, telegramcontroller.SemanticSettingsTechnicalOutputLines:
+	case telegramcontroller.SemanticSettingsTechnicalActions, telegramcontroller.SemanticSettingsTechnicalOutputLines, telegramcontroller.SemanticSettingsTechnicalCommandLines:
 		return telegramui.Action(action), nil
 	case telegramcontroller.SemanticSettingsBackgroundQuestions:
 		return telegramui.ActionSettingsBackgroundQuestions, nil

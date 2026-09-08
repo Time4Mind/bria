@@ -17,6 +17,7 @@ type Snapshot struct {
 	CardPageLimit             int
 	ShowTechnicalActions      bool
 	TechnicalOutputLines      int
+	TechnicalCommandLines     int
 	NotifyBackgroundQuestions bool
 	NotifyBackgroundErrors    bool
 	SessionLifetime           string
@@ -68,6 +69,7 @@ type StandbyPreferences interface {
 type AutoApprovalPreferences = settingscapability.AutoApprovalPreferences
 type ScreenCapturePreferences = settingscapability.ScreenCapturePreferences
 type TechnicalOutputPreferences = settingscapability.TechnicalOutputPreferences
+type TechnicalCommandPreferences = settingscapability.TechnicalCommandPreferences
 
 // NodeRenamer optionally persists the display name of a computer node.
 type NodeRenamer interface {

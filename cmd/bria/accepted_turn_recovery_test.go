@@ -63,7 +63,7 @@ func TestDurableAcceptedTurnReconcilerCommitsExactProviderHistoryOutcome(t *test
 	}
 }
 
-func TestDurableAcceptedTurnReconcilerSealsMissingCorrelationUnknown(t *testing.T) {
+func TestDurableAcceptedTurnReconcilerKeepsMissingCorrelationAccepted(t *testing.T) {
 	flow, journal := acceptedRecoveryFlow(t)
 	const (
 		sessionID = domain.SessionID("123e4567-e89b-12d3-a456-426614174000")
@@ -85,7 +85,7 @@ func TestDurableAcceptedTurnReconcilerSealsMissingCorrelationUnknown(t *testing.
 		t.Fatalf("reconciliation = %#v, %v", receipt, err)
 	}
 	inputs, loadErr := journal.Inputs(context.Background(), string(sessionID))
-	if loadErr != nil || len(inputs) != 1 || inputs[0].Phase != messagejournal.InputUnknown {
+	if loadErr != nil || len(inputs) != 1 || inputs[0].Phase != messagejournal.InputAccepted {
 		t.Fatalf("journal inputs = %#v, %v", inputs, loadErr)
 	}
 }

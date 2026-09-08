@@ -59,6 +59,7 @@ const (
 	SemanticSettingsContinueExisting         SemanticActionKind = "settings_continue_existing"
 	SemanticSettingsTechnicalActions         SemanticActionKind = "settings_technical_actions"
 	SemanticSettingsTechnicalOutputLines     SemanticActionKind = "settings_technical_output_lines"
+	SemanticSettingsTechnicalCommandLines    SemanticActionKind = "settings_technical_command_lines"
 	SemanticSettingsBackgroundQuestions      SemanticActionKind = "settings_background_questions"
 	SemanticSettingsBackgroundErrors         SemanticActionKind = "settings_background_errors"
 	SemanticSettingsArchiveRecommendations   SemanticActionKind = "settings_archive_recommendations"
@@ -90,7 +91,7 @@ func IsGlobal(kind SemanticActionKind) bool {
 		SemanticCreateChoice, SemanticCreatePrevious, SemanticCreateFirst, SemanticCreateNext,
 		SemanticCreateUp, SemanticCreatePick, SemanticCreateDirectoryNew, SemanticCreateBack, SemanticCreateFresh,
 		SemanticSettingsCategory, SemanticSettingsScreen, SemanticSettingsScreenCaptureLimit, SemanticSettingsAutoApproveCommands, SemanticSettingsDetail, SemanticSettingsPageLimit, SemanticSettingsContinueExisting,
-		SemanticSettingsTechnicalActions, SemanticSettingsTechnicalOutputLines, SemanticSettingsBackgroundQuestions, SemanticSettingsBackgroundErrors,
+		SemanticSettingsTechnicalActions, SemanticSettingsTechnicalOutputLines, SemanticSettingsTechnicalCommandLines, SemanticSettingsBackgroundQuestions, SemanticSettingsBackgroundErrors,
 		SemanticSettingsArchiveRecommendations,
 		SemanticSettingsDefaultProvider, SemanticSettingsDefaultWorkdir, SemanticSettingsClearCreationDefaults,
 		SemanticSettingsLifetimeNever, SemanticSettingsLifetime6Hours, SemanticSettingsLifetime12Hours,

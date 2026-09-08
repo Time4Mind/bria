@@ -111,7 +111,7 @@ func TestExecuteDistinguishesAcceptanceFailureFromMissingAttachmentCustody(t *te
 				},
 				AfterAccepted: func() { t.Fatal("post-custody callback ran despite failure") },
 			})
-			if err == nil || execution.Accepted != !acceptanceFails || execution.Result.TerminalStatus != "" {
+			if err == nil || !execution.Accepted || execution.Result.TerminalStatus != "" {
 				t.Fatalf("Execute crossed the wrong acceptance boundary: %+v, %v", execution, err)
 			}
 			if acceptanceFails && !errors.Is(err, acceptanceErr) {

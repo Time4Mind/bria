@@ -130,6 +130,7 @@ const (
 	ActionRefreshStatus                        Action = 85
 	ActionSettingsScreenCaptureLimit           Action = 86
 	ActionSettingsTechnicalOutputLines         Action = 87
+	ActionSettingsTechnicalCommandLines        Action = 88
 )
 
 // Fields is the semantic callback payload. SessionID identifies the selected
@@ -260,7 +261,7 @@ func validAction(action Action) bool {
 		ActionCreateWorkdir, ActionCreateConfirm, ActionCreateCodex, ActionCreateClaude,
 		ActionSettingsCategory, ActionMenuNodes, ActionSelectNode,
 		ActionSettingsScreen, ActionSettingsScreenCaptureLimit, ActionSettingsDetail, ActionSettingsPageLimit, ActionSettingsContinueExisting,
-		ActionSettingsTechnicalActions, ActionSettingsTechnicalOutputLines, ActionSettingsBackgroundQuestions, ActionSettingsBackgroundErrors,
+		ActionSettingsTechnicalActions, ActionSettingsTechnicalOutputLines, ActionSettingsTechnicalCommandLines, ActionSettingsBackgroundQuestions, ActionSettingsBackgroundErrors,
 		ActionSettingsArchiveRecommendations,
 		ActionSettingsDefaultProvider, ActionSettingsDefaultWorkdir, ActionSettingsClearCreationDefaults,
 		ActionSettingsLifetimeNever, ActionSettingsLifetime6Hours, ActionSettingsLifetime12Hours,
@@ -312,7 +313,7 @@ func validTarget(action Action, target int) bool {
 		ActionMenuSettings, ActionMenuBack, ActionCreateSelectCodex, ActionCreateSelectClaude,
 		ActionCreateWorkdir, ActionCreateConfirm, ActionCreateCodex, ActionCreateClaude,
 		ActionSettingsScreen, ActionSettingsScreenCaptureLimit, ActionSettingsDetail, ActionSettingsPageLimit, ActionSettingsContinueExisting,
-		ActionSettingsTechnicalActions, ActionSettingsTechnicalOutputLines, ActionSettingsBackgroundQuestions, ActionSettingsBackgroundErrors,
+		ActionSettingsTechnicalActions, ActionSettingsTechnicalOutputLines, ActionSettingsTechnicalCommandLines, ActionSettingsBackgroundQuestions, ActionSettingsBackgroundErrors,
 		ActionSettingsArchiveRecommendations,
 		ActionSettingsDefaultProvider, ActionSettingsDefaultWorkdir, ActionSettingsClearCreationDefaults,
 		ActionSettingsLifetimeNever, ActionSettingsLifetime6Hours, ActionSettingsLifetime12Hours,

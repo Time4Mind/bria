@@ -147,7 +147,7 @@ func TestPendingFinalSaveStopsOnShutdownOrReplacedBinding(t *testing.T) {
 			}
 			select {
 			case got := <-completed:
-				if got.Completion != telegramcontroller.DurableInputUnknown {
+				if got.Completion != telegramcontroller.DurableInputCompletion("awaiting_recovery") {
 					t.Fatalf("old request falsely completed: %+v", got)
 				}
 			case <-ctx.Done():

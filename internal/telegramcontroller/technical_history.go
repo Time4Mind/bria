@@ -143,7 +143,7 @@ func (c *Controller) appendRuntimeHistoryForMessage(ctx context.Context, id doma
 // Filter a projection copy before pagination. Settings changes can reveal old
 // tool entries again without reconstructing history or resubmitting a turn.
 func (c *Controller) displayHistory(ctx context.Context, id domain.SessionID, history []string) ([]cardtranscript.Block, error) {
-	show, lines := true, 10
+	show, lines, commandLines := true, 10, 10
 	if c.settings != nil {
 		settings, err := c.settings.Snapshot(ctx)
 		if err != nil {
@@ -151,6 +151,7 @@ func (c *Controller) displayHistory(ctx context.Context, id domain.SessionID, hi
 		}
 		show = settings.ShowTechnicalActions
 		lines = settings.TechnicalOutputLines
+		commandLines = settings.TechnicalCommandLines
 	}
 	if store, ok := c.uiState.(typedTranscriptStore); ok {
 		blocks, err := store.LoadCardTranscript(ctx, id, show)
@@ -160,6 +161,7 @@ func (c *Controller) displayHistory(ctx context.Context, id domain.SessionID, hi
 		blocks = append([]cardtranscript.Block(nil), blocks...)
 		for i := range blocks {
 			blocks[i].ToolLines = lines
+			blocks[i].CommandLines = commandLines
 		}
 		return cardtranscript.RenderBlocks(blocks), nil
 	}
@@ -185,7 +187,7 @@ func (c *Controller) displayHistory(ctx context.Context, id domain.SessionID, hi
 				break
 			}
 		}
-		blocks = append(blocks, cardtranscript.Block{Kind: kind, Text: text, ToolLines: lines})
+		blocks = append(blocks, cardtranscript.Block{Kind: kind, Text: text, ToolLines: lines, CommandLines: commandLines})
 	}
 	return cardtranscript.RenderBlocks(blocks), nil
 }

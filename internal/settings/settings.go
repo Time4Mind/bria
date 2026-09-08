@@ -12,6 +12,7 @@ const (
 	DefaultQueueLimit            = 32
 	DefaultCardPages             = 64
 	DefaultTechnicalOutputLines  = 10
+	DefaultTechnicalCommandLines = 10
 	DefaultScreenCaptureLimitKiB = 48
 )
 
@@ -45,6 +46,7 @@ type Settings struct {
 	CardPageLimit             int               `json:"card_page_limit"`
 	ShowTechnicalActions      bool              `json:"show_technical_actions"`
 	TechnicalOutputLines      int               `json:"technical_output_lines"`
+	TechnicalCommandLines     int               `json:"technical_command_lines"`
 	NotifyBackgroundQuestions bool              `json:"notify_background_questions"`
 	NotifyBackgroundErrors    bool              `json:"notify_background_errors"`
 	SessionLifetime           SessionLifetime   `json:"session_lifetime"`
@@ -69,6 +71,7 @@ type Effective struct {
 	CardPageLimit              int
 	ShowTechnicalActions       bool
 	TechnicalOutputLines       int
+	TechnicalCommandLines      int
 	NotifyBackgroundCompletion bool
 	NotifyBackgroundQuestions  bool
 	NotifyBackgroundErrors     bool
@@ -87,7 +90,7 @@ type Effective struct {
 }
 
 func Default() Settings {
-	return Settings{Version: FormatVersion, ContinueExisting: true, ScreenEnabled: false, ScreenCaptureLimitKiB: DefaultScreenCaptureLimitKiB, CardDetail: CardDetailStandard, CardPageLimit: DefaultCardPages, ShowTechnicalActions: true, TechnicalOutputLines: DefaultTechnicalOutputLines, NotifyBackgroundQuestions: false, NotifyBackgroundErrors: true, SessionLifetime: Lifetime12Hours, QueueLimit: DefaultQueueLimit, VoiceRecognition: VoiceParakeet, RetryUndeliveredFiles: false, ArchiveRecommendations: false, DefaultProviders: map[string]string{}, DefaultWorkdirs: map[string]string{}, AutoApproveCommands: true}
+	return Settings{Version: FormatVersion, ContinueExisting: true, ScreenEnabled: false, ScreenCaptureLimitKiB: DefaultScreenCaptureLimitKiB, CardDetail: CardDetailStandard, CardPageLimit: DefaultCardPages, ShowTechnicalActions: true, TechnicalOutputLines: DefaultTechnicalOutputLines, TechnicalCommandLines: DefaultTechnicalCommandLines, NotifyBackgroundQuestions: false, NotifyBackgroundErrors: true, SessionLifetime: Lifetime12Hours, QueueLimit: DefaultQueueLimit, VoiceRecognition: VoiceParakeet, RetryUndeliveredFiles: false, ArchiveRecommendations: false, DefaultProviders: map[string]string{}, DefaultWorkdirs: map[string]string{}, AutoApproveCommands: true}
 }
 
 func (s Settings) Effective() Effective {
@@ -99,6 +102,7 @@ func (s Settings) Effective() Effective {
 		CardPageLimit:              s.CardPageLimit,
 		ShowTechnicalActions:       s.ShowTechnicalActions,
 		TechnicalOutputLines:       s.TechnicalOutputLines,
+		TechnicalCommandLines:      s.TechnicalCommandLines,
 		NotifyBackgroundCompletion: true,
 		NotifyBackgroundQuestions:  s.NotifyBackgroundQuestions,
 		NotifyBackgroundErrors:     s.NotifyBackgroundErrors,
@@ -127,8 +131,10 @@ func (s Settings) Validate() error {
 	if s.CardPageLimit != 32 && s.CardPageLimit != 64 && s.CardPageLimit != 128 {
 		return errors.New("card page limit must be 32, 64, or 128")
 	}
-	if s.TechnicalOutputLines != 5 && s.TechnicalOutputLines != 10 && s.TechnicalOutputLines != 20 && s.TechnicalOutputLines != 40 {
-		return errors.New("technical output lines must be 5, 10, 20, or 40")
+	for _, limit := range []int{s.TechnicalCommandLines, s.TechnicalOutputLines} {
+		if limit != 3 && limit != 5 && limit != 10 && limit != 20 {
+			return errors.New("technical command and output lines must each be 3, 5, 10, or 20")
+		}
 	}
 	if s.ScreenCaptureLimitKiB != 48 && s.ScreenCaptureLimitKiB != 64 && s.ScreenCaptureLimitKiB != 86 {
 		return errors.New("screen capture limit must be 48, 64, or 86 KiB")

@@ -54,8 +54,8 @@ func (processor *Processor) Process(ctx context.Context, input durableflow.Provi
 		}
 		return callbacks.OnAccepted(callbackCtx, durableflow.HandoffResult{SessionID: input.SessionID, MessageID: input.MessageID, Sequence: input.Sequence, State: durableflow.HandoffAccepted})
 	}, OnCompleted: func(callbackCtx context.Context, receipt turnprocessing.DurableInputProcessReceipt) error {
-		completed, err := translate(input, receipt)
-		if err != nil || callbacks.OnCompleted == nil || completed.State == durableflow.InputProcessAccepted {
+		completed, err := translate(input, receipt, nil)
+		if err != nil || callbacks.OnCompleted == nil || receipt.Completion == turnprocessing.DurableInputPending {
 			return durableflow.ErrInvalidHandoff
 		}
 		if err := callbacks.OnCompleted(callbackCtx, completed); err != nil {
@@ -72,29 +72,29 @@ func (processor *Processor) Process(ctx context.Context, input durableflow.Provi
 		}
 		return nil
 	}})
-	if err != nil {
-		if errors.Is(err, turnprocessing.ErrInputDeferred) && !receipt.Accepted && input.SessionID != "" && input.MessageID != "" && input.Sequence != 0 && receipt.SessionID == domain.SessionID(input.SessionID) && receipt.MessageID == input.MessageID && receipt.Sequence == input.Sequence {
-			result.State, err = durableflow.InputProcessDeferred, nil
-		}
-		return result, err
+	if errors.Is(err, turnprocessing.ErrInputDeferred) && !receipt.Accepted && input.SessionID != "" && input.MessageID != "" && input.Sequence != 0 && receipt.SessionID == domain.SessionID(input.SessionID) && receipt.MessageID == input.MessageID && receipt.Sequence == input.Sequence {
+		return durableflow.InputProcessResult{SessionID: input.SessionID, MessageID: input.MessageID, Sequence: input.Sequence, State: durableflow.InputProcessDeferred}, nil
 	}
-	return translate(input, receipt)
+	return translate(input, receipt, err)
 }
 
-func translate(input durableflow.ProviderInput, receipt turnprocessing.DurableInputProcessReceipt) (durableflow.InputProcessResult, error) {
+func translate(input durableflow.ProviderInput, receipt turnprocessing.DurableInputProcessReceipt, processErr error) (durableflow.InputProcessResult, error) {
 	result := durableflow.InputProcessResult{SessionID: input.SessionID, MessageID: input.MessageID, Sequence: input.Sequence, State: durableflow.InputProcessUnknown}
-	if receipt.SessionID != domain.SessionID(input.SessionID) || receipt.MessageID != input.MessageID || receipt.Sequence != input.Sequence || !receipt.Accepted {
-		return result, durableflow.ErrInvalidHandoff
+	if input.SessionID == "" || input.MessageID == "" || input.Sequence == 0 || receipt.SessionID != domain.SessionID(input.SessionID) || receipt.MessageID != input.MessageID || receipt.Sequence != input.Sequence || !receipt.Accepted {
+		return result, errors.Join(processErr, durableflow.ErrInvalidHandoff)
+	}
+	if processErr != nil && receipt.Completion != turnprocessing.DurableInputAwaitingRecovery && receipt.Completion != turnprocessing.DurableInputPending {
+		return result, processErr
 	}
 	switch receipt.Completion {
 	case turnprocessing.DurableInputSucceeded:
 		result.State = durableflow.InputProcessCompleted
 	case turnprocessing.DurableInputFailed, turnprocessing.DurableInputTerminalFailed, turnprocessing.DurableInputUnknown:
 		result.State = durableflow.InputProcessState(receipt.Completion)
-	case turnprocessing.DurableInputPending:
+	case turnprocessing.DurableInputPending, turnprocessing.DurableInputAwaitingRecovery:
 		result.State = durableflow.InputProcessAccepted
 	default:
 		return result, durableflow.ErrInvalidHandoff
 	}
-	return result, nil
+	return result, processErr
 }

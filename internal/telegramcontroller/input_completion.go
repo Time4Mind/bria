@@ -86,7 +86,7 @@ func (c *Controller) awaitInputCompletion(input DurableLeasedInput, callbacks Du
 		state, err := terminal.Wait(context.WithoutCancel(c.rootContext))
 		outcome := DurableInputCompletion(state)
 		if err != nil || state == "" {
-			outcome = DurableInputUnknown
+			outcome = DurableInputAwaitingRecovery
 		}
 		ticket.Finish(c.completeInput(callbacks, input, outcome))
 	}()

@@ -48,7 +48,7 @@ func (*failedStartRuntime) Start(context.Context, app.StartSessionRequest) (doma
 	return domain.ProviderBinding{}, errors.New("private-start-error")
 }
 
-func TestOrdinaryStartupFailureObservesPersistedAwaitingState(t *testing.T) {
+func TestReconciledReadyStartupFailureObservesPersistedAwaitingState(t *testing.T) {
 	ready, _ := readySession(t)
 	runtime := &failedStartRuntime{}
 	manager := recoveryManager(t, &memoryStore{session: ready}, runtime, runtime, &recoveryReconciler{})
@@ -58,8 +58,8 @@ func TestOrdinaryStartupFailureObservesPersistedAwaitingState(t *testing.T) {
 	if err != nil || result.Awaiting != 1 {
 		t.Fatal("ordinary failed recovery did not remain awaiting")
 	}
-	if len(observer.events) != 1 || observer.events[0].Outcome.String() != "awaiting_recovery" || observer.events[0].Reason.String() != "startup_recovery" {
-		t.Fatal("ordinary startup failure has no observed awaiting outcome")
+	if len(observer.events) != 1 || observer.events[0].Outcome.String() != "recovery_exhausted" || observer.events[0].Reason.String() != "startup_recovery" {
+		t.Fatalf("reconciled startup failure has no observed exhausted outcome: %+v", observer.events)
 	}
 }
 

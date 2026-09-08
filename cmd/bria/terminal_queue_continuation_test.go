@@ -207,12 +207,13 @@ func TestTerminalQueueContinuationAfterActualProviderProof(t *testing.T) {
 			}
 			wantPhases := []string{"terminal_failed", "terminal_failed", "completed"}
 			if mode == "eof" || mode == "attachment-failure" {
-				wantPhases = []string{"unknown", "unknown", "pending"}
+				wantPhases = []string{"accepted", "accepted", "pending"}
 			}
 			waitQueueTerminalPhases(t, ctx, journalPath, id, wantPhases)
 			if err := controller.Close(ctx); err != nil {
 				t.Fatal(err)
 			}
+			waitQueueTerminalPhases(t, ctx, journalPath, id, wantPhases)
 			var submitted []string
 			for len(runtime.submitted) != 0 {
 				submitted = append(submitted, <-runtime.submitted)

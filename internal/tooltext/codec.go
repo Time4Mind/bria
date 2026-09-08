@@ -39,20 +39,17 @@ func Encode(tool Tool) string {
 		output, oCut = Read(output)
 	}
 	arguments, cut := Bound(arguments, 40)
-	body := arguments
-	if arguments != "" && output != "" {
-		body += Separator
+	output, outputCut := Bound(output, 40)
+	// Preserve unused retention within forty lines, guaranteeing twenty to each
+	// nonempty field on overflow. Presentation separators are not content.
+	if arguments != "" && output != "" && strings.Count(arguments, "\n")+strings.Count(output, "\n")+2 > 40 {
+		var aBound, oBound bool
+		arguments, aBound = Bound(arguments, 20)
+		output, oBound = Bound(output, 20)
+		cut, outputCut = cut || aBound, outputCut || oBound
 	}
-	// Bound normalizes CRLF, including a trailing argument CR joined to the
-	// separator. Measure that same prefix while retaining the literal arguments.
-	body = strings.ReplaceAll(body, "\r\n", "\n")
-	start := len(body)
-	body, combinedCut := Bound(body+output, 40)
-	tool.Arguments, tool.Output = arguments, ""
-	if len(body) > start {
-		tool.Output = body[start:]
-	}
-	tool.Truncated = tool.Truncated || aCut || oCut || cut || combinedCut
+	tool.Arguments, tool.Output = arguments, output
+	tool.Truncated = tool.Truncated || aCut || oCut || cut || outputCut
 	tool.Encoding = "text-v1"
 	encoded, _ := json.Marshal(tool)
 	if len(encoded) > 16384 {

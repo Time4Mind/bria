@@ -26,11 +26,10 @@ func TestProvenTerminalFailureAdvancesQueueWithoutReplayAfterReopen(t *testing.T
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err = journal.MarkInputAccepted(ctx, "s", "a", "worker"); err != nil {
-				t.Fatal(err)
-			}
 			if prior == messagejournal.InputUnknown {
-				_, err = journal.MarkInputUnknown(ctx, "s", "a")
+				_, err = journal.MarkInputDeliveryUnknown(ctx, "s", "a", "worker")
+			} else {
+				_, err = journal.MarkInputAccepted(ctx, "s", "a", "worker")
 			}
 			if prior == messagejournal.InputFailed {
 				_, err = journal.FailInput(ctx, "s", "a")

@@ -71,7 +71,7 @@ func (o attachmentCompletionObserver) ProcessDurableInput(ctx context.Context, i
 	return o.Controller.ProcessDurableInput(ctx, input, callbacks)
 }
 
-func TestAcceptedAttachmentFailureCompletesUnknownWithoutReplay(t *testing.T) {
+func TestAcceptedAttachmentFailureRemainsAwaitingRecoveryWithoutReplay(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	store, sessions := acceptedProofFixture(t)
@@ -142,15 +142,15 @@ func TestAcceptedAttachmentFailureCompletesUnknownWithoutReplay(t *testing.T) {
 	release()
 	select {
 	case receipt := <-observer.completed:
-		if !receipt.Accepted || receipt.Completion != telegramcontroller.DurableInputUnknown || receipt.SessionID != id || receipt.MessageID != messageID || receipt.Sequence != queued.Sequence {
-			t.Fatalf("actual controller OnCompleted=%+v, want exact accepted/unknown", receipt)
+		if !receipt.Accepted || string(receipt.Completion) != "awaiting_recovery" || receipt.SessionID != id || receipt.MessageID != messageID || receipt.Sequence != queued.Sequence {
+			t.Fatalf("actual controller OnCompleted=%+v, want exact accepted/awaiting_recovery", receipt)
 		}
 	case <-ctx.Done():
 		t.Fatal("actual controller did not invoke OnCompleted after attachment acceptance failure")
 	}
-	assertTerminalJournalPhase(t, ctx, journalPath, id, []string{messageID}, string(messagejournal.InputUnknown))
+	assertTerminalJournalPhase(t, ctx, journalPath, id, []string{messageID}, string(messagejournal.InputAccepted))
 	if _, err := flow.ProcessNextInput(ctx, string(id), processor); !errors.Is(err, messagejournal.ErrNoAvailable) {
-		t.Fatalf("dispatch after unknown=%v; must not replay", err)
+		t.Fatalf("dispatch awaiting recovery=%v; must not replay", err)
 	}
 	if err := controller.Close(ctx); err != nil {
 		t.Fatal(err)

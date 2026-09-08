@@ -85,7 +85,7 @@ func (c deferredQueueController) ProcessDurableInput(ctx context.Context, input 
 	return c.Controller.ProcessDurableInput(ctx, input, callbacks)
 }
 
-func TestFinalizationUnknownReleasesExactlyUnsentQueuedInput(t *testing.T) {
+func TestFinalizationAwaitingRecoveryReleasesExactlyUnsentQueuedInput(t *testing.T) {
 	for _, mode := range []string{"history", "attachment-custody"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -186,15 +186,15 @@ func TestFinalizationUnknownReleasesExactlyUnsentQueuedInput(t *testing.T) {
 					t.Fatalf("definitely unsent B must return exact deferred result: %+v err=%v", got.receipt, got.err)
 				}
 			case <-ctx.Done():
-				t.Fatal("B did not defer after A became Unknown")
+				t.Fatal("B did not defer while accepted A awaited recovery")
 			}
-			waitDeferredQueuePhase(t, ctx, journalPath, id, 0, messagejournal.InputUnknown)
+			waitDeferredQueuePhase(t, ctx, journalPath, id, 0, messagejournal.InputAccepted)
 			inputs = terminalJournalInputs(t, ctx, journalPath, id)
-			if len(inputs) != 2 || inputs[0].MessageID != "deferred-A" || inputs[0].Phase != messagejournal.InputUnknown || inputs[1].MessageID != "deferred-B" || inputs[1].Sequence != queued.Sequence || inputs[1].Phase != messagejournal.InputPending || inputs[1].Lease != (messagejournal.Lease{}) || string(inputs[1].Payload) != "synthetic B" {
-				t.Fatalf("physical deferred queue must preserve Unknown A / unleased exact Pending B: %+v", inputs)
+			if len(inputs) != 2 || inputs[0].MessageID != "deferred-A" || inputs[0].Phase != messagejournal.InputAccepted || inputs[1].MessageID != "deferred-B" || inputs[1].Sequence != queued.Sequence || inputs[1].Phase != messagejournal.InputPending || inputs[1].Lease != (messagejournal.Lease{}) || string(inputs[1].Payload) != "synthetic B" {
+				t.Fatalf("physical deferred queue must preserve Accepted A / unleased exact Pending B: %+v", inputs)
 			}
-			if _, err := flow.ProcessNextInput(ctx, string(id), processor); !errors.Is(err, messagejournal.ErrNoAvailable) {
-				t.Fatalf("Unknown A did not block subsequent dispatch: %v", err)
+			if got, err := flow.ProcessNextInput(ctx, string(id), processor); err != nil || got.State != durableflow.InputProcessDeferred {
+				t.Fatalf("Accepted A did not defer subsequent root dispatch: %+v err=%v", got, err)
 			}
 			select {
 			case got := <-provider.submitted:

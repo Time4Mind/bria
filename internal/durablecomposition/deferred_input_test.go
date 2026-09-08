@@ -100,10 +100,11 @@ func TestControllerDeferredReceiptPreservesPendingJournalBehindFailedPrior(t *te
 		t.Fatal(err)
 	}
 	inputs, err := journal.Inputs(ctx, "s")
-	if err != nil || len(inputs) != 2 || inputs[0].Phase != messagejournal.InputUnknown || inputs[1].Phase != messagejournal.InputPending || inputs[1].Lease.Owner != "" {
+	if err != nil || len(inputs) != 2 || inputs[0].Phase != messagejournal.InputAccepted || inputs[1].Phase != messagejournal.InputPending || inputs[1].Lease.Owner != "" {
 		t.Fatalf("known-unsent B not pending: %#v %v", inputs, err)
 	}
-	if _, err := journal.LeaseNextInput(ctx, "s", "other", time.Now().Add(time.Hour), time.Minute); !errors.Is(err, messagejournal.ErrNoAvailable) {
-		t.Fatalf("unknown A bypassed: %v", err)
+	custody := durablecomposition.InputCustody{Flow: flow}
+	if err := custody.CheckRootInput(ctx, telegramcontroller.DurableLeasedInput{SessionID: "s", MessageID: "b", Sequence: 2}); !errors.Is(err, turnprocessing.ErrInputDeferred) {
+		t.Fatalf("accepted A bypassed: %v", err)
 	}
 }

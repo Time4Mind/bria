@@ -265,9 +265,8 @@ func (journal *Journal) FailInput(ctx context.Context, sessionID, messageID stri
 	return journal.transitionInputOutcome(ctx, sessionID, messageID, 0, InputFailed, InputAccepted)
 }
 
-// MarkInputUnknown records that an already accepted provider turn cannot be
-// reconciled with provider history after recovery. It is observable and
-// blocks automatic replay until an explicit RetryInput.
+// MarkInputUnknown preserves proven acceptance when terminal history is absent.
+// Existing preacceptance unknown stays distinct; this never requeues input.
 func (journal *Journal) MarkInputUnknown(ctx context.Context, sessionID, messageID string) (Input, error) {
 	return journal.transitionInputOutcome(ctx, sessionID, messageID, 0, InputUnknown, InputAccepted)
 }

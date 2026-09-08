@@ -80,16 +80,22 @@ func nativeTerminalRecovery(t *testing.T, prior messagejournal.InputPhase, confl
 	if _, err := journal.LeaseNextInput(ctx, string(logical), "initial", time.Unix(10, 0), time.Minute); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := journal.MarkInputAccepted(ctx, string(logical), "native-A", "initial"); err != nil {
+	if prior == messagejournal.InputUnknown {
+		_, err = journal.MarkInputDeliveryUnknown(ctx, string(logical), "native-A", "initial")
+	} else {
+		_, err = journal.MarkInputAccepted(ctx, string(logical), "native-A", "initial")
+	}
+	if err != nil {
 		t.Fatal(err)
 	}
-	if prior == messagejournal.InputUnknown {
-		_, err = journal.MarkInputUnknown(ctx, string(logical), "native-A")
-	} else if prior == messagejournal.InputFailed {
+	if prior == messagejournal.InputFailed {
 		_, err = journal.FailInput(ctx, string(logical), "native-A")
 	}
 	if err != nil {
 		t.Fatal(err)
+	}
+	if physical := terminalJournalInputs(t, ctx, journalPath, logical); physical[0].Phase != prior {
+		t.Fatalf("fixture phase=%s want=%s", physical[0].Phase, prior)
 	}
 	root, transcriptRoot := filepath.Join(dir, "receipts"), filepath.Join(dir, "sessions")
 	savedOutcome := "unknown"
@@ -163,6 +169,9 @@ func nativeTerminalRecovery(t *testing.T, prior messagejournal.InputPhase, confl
 		}
 		physical := terminalJournalInputs(t, ctx, journalPath, logical)
 		wantPhase := messagejournal.InputUnknown
+		if prior == messagejournal.InputAccepted {
+			wantPhase = messagejournal.InputAccepted
+		}
 		if prior == messagejournal.InputFailed {
 			wantPhase = messagejournal.InputFailed
 		}
@@ -172,7 +181,7 @@ func nativeTerminalRecovery(t *testing.T, prior messagejournal.InputPhase, confl
 		if len(physical) != 2 || physical[0].MessageID != "native-A" || physical[0].Sequence != 1 || physical[0].Phase != wantPhase || physical[1].MessageID != "native-B" || physical[1].Sequence != 2 || physical[1].Phase != messagejournal.InputPending {
 			t.Fatalf("pass %d physical journal=%+v want A=%s B=pending", pass, physical, wantPhase)
 		}
-		if !wantProof {
+		if !wantProof && prior != messagejournal.InputAccepted {
 			if next, err := journal.LeaseNextInput(ctx, string(logical), "blocked", time.Unix(100, 0), time.Minute); !errors.Is(err, messagejournal.ErrNoAvailable) {
 				t.Fatalf("pass %d incomplete/conflicting proof leased %+v: %v", pass, next, err)
 			}

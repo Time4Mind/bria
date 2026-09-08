@@ -72,6 +72,11 @@ func TestTerminalWakeDrainsStoppingQueueWithoutNewIncomingWake(t *testing.T) {
 			accepted := make(chan continuation, 1)
 			processed := make(chan string, 8)
 			processor := durablecomposition.NewControllerInputProcessor(asyncProcessor(func(ctx context.Context, input telegramcontroller.DurableLeasedInput, cb telegramcontroller.DurableInputCallbacks) (telegramcontroller.DurableInputProcessReceipt, error) {
+				if input.MessageID != "parent" {
+					if err := custody.CheckRootInput(ctx, input); err != nil {
+						return telegramcontroller.DurableInputProcessReceipt{SessionID: input.SessionID, MessageID: input.MessageID, Sequence: input.Sequence}, err
+					}
+				}
 				if err := cb.OnAccepted(ctx, telegramcontroller.DurableInputAcceptance{SessionID: input.SessionID, MessageID: input.MessageID, Sequence: input.Sequence}); err != nil {
 					return telegramcontroller.DurableInputProcessReceipt{}, err
 				}
@@ -163,6 +168,9 @@ func TestTerminalWakeDrainsStoppingQueueWithoutNewIncomingWake(t *testing.T) {
 			} else {
 				wantLater = messagejournal.InputPending
 				wantParent = messagejournal.InputPhase(outcome)
+				if outcome == telegramcontroller.DurableInputUnknown {
+					wantParent = messagejournal.InputAccepted
+				}
 				if err := dispatcher.ProcessReadySession(ctx, "s"); err != nil {
 					t.Fatal(err)
 				}

@@ -18,3 +18,8 @@ type ScreenCapturePreferences interface {
 type TechnicalOutputPreferences interface {
 	CycleTechnicalOutputLines(context.Context) error
 }
+
+// TechnicalCommandPreferences independently controls the post-wrap command budget.
+type TechnicalCommandPreferences interface {
+	CycleTechnicalCommandLines(context.Context) error
+}

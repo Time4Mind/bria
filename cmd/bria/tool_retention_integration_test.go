@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -56,13 +57,23 @@ func TestA25ToolRetentionNativeToReopenedRichWire(t *testing.T) {
 	for _, sample := range []struct{ name, glyph string }{{"emoji", "🙂"}, {"escaped_control", "\x01"}} {
 		for _, count := range []int{4000, 4001} {
 			t.Run(fmt.Sprintf("%s_%d", sample.name, count), func(t *testing.T) {
-				retentionEndToEnd(t, sample.glyph, count)
+				retentionEndToEnd(t, sample.glyph, count, false)
 			})
 		}
 	}
 }
 
-func retentionEndToEnd(t *testing.T, glyph string, count int) {
+func TestA26ToolRetentionIndependentLimitsNativeToReopenedRichWire(t *testing.T) {
+	for _, sample := range []struct{ name, glyph string }{{"emoji", "🙂"}, {"escaped_control", "\x01"}} {
+		for _, count := range []int{2000, 2001, 4000, 4001} {
+			t.Run(fmt.Sprintf("%s_%d", sample.name, count), func(t *testing.T) {
+				retentionEndToEnd(t, sample.glyph, count, true)
+			})
+		}
+	}
+}
+
+func retentionEndToEnd(t *testing.T, glyph string, count int, withCommand bool) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -70,15 +81,22 @@ func retentionEndToEnd(t *testing.T, glyph string, count int) {
 	const nativeID = "01900000-0000-7000-8000-000000000001"
 	const sessionID = domain.SessionID("11111111-1111-4111-9111-111111111111")
 	callID := strings.Repeat("c", 1000) // Exercises compact storage with bounded metadata.
+	commandGlyph := "🚀"
+	if glyph == "\x01" {
+		commandGlyph = "\x02"
+	}
+	if !withCommand {
+		commandGlyph = ""
+	}
 	content := []map[string]string{{"type": "text", "text": strings.Repeat(glyph, count)}}
 	contentJSON, err := json.Marshal(content)
-	if err != nil || len(contentJSON) <= 8192 {
+	if err != nil || count >= 4000 && len(contentJSON) <= 8192 {
 		t.Fatal("fixture must exceed the old native metadata cap")
 	}
 	var source strings.Builder
 	for _, record := range []any{
 		map[string]any{"type": "session_meta", "payload": map[string]string{"id": nativeID, "cwd": "/synthetic"}},
-		map[string]any{"type": "response_item", "payload": map[string]any{"type": "function_call", "call_id": callID, "name": "exec", "arguments": ""}},
+		map[string]any{"type": "response_item", "payload": map[string]any{"type": "function_call", "call_id": callID, "name": "exec", "arguments": strings.Repeat(commandGlyph, count)}},
 		map[string]any{"type": "response_item", "payload": map[string]any{"type": "function_call_output", "call_id": callID, "output": content}},
 	} {
 		encoded, err := json.Marshal(record)
@@ -147,10 +165,11 @@ func retentionEndToEnd(t *testing.T, glyph string, count int) {
 		t.Fatal(err)
 	}
 	prefs := settingscomposition.Preferences{Store: prefsStore}
-	for range 2 {
-		if err := prefs.CycleTechnicalOutputLines(ctx); err != nil {
-			t.Fatal(err)
-		}
+	if err := prefsStore.Update(ctx, func(current *settings.Settings) error {
+		current.TechnicalCommandLines, current.TechnicalOutputLines = 20, 20
+		return nil
+	}); err != nil {
+		t.Fatal(err)
 	}
 	done := make(chan telegramcontroller.Notification, 1)
 	c, err := telegramcontroller.New(7, 42, "local", archiveCreator{}, store, retentionSubmitter{events}, archiveNotifier(func(_ context.Context, n telegramcontroller.Notification) error {
@@ -200,18 +219,23 @@ func retentionEndToEnd(t *testing.T, glyph string, count int) {
 		var envelope struct {
 			Encoding  string `json:"encoding"`
 			Truncated bool   `json:"truncated"`
+			Arguments string `json:"arguments"`
+			Output    string `json:"output"`
 		}
 		if len(block.Text) > 16384 || json.Unmarshal([]byte(block.Text), &envelope) != nil {
 			t.Fatal("invalid physical history item")
 		}
-		if envelope.Encoding == "rune21-v1" {
-			compact = true
-			if envelope.Truncated != (count > 4000) {
-				t.Fatal("truncation provenance lost on disk")
-			}
+		if envelope.Encoding != "text-v1" && envelope.Encoding != "rune21-v1" {
+			t.Fatal("missing bounded tool encoding")
+		}
+		compact = compact || envelope.Encoding == "rune21-v1"
+		// Native call and output are separate history records. Retain their
+		// existing 40-line capacity; only projection changes to a 20-line max.
+		if envelope.Truncated != (count > 4000 && (envelope.Arguments != "" || envelope.Output != "")) {
+			t.Fatal("single-field 40-line truncation provenance lost on disk")
 		}
 	}
-	if tools != 2 || !compact {
+	if tools != 2 || count >= 4000 && !compact {
 		t.Fatalf("stored tools=%d compact=%t", tools, compact)
 	}
 	prefsStore, err = settings.OpenFileStore(settingsPath)
@@ -219,11 +243,51 @@ func retentionEndToEnd(t *testing.T, glyph string, count int) {
 		t.Fatal(err)
 	}
 	prefs = settingscomposition.Preferences{Store: prefsStore}
-	if snapshot, err := prefs.Snapshot(ctx); err != nil || snapshot.TechnicalOutputLines != 40 {
+	if snapshot, err := prefs.Snapshot(ctx); err != nil || snapshot.TechnicalOutputLines != 20 || snapshot.TechnicalCommandLines != 20 {
 		t.Fatal("maximum setting did not survive reopen")
 	}
-	c2 := archiveController(t, reopened, nil, telegramcontroller.Options{Recovered: []domain.Session{ready}, UIState: reopened, Settings: prefs})
-	defer c2.Close(context.Background())
+	for _, limits := range [][2]int{{20, 20}, {3, 5}, {5, 3}, {20, 20}} {
+		if err := prefsStore.Update(ctx, func(current *settings.Settings) error {
+			current.TechnicalCommandLines, current.TechnicalOutputLines = limits[0], limits[1]
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		persistedPrefs, err := settings.OpenFileStore(settingsPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		prefs := settingscomposition.Preferences{Store: persistedPrefs}
+		if snapshot, err := prefs.Snapshot(ctx); err != nil || snapshot.TechnicalCommandLines != limits[0] || snapshot.TechnicalOutputLines != limits[1] {
+			t.Fatalf("independent settings did not survive reopen: %v", err)
+		}
+		c2 := archiveController(t, reopened, nil, telegramcontroller.Options{Recovered: []domain.Session{ready}, UIState: reopened, Settings: prefs})
+		part := func(value string, lines int) string {
+			return strings.TrimSuffix(strings.Repeat(strings.Repeat(value, 100)+"\n", lines), "\n")
+		}
+		want := part(glyph, limits[1])
+		if withCommand {
+			want = part(commandGlyph, limits[0]) + "\n\n---\n\n" + want
+		}
+		if withCommand && count > limits[0]*100 || count > limits[1]*100 {
+			want += "\n… (truncated)"
+		}
+		assertRetentionRichWire(t, ctx, c2, sessionID, want)
+		if err := c2.Close(ctx); err != nil {
+			t.Fatal(err)
+		}
+		current, err := reopened.LoadCardTranscript(ctx, sessionID, true)
+		if err != nil || !reflect.DeepEqual(current, blocks) {
+			t.Fatal("projection settings rewrote retained history")
+		}
+		if next, err := reader.Poll(ctx); err != nil || len(next) != 0 {
+			t.Fatal("projection change replayed native tool events")
+		}
+	}
+}
+
+func assertRetentionRichWire(t *testing.T, ctx context.Context, c2 *telegramcontroller.Controller, sessionID domain.SessionID, want string) {
+	t.Helper()
 	projection, err := c2.ProjectCurrent(ctx, sessionID)
 	if err != nil || projection.Card == nil {
 		t.Fatalf("reopened projection: %v", err)
@@ -273,10 +337,6 @@ func retentionEndToEnd(t *testing.T, glyph string, count int) {
 		if _, err := sender.SendStatus(ctx, fmt.Sprintf("retention-%d", index), coordinator.Status{ConversationID: 42, Text: page.Content}); err != nil {
 			t.Fatal(err)
 		}
-	}
-	want := strings.TrimSuffix(strings.Repeat(strings.Repeat(glyph, 100)+"\n", 40), "\n")
-	if count > 4000 {
-		want += "\n… (truncated)"
 	}
 	if bodies.String() != want {
 		t.Fatalf("native->wire retained %d runes, want %d", utf8.RuneCountInString(bodies.String()), utf8.RuneCountInString(want))

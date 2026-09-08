@@ -20,7 +20,7 @@ import (
 	"bria/internal/storage"
 )
 
-func TestUnknownReopenRestoresOnlyLateExactFinalWithoutReplay(t *testing.T) {
+func TestAcceptedReopenRestoresOnlyLateExactFinalWithoutReplay(t *testing.T) {
 	lateFinalRecovery(t, false)
 }
 
@@ -129,7 +129,7 @@ func lateFinalRecovery(t *testing.T, partialCompleted bool) {
 		if err != nil || len(inputs) != 1 {
 			t.Fatalf("inputs: %#v %v", inputs, err)
 		}
-		wantPhase, wantBlocks := messagejournal.InputUnknown, 1
+		wantPhase, wantBlocks := messagejournal.InputAccepted, 1
 		if pass >= 2 {
 			wantPhase, wantBlocks = messagejournal.InputCompleted, 2
 		}

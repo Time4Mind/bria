@@ -2,7 +2,6 @@ package telegramcontroller
 
 import (
 	"context"
-	"errors"
 	"strings"
 
 	"bria/internal/domain"
@@ -10,17 +9,6 @@ import (
 	"bria/internal/telegramnodes"
 	"bria/internal/telegramsettingsview"
 )
-
-func (controller *Controller) cycleTechnicalOutputLines(ctx context.Context) (SemanticActionResult, error) {
-	preferences, ok := controller.settings.(settingsport.TechnicalOutputPreferences)
-	if !ok {
-		return SemanticActionResult{}, errors.New("technical output settings are not configured")
-	}
-	if err := preferences.CycleTechnicalOutputLines(ctx); err != nil {
-		return SemanticActionResult{}, err
-	}
-	return controller.settingsCategorySemanticResult(ctx, telegramsettingsview.CategoryCard)
-}
 
 func (controller *Controller) settingsSemanticResult(ctx context.Context) (SemanticActionResult, error) {
 	surface := telegramsettingsview.Render()

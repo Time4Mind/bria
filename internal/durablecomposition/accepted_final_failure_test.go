@@ -38,13 +38,13 @@ func TestRecoveryFinalSinkFailureAndUnknownNeverCompleteOrReplay(t *testing.T) {
 		previouslyUnknown bool
 		missingSink       bool
 	}{
-		{"sink failure", sessionruntime.AcceptedTurnCompleted, "proven final", false, messagejournal.InputUnknown, false, false},
-		{"stale proof", sessionruntime.AcceptedTurnCompleted, "", true, messagejournal.InputUnknown, false, false},
-		{"unknown", sessionruntime.AcceptedTurnUnknown, "", false, messagejournal.InputUnknown, false, false},
+		{"sink failure", sessionruntime.AcceptedTurnCompleted, "proven final", false, messagejournal.InputAccepted, false, false},
+		{"stale proof", sessionruntime.AcceptedTurnCompleted, "", true, messagejournal.InputAccepted, false, false},
+		{"unknown", sessionruntime.AcceptedTurnUnknown, "", false, messagejournal.InputAccepted, false, false},
 		{"completed without final", sessionruntime.AcceptedTurnCompleted, "", false, messagejournal.InputCompleted, false, false},
 		{"failed without final", sessionruntime.AcceptedTurnFailed, "", false, messagejournal.InputFailed, false, false},
 		{"unknown needs final proof", sessionruntime.AcceptedTurnCompleted, "", false, messagejournal.InputUnknown, true, false},
-		{"correlated requires sink", sessionruntime.AcceptedTurnCompleted, "proven final", false, messagejournal.InputUnknown, false, true},
+		{"correlated requires sink", sessionruntime.AcceptedTurnCompleted, "proven final", false, messagejournal.InputAccepted, false, true},
 		{"legacy without sink", sessionruntime.AcceptedTurnCompleted, "", false, messagejournal.InputCompleted, false, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -60,13 +60,13 @@ func TestRecoveryFinalSinkFailureAndUnknownNeverCompleteOrReplay(t *testing.T) {
 			if _, err = journal.LeaseNextInput(ctx, "logical", "worker", time.Unix(200, 0), time.Minute); err != nil {
 				t.Fatal(err)
 			}
-			if _, err = journal.MarkInputAccepted(ctx, "logical", "m", "worker"); err != nil {
-				t.Fatal(err)
-			}
 			if tc.previouslyUnknown {
-				if _, err = journal.MarkInputUnknown(ctx, "logical", "m"); err != nil {
-					t.Fatal(err)
-				}
+				_, err = journal.MarkInputDeliveryUnknown(ctx, "logical", "m", "worker")
+			} else {
+				_, err = journal.MarkInputAccepted(ctx, "logical", "m", "worker")
+			}
+			if err != nil {
+				t.Fatal(err)
 			}
 			flow, err := durableflow.New(journal, nil, nil, durableflow.Options{Owner: "worker", LeaseDuration: time.Minute, Now: func() time.Time { return time.Unix(210, 0) }})
 			if err != nil {
