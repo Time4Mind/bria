@@ -13,6 +13,10 @@ type ScreenSource interface {
 	ScreenPNG(context.Context, string) ([]byte, error)
 }
 
+type currentScreenSource interface {
+	CurrentScreenDelivery(context.Context, string) ([]byte, string, string, error)
+}
+
 type cachedScreenSource interface {
 	CachedScreenDelivery(string) ([]byte, string, string)
 	RequestScreenPNG(context.Context, string) error
@@ -35,10 +39,12 @@ func (sender *Sender) BindScreenSource(source any) error {
 	if sender == nil || source == nil || sender.screen != nil {
 		return errors.New("screen source binding is invalid")
 	}
-	if _, ok := source.(ScreenSource); !ok {
-		if _, cached := source.(cachedScreenSource); !cached {
-			if _, deferred := source.(deferredScreenSource); !deferred {
-				return errors.New("screen source binding is invalid")
+	if _, current := source.(currentScreenSource); !current {
+		if _, ok := source.(ScreenSource); !ok {
+			if _, cached := source.(cachedScreenSource); !cached {
+				if _, deferred := source.(deferredScreenSource); !deferred {
+					return errors.New("screen source binding is invalid")
+				}
 			}
 		}
 	}
@@ -51,11 +57,26 @@ func (sender *Sender) screenMessage(ctx context.Context, status coordinator.Stat
 	if sender.screen == nil || status.ScreenSessionID == "" {
 		return rich, nil, screenReceipt{}, nil
 	}
-	// Native production screenshots are refreshed asynchronously. The card
-	// must use only the last completed image; text and keyboard delivery never
-	// wait for capture or PNG encoding. The refresh is intentionally requested
-	// after reading the cache so this rich_md update carries the previous ready
-	// image while the next one is prepared.
+	if current, ok := sender.screen.(currentScreenSource); ok {
+		data, hash, fileID, err := current.CurrentScreenDelivery(ctx, status.ScreenSessionID)
+		if ctx.Err() != nil {
+			return rich, nil, screenReceipt{}, ctx.Err()
+		}
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return rich, nil, screenReceipt{}, err
+		}
+		if err != nil {
+			return rich, nil, screenReceipt{}, nil
+		}
+		rich, data = screenRichMessage(rich, data, fileID)
+		receipt := screenReceipt{}
+		if len(data) != 0 && hash != "" {
+			receipt = screenReceipt{sessionID: status.ScreenSessionID, pngHash: hash}
+		}
+		return rich, data, receipt, nil
+	}
+	// Legacy sources without current delivery retain their deferred contract:
+	// use a completed image while requesting the next one without blocking.
 	if deferred, ok := sender.screen.(cachedScreenSource); ok {
 		data, pngHash, fileID := deferred.CachedScreenDelivery(status.ScreenSessionID)
 		_ = deferred.RequestScreenPNG(context.WithoutCancel(ctx), status.ScreenSessionID)
@@ -107,7 +128,9 @@ func (sender *Sender) rememberScreenReceipt(receipt screenReceipt, message teleg
 	if receipt.sessionID == "" || receipt.pngHash == "" || sender == nil || sender.screen == nil {
 		return
 	}
-	source, ok := sender.screen.(cachedScreenSource)
+	source, ok := sender.screen.(interface {
+		RememberTelegramFileID(string, string, string) bool
+	})
 	if !ok {
 		return
 	}

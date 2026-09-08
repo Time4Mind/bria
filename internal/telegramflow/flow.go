@@ -96,6 +96,8 @@ type Config struct {
 	Operations         CallbackOperationStore
 	Sender             TransportSender
 	Observer           TraceObserver
+	// OnUserAction records authenticated ingress only; the scheduler owns deduplication.
+	OnUserAction func(coordinator.Update)
 }
 type pendingStore struct {
 	mu    sync.Mutex
@@ -115,6 +117,7 @@ type Handler struct {
 	acknowledger       CallbackAcknowledger
 	pending            *pendingStore
 	observer           TraceObserver
+	onUserAction       func(coordinator.Update)
 }
 type Sender struct {
 	base       TransportSender
@@ -173,6 +176,7 @@ func New(config Config) (*Handler, *Sender, error) {
 			acknowledger:       acknowledger,
 			pending:            pending,
 			observer:           config.Observer,
+			onUserAction:       config.OnUserAction,
 		}, &Sender{
 			base:       config.Sender,
 			registry:   config.CallbackRegistry,
@@ -243,6 +247,10 @@ func (handler *Handler) PrepareUnknownRecovery(ctx context.Context, update coord
 	return coordinator.RecoveryControl{}, coordinator.Decision{}, errors.New("project unknown callback recovery")
 }
 func (handler *Handler) Handle(ctx context.Context, update coordinator.Update) (decision coordinator.Decision, returnErr error) {
+	if handler.onUserAction != nil && update.ID > 0 && (update.Kind == coordinator.UpdateMessage || update.Kind == coordinator.UpdateCallback) &&
+		update.ActorID == handler.ownerUserID && update.ConversationID == handler.ownerPrivateChatID && update.ConversationKind == "private" {
+		handler.onUserAction(update)
+	}
 	started := time.Now()
 	operationID := "status:" + strconv.FormatInt(update.ID, 10)
 	handler.trace(ctx, TraceEvent{Stage: "ingress.received", OperationID: operationID, UpdateID: update.ID, UpdateKind: update.Kind, Result: "started"})

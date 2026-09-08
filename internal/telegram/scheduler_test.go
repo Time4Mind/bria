@@ -18,6 +18,215 @@ type schedulerClock struct {
 	waits []time.Duration
 }
 
+func recordSchedulerActivity(s *telegram.MutationScheduler, chat, update int64) {
+	s.RecordUserActivity(chat, update)
+}
+
+func TestMutationSchedulerElapsedActivityBoundaries(t *testing.T) {
+	for _, test := range []struct{ age, want time.Duration }{
+		{0, 1500 * time.Millisecond}, {25*time.Second - time.Nanosecond, 1500 * time.Millisecond},
+		{25 * time.Second, 2 * time.Second}, {50*time.Second - time.Nanosecond, 2 * time.Second},
+		{50 * time.Second, 2500 * time.Millisecond}, {650*time.Second - time.Nanosecond, 2500 * time.Millisecond},
+		{650 * time.Second, 3 * time.Second}, {1850*time.Second - time.Nanosecond, 3 * time.Second},
+		{1850 * time.Second, 3500 * time.Millisecond}, {3050 * time.Second, 4 * time.Second},
+		{time.Duration(1<<63 - 1), 3843074 * time.Second},
+	} {
+		t.Run(test.age.String(), func(t *testing.T) {
+			clock := &schedulerClock{now: time.Unix(1700000000, 0)}
+			stop := errors.New("observed scheduler delay")
+			var delay time.Duration
+			s, err := telegram.OpenMutationScheduler(telegram.SchedulerOptions{Now: clock.Now, Wait: func(_ context.Context, d time.Duration) error { delay = d; return stop }})
+			if err != nil {
+				t.Fatal(err)
+			}
+			recordSchedulerActivity(s, 42, 1)
+			m := telegram.Mutation{Method: "editMessageText", ChatID: 42, CardID: 10}
+			lease, err := s.Acquire(context.Background(), m)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_ = lease.Complete(telegram.MutationOutcome{})
+			if test.age > 0 {
+				clock.Advance(test.age)
+				lease, err = s.Acquire(context.Background(), m)
+				if err != nil {
+					t.Fatal(err)
+				}
+				_ = lease.Complete(telegram.MutationOutcome{})
+			}
+			if _, err := s.Acquire(context.Background(), m); !errors.Is(err, stop) || delay != test.want {
+				t.Fatalf("elapsed %s delay=%s want=%s err=%v", test.age, delay, test.want, err)
+			}
+		})
+	}
+}
+
+func TestMutationSchedulerActivityResetIsPerChatDeduplicatedAndKeepsSpacing(t *testing.T) {
+	for _, test := range []struct {
+		name         string
+		chat, update int64
+		want         time.Duration
+	}{
+		{"same-card-noop", 42, 11, 1500 * time.Millisecond}, {"replay", 42, 10, 3 * time.Second},
+		{"out-of-order", 42, 9, 3 * time.Second}, {"other-chat", 43, 11, 3 * time.Second},
+		{"invalid-chat", 0, 11, 3 * time.Second}, {"negative-update", 42, -1, 3 * time.Second},
+		{"zero-update", 42, 0, 3 * time.Second}, {"negative-chat", -42, 11, 3 * time.Second},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			clock := &schedulerClock{now: time.Unix(1700000000, 0)}
+			s, err := telegram.OpenMutationScheduler(telegram.SchedulerOptions{Now: clock.Now, Wait: clock.Wait})
+			if err != nil {
+				t.Fatal(err)
+			}
+			recordSchedulerActivity(s, 42, 10)
+			m := telegram.Mutation{Method: "editMessageText", ChatID: 42, CardID: 10}
+			first, err := s.Acquire(context.Background(), m)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_ = first.Complete(telegram.MutationOutcome{})
+			clock.Advance(700 * time.Second)
+			last, err := s.Acquire(context.Background(), m)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_ = last.Complete(telegram.MutationOutcome{})
+			recordSchedulerActivity(s, test.chat, test.update)
+			before := clock.Now()
+			next, err := s.Acquire(context.Background(), m)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_ = next.Complete(telegram.MutationOutcome{})
+			if got := clock.Now().Sub(before); got != test.want {
+				t.Fatalf("activity delay=%s want=%s", got, test.want)
+			}
+		})
+	}
+}
+
+func TestMutationSchedulerActivityResetInterruptsSleepingDelay(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	clock := &schedulerClock{now: time.Unix(1700000000, 0)}
+	started := make(chan time.Duration, 4)
+	cancelled := make(chan struct{}, 4)
+	advance := make(chan struct{})
+	s, err := telegram.OpenMutationScheduler(telegram.SchedulerOptions{Now: clock.Now, Wait: func(ctx context.Context, d time.Duration) error {
+		started <- d
+		select {
+		case <-ctx.Done():
+			cancelled <- struct{}{}
+			return ctx.Err()
+		case <-advance:
+			clock.Advance(d)
+			return nil
+		}
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	recordSchedulerActivity(s, 42, 1)
+	m := telegram.Mutation{Method: "editMessageText", ChatID: 42, CardID: 10}
+	lease, err := s.Acquire(ctx, m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = lease.Complete(telegram.MutationOutcome{})
+	clock.Advance(700 * time.Second)
+	lease, err = s.Acquire(ctx, m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = lease.Complete(telegram.MutationOutcome{})
+	done := make(chan error, 1)
+	go func() {
+		lease, err := s.Acquire(ctx, m)
+		if err == nil {
+			err = lease.Complete(telegram.MutationOutcome{})
+		}
+		done <- err
+	}()
+	select {
+	case d := <-started:
+		if d != 3*time.Second {
+			t.Fatalf("old delay=%s", d)
+		}
+	case <-ctx.Done():
+		t.Fatal("old wait missing")
+	}
+	recordSchedulerActivity(s, 42, 2)
+	select {
+	case <-cancelled:
+	case <-ctx.Done():
+		t.Fatal("activity did not cancel sleeping old delay")
+	}
+	select {
+	case d := <-started:
+		if d != 1500*time.Millisecond {
+			t.Fatalf("reset delay=%s", d)
+		}
+	case <-ctx.Done():
+		t.Fatal("reset wait missing")
+	}
+	close(advance)
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-ctx.Done():
+		t.Fatal("reset acquisition leaked")
+	}
+}
+
+func TestMutationSchedulerActivityPreservesGlobalCooldownAndStop(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		outcome telegram.MutationOutcome
+		want    time.Duration
+		stopped bool
+	}{
+		{name: "global-spacing", want: 40 * time.Millisecond},
+		{name: "retry-after", outcome: telegram.MutationOutcome{HTTPStatus: 429, RetryAfter: 7 * time.Second}, want: 7 * time.Second},
+		{name: "server-backoff", outcome: telegram.MutationOutcome{HTTPStatus: 500}, want: 4 * time.Second},
+		{name: "global-stop", outcome: telegram.MutationOutcome{HTTPStatus: 401}, stopped: true},
+		{name: "chat-stop", outcome: telegram.MutationOutcome{HTTPStatus: 403}, stopped: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			clock := &schedulerClock{now: time.Unix(1700000000, 0)}
+			s, err := telegram.OpenMutationScheduler(telegram.SchedulerOptions{Now: clock.Now, Wait: clock.Wait, Jitter: func(time.Duration) time.Duration { return 0 }})
+			if err != nil {
+				t.Fatal(err)
+			}
+			m := telegram.Mutation{Method: "sendMessage", ChatID: 42}
+			lease, err := s.Acquire(context.Background(), m)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := lease.Complete(test.outcome); err != nil {
+				t.Fatal(err)
+			}
+			s.RecordUserActivity(42, 1)
+			before := clock.Now()
+			lease, err = s.Acquire(context.Background(), m)
+			if test.stopped {
+				if !errors.Is(err, telegram.ErrMutationStopped) {
+					t.Fatalf("activity cleared stop: %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			_ = lease.Complete(telegram.MutationOutcome{})
+			if got := clock.Now().Sub(before); got != test.want {
+				t.Fatalf("activity changed safety delay=%s want=%s", got, test.want)
+			}
+		})
+	}
+}
+
 type blockingSchedulerClock struct {
 	mu      sync.Mutex
 	now     time.Time
@@ -67,52 +276,48 @@ func (clock *schedulerClock) Advance(delay time.Duration) {
 	clock.mu.Unlock()
 }
 
-func TestMutationSchedulerUsesStagedCardCadenceAndResetsOnCardSwitch(t *testing.T) {
-	t.Parallel()
-
-	clock := &schedulerClock{now: time.Unix(1_700_000_000, 0).UTC()}
-	options := telegram.SchedulerOptions{StatePath: filepath.Join(t.TempDir(), "scheduler.json"), Now: clock.Now, Wait: clock.Wait, Jitter: func(time.Duration) time.Duration { return 0 }}
-	scheduler, err := telegram.OpenMutationScheduler(options)
-	if err != nil {
-		t.Fatal(err)
+func TestMutationSchedulerRegisteredActivitySurvivesRoutineCarrierAndOutgoingInteractive(t *testing.T) {
+	for _, interactive := range []bool{false, true} {
+		t.Run(map[bool]string{false: "routine-carrier", true: "outgoing-interactive"}[interactive], func(t *testing.T) {
+			clock := &schedulerClock{now: time.Unix(1700000000, 0)}
+			s, err := telegram.OpenMutationScheduler(telegram.SchedulerOptions{Now: clock.Now, Wait: clock.Wait})
+			if err != nil {
+				t.Fatal(err)
+			}
+			s.RecordUserActivity(42, 1)
+			m := telegram.Mutation{Method: "editMessageText", ChatID: 42, CardID: 10}
+			for _, advance := range []time.Duration{0, 700 * time.Second} {
+				clock.Advance(advance)
+				lease, err := s.Acquire(context.Background(), m)
+				if err != nil {
+					t.Fatal(err)
+				}
+				_ = lease.Complete(telegram.MutationOutcome{})
+			}
+			before := clock.Now()
+			m.CardID = 11
+			if interactive {
+				outgoing := m
+				outgoing.Priority = telegram.MutationInteractive
+				lease, err := s.Acquire(context.Background(), outgoing)
+				if err != nil {
+					t.Fatal(err)
+				}
+				_ = lease.Complete(telegram.MutationOutcome{})
+			}
+			lease, err := s.Acquire(context.Background(), m)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_ = lease.Complete(telegram.MutationOutcome{})
+			if got := clock.Now().Sub(before); got != 3*time.Second {
+				t.Fatalf("background carrier reset activity or lastAt: elapsed=%s want=3s", got)
+			}
+		})
 	}
-	mutation := telegram.Mutation{Method: "editMessageText", ChatID: 42, CardID: 10}
-	for attempt := 1; attempt <= 31; attempt++ {
-		lease, err := scheduler.Acquire(context.Background(), mutation)
-		if err != nil {
-			t.Fatalf("Acquire(%d): %v", attempt, err)
-		}
-		if err := lease.Complete(telegram.MutationOutcome{}); err != nil {
-			t.Fatalf("Complete(%d): %v", attempt, err)
-		}
-	}
-	if len(clock.waits) != 30 {
-		t.Fatalf("wait count = %d, want 30", len(clock.waits))
-	}
-	for index, delay := range clock.waits {
-		want := 1500 * time.Millisecond
-		if index >= 9 && index < 29 {
-			want = 2500 * time.Millisecond
-		} else if index >= 29 {
-			want = 3500 * time.Millisecond
-		}
-		if delay != want {
-			t.Fatalf("wait[%d] = %v, want %v", index, delay, want)
-		}
-	}
-
-	before := len(clock.waits)
-	lease, err := scheduler.Acquire(context.Background(), telegram.Mutation{Method: "editMessageText", ChatID: 42, CardID: 11})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := clock.waits[before:]; len(got) != 1 || got[0] != 40*time.Millisecond {
-		t.Fatalf("card switch waits = %v, want only 40ms global spacing", got)
-	}
-	_ = lease.Complete(telegram.MutationOutcome{})
 }
 
-func TestMutationSchedulerUsesFiveSecondCardCadenceAfterThirtyMinutes(t *testing.T) {
+func TestMutationSchedulerUsesElapsedCadenceAfterThirtyMinutes(t *testing.T) {
 	t.Parallel()
 
 	clock := &schedulerClock{now: time.Unix(1_700_000_000, 0).UTC()}
@@ -136,8 +341,8 @@ func TestMutationSchedulerUsesFiveSecondCardCadenceAfterThirtyMinutes(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := clock.waits[len(clock.waits)-1]; got != 5*time.Second {
-		t.Fatalf("thirty-minute cadence wait = %v, want 5s", got)
+	if got := clock.waits[len(clock.waits)-1]; got != 3*time.Second {
+		t.Fatalf("thirty-minute cadence wait = %v, want 3s", got)
 	}
 	_ = third.Complete(telegram.MutationOutcome{})
 }
@@ -162,7 +367,8 @@ func TestMutationSchedulerResetsLongCardCadenceAfterInteractiveSessionSwitch(t *
 		t.Fatal(err)
 	}
 	_ = lease.Complete(telegram.MutationOutcome{})
-	for _, cardID := range []int64{11, 10} {
+	for index, cardID := range []int64{11, 10} {
+		scheduler.RecordUserActivity(42, int64(index+1))
 		lease, err = scheduler.Acquire(context.Background(), telegram.Mutation{
 			Method: "editMessageText", ChatID: 42, CardID: cardID, Priority: telegram.MutationInteractive,
 		})

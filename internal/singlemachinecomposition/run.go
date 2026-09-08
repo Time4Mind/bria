@@ -607,6 +607,9 @@ func runTelegramController(
 	callbackExecutor := turnRuntime.WrapCallback(telegramflow.CallbackExecutor(recoveryExecutor))
 	flowHandler, flowSender, err := telegramflow.New(telegramflow.Config{
 		OwnerUserID: configuration.OwnerUserID, OwnerPrivateChatID: configuration.PrivateChatID,
+		OnUserAction: func(update coordinator.Update) {
+			telegramScheduler.RecordUserActivity(update.ConversationID, update.ID)
+		},
 		Presenter: presenter, CallbackRegistry: callbackRegistry,
 		UIState: telegramruntimecomposition.SessionTelegramUIStore{State: state}, MessageUI: controllerAdapter,
 		Callbacks: callbackExecutor, Operations: callbackOperations, Sender: transportSender, Observer: flowTrace,

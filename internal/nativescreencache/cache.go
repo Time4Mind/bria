@@ -1,6 +1,6 @@
-// Package nativescreencache owns native screenshot refresh cadence, immutable
-// PNG identities, receipt reuse, and lifecycle invalidation. Runtime and
-// preferences are supplied through callbacks; no transport is accessed here.
+// Package nativescreencache owns guarded local screenshot rendering, immutable
+// PNG identities, receipt reuse, and lifecycle invalidation. The transport owns
+// refresh cadence; runtime snapshots and preferences arrive through callbacks.
 package nativescreencache
 
 import (
@@ -9,7 +9,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"sync"
-	"time"
 
 	"bria/internal/domain"
 	"bria/internal/nativerender"
@@ -30,6 +29,7 @@ type NativeImage struct {
 
 type nativeCacheEntry struct {
 	snapshotHash string
+	captureKiB   int
 	image        NativeImage
 }
 
@@ -67,28 +67,8 @@ type Source struct {
 	png            []byte
 	cache          map[domain.SessionID][]nativeCacheEntry
 	epoch          map[domain.SessionID]uint64
-	lastCapture    time.Time
-	interval       time.Duration
-	captures       int
 	inFlight       bool
 	requestPending bool
-}
-
-const (
-	minScreenshotInterval    = 2500 * time.Millisecond
-	steadyScreenshotInterval = 3500 * time.Millisecond
-	maxScreenshotInterval    = 5 * time.Second
-)
-
-func screenshotInterval(captures int) time.Duration {
-	switch {
-	case captures >= 30:
-		return maxScreenshotInterval
-	case captures >= 10:
-		return steadyScreenshotInterval
-	default:
-		return minScreenshotInterval
-	}
 }
 
 func New(config Config) (*Source, error) {
@@ -98,7 +78,7 @@ func New(config Config) (*Source, error) {
 	return &Source{
 		preferences: config.Preferences, activeSession: config.ActiveSession, snapshot: config.Snapshot,
 		cache: make(map[domain.SessionID][]nativeCacheEntry),
-		epoch: make(map[domain.SessionID]uint64), interval: minScreenshotInterval,
+		epoch: make(map[domain.SessionID]uint64),
 	}, nil
 }
 
@@ -167,8 +147,6 @@ func (source *Source) ForgetSession(sessionID string) {
 	source.epoch[id]++
 	if source.session == id {
 		source.session, source.hash, source.pngHash, source.fileID, source.png = "", "", "", "", nil
-		source.lastCapture, source.captures = time.Time{}, 0
-		source.interval = minScreenshotInterval
 	}
 	source.mu.Unlock()
 }
@@ -197,126 +175,92 @@ func (source *Source) refreshAsync(ctx context.Context, id domain.SessionID) {
 		source.requestPending = false
 		source.mu.Unlock()
 	}()
-	preferences, err := source.preferences(ctx)
-	if err != nil || !preferences.ScreenEnabled {
-		return
+	_, _, _, _ = source.CurrentScreenDelivery(ctx, string(id))
+}
+
+// CurrentScreenDelivery renders the latest local native snapshot for this
+// update. The transport owns cadence; no provider capture, timer or input is
+// triggered here. Busy renders degrade to text instead of waiting indefinitely.
+func (source *Source) CurrentScreenDelivery(ctx context.Context, sessionID string) ([]byte, string, string, error) {
+	if source == nil || ctx == nil || sessionID == "" {
+		return nil, "", "", ErrInvalidConfiguration
 	}
-	active, err := source.activeSession(ctx)
-	if err != nil || active != id {
-		return
+	if err := ctx.Err(); err != nil {
+		return nil, "", "", err
 	}
-	snapshot, ok := source.snapshot(id)
-	if !ok || snapshot.FullText == "" || snapshot.Hash == "" {
-		return
-	}
-	now := time.Now()
+	id := domain.SessionID(sessionID)
 	source.mu.Lock()
-	if source.session != id {
-		source.session, source.hash, source.pngHash, source.fileID, source.png = id, "", "", "", nil
-		source.lastCapture, source.captures = time.Time{}, 0
-		source.interval = minScreenshotInterval
-	}
-	if cached, ok := source.cachedBySnapshotHash(id, snapshot.Hash); ok {
-		source.setCurrent(id, snapshot.Hash, cached)
+	if source.inFlight {
 		source.mu.Unlock()
-		return
-	}
-	if source.hash == snapshot.Hash && len(source.png) > 0 {
-		source.mu.Unlock()
-		return
-	}
-	if source.inFlight || (!source.lastCapture.IsZero() && now.Sub(source.lastCapture) < source.interval) {
-		source.mu.Unlock()
-		return
+		return nil, "", "", nil
 	}
 	source.inFlight = true
 	epoch := source.epoch[id]
 	source.mu.Unlock()
+	defer func() { source.mu.Lock(); source.inFlight = false; source.mu.Unlock() }()
 
-	data, renderErr := nativerender.RenderNativeWithOptions(ctx, snapshot.FullText, nativerender.NativeOptions{CaptureKiB: preferences.ScreenCaptureLimitKiB})
-	active, activeErr := source.activeSession(ctx)
-	source.mu.Lock()
-	defer source.mu.Unlock()
-	source.inFlight = false
-	if renderErr != nil || activeErr != nil || active != id || len(data) == 0 ||
-		len(data) > maxRichNativePNGBytes || source.epoch[id] != epoch {
-		return
-	}
-	image := source.imageForRenderedPNG(id, data)
-	source.remember(id, nativeCacheEntry{snapshotHash: snapshot.Hash, image: image})
-	source.setCurrent(id, snapshot.Hash, image)
-	source.lastCapture = time.Now()
-	source.captures++
-	source.interval = screenshotInterval(source.captures)
-}
-
-// ScreenPNG is active-card only, globally opt-in, and strictly cache-based.
-// Unavailable snapshots are not substituted with old event-transcript images.
-func (source *Source) ScreenPNG(ctx context.Context, sessionID string) ([]byte, error) {
-	id := domain.SessionID(sessionID)
-	if source == nil || ctx == nil || id == "" {
-		return nil, ErrInvalidConfiguration
-	}
 	preferences, err := source.preferences(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if !preferences.ScreenEnabled {
-		return nil, nil
+	if err != nil || !preferences.ScreenEnabled {
+		return nil, "", "", err
 	}
 	active, err := source.activeSession(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if active != id {
-		return nil, nil
+	if err != nil || active != id {
+		return nil, "", "", err
 	}
 	snapshot, ok := source.snapshot(id)
-	if !ok || snapshot.FullText == "" {
-		return nil, nil
+	if !ok || snapshot.FullText == "" || snapshot.Hash == "" {
+		return nil, "", "", nil
+	}
+	source.mu.Lock()
+	image, cached := source.cachedBySnapshotHash(id, snapshot.Hash, preferences.ScreenCaptureLimitKiB)
+	source.mu.Unlock()
+	if !cached {
+		data, renderErr := nativerender.RenderNativeWithOptions(ctx, snapshot.FullText, nativerender.NativeOptions{CaptureKiB: preferences.ScreenCaptureLimitKiB})
+		if renderErr != nil {
+			return nil, "", "", renderErr
+		}
+		if len(data) == 0 || len(data) > maxRichNativePNGBytes {
+			return nil, "", "", nil
+		}
+		source.mu.Lock()
+		image = source.imageForRenderedPNG(id, data)
+		source.mu.Unlock()
+	}
+	// User navigation, Screen-off, or Forget may happen while encoding.
+	active, err = source.activeSession(ctx)
+	if err != nil || active != id {
+		return nil, "", "", err
+	}
+	currentPreferences, err := source.preferences(ctx)
+	if err != nil || !currentPreferences.ScreenEnabled || currentPreferences.ScreenCaptureLimitKiB != preferences.ScreenCaptureLimitKiB {
+		return nil, "", "", err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, "", "", err
 	}
 	source.mu.Lock()
 	defer source.mu.Unlock()
-	if source.session != id {
-		source.session, source.hash, source.pngHash, source.fileID, source.png = id, "", "", "", nil
-		source.lastCapture, source.captures = time.Time{}, 0
-		source.interval = minScreenshotInterval
+	if source.epoch[id] != epoch {
+		return nil, "", "", nil
 	}
-	if source.session != id || source.hash != snapshot.Hash || len(source.png) == 0 {
-		if cached, ok := source.cachedBySnapshotHash(id, snapshot.Hash); ok {
-			source.setCurrent(id, snapshot.Hash, cached)
-		} else {
-			png, err := nativerender.RenderNativeWithOptions(ctx, snapshot.FullText, nativerender.NativeOptions{CaptureKiB: preferences.ScreenCaptureLimitKiB})
-			if err != nil {
-				return nil, err
-			}
-			// An unexpectedly oversized image must not block the rich text card.
-			// The renderer owns normal content cropping to the accepted bound.
-			if len(png) > maxRichNativePNGBytes {
-				return nil, nil
-			}
-			image := source.imageForRenderedPNG(id, png)
-			source.remember(id, nativeCacheEntry{snapshotHash: snapshot.Hash, image: image})
-			source.setCurrent(id, snapshot.Hash, image)
-			source.lastCapture = time.Now()
-			source.captures++
-			source.interval = screenshotInterval(source.captures)
-		}
+	// Preserve a receipt arriving during the render/checks.
+	if prior, ok := source.cachedByPNGHash(id, image.Hash); ok {
+		image.FileID = prior.FileID
 	}
-	// A switch during rendering must not attach the former node's terminal.
-	active, err = source.activeSession(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if active != id {
-		return nil, nil
-	}
-	return append([]byte(nil), source.png...), nil
+	source.remember(id, nativeCacheEntry{snapshotHash: snapshot.Hash, captureKiB: preferences.ScreenCaptureLimitKiB, image: image})
+	source.setCurrent(id, snapshot.Hash, image)
+	return append([]byte(nil), image.PNG...), image.Hash, image.FileID, nil
 }
 
-func (source *Source) cachedBySnapshotHash(id domain.SessionID, hash string) (NativeImage, bool) {
+// ScreenPNG keeps the existing synchronous API on the guarded delivery path.
+func (source *Source) ScreenPNG(ctx context.Context, sessionID string) ([]byte, error) {
+	png, _, _, err := source.CurrentScreenDelivery(ctx, sessionID)
+	return png, err
+}
+
+func (source *Source) cachedBySnapshotHash(id domain.SessionID, hash string, captureKiB int) (NativeImage, bool) {
 	for _, entry := range source.cache[id] {
-		if entry.snapshotHash == hash && len(entry.image.PNG) != 0 {
+		if entry.snapshotHash == hash && entry.captureKiB == captureKiB && len(entry.image.PNG) != 0 {
 			return entry.image, true
 		}
 	}
@@ -347,7 +291,7 @@ func (source *Source) remember(id domain.SessionID, entry nativeCacheEntry) {
 	filtered := make([]nativeCacheEntry, 0, maxCachedNativePNGsPerSession)
 	filtered = append(filtered, entry)
 	for _, cached := range entries {
-		if cached.snapshotHash == entry.snapshotHash || cached.image.Hash == entry.image.Hash {
+		if cached.snapshotHash == entry.snapshotHash && cached.captureKiB == entry.captureKiB || cached.image.Hash == entry.image.Hash {
 			continue
 		}
 		filtered = append(filtered, cached)

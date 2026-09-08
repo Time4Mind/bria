@@ -18,10 +18,11 @@ func TestRefreshReturnsBeforeCaptureAndOutlivesCardContext(t *testing.T) {
 	defer cancel()
 	entered, release := make(chan struct{}), make(chan struct{})
 	var once sync.Once
+	var enteredOnce sync.Once
 	defer once.Do(func() { close(release) })
 	source, err := nativescreencache.New(nativescreencache.Config{
 		Preferences: func(ctx context.Context) (nativescreencache.Preferences, error) {
-			close(entered)
+			enteredOnce.Do(func() { close(entered) })
 			<-release
 			if ctx.Err() != nil || ctx.Value(contextKey{}) != "card" {
 				t.Error("refresh lost context values or inherited card cancellation")

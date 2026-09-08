@@ -1,5 +1,91 @@
 # A26: Separate command and output spoiler limits
 
+## Current amendment A28: shared refresh cadence and all user activity
+
+Artem added before push/install (2026-09-09 Europe/Moscow): screenshot refresh
+must use the same timings as text; ANY user action resets the activity timer,
+not only session switches/menu reopen. Since last user action: first 25 seconds
+refresh every 1.5s; next 25 seconds every 2s; next 10 minutes every 2.5s; thereafter
+add 0.5s for each 20-minute stage. Exact first slow-stage increment is being
+clarified asynchronously (3s immediately after 10m50s vs 20m later); independent
+mapping and tests may proceed. No provider/background event resets user activity.
+Working interpretation announced to Artem while clarification remains unanswered:
+3s begins immediately at elapsed 650s; 3.5s at 1850s, then +0.5s every 1200s.
+This is an explicit assumption, not a received answer; adapt if he clarifies.
+Only authenticated user actions in this existing bot scope count, not unsolicited
+updates from others. Preserve visibility cancellation, no stale media/text,
+single in-flight capture, rate-limit/error handling and no background chat spam.
+
+Same entire request and automatic release obligations remain. A26+A27 production
+commit `622074212284626c23cfd552544ee54cc32e6712` is local only; no push/install/restart.
+Their final full gate passed before A28, so A28 must receive fresh release gate.
+One additional cancellation regression left by the earlier executor exists as
+`cmd/bria/accepted_anchor_cancel_test.go`, independently race-tested x3 (1.153s),
+not yet committed; retain it in the final test manifest.
+
+Deliverable: shared elapsed-time refresh policy wired to both text/screenshot
+and every authenticated user action, deterministic boundary/reset/visibility
+tests, full source checks, push/current-SHA CI/install/restart/postflight.
+Allowed changes: this code/tests/docs and previously bounded current Bria release;
+no new live messages, hosts, secrets or manual state edits. Acceptance through
+real controller/native-cache/notification consumers with fake clock/transport;
+live state/version/getMe checks after deployment, no unobserved visual claim.
+
+Coverage before implementation: main owns contract/docs/synthesis and final
+wiring/release; Darwin read-only maps text timers and action resets; Bernoulli
+read-only maps screenshot cache and common notification path; Anscombe read-only
+maps authenticated ingress coverage. Assign disjoint edit zones after findings.
+Stop each map at exact files/current semantics/public regression seam, no broad
+refactor. Carver independent final review. Previous source owners remain frozen.
+Implementation ownership: Darwin - mutationscheduler plus telegram/scheduler_test.go;
+Anscombe - telegramflow ingress helper/config/tests; Bernoulli - nativescreencache,
+screenproduction, telegrambridge/screen.go and screen_test.go; main - docs,
+singlemachinecomposition wiring and architecture registry only if required.
+APIs: scheduler.RecordUserActivity(chatID, updateID) deduplicates received actions;
+telegramflow.Config.OnUserAction func(coordinator.Update) authenticates before
+calling it; native source exposes same-update CurrentScreenDelivery to bridge.
+Screenshot production consumes local native snapshots, no provider RPC or new
+periodic sender. Existing deferred compatibility may remain, but production no
+longer deliberately sends the prior ready image or uses a second cadence.
+Architecture placement: Bernoulli also owns cmd/bria/screenshot_update_test.go
+for real native-source/bridge integration, because bridge tests cannot import
+runtime/settings layers. Peirce owns separate cmd/bria/refresh_cadence_integration_test.go
+for shared scheduler + authenticated ingress + physical Rich payload integration.
+No architecture allowlist or existing size cap is weakened for these tests.
+Typing before send or client-side scrolling have no Telegram ingress event and
+are not observable; delivered messages/callbacks, including stale owner buttons,
+do reset activity. No new invisible-client event source is authorized.
+
+| ID | Acceptance | Status | Evidence |
+|---|---|---|---|
+| A28.1 | Exact elapsed-time stages shared by text and screenshots | done locally | Shared elapsed scheduler, no independent capture throttle, same Rich payload with current PNG |
+| A28.2 | Every authenticated user action resets the common timer | done locally | Authenticated ingress, per-chat update dedup, interruptible pending wait; message/voice/signed and stale callback tests |
+| A28.3 | No stale/mismatched updates; boundary/reset tests and full release | done locally | Public RED/GREEN, joined real-consumer tests, final full gate and independent review PASS; release tracked below |
+
+A28 owners frozen: scheduler 648/650 LOC; production consumers reviewed by main.
+Main combined race PASS: flow 10.929s, native cache 1.494s, screenproduction
+0.479s, bridge 1.219s, Telegram 1.724s, composition 1.817s. Final architecture,
+policy tests and format PASS. Owners supplied public RED/GREEN for interrupting
+a pending scheduler wait, first-frame/crop-change/Screen-off screenshot guards;
+joined real ingress/controller/native render/Rich HTTP tests plain 1.245s and
+race x3 6.404s. Joined tests added after APIs are GREEN-only, not claimed RED.
+Independent reviewer has no required findings, conditional on fresh full gate.
+PNG is current at preparation, then text and image share one scheduled mutation;
+this is not atomic provider capture at HTTP delivery or a live visual proof.
+
+Final A26+A27+A28 gate: main observed `make check-full` exit 0 on frozen source
+2026-09-08 21:58 UTC. Cmd plain 34.545s/race 56.467s; flow plain 13.119s/race
+14.858s; all policy/architecture/format/vet/packaging checks and executable trio
+acceptance PASS. Post-build config check PASS, version
+`20260908-separate-spoiler-limits`, all three Mach-O arm64 binaries.
+Final bria SHA256 `63038db59a1a6d8cdc1a9aee0139359b82abc242cb728a7fc51bb0cf09a2013f`;
+Codex and Claude adapter hashes remain those in the A27 final gate below.
+Source freeze matches reviewed scheduler SHA256
+`650154c99b02420d501a05a8aded3f5c5b5b1290fe1122032d3de912e2d1b201`.
+Fresh 21:56:58 UTC preflight: same 5 sessions, 146 history entries, 16 completed
+inputs, unchanged identity/cards/journal/config/plist/settings hashes. Not yet
+an install receipt. Remote main reread remains b767f9e; ordinary push next.
+
 ## Current amendment A27: accepted requests retain acceptance
 
 Artem added before push/install: once accepted by the model, a request must not

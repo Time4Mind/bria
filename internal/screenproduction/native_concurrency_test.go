@@ -63,10 +63,10 @@ type firstRefreshSettings struct {
 
 func (s *firstRefreshSettings) Load(context.Context) (settings.Settings, error) {
 	call := s.calls.Add(1)
-	if call == 2 {
+	if call == 3 {
 		close(s.next)
 	}
-	return settings.Settings{ScreenEnabled: call == 1}, nil
+	return settings.Settings{ScreenEnabled: call <= 2}, nil
 }
 
 type delayedActiveCheck struct {

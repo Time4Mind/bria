@@ -1224,7 +1224,7 @@ var packagePolicies = map[string]packagePolicy{
 		maxProductionLines: 550,
 	},
 	"internal/nativescreencache": {
-		responsibility:     "own immutable screenshot cache, refresh cadence and lifecycle invalidation",
+		responsibility:     "prepare current immutable screenshot delivery and lifecycle invalidation",
 		allowedImports:     []string{"internal/domain", "internal/nativerender"},
 		maxProductionLines: 400,
 	},

@@ -12,16 +12,17 @@ import (
 // NativeImage identifies an immutable rendered PNG and its confirmed receipt.
 type NativeImage = nativescreencache.NativeImage
 
-// NativeSource preserves the production screen API while cache state and
-// refresh scheduling are owned independently of settings and provider adapters.
+// NativeSource renders a current cached native snapshot for the same rich card
+// update. Cache state is independent of settings/provider adapters and has no
+// cadence of its own; the Telegram mutation scheduler controls delivery timing.
 type NativeSource = nativescreencache.Source
 
 type ActiveSessionReader interface {
 	LoadActiveSession(context.Context) (domain.SessionID, error)
 }
 
-// ScreenshotRefreshSource lets rich cards consume ready images and request
-// refresh without placing capture or PNG rendering on the text critical path.
+// ScreenshotRefreshSource retains the legacy deferred-refresh capability.
+// Production rich cards prefer NativeSource.CurrentScreenDelivery instead.
 type ScreenshotRefreshSource interface {
 	CachedScreenPNG(string) []byte
 	RequestScreenPNG(context.Context, string) error

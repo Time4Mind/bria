@@ -71,10 +71,9 @@ type mutationDiskState struct {
 }
 
 type cadenceState struct {
-	cardID    int64
-	count     int
-	startedAt time.Time
-	lastAt    time.Time
+	lastUpdateID int64
+	startedAt    time.Time
+	lastAt       time.Time
 }
 
 type globalStart struct {
@@ -238,8 +237,9 @@ func (scheduler *MutationScheduler) Acquire(ctx context.Context, mutation Mutati
 			scheduler.mu.Unlock()
 			return &Lease{scheduler: scheduler, mutation: mutation, heavy: heavy, probe: probe, epoch: epoch}, nil
 		}
+		notify := scheduler.notify
 		scheduler.mu.Unlock()
-		if err := scheduler.wait(ctx, delay); err != nil {
+		if err := scheduler.waitDelay(ctx, delay, notify); err != nil {
 			releaseHeavy()
 			return nil, err
 		}
@@ -416,10 +416,6 @@ func (scheduler *MutationScheduler) delayLocked(now time.Time, mutation Mutation
 	}
 	if mutation.ChatID != 0 && mutation.CardID > 0 && mutation.Priority != Interactive {
 		cadence := scheduler.cadence[mutation.ChatID]
-		if mutation.CardID != 0 && cadence.cardID != mutation.CardID {
-			cadence = cadenceState{cardID: mutation.CardID}
-			scheduler.cadence[mutation.ChatID] = cadence
-		}
 		chatDelay := cadence.lastAt.Add(cadenceInterval(cadence, now)).Sub(now)
 		if chatDelay > delay {
 			delay = chatDelay
@@ -434,21 +430,13 @@ func (scheduler *MutationScheduler) delayLocked(now time.Time, mutation Mutation
 func (scheduler *MutationScheduler) recordStartLocked(now time.Time, mutation Mutation) {
 	scheduler.globalStarts = append(scheduler.globalStarts, globalStart{at: now, priority: mutation.Priority})
 	scheduler.state.LastMutationAt = now
-	if mutation.ChatID == 0 || mutation.CardID <= 0 {
+	if mutation.ChatID == 0 || mutation.CardID <= 0 || mutation.Priority == Interactive {
 		return
 	}
 	cadence := scheduler.cadence[mutation.ChatID]
-	if mutation.CardID != 0 && cadence.cardID != mutation.CardID {
-		cadence = cadenceState{cardID: mutation.CardID}
-		scheduler.cadence[mutation.ChatID] = cadence
-	}
-	if mutation.Priority == Interactive {
-		return
-	}
 	if cadence.startedAt.IsZero() {
 		cadence.startedAt = now
 	}
-	cadence.count++
 	cadence.lastAt = now
 	scheduler.cadence[mutation.ChatID] = cadence
 }
@@ -478,17 +466,38 @@ func (scheduler *MutationScheduler) classDelayLocked(now time.Time, priority Pri
 	return 0
 }
 
+// RecordUserActivity accepts only fresh authenticated-ingress identities. The
+// caller owns authentication. Activity is per chat, in-memory, and never clears
+// mutation spacing, rate limits, cooldown or stop state.
+func (scheduler *MutationScheduler) RecordUserActivity(chatID, updateID int64) {
+	if scheduler == nil || chatID <= 0 || updateID <= 0 {
+		return
+	}
+	scheduler.mu.Lock()
+	defer scheduler.mu.Unlock()
+	state := scheduler.cadence[chatID]
+	if updateID <= state.lastUpdateID {
+		return
+	}
+	state.lastUpdateID, state.startedAt = updateID, scheduler.now().UTC()
+	scheduler.cadence[chatID] = state
+	scheduler.broadcastLocked()
+}
+
 func cadenceInterval(state cadenceState, now time.Time) time.Duration {
-	if !state.startedAt.IsZero() && now.Sub(state.startedAt) >= 30*time.Minute {
-		return 5 * time.Second
-	}
-	if state.count >= 30 {
-		return 3500 * time.Millisecond
-	}
-	if state.count >= 10 {
+	elapsed := now.Sub(state.startedAt)
+	switch {
+	case state.startedAt.IsZero() || elapsed < 25*time.Second:
+		return baseMutationInterval
+	case elapsed < 50*time.Second:
+		return 2 * time.Second
+	case elapsed < 650*time.Second:
 		return 2500 * time.Millisecond
+	default:
+		// Sub saturates at Duration's maximum; dividing before multiplication
+		// keeps unlimited stage growth bounded without duration overflow.
+		return 3*time.Second + ((elapsed-650*time.Second)/(20*time.Minute))*(500*time.Millisecond)
 	}
-	return baseMutationInterval
 }
 
 func serverBackoff(failures int) time.Duration {
@@ -528,6 +537,31 @@ func waitForSchedulerChange(ctx context.Context, notify <-chan struct{}) error {
 		return ctx.Err()
 	case <-notify:
 		return nil
+	}
+}
+
+func (scheduler *MutationScheduler) waitDelay(ctx context.Context, delay time.Duration, notify <-chan struct{}) error {
+	waitCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		select {
+		case <-notify:
+			cancel()
+		case <-waitCtx.Done():
+		}
+	}()
+	err := scheduler.wait(waitCtx, delay)
+	cancel()
+	<-done
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	select {
+	case <-notify:
+		return nil
+	default:
+		return err
 	}
 }
 
