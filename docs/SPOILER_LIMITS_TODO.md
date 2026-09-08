@@ -203,8 +203,36 @@ Prior feature owners are frozen. No useful further independent write zones.
 | ID | Acceptance | Status | Evidence |
 |---|---|---|---|
 | A26.R1 | Standing automatic release rule with protected policy tests | done | Public policy RED/GREEN; machine negative controls and independent review |
-| A26.R2 | Full gate, exact commit pushed, current-SHA CI green | pending | Prior scoped checks not full release gate |
-| A26.R3 | Exact release installed, Bria restarted, data/health verified | pending | Live preflight current=final-save-retry PID89675 |
+| A26.R2 | Full gate, exact commit pushed, current-SHA CI green | done | b65c6f6 pushed; Stage 1 checks 34283573135 and Platform build matrix 34283573164 success |
+| A26.R3 | Exact release installed, Bria restarted, data/health verified | done | Exact trio installed 22:04 UTC; PID90706 owns lock, getMe PASS; hashes/data retained; flow_ready and recovery logs, no fresh errors |
+
+## A26+A27+A28 release receipt
+
+2026-09-08 22:04 UTC (2026-09-09 01:04 Europe/Moscow): source
+`b65c6f6e2ab5c0ea65cf21178291b82658f07418` is in origin/main and both mandatory
+CI runs succeeded before installation. The exact verified trio was installed to
+`/Users/a-s-nosko/.local/opt/bria-v2/releases/20260908-separate-spoiler-limits`.
+Old PID89675 exited gracefully; lock was empty; only existing service
+`gui/501/com.time4mind.bria.v2` was bootstrapped with unchanged plist. Current
+symlink now selects this release; PID90706 is running and owns the sole lock.
+Installed version and all three hashes match the final A28 build above.
+Postflight getMe PASS. Initial one-shot preflight Telegram failures were
+unclassified, not auth rejection; subsequent independent candidate/installed
+identity probes PASS. No token/config/proxy changes were made.
+
+Main reread at 22:04:54 UTC: 5 sessions (3 ready/2 archived), 5 cards,
+146 history entries and 16 completed inputs. Identity/cards/journal/config/
+plist/settings hashes match immediately before and after graceful stop exactly.
+No user data was deleted or manually rewritten; earlier releases were retained.
+Fresh safe logs 22:04:31-22:05:31 UTC: flow_ready once, startup recovery recovered
+twice, no errors/repeated errors/malformed rows/partial tails. Two native adapters
+run from the new release. PID90706 remains running with runs=1/no exits at
+22:05:07 and 22:05:41; main independently rechecked at 22:06:05, with all
+preservation hashes unchanged. This is bounded operational postflight, not
+long-term stability proof.
+No manual visual Telegram acceptance, outgoing test message, artificial live
+disk failure, or observation of client-only typing/scrolling is claimed.
+The later release-receipt commit changes documentation only, not installed code.
 
 ## Final amended release gate
 
