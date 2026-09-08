@@ -86,7 +86,7 @@ not relaxed. The rejected gate is not acceptance evidence.
 | A25.F1.2 | main/steer journal and next-input/card continuity | locally verified; actual runtime/store/main+steer/B-once race PASS 13.843s, independent repeat x3 PASS 42.140s |
 | A25.F1.3 | safe error/recovery diagnostics and documentation | locally verified; controller to physical JSONL exact operation/parent refs and private sentinel absence, cancellable notices; main fresh scoped race PASS 5.347s |
 | A25.F1.4 | complete local gate/build/review | complete: final make check-full PASS 18:40 UTC; independent helper/storage and notification/correlation approvals; physical trio verified below |
-| A25.R3 | conditional push/restart after full completion | retained; prepare exact targets, source manifest, compatibility and postflight; no write yet |
+| A25.R3 | conditional push/restart after full completion | in progress; 4d82381 pushed/remote verified, CI-found exit-drain fix now locally verified; follow-up full gate/CI then exact install/restart/postflight remain |
 
 Release preflight (2026-09-08 18:34 UTC): origin Time4Mind/bria main remains
 24921b7ebcab9b23a16683253f9a4461c84b01ac. Exact source manifest has 268 paths
@@ -128,6 +128,59 @@ F1-unimplemented rows are superseded by revision7 and current conditional releas
 Remaining current obligation A25.R3: publish exact manifest, verify remote/CI,
 install/restart exact service and postflight. Manual Telegram UI scenario and live
 fault injection are not claimed by local tests or readiness checks.
+
+Release execution receipt (in progress): source commit
+4d82381d8ceb940017c974896cf0c8c8f4dfc107 pushed normally to origin/main;
+independent ls-remote equals that exact commit. Git tree contains AGENTS.md,
+staged paths matched the manifest exactly (Git rename detection reports266 files
+for268 raw paths). No source changes after local gate other than task records.
+CI runs: Stage1 34264518186 and Platform matrix34264518153, currently running.
+Read-only Telegram getMe with the new binary confirms expected bot identity.
+Before deployment lock-file owner and launchd PID both89657; the current agent
+process tree is a separate tmux descendant, not a Bria descendant.
+
+CI follow-up within the same bounded release: macOS native job102190422730
+(run34264518153) fails TestA25NativeExitDiagnosticReachesPhysicalSafeLogWithExactCorrelation
+at line86: accepted identity/final absence/safe class are correct, missing model
+event is the discriminating unchecked field. Linux native/cross builds/Docker pass.
+Install remains unperformed. Hypotheses: (1) process-done select wins over already
+buffered stdout, (2) reaper closes pipe before reader drains, (3) helper encoding
+loses output on fast exit. Read-only source shows reaper waits outputEOF, making
+(2) less likely; (1) has an explicit competing case in Submit/drainInterrupted.
+Main owns follow-up synthesis/docs/release. Carver diagnoses runtime read-only;
+Peirce owns only the cmd diagnostic test's improved assertion/stress evidence.
+No weakened assertions, sleep-based masking or blind CI rerun as a fix.
+Runtime follow-up contract refinement from confirmed source evidence: stdout
+consumer, not process reaper, owns turn settlement. Main exclusively owns
+sessionruntime/starter.go; Darwin owns new public exit_drain_test.go; Peirce retains
+cmd log regression only; Carver independently reviews ordering/cancellation;
+Ohm reviews completed-write custody read-only. Consumer must drain buffered
+event/final/terminal and steer acknowledgments before EOF, including interrupted
+drain. Reaper still owns physical process/stderr completion, never waits for turn.
+Unknown remains unknown without an exact terminal; no provider replay. Deferred
+turn settlement covers every early consumer return; existing positive terminal
+is not overwritten. Returning a successful write remains distinct from acceptance.
+
+CI defect reproduced: original timing0/100 failures locally; public OnAccepted ->
+exact Starter.Wait reap barrier90/100 failures, all lose modelEvents while retaining
+acceptance and safe native class. Main independent barrier run10/10 RED. Minimal
+starter.go change gives main both diagnostic cases x10 GREEN1.106s, identical
+stress100/100 GREEN3.830s, full runtime/cmd race PASS7.492s/41.897s.
+New public exit-drain matrix also checks event+EOF without invented terminal,
+completed+exit, interrupted+exit, buffered steer ACK+completed, cancelled root with
+buffered steer ACK+interrupted, and StopCurrent proof after reap. Six cases plainx20
+and racex3 PASS20.179s; last two added after fix and no separate RED claimed.
+Carver independently approves consumer ownership/no reaper wait cycle; cancellation
+and write-error boundaries retained. Final complete gate/build is rerunning before
+the follow-up commit/CI. No installed binary, config or state changed.
+
+Follow-up final acceptance 18:54 UTC: complete make check-full PASS; cmd suite
+plain25.349s/race43.466s, runtime race10.902s; final Carver review approve including
+cancel/Stop cases. Rebuilt version unchanged (not previously installed):
+bria SHA256 8ad43ff93c38f02eddeb52dc5ef50f54afe0f7804387228a66d6ca5cdbed415d;
+both adapter hashes unchanged from above. Config check PASS. Exact follow-up
+source set: starter.go, new exit_drain_test.go, cmd runtime_failure_log_regression_test.go,
+this todo and STATUS_AND_NEXT.md. New commit/remote CI still required before install.
 
 ### Current release condition audit - 2026-09-08
 

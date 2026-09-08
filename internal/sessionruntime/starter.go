@@ -508,6 +508,9 @@ func (starter *Starter) submitWithCallbacks(ctx context.Context, sessionID domai
 	turn := &activeTurn{requestID: requestID, done: make(chan struct{}), steers: make(map[string]*steerWaiter)}
 	record.turn = turn
 	record.turnMu.Unlock()
+	// The wire consumer owns settlement, including every failed early return.
+	// Reaping the process must not discard its already-buffered terminal proof.
+	defer starter.finishTurn(record, turn, false, errors.New("provider turn ended without a confirmed terminal"))
 
 	if err := starter.writeContext(ctx, record, submitEnvelope{Protocol: ProtocolVersion, Type: "submit", RequestID: requestID, Text: input.Text, Model: input.Model, Effort: input.Effort, MessageID: callbacks.MessageID, Attachments: input.Attachments}); err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
@@ -645,10 +648,6 @@ func (starter *Starter) submitWithCallbacks(ctx context.Context, sessionID domai
 			default:
 				return starter.protocolTurnFailure(record, requestID)
 			}
-		case <-record.done:
-			exitErr := turnExitError(record)
-			starter.finishTurn(record, turn, false, exitErr)
-			return TurnResult{}, exitErr
 		case <-ctx.Done():
 			interruptContext, cancel := context.WithTimeout(context.Background(), starter.closeTimeout)
 			if err := starter.sendInterrupt(interruptContext, record, turn); err != nil {
@@ -714,13 +713,6 @@ func (starter *Starter) SubmitCurrentWithCallbacks(ctx context.Context, sessionI
 		default:
 		}
 		return ErrNoTurnInFlight
-	case <-record.done:
-		select {
-		case err := <-waiter.result:
-			return accepted(err)
-		default:
-		}
-		return errors.New("provider process exited during current-turn input")
 	case <-ctx.Done():
 		record.turnMu.Lock()
 		delete(turn.steers, requestID)
@@ -1016,8 +1008,9 @@ func (starter *Starter) writeEncodedContext(ctx context.Context, record *process
 		<-result
 		return ctx.Err()
 	case <-record.done:
-		<-result
-		return errors.New("provider process ended during adapter write")
+		// Join the actual write; process exit cannot turn a completed write
+		// into a known-unsent failure. Acceptance still requires its wire ACK.
+		return <-result
 	}
 }
 
@@ -1061,11 +1054,18 @@ func (starter *Starter) drainInterrupted(record *processRecord, turn *activeTurn
 	for {
 		select {
 		case incoming, open := <-record.output:
-			if !open || incoming.err != nil || incoming.message.RequestID != turn.requestID {
+			if !open || incoming.err != nil {
 				starter.killAndWait(record)
 				return TurnResult{}
 			}
 			message := incoming.message
+			if message.RequestID != turn.requestID {
+				if starter.acceptSteer(record, turn, message) {
+					continue
+				}
+				starter.killAndWait(record)
+				return TurnResult{}
+			}
 			switch message.Type {
 			case "accepted":
 				if accepted || finalSeen {
@@ -1096,8 +1096,6 @@ func (starter *Starter) drainInterrupted(record *processRecord, turn *activeTurn
 				starter.killAndWait(record)
 				return TurnResult{}
 			}
-		case <-record.done:
-			return TurnResult{}
 		case <-timer.C:
 			starter.killAndWait(record)
 			return TurnResult{}
@@ -1253,13 +1251,6 @@ func (starter *Starter) finalizeReap(record *processRecord) {
 	if record.stderrDone != nil {
 		<-record.stderrDone
 	}
-	record.turnMu.Lock()
-	if turn := record.turn; turn != nil {
-		turn.terminalErr = record.startupDiagnostic.wrap(errors.New("provider process exited before turn terminal"))
-		record.turn = nil
-		close(turn.done)
-	}
-	record.turnMu.Unlock()
 	starter.mu.Lock()
 	if starter.processes[record.request.SessionID] == record {
 		delete(starter.processes, record.request.SessionID)

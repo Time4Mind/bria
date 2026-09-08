@@ -28,6 +28,15 @@ func (a25DiagnosticResolver) ProviderForSession(context.Context, domain.SessionI
 }
 
 func TestA25NativeExitDiagnosticReachesPhysicalSafeLogWithExactCorrelation(t *testing.T) {
+	a25NativeExitDiagnostic(t, false)
+}
+
+func TestA25NativeExitAfterAcceptanceWaitPreservesBufferedModelEvent(t *testing.T) {
+	a25NativeExitDiagnostic(t, true)
+}
+
+func a25NativeExitDiagnostic(t *testing.T, waitForExit bool) {
+	t.Helper()
 	directory := t.TempDir()
 	logger, err := safelog.Open(safelog.Options{Directory: directory})
 	if err != nil {
@@ -73,7 +82,16 @@ func TestA25NativeExitDiagnosticReachesPhysicalSafeLogWithExactCorrelation(t *te
 			accepted := ""
 			modelEvents := 0
 			result, err := wrapped.SubmitWithCallbacks(ctx, request.SessionID, privatePrompt, sessionruntime.TurnCallbacks{
-				MessageID: tc.message, OnAccepted: func(id string) error { accepted = id; return nil },
+				MessageID: tc.message, OnAccepted: func(id string) error {
+					accepted = id
+					if waitForExit {
+						// The child writes commentary before exiting. Wait is the
+						// public exact-generation reap barrier, not a timing sleep:
+						// stdout has been read but the event is not consumed yet.
+						return starter.Wait(ctx, request.SessionID, binding)
+					}
+					return nil
+				},
 				OnEvent: func(event sessionruntime.TurnEvent) error {
 					if event.Kind != sessionruntime.EventCommentary || event.Text != a25FailurePrivateModelText {
 						return fmt.Errorf("unexpected synthetic model event")
@@ -83,7 +101,7 @@ func TestA25NativeExitDiagnosticReachesPhysicalSafeLogWithExactCorrelation(t *te
 				},
 			})
 			if accepted != tc.message || modelEvents != 1 || err == nil || result.Final != "" || sessionruntime.RuntimeFailureClass(err) != "native_transcript_record_too_large" {
-				t.Fatalf("acceptance=%q final_bytes=%d class=%q err=%v", accepted, len(result.Final), sessionruntime.RuntimeFailureClass(err), err)
+				t.Fatalf("acceptance=%q modelEvents=%d final_bytes=%d class=%q err=%v", accepted, modelEvents, len(result.Final), sessionruntime.RuntimeFailureClass(err), err)
 			}
 		}()
 	}
