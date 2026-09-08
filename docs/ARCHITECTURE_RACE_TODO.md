@@ -30,6 +30,8 @@ touch unrelated bots, credentials or user changes.
 | A11 | Controller worker: internal/integration/telegram_callback_acceptance_test.go | Async callback HTTP fake race reproduced then repeat green | done; whole integration race count=10 |
 | A12 | Main: Makefile and push CI workflows | Provision pinned dependencies before offline checks; native test prerequisites | local done; actual push CI pending |
 | A13 | Main: approval docs/fixtures only | No internal work-source identities or business values in public Git payload; raw receipts retained locally | done; sanitized full gate passed |
+| A14 | CI worker: internal/sessionruntime orphan cleanup, its starter.go call/import; new internal/orphanresume | Linux runtime <=1850 with unchanged cleanup behavior | local done; Linux execution awaits CI |
+| A15 | Main: internal/nativeterminal, scripts architecture checker/tests | Linux terminal <=510; architecture inspects all supported GOOS/GOARCH | local done; full gate passed |
 
 Workers must not edit scripts or shared docs. Public API aliases/adapters preserve
 consumer compatibility; report any required cross-owner edits to main. Main
@@ -38,6 +40,42 @@ New packages must have a real responsibility, not merely relocate random lines.
 Stop each zone at passing scoped checks and evidence handoff. No external
 queries/live writes for workers. Final full verification only after integration.
 Existing LUNA_APPROVAL_TODO and stabilization backlog remain preserved.
+
+CI continuation uses the same contract and approved publication sequence. Main
+owns integration, terminal cleanup simplification, checker, docs and release;
+the independent worker owns only orphan-resume extraction and its tests. No
+cross-owner edits, no live process operations by the worker. Stop at scoped
+behavior checks and unchanged Linux package limits; then main runs full gates.
+One worker plus main covers both independent code areas without shared writes.
+
+Initial push receipt: remote main = 5d0a8b6ffe0efb4a1fbcf4bf5ecd0e96c502c8f9.
+Platform run 34198434479 succeeded (8 jobs). Stage1 run 34198434480 failed:
+Linux sessionruntime=1947/1850 and nativeterminal=512/510. No deploy occurred.
+Hypotheses: platform-selected GoFiles differ (reproduce with Linux go list),
+Go-version counting drift (compare same files locally), stale remote source
+(compare SHA). Exact remote SHA matched; platform-specific files are present.
+Add all supported platform graph checks so host-only acceptance cannot recur.
+
+Confirmed: the same local Go toolchain reproduces both exact Linux counts when
+go list selects Linux files; no version/counting drift is needed to explain CI.
+New checker regression first failed all five cases (four target-specific caps
+and a Linux/arm64-only forbidden import), then passed after checking all shipped
+targets. The enhanced checker reproduced the original Linux CI errors locally.
+Terminal cleanup now parses each discovered PID once and skips already-owned
+identities before reading metadata; pinned-descriptor and parentage rechecks
+remain intact. Linux terminal size is 507/510. Fresh macOS isolated-tmux race
+tests passed; Linux/arm64 test executable compiles. Linux runtime execution of
+the changed cleanup still requires the next CI receipt.
+
+CI-fix integration: orphan-resume cleanup is now a stdlib-only platform module
+(112/150 Linux lines); sessionruntime is 1842/1850 on Linux and macOS. Existing
+Start request validation requires a prior binding before the direct resume
+cleanup call. Removed only obsolete private wrappers, not a public API. Main
+reviewed the exact selection/termination diff and Linux test child ownership.
+Focused race/vet checks and Linux test cross-compilation passed. Canonical
+make check-full passed again with all-platform architecture enforcement and
+physical executable-trio acceptance. Next: commit/push scoped CI correction,
+read actual Linux process-test and full push CI receipts, then approved deploy.
 
 ## Evidence and open boundaries
 

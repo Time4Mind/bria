@@ -831,6 +831,7 @@ func TestArchitectureCheckerCapsCoherentCustodyResponsibilities(t *testing.T) {
 		{path: "internal/telegramflow", limit: 2500},
 		{path: "internal/telegrampipeline", limit: 1700},
 		{path: "internal/sessionruntime", limit: 1850},
+		{path: "internal/orphanresume", limit: 150},
 		{path: "internal/coordinator", limit: 825},
 		{path: "internal/nativeadapter", limit: 850},
 		{path: "internal/nativeattachment", limit: 100},

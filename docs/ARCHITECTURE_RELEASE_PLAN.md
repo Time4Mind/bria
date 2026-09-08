@@ -46,6 +46,21 @@ Full-gate fixture/regression additions (within the CI-fix sequence):
 
 - `internal/nativeapproval/public_fixtures_test.go`
 - `scripts/architecture_refactor_test.go`
+- `scripts/architecture_platform_test.go`
+
+Linux CI-fix iteration (same approved branch and unchanged package budgets):
+
+- `internal/nativeterminal/process_linux.go`
+- `internal/sessionruntime/orphan_recovery_linux.go`
+- `internal/sessionruntime/orphan_recovery_unsupported.go`
+- `internal/sessionruntime/starter.go`
+- `internal/orphanresume/cleanup.go`
+- `internal/orphanresume/cleanup_linux.go`
+- `internal/orphanresume/cleanup_unsupported.go`
+- `internal/orphanresume/cleanup_test.go`
+- `internal/orphanresume/cleanup_external_test.go`
+- `internal/orphanresume/cleanup_linux_test.go`
+- `internal/orphanresume/cleanup_unsupported_test.go`
 
 - `.github/workflows/context.yml`
 - `.github/workflows/platform.yml`

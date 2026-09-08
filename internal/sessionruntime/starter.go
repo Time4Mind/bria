@@ -22,6 +22,7 @@ import (
 
 	"bria/internal/app"
 	"bria/internal/domain"
+	"bria/internal/orphanresume"
 	"bria/internal/processgroup"
 	"bria/internal/runtimeprotocol"
 )
@@ -319,7 +320,7 @@ func (starter *Starter) Start(ctx context.Context, request app.StartSessionReque
 	// The platform helper is fail-closed and is a no-op where process inspection
 	// is unavailable.
 	if request.Mode == app.SessionStartResume {
-		if err := cleanupOrphanResumeProcess(request); err != nil {
+		if err := orphanresume.Cleanup(request.PriorBinding.SessionID, request.Workdir); err != nil {
 			return domain.ProviderBinding{}, fmt.Errorf("clean stale provider runtime: %w", err)
 		}
 	}

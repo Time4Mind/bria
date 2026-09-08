@@ -16,6 +16,8 @@ func TestRefactoredLayersKeepOriginalForbiddenEdges(t *testing.T) {
 		{"internal/telegramhistory", "internal/storage"},
 		{"internal/telegramcallbackview", "internal/telegrambridge"},
 		{"internal/telegramturnhelpers", "internal/telegramcontroller"},
+		{"internal/orphanresume", "internal/sessionruntime"},
+		{"internal/orphanresume", "internal/app"},
 	} {
 		if failures := checkGraph(graphWithEdge(edge[0], edge[1])); len(failures) == 0 {
 			t.Fatalf("refactor admits reverse dependency %s -> %s", edge[0], edge[1])

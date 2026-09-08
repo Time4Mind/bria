@@ -144,7 +144,8 @@ func (p *ownedProcess) killTree() error {
 		}
 		for _, entry := range entries {
 			value := entry.Name()
-			if _, parseErr := strconv.Atoi(value); parseErr != nil {
+			pid, parseErr := strconv.Atoi(value)
+			if parseErr != nil || seen[pid] {
 				continue
 			}
 			data, readErr := os.ReadFile("/proc/" + value + "/stat")
@@ -156,33 +157,27 @@ func (p *ownedProcess) killTree() error {
 			if end < 0 || len(fields) < 2 || fields[1] != strconv.Itoa(current.pid) {
 				continue
 			}
-			{
-				pid, err := strconv.Atoi(value)
-				if err != nil || seen[pid] {
-					continue
-				}
-				child, err := ownProcess(pid)
-				if errors.Is(err, syscall.ESRCH) {
-					continue
-				}
-				if err != nil {
-					return err
-				}
-				// The children file is only a discovery hint. Re-check parentage
-				// against the pinned child before any side effect, so stale PID
-				// numbers cannot cause a signal to an unrelated reused process.
-				stat, statErr := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
-				end := strings.LastIndexByte(string(stat), ')')
-				fields := strings.Fields(string(stat)[end+1:])
-				if statErr != nil || end < 0 || len(fields) < 2 || fields[1] != strconv.Itoa(current.pid) || child.exited() {
-					_ = syscall.Close(child.fd)
-					continue
-				}
-				seen[pid] = true
-				owned = append(owned, child)
-				if len(owned) > 2048 {
-					return errors.New("owned CLI tree exceeds cleanup bound")
-				}
+			child, err := ownProcess(pid)
+			if errors.Is(err, syscall.ESRCH) {
+				continue
+			}
+			if err != nil {
+				return err
+			}
+			// The process table is only a discovery hint. Re-check parentage
+			// against the pinned child before any side effect, so stale PID
+			// numbers cannot cause a signal to an unrelated reused process.
+			stat, statErr := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+			end = strings.LastIndexByte(string(stat), ')')
+			fields = strings.Fields(string(stat)[end+1:])
+			if statErr != nil || end < 0 || len(fields) < 2 || fields[1] != strconv.Itoa(current.pid) || child.exited() {
+				_ = syscall.Close(child.fd)
+				continue
+			}
+			seen[pid] = true
+			owned = append(owned, child)
+			if len(owned) > 2048 {
+				return errors.New("owned CLI tree exceeds cleanup bound")
 			}
 		}
 	}

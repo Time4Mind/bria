@@ -1090,7 +1090,7 @@ var runtimeFactoryAllowedImports = []string{
 }
 
 var sessionRuntimeAllowedImports = []string{
-	"internal/app", "internal/domain", "internal/nativecontrolport", "internal/processgroup", "internal/runtimeprotocol",
+	"internal/app", "internal/domain", "internal/nativecontrolport", "internal/orphanresume", "internal/processgroup", "internal/runtimeprotocol",
 }
 
 var telegramControllerAllowedImports = []string{
@@ -1479,6 +1479,10 @@ var packagePolicies = map[string]packagePolicy{
 		responsibility:     "control provider process trees across platforms",
 		maxProductionLines: 700,
 	},
+	"internal/orphanresume": {
+		responsibility:     "clean up exact orphaned provider resume processes using platform process metadata",
+		maxProductionLines: 150,
+	},
 	"internal/provider/claude": {
 		responsibility: "adapt the Claude CLI protocol",
 		allowedImports: []string{
@@ -1669,7 +1673,7 @@ var packagePolicies = map[string]packagePolicy{
 	"internal/sessionruntime": {
 		responsibility: "supervise provider adapter sessions and exact native terminal key and screen requests",
 		allowedImports: []string{
-			"internal/app", "internal/domain", "internal/nativecontrolport", "internal/processgroup", "internal/runtimeprotocol",
+			"internal/app", "internal/domain", "internal/nativecontrolport", "internal/orphanresume", "internal/processgroup", "internal/runtimeprotocol",
 		},
 		maxProductionLines: 1850,
 	},
@@ -1889,16 +1893,30 @@ var packagePolicies = map[string]packagePolicy{
 }
 
 func checkArchitecture(root string) []string {
-	packages, err := goListPackages(root)
-	if err != nil {
-		return []string{err.Error()}
+	var failures []string
+	// go list selects build-tagged files. Inspect every shipped target on any
+	// host; cross-compilation alone does not enforce dependency/size policies.
+	for _, target := range []struct{ os, arch string }{
+		{"linux", "amd64"}, {"linux", "arm64"},
+		{"darwin", "amd64"}, {"darwin", "arm64"},
+	} {
+		prefix := target.os + "/" + target.arch + ": "
+		packages, err := goListPackages(root, "GOOS="+target.os, "GOARCH="+target.arch, "CGO_ENABLED=0")
+		if err != nil {
+			failures = append(failures, prefix+err.Error())
+			continue
+		}
+		for _, failure := range checkGraph(packages) {
+			failures = append(failures, prefix+failure)
+		}
 	}
-	return checkGraph(packages)
+	return failures
 }
 
-func goListPackages(root string) ([]packageInfo, error) {
+func goListPackages(root string, environment ...string) ([]packageInfo, error) {
 	command := exec.Command("go", "list", "-mod=readonly", "-json", "./...")
 	command.Dir = root
+	command.Env = append(os.Environ(), environment...)
 	var standardOutput bytes.Buffer
 	var standardError bytes.Buffer
 	command.Stdout = &standardOutput
