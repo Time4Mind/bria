@@ -221,6 +221,40 @@ message was sent, and Telegram card appearance was not manually inspected.
 Local actual HTTP/store/runtime regressions cover those changed flows; readiness
 and recovery logs do not independently prove the owner's visible card interaction.
 
+Documentation-only938f24706dab5dbf2d49711ddf4e8c7abe8a5957 is remote verified,
+but its extra Stage1 run34266640937 exposes a pre-existing nested-Claude heartbeat
+test instability: process_nested_unix_test.go87 sees timestamp then empty after
+Abort. No product file differs from the green/deployed00b26a7. Service stays healthy;
+do not silently claim this last CI green or redeploy unchanged binaries.
+Read-only diagnosis: one heartbeat writer uses truncate-then-write, and old helper
+readers accept empty snapshots. Exact CI interleaving remains inferred; process
+survival is not proved by an empty file. Darwin owns only nested process fixture
+and optional heartbeat test: atomic increasing counters, valid samples before kill,
+bounded continuous quiescence after kill, negative live-writer control; no production
+change. Peirce measures original stress; Carver independent review. Main owns
+records/final CI iteration. Retain successful deployed-code evidence separately.
+
+Test-only follow-up ready locally: atomic publication regression rejects old
+truncate-in-place via retained inode; invalid/empty samples are errors; negative
+live-publisher control must time out, not succeed. Two valid increasing samples
+precede Abort, then100ms uninterrupted quiescence is required within1s. Exact
+request/binding Abort cleanup now covers early fixture failure. Original Abort
+deadline remains unchanged. Baseline Darwin100/100 passed, so the rare Linux
+interleaving is not claimed locally reproduced. New fixture RED->GREEN, original
+scenario plainx50 and race-controlsx20 PASS, final package plain1.136s/race0.959s;
+main independent package race0.905s. Carver reviewed assertions; cleanup finding
+fixed and reread. Only two test files and task records differ from938f247;
+full gate and rebuilt-hash equality will confirm unchanged installed product.
+
+Test-only final local gate19:13 UTC: make check-full PASS, independent review
+approve including exact Abort cleanup. Rebuilt trio hashes equal the installed
+8ad43ff.../9ac46e30.../0964ef3d...; no new deployment is required. Exact final
+follow-up contains only process_nested_unix_test.go, nested_heartbeat_test.go
+and the two task records. Current remote check runs for that commit are the
+external CI receipt; never attribute the older938f247 failure to the fixed test.
+No product obligation was dropped or deferred; the runtime release remains
+verified and unchanged. Working state/config/history untouched by this test fix.
+
 ### Current release condition audit - 2026-09-08
 
 Artem now explicitly requests push and restart if the entire plan is complete,

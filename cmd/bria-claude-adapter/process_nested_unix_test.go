@@ -59,8 +59,14 @@ func TestSessionRuntimeForcedKillReachesStoppedClaudeAdapterRawAndGrandchild(t *
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
-	firstBeat := waitForChangingFile(t, beat, "", time.Second)
-	_ = waitForChangingFile(t, beat, firstBeat, time.Second)
+	defer starter.Abort(context.Background(), request, binding)
+	firstBeat, err := waitNestedHeartbeatIncrease(beat, 0, time.Second)
+	if err != nil {
+		t.Fatalf("first valid nested heartbeat: %v", err)
+	}
+	if _, err := waitNestedHeartbeatIncrease(beat, firstBeat, time.Second); err != nil {
+		t.Fatalf("second increasing nested heartbeat: %v", err)
+	}
 	adapterPID, err := strconv.Atoi(waitForFile(t, ready, time.Second))
 	if err != nil || adapterPID < 2 {
 		t.Fatalf("decode stopped adapter pid: %v", err)
@@ -77,14 +83,8 @@ func TestSessionRuntimeForcedKillReachesStoppedClaudeAdapterRawAndGrandchild(t *
 		<-abortDone
 		t.Fatal("Abort did not reach forced process-tree kill")
 	}
-	stable := waitForFile(t, beat, time.Second)
-	time.Sleep(100 * time.Millisecond)
-	after, err := os.ReadFile(beat)
-	if err != nil {
-		t.Fatalf("read nested heartbeat after kill: %v", err)
-	}
-	if string(after) != stable {
-		t.Fatalf("raw Claude grandchild survived forced adapter kill: before=%q after=%q", stable, after)
+	if err := waitNestedHeartbeatQuiet(beat, 100*time.Millisecond, time.Second); err != nil {
+		t.Fatalf("nested heartbeat after Abort did not prove quiescence: %v", err)
 	}
 }
 
@@ -149,8 +149,8 @@ func runNestedProcessHelper(mode string) {
 		}
 	case "nested-grandchild":
 		signal.Ignore(syscall.SIGTERM)
-		for counter := 1; ; counter++ {
-			if err := os.WriteFile(os.Getenv(treeBeatPath), []byte(time.Now().String()), 0o600); err != nil {
+		for counter := uint64(1); ; counter++ {
+			if err := publishNestedHeartbeat(os.Getenv(treeBeatPath), counter); err != nil {
 				os.Exit(103)
 			}
 			time.Sleep(10 * time.Millisecond)
