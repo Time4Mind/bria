@@ -98,7 +98,9 @@ func TestEncodedToolFitsPersistedEntryAndPreservesIdentity(t *testing.T) {
 	id := strings.Repeat("identity", 300)
 	encoded := EncodeTool(Tool{ID: id, Name: "exec", Arguments: strings.Repeat("<\n", 10000), Output: strings.Repeat("я\t", 10000)})
 	var decoded Tool
-	if len(encoded) > 16384 || json.Unmarshal([]byte(encoded), &decoded) != nil || !strings.HasPrefix(decoded.ID, "sha256:") || decoded.Arguments == "" || decoded.Output == "" {
+	// Arguments consume the shared forty-line budget; omitted output must be
+	// explicit rather than preserving separate per-field byte allowances.
+	if len(encoded) > 16384 || json.Unmarshal([]byte(encoded), &decoded) != nil || !strings.HasPrefix(decoded.ID, "sha256:") || decoded.Arguments == "" || !decoded.Truncated {
 		t.Fatalf("invalid bounded tool: bytes=%d value=%#v", len(encoded), decoded)
 	}
 	var same Tool

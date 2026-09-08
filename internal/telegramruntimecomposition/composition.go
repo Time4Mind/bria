@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"time"
 
+	"bria/internal/controllertelemetry"
 	"bria/internal/coordinator"
 	"bria/internal/domain"
 	"bria/internal/telegramcontroller"
@@ -80,7 +81,7 @@ func (adapter ControllerFlowAdapter) HandleCallback(ctx context.Context, plan te
 	if err != nil {
 		return telegramflow.CallbackResult{}, err
 	}
-	result, err := adapter.Controller.HandleSemanticAction(ctx, action)
+	result, err := adapter.Controller.HandleSemanticAction(controllertelemetry.WithOperation(ctx, plan.OperationID), action)
 	if err != nil {
 		return telegramflow.CallbackResult{}, err
 	}
@@ -190,8 +191,8 @@ func semanticActionFromPlan(plan telegrampipeline.CallbackPlan) (telegramcontrol
 		kind = telegramcontroller.SemanticSettingsPageLimit
 	case telegramui.ActionSettingsContinueExisting:
 		kind = telegramcontroller.SemanticSettingsContinueExisting
-	case telegramui.ActionSettingsTechnicalActions:
-		kind = telegramcontroller.SemanticSettingsTechnicalActions
+	case telegramui.ActionSettingsTechnicalActions, telegramui.ActionSettingsTechnicalOutputLines:
+		kind = telegramcontroller.SemanticActionKind(plan.Action)
 	case telegramui.ActionSettingsBackgroundQuestions:
 		kind = telegramcontroller.SemanticSettingsBackgroundQuestions
 	case telegramui.ActionSettingsBackgroundErrors:
@@ -311,7 +312,7 @@ func callbackEffectForAction(action telegramui.Action) telegrampipeline.Callback
 	case telegramui.ActionSettingsDetail:
 		return telegrampipeline.EffectToggleSettingsDetail
 	case telegramui.ActionSettingsPageLimit, telegramui.ActionSettingsAutoApproveCommands, telegramui.ActionSettingsContinueExisting,
-		telegramui.ActionSettingsTechnicalActions, telegramui.ActionSettingsBackgroundQuestions,
+		telegramui.ActionSettingsTechnicalActions, telegramui.ActionSettingsTechnicalOutputLines, telegramui.ActionSettingsBackgroundQuestions,
 		telegramui.ActionSettingsBackgroundErrors, telegramui.ActionSettingsLifetimeNever,
 		telegramui.ActionSettingsArchiveRecommendations,
 		telegramui.ActionSettingsDefaultProvider, telegramui.ActionSettingsDefaultWorkdir, telegramui.ActionSettingsClearCreationDefaults,
@@ -353,11 +354,11 @@ func projectSemanticCard(card telegramcontroller.SemanticCard, effect telegramui
 		pages[index] = telegramui.ContentPage{Content: page.Content, Anchors: append([]string(nil), page.Anchors...)}
 	}
 	view := telegramui.PageView{Page: card.View.Page, Pages: card.View.Pages, Anchor: card.View.Anchor, FollowLatest: card.View.FollowLatest}
-	keyboard, err := telegramui.ProjectCardKeyboard(telegramui.CardKeyboardInput{View: view, Working: card.Working, Archived: card.Archived, CloseConfirmation: card.CloseConfirmation, DeleteConfirmation: card.DeleteConfirmation, OptionsExpanded: card.OptionsExpanded, SessionRowSizes: append([]int(nil), card.SessionRowSizes...), SessionLabels: append([]string(nil), card.SelectableSessionLabels...)})
+	keyboard, err := telegramui.ProjectCardKeyboard(telegramui.CardKeyboardInput{View: view, Working: card.Working, Archived: card.Archived, Recovery: card.Recovery, CloseConfirmation: card.CloseConfirmation, DeleteConfirmation: card.DeleteConfirmation, OptionsExpanded: card.OptionsExpanded, SessionRowSizes: append([]int(nil), card.SessionRowSizes...), SessionLabels: append([]string(nil), card.SelectableSessionLabels...)})
 	if err != nil {
 		return nil, fmt.Errorf("project semantic card keyboard: %w", err)
 	}
-	return &telegramflow.CardOutput{ScreenEligible: !card.Archived && !card.CloseConfirmation && !card.DeleteConfirmation, SessionID: card.SessionID, Header: card.Header, Footer: card.Footer, Projection: telegramui.CarrierProjection{Effect: effect, Card: telegramui.ProjectedCard{Pages: pages, View: view, Keyboard: keyboard}}, OptionsExpanded: card.OptionsExpanded, SelectableSessionIDs: append([]domain.SessionID(nil), card.SelectableSessionIDs...), MakeActive: card.MakeActive}, nil
+	return &telegramflow.CardOutput{ScreenEligible: !card.Archived && !card.Recovery && !card.CloseConfirmation && !card.DeleteConfirmation, SessionID: card.SessionID, Header: card.Header, Footer: card.Footer, Projection: telegramui.CarrierProjection{Effect: effect, Card: telegramui.ProjectedCard{Pages: pages, View: view, Keyboard: keyboard}}, OptionsExpanded: card.OptionsExpanded, SelectableSessionIDs: append([]domain.SessionID(nil), card.SelectableSessionIDs...), MakeActive: card.MakeActive}, nil
 }
 
 func projectSemanticSurface(surface telegramcontroller.SemanticSurface) (*telegramflow.SurfaceOutput, error) {
@@ -495,8 +496,8 @@ func telegramUIAction(action telegramcontroller.SemanticActionKind) (telegramui.
 		return telegramui.ActionSettingsPageLimit, nil
 	case telegramcontroller.SemanticSettingsContinueExisting:
 		return telegramui.ActionSettingsContinueExisting, nil
-	case telegramcontroller.SemanticSettingsTechnicalActions:
-		return telegramui.ActionSettingsTechnicalActions, nil
+	case telegramcontroller.SemanticSettingsTechnicalActions, telegramcontroller.SemanticSettingsTechnicalOutputLines:
+		return telegramui.Action(action), nil
 	case telegramcontroller.SemanticSettingsBackgroundQuestions:
 		return telegramui.ActionSettingsBackgroundQuestions, nil
 	case telegramcontroller.SemanticSettingsBackgroundErrors:

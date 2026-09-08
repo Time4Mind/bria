@@ -102,6 +102,14 @@ const (
 type ReconciledAcceptedTurn struct {
 	MessageID string
 	Outcome   AcceptedTurnOutcome
+	// TurnID is exact persisted native correlation; empty on legacy receipts.
+	TurnID string `json:",omitempty"`
+	// Final is present only with an explicit final and successful completion
+	// for TurnID. Consumers must deduplicate restoration by MessageID.
+	Final string `json:",omitempty"`
+	// TerminalFailureProven requires a fresh exact native terminal proof,
+	// Outcome Failed and nonempty TurnID; legacy failed receipts are not proof.
+	TerminalFailureProven bool `json:",omitempty"`
 }
 
 type AcceptedTurnReconciliation struct {

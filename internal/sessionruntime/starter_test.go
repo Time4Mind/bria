@@ -391,6 +391,48 @@ func TestStarterRejectsConcurrentTurnAndInterruptsCancelledTurn(t *testing.T) {
 	}
 }
 
+func TestCancelledSubmitRetainsConfirmedInterruptedProof(t *testing.T) {
+	starter, request, binding := startHelper(t, "delayed-interrupt", sessionruntime.Options{GracefulCloseTimeout: time.Second})
+	defer starter.Abort(context.Background(), request, binding)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	result, err := starter.SubmitWithCallbacks(ctx, request.SessionID, "first", sessionruntime.TurnCallbacks{
+		MessageID: "cancel-proof", OnAccepted: func(string) error { cancel(); return nil },
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled Submit error = %v, want context.Canceled", err)
+	}
+	if result.TerminalStatus != sessionruntime.StatusInterrupted || result.ErrorCode != sessionruntime.ErrorInterrupted || result.Final != "" {
+		t.Fatalf("cancelled Submit lost correlated terminal proof: %+v", result)
+	}
+	next, err := starter.Submit(context.Background(), request.SessionID, "after")
+	if err != nil || next.Final != "done:after" {
+		t.Fatalf("confirmed cancellation must keep adapter reusable: %+v, %v", next, err)
+	}
+}
+
+func TestCancelledSubmitDoesNotInventInterruptedProof(t *testing.T) {
+	for _, mode := range []string{"bad-interrupt", "uncorrelated-interrupt", "exit-on-interrupt", "silent-interrupt"} {
+		t.Run(mode, func(t *testing.T) {
+			starter, request, binding := startHelper(t, mode, sessionruntime.Options{GracefulCloseTimeout: 40 * time.Millisecond})
+			defer starter.Abort(context.Background(), request, binding)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			result, err := starter.SubmitWithCallbacks(ctx, request.SessionID, "first", sessionruntime.TurnCallbacks{
+				MessageID: "cancel-unproven", OnAccepted: func(string) error { cancel(); return nil },
+			})
+			if !errors.Is(err, context.Canceled) || result.TerminalStatus != "" || result.ErrorCode != "" || result.Final != "" {
+				t.Fatalf("unconfirmed interruption invented terminal proof: %+v, %v", result, err)
+			}
+			waitCtx, stopWait := context.WithTimeout(context.Background(), time.Second)
+			defer stopWait()
+			if err := starter.Wait(waitCtx, request.SessionID, binding); err != nil {
+				t.Fatalf("unconfirmed interruption did not retire adapter: %v", err)
+			}
+		})
+	}
+}
+
 func TestCancelledSubmitWaitsForInterruptedTerminalBeforeReleasingNextTurn(t *testing.T) {
 	t.Parallel()
 	starter, request, binding := startHelper(t, "delayed-interrupt", sessionruntime.Options{GracefulCloseTimeout: time.Second})
@@ -1109,6 +1151,16 @@ func TestSessionRuntimeHelperProcess(t *testing.T) {
 			}
 			return
 		case "interrupt":
+			if mode == "exit-on-interrupt" {
+				return
+			}
+			if mode == "silent-interrupt" {
+				continue
+			}
+			if mode == "uncorrelated-interrupt" {
+				emit(map[string]any{"protocol": 1, "type": "completed", "request_id": "wrong", "status": "interrupted", "error_code": "interrupted"})
+				continue
+			}
 			if mode == "bad-interrupt" {
 				emit(map[string]any{"protocol": 1, "type": "completed", "request_id": message.RequestID, "status": "completed"})
 				continue
@@ -1118,6 +1170,12 @@ func TestSessionRuntimeHelperProcess(t *testing.T) {
 			}
 			emit(map[string]any{"protocol": 1, "type": "completed", "request_id": message.RequestID, "status": "interrupted", "error_code": "interrupted"})
 		case "submit":
+			if mode == "runtime-diagnostic" {
+				emit(map[string]any{"protocol": 1, "type": "accepted", "request_id": message.RequestID, "message_id": message.MessageID})
+				fmt.Fprintln(os.Stderr, "private-payload=never-log")
+				fmt.Fprintln(os.Stderr, "bria-native-startup:native_transcript_record_too_large")
+				os.Exit(1)
+			}
 			switch mode {
 			case "steer":
 				if message.Text != "root" || rootRequestID != "" {
@@ -1150,9 +1208,9 @@ func TestSessionRuntimeHelperProcess(t *testing.T) {
 				emit(map[string]any{"protocol": 1, "type": "accepted", "request_id": message.RequestID})
 				emit(map[string]any{"protocol": 1, "type": "final", "request_id": message.RequestID, "text": "must not publish"})
 				emit(map[string]any{"protocol": 1, "type": "completed", "request_id": message.RequestID, "status": "failed", "error_code": "authentication_failed"})
-			case "hold", "bad-interrupt", "delayed-interrupt":
+			case "hold", "bad-interrupt", "delayed-interrupt", "uncorrelated-interrupt", "exit-on-interrupt", "silent-interrupt":
 				if message.Text == "first" {
-					emit(map[string]any{"protocol": 1, "type": "accepted", "request_id": message.RequestID})
+					emit(map[string]any{"protocol": 1, "type": "accepted", "request_id": message.RequestID, "message_id": message.MessageID})
 					continue
 				}
 				success(message)

@@ -18,8 +18,8 @@ func (controller *Controller) restoreNodeSelection(ctx context.Context) error {
 	}
 	if active != "" {
 		session, loadErr := controller.sessions.Load(ctx, active)
-		if loadErr != nil || (session.Status() != domain.SessionReady && session.Status() != domain.SessionRunning && session.Status() != domain.SessionStopping) {
-			// Never expose an awaiting-recovery/failed session as the input target.
+		if loadErr != nil || (session.Status() != domain.SessionReady && session.Status() != domain.SessionRunning && session.Status() != domain.SessionStopping && session.Status() != domain.SessionAwaitingRecovery) {
+			// Foreground viewing and input readiness are separate capabilities.
 			if clearErr := controller.nodes.RestoreActive(ctx, controller.nodes.Current(), ""); clearErr != nil {
 				return clearErr
 			}
@@ -132,14 +132,10 @@ func (controller *Controller) startQuotaRefresh() {
 
 func (controller *Controller) openSessionsSemanticResult(ctx context.Context) (SemanticActionResult, error) {
 	controller.ScheduleStandby()
-	nodeID := controller.currentNodeID()
-	active, err := controller.nodes.EnsureActive(ctx, nodeID)
+	active, err := controller.ensureCurrentActive(ctx)
 	if err != nil {
 		return SemanticActionResult{}, err
 	}
-	controller.mu.Lock()
-	controller.active = active
-	controller.mu.Unlock()
 	if active == "" {
 		return controller.sessionListSemanticResult(ctx)
 	}
@@ -160,17 +156,21 @@ func (controller *Controller) selectNodeSemantic(ctx context.Context, choice int
 	}
 	nodeID := nodes[choice-1].ID
 	controller.cancelCreateDraft()
+	controller.selectionMu.Lock()
 	current := controller.currentNodeID()
 	active, selected, err := controller.nodes.Select(ctx, nodeID)
 	if err != nil {
+		controller.selectionMu.Unlock()
 		return SemanticActionResult{}, err
 	}
 	if current == nodeID || !selected {
+		controller.selectionMu.Unlock()
 		return controller.nodeListSemanticResult(ctx)
 	}
 	controller.mu.Lock()
 	controller.active = active
 	controller.mu.Unlock()
+	controller.selectionMu.Unlock()
 	controller.ScheduleStandby()
 	if active != "" {
 		card, err := controller.semanticCard(ctx, active, true)
@@ -179,7 +179,21 @@ func (controller *Controller) selectNodeSemantic(ctx context.Context, choice int
 	return controller.sessionListSemanticResult(ctx)
 }
 
+func (controller *Controller) ensureCurrentActive(ctx context.Context) (domain.SessionID, error) {
+	controller.selectionMu.Lock()
+	defer controller.selectionMu.Unlock()
+	active, err := controller.nodes.EnsureActive(ctx, controller.currentNodeID())
+	if err == nil {
+		controller.mu.Lock()
+		controller.active = active
+		controller.mu.Unlock()
+	}
+	return active, err
+}
+
 func (controller *Controller) setCurrentNodeActive(ctx context.Context, session domain.Session) error {
+	controller.selectionMu.Lock()
+	defer controller.selectionMu.Unlock()
 	if err := controller.nodes.SetActive(ctx, session); err != nil {
 		return err
 	}

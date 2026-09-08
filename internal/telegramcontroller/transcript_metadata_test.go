@@ -41,10 +41,10 @@ func TestRuntimeMetadataReachesPersistedTranscriptAndPairedSpoilers(t *testing.T
 	if err != nil || len(items) != 3 {
 		t.Fatalf("items=%#v err=%v", items, err)
 	}
-	if !strings.Contains(items[0], "<summary>∴ thinking</summary>") || !strings.Contains(items[1], "✓ exec</summary>\n\nls\n\n---\n\nfile.go") || strings.Contains(items[2], "file.go") {
+	if !strings.Contains(items[0].Text, "<summary>∴ thinking</summary>") || !strings.Contains(items[1].Text, "✓ exec</summary>\n\nls\n\n---\n\nfile.go") || strings.Contains(items[2].Text, "file.go") {
 		t.Fatalf("metadata lost/mispaired: %#v", items)
 	}
-	pages := paginateSemanticHistory(items, 64)
+	pages := cardtranscript.Paginate(items, 64)
 	if len(pages) != 1 || strings.Count(pages[0].Content, cardtranscript.Separator) != 2 {
 		t.Fatalf("incorrect block separators: %#v", pages)
 	}

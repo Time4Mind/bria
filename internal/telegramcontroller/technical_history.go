@@ -4,25 +4,39 @@ import (
 	"context"
 
 	"bria/internal/cardtranscript"
+	"bria/internal/controllertelemetry"
 	"bria/internal/domain"
+	"bria/internal/finalpersist"
 	"bria/internal/sessionruntime"
+	"bria/internal/telegramcontrolport"
 )
 
-type technicalHistoryStore interface {
-	AppendCardTechnicalHistory(context.Context, domain.SessionID, string) error
-}
+type technicalHistoryStore = telegramcontrolport.TechnicalHistoryStore
+type displayHistoryStore = telegramcontrolport.DisplayHistoryStore
+type typedTranscriptStore = telegramcontrolport.TypedTranscriptStore
+type typedTranscriptInserter = telegramcontrolport.TypedTranscriptInserter
 
-type displayHistoryStore interface {
-	LoadCardDisplayHistory(context.Context, domain.SessionID, bool) ([]string, error)
-}
-
-type typedTranscriptStore interface {
-	AppendCardTypedHistory(context.Context, domain.SessionID, string, string) error
-	LoadCardTranscript(context.Context, domain.SessionID, bool) ([]cardtranscript.Block, error)
-}
-
-type typedTranscriptInserter interface {
-	InsertCardTypedHistoryAfterPrompt(context.Context, domain.SessionID, string, string, string) error
+func (c *Controller) persistFinal(ctx context.Context, id domain.SessionID, messageID, text string, binding domain.ProviderBinding) error {
+	if store, ok := c.uiState.(finalpersist.Writer); ok {
+		ctx = controllertelemetry.WithOperation(ctx, messageID+":final-save")
+		retrying := false
+		event := controllertelemetry.Event{Stage: controllertelemetry.FinalSave, OperationID: messageID + ":final-save", ParentOperationID: messageID, SessionID: string(id), Outcome: controllertelemetry.Failed, Reason: controllertelemetry.PersistFailed}
+		err := finalpersist.Save(ctx, finalpersist.Request{SessionID: id, Binding: binding, MessageID: messageID, Text: text, RequireRunning: c.turnLifecycle != nil}, c.sessions, store, func(attempt uint64, failure error) {
+			retrying = true
+			c.closeFlow.Observe(context.WithoutCancel(ctx), event)
+			if attempt == 1 {
+				c.notify(ctx, Notification{OperationID: messageID + ":final-history-error", ConversationID: c.ownerPrivateChatID, SessionID: id, Kind: NotificationError, Text: "Не удалось сохранить финальный ответ. " + finalpersist.FailureText(failure) + " Повторю запись автоматически; очередь пока ожидает. Запрос модели не повторяется."})
+			}
+		})
+		if retrying && err == nil {
+			event.Outcome, event.Reason = controllertelemetry.Persisted, controllertelemetry.ReasonUnknown
+			c.closeFlow.Observe(context.WithoutCancel(ctx), event)
+			c.notify(ctx, Notification{OperationID: messageID + ":final-history-restored", ConversationID: c.ownerPrivateChatID, SessionID: id, Kind: NotificationPromptStatus, Text: "Финальный ответ сохранён. Завершаю запрос."})
+		}
+		return err
+	}
+	c.appendRuntimeHistoryForMessage(ctx, id, messageID, sessionruntime.TurnEvent{Kind: "final", Text: text})
+	return nil
 }
 
 // Technical identity comes from the provider event type, never from visible
@@ -128,24 +142,34 @@ func (c *Controller) appendRuntimeHistoryForMessage(ctx context.Context, id doma
 
 // Filter a projection copy before pagination. Settings changes can reveal old
 // tool entries again without reconstructing history or resubmitting a turn.
-func (c *Controller) displayHistory(ctx context.Context, id domain.SessionID, history []string) ([]string, error) {
-	show := true
+func (c *Controller) displayHistory(ctx context.Context, id domain.SessionID, history []string) ([]cardtranscript.Block, error) {
+	show, lines := true, 10
 	if c.settings != nil {
 		settings, err := c.settings.Snapshot(ctx)
 		if err != nil {
 			return nil, err
 		}
 		show = settings.ShowTechnicalActions
+		lines = settings.TechnicalOutputLines
 	}
 	if store, ok := c.uiState.(typedTranscriptStore); ok {
 		blocks, err := store.LoadCardTranscript(ctx, id, show)
 		if err != nil {
 			return nil, err
 		}
-		return cardtranscript.Render(blocks), nil
+		blocks = append([]cardtranscript.Block(nil), blocks...)
+		for i := range blocks {
+			blocks[i].ToolLines = lines
+		}
+		return cardtranscript.RenderBlocks(blocks), nil
 	}
 	if store, ok := c.uiState.(displayHistoryStore); ok {
-		return store.LoadCardDisplayHistory(ctx, id, show)
+		texts, err := store.LoadCardDisplayHistory(ctx, id, show)
+		blocks := make([]cardtranscript.Block, len(texts))
+		for i, text := range texts {
+			blocks[i] = cardtranscript.Block{Text: text}
+		}
+		return blocks, err
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -161,7 +185,7 @@ func (c *Controller) displayHistory(ctx context.Context, id domain.SessionID, hi
 				break
 			}
 		}
-		blocks = append(blocks, cardtranscript.Block{Kind: kind, Text: text})
+		blocks = append(blocks, cardtranscript.Block{Kind: kind, Text: text, ToolLines: lines})
 	}
-	return cardtranscript.Render(blocks), nil
+	return cardtranscript.RenderBlocks(blocks), nil
 }

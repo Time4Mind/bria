@@ -18,6 +18,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"bria/internal/callbackdiagnostic"
+	"bria/internal/controllertelemetry"
 )
 
 type Class string
@@ -150,8 +153,11 @@ func (logger *Logger) Write(event Event) error {
 	if now.IsZero() {
 		return ErrInvalidOptions
 	}
-	// Retention is measured from the write, not from caller-controlled data.
-	event.Time = now
+	// Only Telegram traces carry observation time captured before queueing.
+	if event.Type != "telegram.flow_stage" || event.Time.IsZero() {
+		event.Time = now
+	}
+	event.Time = event.Time.UTC()
 	event = sanitizeEvent(event)
 	encoded, err := encodeEvent(event)
 	if err != nil {
@@ -492,6 +498,9 @@ func sanitizeEvent(event Event) Event {
 	event.EntityID = sanitizeLabel(event.EntityID)
 	event.Result = sanitizeLabel(event.Result)
 	event.ErrorCategory = sanitizeLabel(event.ErrorCategory)
+	if event.Type == "telegram.flow_stage" && event.ErrorCategory != "" {
+		event.ErrorCategory = callbackdiagnostic.SafeCode(event.ErrorCategory)
+	}
 	if event.Error != "" {
 		// Free-form errors may contain arbitrary user or agent text that pattern
 		// matching cannot identify reliably. ErrorCategory is the safe diagnostic
@@ -507,6 +516,10 @@ func sanitizeEvent(event Event) Event {
 		sanitized := make(map[string]string, len(event.Fields))
 		redactedField := 0
 		for _, key := range keys {
+			if value, known := telegramStructuredField(strings.ToLower(key), event.Fields[key]); known {
+				sanitized[key] = value
+				continue
+			}
 			safeKey := key
 			knownSafeField := safeStructuredField(key)
 			if !knownSafeField || !safeFieldNamePattern.MatchString(key) {
@@ -517,6 +530,8 @@ func sanitizeEvent(event Event) Event {
 				sanitized[safeKey] = "[REDACTED]"
 			} else if strings.EqualFold(key, "model_evidence") && event.Fields[key] != "" && event.Fields[key] != "codex_cli_header" {
 				sanitized[safeKey] = "[REDACTED]"
+			} else if strings.EqualFold(key, "stage") && event.Fields["selection_outcome"] != "" {
+				sanitized[safeKey] = controllertelemetry.SafeStage(event.Fields[key])
 			} else if numericStructuredField(key) && !safeNonNegativeDecimal(event.Fields[key]) {
 				// Timing and load counters are numeric by contract. Do not preserve
 				// signed, decimal, or overflowing caller values as labels.
@@ -559,12 +574,44 @@ func safeStructuredField(key string) bool {
 }
 
 func safeOpaqueField(key string) bool {
-	switch strings.ToLower(key) {
-	case "message_id", "model", "model_evidence", "stage":
-		return true
+	key = strings.ToLower(key)
+	return key == "message_id" || key == "model" || key == "model_evidence" || key == "stage"
+}
+
+var traceRefPattern = regexp.MustCompile(`^c_[0-9a-f]{64}$`)
+
+func telegramStructuredField(key, value string) (string, bool) {
+	valid := false
+	switch key {
+	case "callback_ref", "card_ref", "expected_card_ref", "session_ref", "presentation_ref", "run_ref",
+		"node_ref", "previous_session_ref", "target_session_ref", "parent_operation_ref":
+		valid = traceRefPattern.MatchString(value)
+	case "button_refs":
+		refs := strings.Split(value, ",")
+		valid = len(refs) <= 32
+		for _, ref := range refs {
+			valid = valid && traceRefPattern.MatchString(ref)
+		}
+	case "follow_latest", "retired":
+		valid = value == "true" || value == "false"
+	case "page", "pages", "target", "button_refs_truncated":
+		valid = safeNonNegativeDecimal(value)
+	case "sequence", "candidate_count":
+		n, err := strconv.ParseUint(value, 10, 64)
+		valid = err == nil && strconv.FormatUint(n, 10) == value
+	case "reason":
+		return callbackdiagnostic.SafeCode(value), true
+	case "selection_reason":
+		return controllertelemetry.SafeReason(value), true
+	case "selection_outcome":
+		return controllertelemetry.SafeOutcome(value), true
 	default:
-		return false
+		return "", false
 	}
+	if !valid {
+		value = "[REDACTED]"
+	}
+	return value, true
 }
 
 func numericStructuredField(key string) bool {
@@ -579,14 +626,7 @@ func numericStructuredField(key string) bool {
 }
 
 func safeNonNegativeDecimal(value string) bool {
-	if value == "" {
-		return false
-	}
-	for _, character := range value {
-		if character < '0' || character > '9' {
-			return false
-		}
-	}
+	// Base 10 ParseUint rejects empty strings, signs and non-decimal digits.
 	_, err := strconv.ParseUint(value, 10, 63)
 	return err == nil
 }

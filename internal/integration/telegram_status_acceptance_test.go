@@ -146,10 +146,10 @@ func (client *statusAcceptanceHTTPClient) Do(request *http.Request) (*http.Respo
 ]}`), nil
 	case 4:
 		client.sendCalls++
-		var body telegram.SendMessageRequest
+		var body telegram.SendRichMessageRequest
 		statusAcceptanceDecode(client.t, request, &body)
-		if body.ChatID != 42 || body.Text == "" || strings.Contains(body.Text, "stale") {
-			client.t.Fatalf("sendMessage body = %#v", body)
+		if !strings.HasSuffix(request.URL.Path, "/sendRichMessage") || body.ChatID != 42 || body.RichMessage.Markdown == "" || strings.Contains(body.RichMessage.Markdown, "stale") {
+			client.t.Fatalf("sendRichMessage body = %#v", body)
 		}
 		return statusAcceptanceResponse(`{"ok":true,"result":{"message_id":901,"from":{"id":600,"is_bot":true},"chat":{"id":42,"type":"private"},"text":"ready"}}`), nil
 	default:

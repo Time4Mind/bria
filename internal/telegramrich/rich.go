@@ -1,42 +1,51 @@
 // Package telegramrich normalizes rich Markdown for Telegram presentation.
 package telegramrich
 
-import "strings"
+import (
+	"strings"
+
+	"bria/internal/markdownliteral"
+)
 
 // NormalizeRichMarkdown applies the compact table layout expected by Telegram.
 func NormalizeRichMarkdown(text string) string {
 	lines := strings.Split(text, "\n")
-	for index := 0; index < len(lines); {
-		if !strings.HasPrefix(strings.TrimSpace(lines[index]), "|") {
-			index++
+	rows := tableRows(lines)
+	var result []string
+	for i, line := range lines {
+		if rows[i] {
+			if i == 0 {
+				result = append(result, "", "")
+			} else if !rows[i-1] && strings.TrimSpace(lines[i-1]) != "" {
+				result = append(result, "")
+			}
+			if !isRichTableSeparator(line) {
+				line = subWrapRichTableRow(line)
+			}
+		}
+		result = append(result, line)
+	}
+	return strings.Join(result, "\n")
+}
+
+func tableRows(lines []string) []bool {
+	blocked, rows := markdownliteral.Lines(lines), make([]bool, len(lines))
+	for i := 0; i+1 < len(lines); i++ {
+		if blocked[i] || blocked[i+1] || !strings.HasPrefix(strings.TrimSpace(lines[i]), "|") ||
+			!isRichTableSeparator(lines[i+1]) || len(splitRichTableCells(lines[i])) != len(splitRichTableCells(lines[i+1])) {
 			continue
 		}
-		end := index
-		for end < len(lines) && strings.HasPrefix(strings.TrimSpace(lines[end]), "|") {
-			end++
+		rows[i], rows[i+1] = true, true
+		for i += 2; i < len(lines) && !blocked[i] && strings.HasPrefix(strings.TrimSpace(lines[i]), "|"); i++ {
+			rows[i] = true
 		}
-		if end-index >= 2 && isRichTableSeparator(lines[index+1]) {
-			if index > 0 && strings.TrimSpace(lines[index-1]) != "" {
-				lines = append(lines[:index], append([]string{""}, lines[index:]...)...)
-				index++
-				end++
-			}
-			for row := index; row < end; row++ {
-				if !isRichTableSeparator(lines[row]) {
-					lines[row] = subWrapRichTableRow(lines[row])
-				}
-			}
-		}
-		index = end
+		i--
 	}
-	return strings.Join(lines, "\n")
+	return rows
 }
 
 func isRichTableSeparator(line string) bool {
 	cells := splitRichTableCells(line)
-	if len(cells) == 0 {
-		return false
-	}
 	for _, cell := range cells {
 		value := strings.Trim(strings.TrimSpace(cell), ":")
 		if len(value) < 3 || strings.Trim(value, "-") != "" {
@@ -50,7 +59,7 @@ func subWrapRichTableRow(line string) string {
 	cells := splitRichTableCells(line)
 	for index, cell := range cells {
 		value := strings.TrimSpace(cell)
-		if value != "" {
+		if value != "" && !(strings.HasPrefix(value, "<sub>") && strings.HasSuffix(value, "</sub>")) {
 			cells[index] = " <sub>" + value + "</sub> "
 		}
 	}

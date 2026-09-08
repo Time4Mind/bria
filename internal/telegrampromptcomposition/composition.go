@@ -100,10 +100,10 @@ func (deliverer Deliverer) Deliver(ctx context.Context, notification telegramcon
 	view := telegramui.PageView{Page: card.View.Page, Pages: card.View.Pages, Anchor: card.View.Anchor, FollowLatest: card.View.FollowLatest}
 	prepared, err := telegramflow.PrepareCardRefresh(operationID, card.SessionID, stored.Carrier.ChatID, stored.Carrier.MessageID,
 		telegramui.CardProjectionInput{Pages: pages, View: view, Keyboard: telegramui.CardKeyboardInput{
-			View: view, Working: card.Working, Archived: card.Archived, OptionsExpanded: card.OptionsExpanded,
+			View: view, Working: card.Working, Archived: card.Archived, Recovery: card.Recovery, OptionsExpanded: card.OptionsExpanded,
 			SessionRowSizes: append([]int(nil), card.SessionRowSizes...),
 			SessionLabels:   append([]string(nil), card.SelectableSessionLabels...),
-		}}, card.Header+"\n\n", card.OptionsExpanded, card.SelectableSessionIDs, deliverer.Presenter)
+		}}, card.Header, card.OptionsExpanded, card.SelectableSessionIDs, deliverer.Presenter)
 	if err != nil {
 		return receipt, err
 	}

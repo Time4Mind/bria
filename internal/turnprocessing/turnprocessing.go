@@ -11,6 +11,10 @@ import (
 	"bria/internal/sessionruntime"
 )
 
+// ErrInputDeferred means this exact input was not sent because the previous
+// turn has no committed outcome that permits continuation.
+var ErrInputDeferred = errors.New("input deferred until prior outcome is resolved")
+
 type IncomingInput struct {
 	Kind              string
 	FileID            string
@@ -82,13 +86,19 @@ type DurableInputPreparation struct {
 type DurableInputCompletion string
 
 const (
-	DurableInputSucceeded DurableInputCompletion = "succeeded"
-	DurableInputFailed    DurableInputCompletion = "failed"
+	DurableInputSucceeded      DurableInputCompletion = "succeeded"
+	DurableInputFailed         DurableInputCompletion = "failed"
+	DurableInputTerminalFailed DurableInputCompletion = "terminal_failed"
+	DurableInputPending        DurableInputCompletion = "pending"
+	DurableInputUnknown        DurableInputCompletion = "unknown"
 )
 
 type DurableInputCallbacks struct {
 	OnPrepared func(context.Context, DurableInputPreparation) error
 	OnAccepted func(context.Context, DurableInputAcceptance) error
+	// OnCompleted runs after durable acceptance and the actual terminal result,
+	// potentially after ProcessDurableInput has returned its pending receipt.
+	OnCompleted func(context.Context, DurableInputProcessReceipt) error
 }
 type DurableInputProcessReceipt struct {
 	SessionID  domain.SessionID
@@ -193,6 +203,9 @@ func Execute(ctx context.Context, submitter sessionruntime.Submitter, interactio
 					return err
 				}
 			}
+			// Durable acceptance cannot be undone by a later attachment custody
+			// failure. Keep it visible so the caller treats the outcome as unknown.
+			execution.Accepted = true
 			for _, attachment := range request.Input.Attachments {
 				if attachments == nil {
 					return errors.New("attachment custody lifecycle is not configured")
@@ -201,7 +214,6 @@ func Execute(ctx context.Context, submitter sessionruntime.Submitter, interactio
 					return err
 				}
 			}
-			execution.Accepted = true
 			if callbacks.AfterAccepted != nil {
 				callbacks.AfterAccepted()
 			}

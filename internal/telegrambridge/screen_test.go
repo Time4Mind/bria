@@ -255,11 +255,11 @@ func TestScreenOffRemovesMediaInSameRichCard(t *testing.T) {
 	}
 }
 
-func TestUnboundScreenMarkerPreservesPlainTransport(t *testing.T) {
+func TestUnboundScreenMarkerUsesRichWithoutAddingMedia(t *testing.T) {
 	for _, mode := range []string{"send", "keyboard", "edit"} {
 		t.Run(mode, func(t *testing.T) {
 			client := mustTelegramClient(t, func(request *http.Request) (*http.Response, error) {
-				want := "/sendMessage"
+				want := "/sendRichMessage"
 				if mode == "edit" {
 					want = "/editMessageText"
 				}
@@ -268,11 +268,9 @@ func TestUnboundScreenMarkerPreservesPlainTransport(t *testing.T) {
 				}
 				var body map[string]json.RawMessage
 				decodeJSON(t, request, &body)
-				if _, ok := body["rich_message"]; ok {
-					t.Fatal("unbound screen marker produced rich message")
-				}
-				if len(body["text"]) == 0 {
-					t.Fatal("plain message text missing")
+				var rich telegram.InputRichMessage
+				if err := json.Unmarshal(body["rich_message"], &rich); err != nil || rich.Markdown != "context" || len(rich.Media) != 0 || len(body["text"]) != 0 {
+					t.Fatalf("unbound Screen must retain Rich text without media: %+v %v", rich, err)
 				}
 				return response(http.StatusOK, `{"ok":true,"result":{"message_id":91,"from":{"id":600,"is_bot":true},"chat":{"id":42,"type":"private"}}}`), nil
 			})

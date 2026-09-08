@@ -78,6 +78,7 @@ func TestCodecSupportsEveryTelegramUIActionWithoutChangingExistingWireValues(t *
 		{"settings screen", ActionSettingsScreen, 18, 0},
 		{"settings category", ActionSettingsCategory, 72, 4},
 		{"settings detail", ActionSettingsDetail, 19, 0},
+		{"technical output lines", ActionSettingsTechnicalOutputLines, 87, 0},
 		{"authorize codex", ActionAuthorizeCodex, 20, 0},
 		{"authorize claude", ActionAuthorizeClaude, 21, 0},
 		{"interaction choice", ActionInteractionChoice, 22, 1},

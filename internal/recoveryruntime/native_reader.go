@@ -1,26 +1,24 @@
 package recoveryruntime
 
 import (
-	"bytes"
 	"context"
 	"encoding/hex"
-	"encoding/json"
-	"io"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"unicode/utf8"
 
 	"bria/internal/domain"
+	"bria/internal/nativereceiptstore"
 	"bria/internal/sessionruntime"
 )
 
 // NativeReader reads the adapter's private exact-session acceptance receipts.
 // It never launches a provider or interprets native transcript prompt text.
 type NativeReader struct {
-	root     string
-	provider domain.Provider
+	root           string
+	provider       domain.Provider
+	transcriptRoot string
 }
 
 func NewNative(root string, provider domain.Provider) (*NativeReader, error) {
@@ -28,6 +26,20 @@ func NewNative(root string, provider domain.Provider) (*NativeReader, error) {
 		return nil, ErrUnavailable
 	}
 	return &NativeReader{root: filepath.Clean(root), provider: provider}, nil
+}
+
+// NewNativeWithTranscriptRoot optionally proves Codex finals from the owning
+// composition's explicit native sessions root. It never launches a provider.
+func NewNativeWithTranscriptRoot(root string, provider domain.Provider, transcriptRoot string) (*NativeReader, error) {
+	reader, err := NewNative(root, provider)
+	if err != nil {
+		return nil, err
+	}
+	if transcriptRoot != "" && (provider != domain.ProviderCodex || !filepath.IsAbs(transcriptRoot) || !utf8.ValidString(transcriptRoot) || strings.ContainsRune(transcriptRoot, 0)) {
+		return nil, ErrUnavailable
+	}
+	reader.transcriptRoot = transcriptRoot
+	return reader, nil
 }
 
 func (reader *NativeReader) ReadAcceptedTurns(ctx context.Context, request sessionruntime.AcceptedTurnReadRequest) (sessionruntime.AcceptedTurnReconciliation, error) {
@@ -38,38 +50,20 @@ func (reader *NativeReader) ReadAcceptedTurns(ctx context.Context, request sessi
 	if err := ctx.Err(); err != nil {
 		return unavailable, err
 	}
-	root, err := os.Lstat(reader.root)
-	if err != nil || !root.IsDir() || root.Mode()&os.ModeSymlink != 0 || root.Mode().Perm()&0077 != 0 {
-		return unavailable, ErrUnavailable
-	}
-	path := filepath.Join(reader.root, request.Binding.SessionID+".json")
-	before, err := os.Lstat(path)
-	if err != nil || !before.Mode().IsRegular() || before.Mode().Perm()&0077 != 0 || before.Size() > 1<<20 {
-		return unavailable, ErrUnavailable
-	}
-	file, err := os.Open(path)
+	doc, err := nativereceiptstore.Read(reader.root, request.Binding.SessionID)
 	if err != nil {
 		return unavailable, ErrUnavailable
 	}
-	defer file.Close()
-	opened, err := file.Stat()
-	if err != nil || !os.SameFile(before, opened) {
-		return unavailable, ErrUnavailable
+	turns := make([]sessionruntime.ReconciledAcceptedTurn, 0, len(doc.Receipts))
+	for message, outcome := range doc.Receipts {
+		turns = append(turns, sessionruntime.ReconciledAcceptedTurn{MessageID: message, Outcome: sessionruntime.AcceptedTurnOutcome(outcome), TurnID: doc.TurnIDs[message]})
 	}
-	data, err := io.ReadAll(io.LimitReader(file, (1<<20)+1))
-	if err != nil || len(data) > 1<<20 {
-		return unavailable, ErrUnavailable
-	}
+	sort.Slice(turns, func(i, j int) bool { return turns[i].MessageID < turns[j].MessageID })
 	if err := ctx.Err(); err != nil {
 		return unavailable, err
 	}
-	turns, err := nativeReceipts(data, request.Binding.SessionID)
-	if err != nil {
-		return unavailable, ErrUnavailable
-	}
-	after, err := os.Lstat(path)
-	if err != nil || !os.SameFile(before, after) || after.Size() != before.Size() || !after.ModTime().Equal(before.ModTime()) {
-		return unavailable, ErrUnavailable
+	if err := reader.enrichNativeTurns(ctx, request, turns); err != nil {
+		return unavailable, err
 	}
 	return sessionruntime.AcceptedTurnReconciliation{Turns: turns}, nil
 }
@@ -80,68 +74,6 @@ func nativeUUID(id string) bool {
 	}
 	decoded, err := hex.DecodeString(strings.ReplaceAll(id, "-", ""))
 	return err == nil && len(decoded) == 16
-}
-
-func nativeReceipts(data []byte, id string) ([]sessionruntime.ReconciledAcceptedTurn, error) {
-	if !utf8.Valid(data) {
-		return nil, ErrUnavailable
-	}
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	token, err := decoder.Token()
-	if err != nil || token != json.Delim('{') {
-		return nil, ErrUnavailable
-	}
-	seen := map[string]bool{}
-	turns := []sessionruntime.ReconciledAcceptedTurn{}
-	for decoder.More() {
-		key, err := decoder.Token()
-		name, ok := key.(string)
-		if err != nil || !ok || seen[name] {
-			return nil, ErrUnavailable
-		}
-		seen[name] = true
-		switch name {
-		case "session_id":
-			var actual string
-			if decoder.Decode(&actual) != nil || actual != id {
-				return nil, ErrUnavailable
-			}
-		case "receipts":
-			token, err := decoder.Token()
-			if err != nil || token != json.Delim('{') {
-				return nil, ErrUnavailable
-			}
-			messages := map[string]bool{}
-			for decoder.More() {
-				key, err := decoder.Token()
-				message, ok := key.(string)
-				if err != nil || !ok || message == "" || len(message) > 1024 || strings.ContainsAny(message, "\x00\r\n") || messages[message] || len(turns) >= 10000 {
-					return nil, ErrUnavailable
-				}
-				messages[message] = true
-				var outcome sessionruntime.AcceptedTurnOutcome
-				if decoder.Decode(&outcome) != nil || outcome != sessionruntime.AcceptedTurnUnknown && outcome != sessionruntime.AcceptedTurnCompleted && outcome != sessionruntime.AcceptedTurnFailed {
-					return nil, ErrUnavailable
-				}
-				turns = append(turns, sessionruntime.ReconciledAcceptedTurn{MessageID: message, Outcome: outcome})
-			}
-			token, err = decoder.Token()
-			if err != nil || token != json.Delim('}') {
-				return nil, ErrUnavailable
-			}
-		default:
-			return nil, ErrUnavailable
-		}
-	}
-	token, err = decoder.Token()
-	if err != nil || token != json.Delim('}') || !seen["session_id"] || !seen["receipts"] {
-		return nil, ErrUnavailable
-	}
-	if _, err = decoder.Token(); err != io.EOF {
-		return nil, ErrUnavailable
-	}
-	sort.Slice(turns, func(i, j int) bool { return turns[i].MessageID < turns[j].MessageID })
-	return turns, nil
 }
 
 var _ sessionruntime.AcceptedTurnReader = (*NativeReader)(nil)

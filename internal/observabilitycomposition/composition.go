@@ -217,13 +217,17 @@ func (timer *turnTimer) measurements() observability.Measurements {
 }
 
 func errorCategory(err error) string {
-	if errors.Is(err, context.Canceled) {
+	if class := sessionruntime.RuntimeFailureClass(err); class != "" {
+		return class
+	}
+	switch {
+	case errors.Is(err, context.Canceled):
 		return "cancelled"
-	}
-	if errors.Is(err, context.DeadlineExceeded) {
+	case errors.Is(err, context.DeadlineExceeded):
 		return "deadline_exceeded"
+	default:
+		return "provider_error"
 	}
-	return "provider_error"
 }
 
 var _ sessionruntime.Submitter = (*Submitter)(nil)

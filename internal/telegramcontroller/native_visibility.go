@@ -12,6 +12,7 @@ import (
 func (c *Controller) HandleSemanticAction(ctx context.Context, action SemanticAction) (SemanticActionResult, error) {
 	c.hideNativeVisibility()
 	result, err := c.handleSemanticAction(ctx, action)
+	c.projectedEvent(ctx, action.SessionID, result, err)
 	if err == nil {
 		c.recordNativeVisibility(result)
 	}
@@ -33,7 +34,7 @@ func (c *Controller) HandleSemanticMessage(ctx context.Context, update coordinat
 func (c *Controller) recordNativeVisibility(result SemanticActionResult) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.nativeCardVisible = result.Card != nil && !result.Card.CloseConfirmation && !result.Card.DeleteConfirmation
+	c.nativeCardVisible = result.Card != nil && !result.Card.Recovery && !result.Card.CloseConfirmation && !result.Card.DeleteConfirmation
 	if result.Surface != nil && result.Surface.NativeSessionID != "" {
 		c.nativeCardVisible = true
 	}

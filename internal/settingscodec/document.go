@@ -56,6 +56,7 @@ func Inspect(document []byte) (map[string]struct{}, error) {
 	allowed["standby_enabled"] = struct{}{}
 	allowed["auto_approve_commands"] = struct{}{}
 	allowed["screen_capture_limit_kib"] = struct{}{}
+	allowed["technical_output_lines"] = struct{}{}
 	for _, field := range creationDocumentFields {
 		allowed[field] = struct{}{}
 	}

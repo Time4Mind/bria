@@ -137,6 +137,11 @@ func isOpen(status domain.SessionStatus) bool {
 // active target creates a UI that accepts input only to reject it.
 func Selectable(status domain.SessionStatus) bool { return isOpen(status) }
 
+// Viewable keeps failed sessions reachable without making them input targets.
+func Viewable(status domain.SessionStatus) bool {
+	return isOpen(status) || status == domain.SessionAwaitingRecovery
+}
+
 func (m Model) Session(id domain.SessionID) (domain.Session, bool) {
 	s, ok := m.items[id]
 	return s, ok

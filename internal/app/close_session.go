@@ -28,47 +28,52 @@ type CloseSessionResult struct {
 // callbacks, where waiting on a provider shutdown would block the bot update
 // loop.
 func (closer *SessionCloser) BeginClose(ctx context.Context, id domain.SessionID) (CloseSessionResult, error) {
-	if ctx == nil {
-		return CloseSessionResult{}, errors.New("session close context is required")
-	}
-	if id == "" {
-		return CloseSessionResult{}, errors.New("session id is required")
+	return closer.BeginCloseWithCompletion(ctx, id, nil)
+}
+
+// BeginCloseWithCompletion reports asynchronous results after the durable
+// lifecycle transition. Synchronous results are returned only, not also reported.
+// Completion retains operation values but is independent of callback cancellation.
+// It runs outside the closer lock and must not panic.
+func (closer *SessionCloser) BeginCloseWithCompletion(ctx context.Context, id domain.SessionID, completed func(context.Context, CloseSessionResult, error)) (CloseSessionResult, error) {
+	if ctx == nil || id == "" {
+		return CloseSessionResult{}, errors.New("session close context and id are required")
 	}
 	closer.mu.Lock()
+	defer closer.mu.Unlock()
 	current, err := closer.store.Load(ctx, id)
 	if err != nil {
-		closer.mu.Unlock()
 		return CloseSessionResult{}, fmt.Errorf("load session to close: %w", err)
 	}
-	if current.Status() == domain.SessionClosingAfterWork || current.Status() == domain.SessionClosing {
-		closer.mu.Unlock()
-		go func() { _, _ = closer.Close(context.Background(), id) }()
+	_, bound := current.Binding()
+	if current.Status() == domain.SessionClosingAfterWork {
 		return CloseSessionResult{Session: current, Scheduled: true}, nil
 	}
-	if current.Status() != domain.SessionReady {
-		closer.mu.Unlock()
-		return closer.Close(ctx, id)
+	if !bound || (current.Status() != domain.SessionReady && current.Status() != domain.SessionClosing) {
+		return closer.closeCurrent(ctx, current)
 	}
-	_, bound := current.Binding()
-	if !bound {
-		closer.mu.Unlock()
-		return closer.Close(ctx, id)
+	closing := current
+	if current.Status() == domain.SessionReady {
+		closing, err = current.BeginClose(closer.now().UTC())
+		if err == nil {
+			err = closer.store.Replace(ctx, current, closing)
+		}
 	}
-	at := closer.now().UTC()
-	closing, err := current.BeginClose(at)
-	if err == nil {
-		err = closer.store.Replace(ctx, current, closing)
-	}
-	closer.mu.Unlock()
 	if err != nil {
 		return CloseSessionResult{}, fmt.Errorf("begin session close: %w", err)
 	}
-	go func() {
-		// Use an independent context: Telegram callback contexts are routinely
-		// cancelled as soon as the answer is sent.
-		_, _ = closer.Close(context.Background(), id)
-	}()
+	closer.completeAsync(ctx, id, completed)
 	return CloseSessionResult{Session: closing, Scheduled: true}, nil
+}
+
+func (closer *SessionCloser) completeAsync(ctx context.Context, id domain.SessionID, completed func(context.Context, CloseSessionResult, error)) {
+	go func() {
+		completionContext := context.WithoutCancel(ctx)
+		result, err := closer.Close(completionContext, id)
+		if completed != nil {
+			completed(completionContext, result, err)
+		}
+	}()
 }
 
 type emptyClosingSessionStore interface {
@@ -96,11 +101,8 @@ func NewSessionCloser(store SessionCloseStore, starter SessionStarter, now func(
 }
 
 func (closer *SessionCloser) Close(ctx context.Context, id domain.SessionID) (CloseSessionResult, error) {
-	if ctx == nil {
-		return CloseSessionResult{}, errors.New("session close context is required")
-	}
-	if id == "" {
-		return CloseSessionResult{}, errors.New("session id is required")
+	if ctx == nil || id == "" {
+		return CloseSessionResult{}, errors.New("session close context and id are required")
 	}
 	closer.mu.Lock()
 	defer closer.mu.Unlock()
@@ -109,6 +111,11 @@ func (closer *SessionCloser) Close(ctx context.Context, id domain.SessionID) (Cl
 	if err != nil {
 		return CloseSessionResult{}, fmt.Errorf("load session to close: %w", err)
 	}
+	return closer.closeCurrent(ctx, current)
+}
+
+// closeCurrent requires mu: deciding and scheduling a busy close is atomic.
+func (closer *SessionCloser) closeCurrent(ctx context.Context, current domain.Session) (CloseSessionResult, error) {
 	at := closer.now().UTC()
 	switch current.Status() {
 	case domain.SessionArchived:
@@ -125,7 +132,7 @@ func (closer *SessionCloser) Close(ctx context.Context, id domain.SessionID) (Cl
 	case domain.SessionReady, domain.SessionClosingAfterWork, domain.SessionAwaitingRecovery, domain.SessionClosing:
 		return closer.closeNow(ctx, current, at)
 	default:
-		return CloseSessionResult{}, fmt.Errorf("session %q cannot close from %q", id, current.Status())
+		return CloseSessionResult{}, fmt.Errorf("session %q cannot close from %q", current.ID(), current.Status())
 	}
 }
 

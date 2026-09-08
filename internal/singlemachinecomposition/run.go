@@ -17,6 +17,7 @@ import (
 	"bria/internal/durableflow"
 	"bria/internal/interactioncomposition"
 	"bria/internal/messagejournal"
+	"bria/internal/nativerecoverycomposition"
 	"bria/internal/observability"
 	"bria/internal/promptpreprocess"
 	"bria/internal/promptpreprocesscommand"
@@ -383,6 +384,7 @@ func runTelegramController(
 	runtimeEvents, finals := turnRuntime.RuntimeEvents, turnRuntime.Finals
 	var recovery app.SessionRecoveryResult
 	var processSupervision contextRunner = idleRunner{}
+	var sessionRecoverer telegramcontroller.SessionRecoverer
 	waiter, canWait := starter.(sessionruntime.ProcessSupervisor)
 	reader, canReconcile := starter.(sessionruntime.AcceptedTurnReader)
 	if canWait && canReconcile {
@@ -390,7 +392,7 @@ func runTelegramController(
 		if err != nil {
 			return fmt.Errorf("compose provider recovery reader: %w", err)
 		}
-		durableRecovery := durablecomposition.AcceptedTurnReconciler{Flow: flow, Histories: map[domain.Provider]sessionsupervisor.AcceptedTurnReconciler{
+		durableRecovery := durablecomposition.AcceptedTurnReconciler{Flow: flow, FinalRestorer: state, Histories: map[domain.Provider]sessionsupervisor.AcceptedTurnReconciler{
 			domain.ProviderCodex: providerHistory, domain.ProviderClaude: providerHistory,
 		}}
 		reportRecovery := func(reportErr error) {
@@ -404,6 +406,8 @@ func runTelegramController(
 		if err != nil {
 			return fmt.Errorf("compose session supervision: %w", err)
 		}
+		supervision.SetObserver(flowTrace)
+		sessionRecoverer = supervision
 		recovery, err = supervision.RecoverStartup(ctx)
 		processSupervision = supervision
 	} else {
@@ -522,8 +526,8 @@ func runTelegramController(
 			Native:                nativeController,
 			Preprocessor:          promptPreprocessor,
 			SessionNamer:          sessionNamer,
-			PreprocessingObserver: preprocessingObserver{logger: safeLogger},
-			Stopper:               turnStopper, ArchivedResumer: archivedResumer, SessionCloser: sessionCloser,
+			PreprocessingObserver: preprocessingObserver{logger: safeLogger}, ControllerObserver: flowTrace,
+			Stopper: turnStopper, ArchivedResumer: archivedResumer, Recoverer: sessionRecoverer, SessionCloser: sessionCloser,
 			TurnLifecycle: turnLifecycle, DurableInput: inputCustody, DurableOutput: outputCustody,
 			InputPreparer: inputPreparer, Attachments: attachments, RuntimeEvents: runtimeEvents, Finals: finals,
 			Interactions: interactions.Flow(), Authorization: authorization,
@@ -532,6 +536,9 @@ func runTelegramController(
 	)
 	if err != nil {
 		return fmt.Errorf("create Telegram controller: %w", err)
+	}
+	if supervision, ok := sessionRecoverer.(*supervisioncomposition.Manager); ok {
+		supervision.SetRecoveryNotifier(handler.RefreshRecoveryCard)
 	}
 	defer func() {
 		closeContext, cancel := context.WithTimeout(context.Background(), controllerCloseTimeout)
@@ -633,7 +640,7 @@ func runTelegramController(
 		}
 	}
 	inputDispatcher := durablecomposition.InputDispatcher{
-		Flow: flow, Processor: durablecomposition.NewControllerInputProcessor(handler), Sessions: state,
+		Flow: flow, Processor: durablecomposition.NewControllerInputProcessor(handler, inputCustody.WakeSession), Sessions: state,
 		Wake: inputWake, Report: durableReporter("durable_input", "durable.input_failed"),
 	}
 	outputDispatcher := durablecomposition.OutputDispatcher{
@@ -735,32 +742,7 @@ func ComposeProviderRuntime(configuration config.Config, environment []string, e
 }
 
 func composeAcceptedTurnReader(configuration config.Config, commands *runtimefactory.CommandSet) (sessionruntime.AcceptedTurnReader, error) {
-	var codex, claude sessionruntime.AcceptedTurnReader
-	if configuration.ProviderEnabled(domain.ProviderCodex) {
-		reader, err := recoveryruntime.NewNative(configuration.StatePath+".native", domain.ProviderCodex)
-		if err != nil {
-			return nil, fmt.Errorf("compose Codex accepted-turn reader: %w", err)
-		}
-		codex = reader
-	}
-	if configuration.ProviderEnabled(domain.ProviderClaude) {
-		reader, err := recoveryruntime.NewNative(configuration.StatePath+".native", domain.ProviderClaude)
-		if err != nil {
-			return nil, fmt.Errorf("compose Claude accepted-turn reader: %w", err)
-		}
-		claude = reader
-	}
-	if codex != nil && claude != nil {
-		readers, err := recoveryruntime.NewProviderReaders(codex, claude)
-		if err != nil {
-			return nil, fmt.Errorf("compose provider accepted-turn readers: %w", err)
-		}
-		return readers, nil
-	}
-	if codex != nil {
-		return codex, nil
-	}
-	return claude, nil
+	return nativerecoverycomposition.Compose(configuration, commands)
 }
 
 func validateRunnableRole(configuration config.Config) error {

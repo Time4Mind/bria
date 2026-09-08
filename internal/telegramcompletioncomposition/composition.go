@@ -174,7 +174,7 @@ func (deliverer CompletionDeliverer) Deliver(ctx context.Context, notification t
 	input := telegramui.CardProjectionInput{
 		Pages: pages, View: view,
 		Keyboard: telegramui.CardKeyboardInput{
-			View: view, Working: card.Working, Archived: card.Archived,
+			View: view, Working: card.Working, Archived: card.Archived, Recovery: card.Recovery,
 			CloseConfirmation: card.CloseConfirmation, OptionsExpanded: card.OptionsExpanded,
 			SessionRowSizes: append([]int(nil), card.SessionRowSizes...),
 			SessionLabels:   append([]string(nil), card.SelectableSessionLabels...),
@@ -187,7 +187,7 @@ func (deliverer CompletionDeliverer) Deliver(ctx context.Context, notification t
 			return receipt, errors.New("active commentary card carrier is not confirmed")
 		}
 		prepared, err = telegramflow.PrepareCardRefresh(operationID, card.SessionID, stored.Carrier.ChatID, stored.Carrier.MessageID,
-			input, card.Header+"\n\n", card.OptionsExpanded, card.SelectableSessionIDs, deliverer.Presenter)
+			input, card.Header, card.OptionsExpanded, card.SelectableSessionIDs, deliverer.Presenter)
 	} else {
 		prepared, err = telegramflow.PrepareCompletion(operationID, card.SessionID, deliverer.ConversationID, active,
 			input, card.OptionsExpanded, card.SelectableSessionIDs, deliverer.Presenter)
@@ -198,7 +198,7 @@ func (deliverer CompletionDeliverer) Deliver(ctx context.Context, notification t
 	if question && !active {
 		prepared.Status.Text = "Фоновая сессия ждёт ответа."
 	}
-	prepared.Card.Header = card.Header + "\n\n"
+	prepared.Card.Header = card.Header
 	if active {
 		prepared.Status.Text = prepared.Card.Header + prepared.Card.Projection.Card.Pages[prepared.Card.Projection.Card.View.Page-1].Content
 	}

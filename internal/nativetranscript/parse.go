@@ -11,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"bria/internal/runtimeprotocol"
+	"bria/internal/tooltext"
 )
 
 type record struct {
@@ -271,12 +272,12 @@ func (s *parseState) parse(line []byte, opts Options, offset int64) ([]Event, er
 				}
 				emitMetadata(KindTool, name, &runtimeprotocol.EventMetadata{
 					ItemID: toolItemID(p.CallID, p.ID), Name: p.Name,
-					Arguments: boundedMetadataText(firstRawText(p.Arguments, p.Input)), Status: toolStatus(p.Status, "in_progress"),
+					Arguments: tooltext.Retain(firstRawText(p.Arguments, p.Input)), Status: toolStatus(p.Status, "in_progress"),
 				})
 			}
 			if p.Type == "function_call_output" || p.Type == "custom_tool_call_output" {
 				emitMetadata(KindTool, "tool", &runtimeprotocol.EventMetadata{
-					ItemID: toolItemID(p.CallID, p.ID), Result: boundedMetadataText(firstRawText(p.Output, p.Content)), Status: toolStatus(p.Status, "completed"),
+					ItemID: toolItemID(p.CallID, p.ID), Result: tooltext.Retain(firstRawText(p.Output, p.Content)), Status: toolStatus(p.Status, "completed"),
 				})
 			}
 			// Native versions can record assistant phase on response_item instead of
@@ -335,7 +336,7 @@ func (s *parseState) parse(line []byte, opts Options, offset int64) ([]Event, er
 						status = "failed"
 					}
 					emitMetadata(KindTool, "tool", &runtimeprotocol.EventMetadata{
-						ItemID: b.ToolUseID, Result: boundedMetadataText(rawText(b.Content)), Status: status,
+						ItemID: b.ToolUseID, Result: tooltext.Retain(rawText(b.Content)), Status: status,
 					})
 				}
 			}
@@ -360,7 +361,7 @@ func (s *parseState) parse(line []byte, opts Options, offset int64) ([]Event, er
 							name = "tool"
 						}
 						emitMetadata(KindTool, name, &runtimeprotocol.EventMetadata{
-							ItemID: b.ID, Name: b.Name, Arguments: boundedMetadataText(rawText(b.Input)), Status: "in_progress",
+							ItemID: b.ID, Name: b.Name, Arguments: tooltext.Retain(rawText(b.Input)), Status: "in_progress",
 						})
 						if question := userQuestion(b); question != "" {
 							emit(KindQuestion, question)

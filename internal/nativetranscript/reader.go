@@ -7,14 +7,30 @@ import (
 	"context"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 
+	"bria/internal/nativejsonline"
 	"bria/internal/runtimeprotocol"
 )
+
+// RecordLimitError identifies a record/projection budget failure, unlike the
+// ErrLimit returned for invalid options or Drain's bounded number of batches.
+// Observed counts bytes inspected in this record, not its unknown eventual size.
+// Counts exclude the newline. No path or transcript payload is included.
+type RecordLimitError struct {
+	Offset, Observed, Limit int64
+}
+
+func (e *RecordLimitError) Error() string {
+	return fmt.Sprintf("native transcript record exceeds limit (offset=%d observed=%d limit=%d)", e.Offset, e.Observed, e.Limit)
+}
+
+func (e *RecordLimitError) Unwrap() error { return ErrLimit }
 
 var (
 	ErrNotFound  = errors.New("native transcript not found yet")
@@ -57,7 +73,7 @@ type Options struct {
 	Root         string // Codex sessions or Claude projects directory
 	MaxEntries   int    // total directory entries inspected during exact lookup
 	MaxPollBytes int    // maximum bytes parsed per Poll; default 4 MiB
-	MaxLineBytes int    // maximum complete or pending JSONL record; default 1 MiB
+	MaxLineBytes int    // record/projection byte budget; default 1 MiB; oversized auxiliary string values may be discarded
 }
 
 // Reader retains one open file and a bounded cursor, not the full history.
@@ -69,6 +85,8 @@ type Reader struct {
 	path           string
 	identity       os.FileInfo
 	offset         int64
+	pending        *nativejsonline.Line
+	pendingStart   int64
 	state          parseState
 	titleIndexInfo os.FileInfo
 	indexedTitle   string
@@ -129,6 +147,19 @@ func Open(ctx context.Context, opts Options) (*Reader, error) {
 		return fail(ErrBinding)
 	}
 	if err = verifyHeader(ctx, data[:n], opts); err != nil {
+		if errors.Is(err, ErrLimit) {
+			for offset := 0; offset < n; {
+				length := bytes.IndexByte(data[offset:n], '\n')
+				if length < 0 {
+					length = n - offset
+				}
+				if length > opts.MaxLineBytes {
+					err = &RecordLimitError{int64(offset), int64(length), int64(opts.MaxLineBytes)}
+					break
+				}
+				offset += length + 1
+			}
+		}
 		return fail(err)
 	}
 	return &Reader{opts: opts, file: file, path: path, identity: after}, nil
@@ -232,7 +263,8 @@ func (r *Reader) Close() error {
 }
 
 // Poll emits each committed complete line once. Partial trailing writes remain
-// at the cursor for the next call. Malformed/replaced/truncated files fail closed;
+// in a bounded checkpoint for the next call. Errors commit neither events nor
+// cursor/parse state for the failed batch. Malformed/replaced/truncated files fail closed;
 // callers must not guess a different session in response to those errors.
 func (r *Reader) Poll(ctx context.Context) ([]Event, error) {
 	r.mu.Lock()
@@ -246,6 +278,16 @@ func (r *Reader) Poll(ctx context.Context) ([]Event, error) {
 // partial trailing baseline record returns ErrNotFound and can be retried once
 // the provider finishes writing it; errors must not be treated as a baseline.
 func (r *Reader) Drain(ctx context.Context) error {
+	return r.Scan(ctx, nil)
+}
+
+// Scan visits from the current cursor through the file size captured at entry,
+// with the same 128-batch and partial-record limits as Drain. Only nil proves
+// that entire prefix was consumed; discard tentative observations on any error.
+// The file is provider-owned append-only data, not an immutable snapshot.
+// The visitor runs under the Reader lock and must not call Reader methods.
+// Reopen the Reader to retry a failed scan of the full history.
+func (r *Reader) Scan(ctx context.Context, visit func([]Event) error) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if err := ctx.Err(); err != nil {
@@ -261,10 +303,19 @@ func (r *Reader) Drain(ctx context.Context) error {
 	end := info.Size()
 	for pass := 0; pass < 128; pass++ {
 		before := r.offset
-		if _, err := r.pollLocked(ctx, end); err != nil {
+		events, err := r.pollLocked(ctx, end)
+		if err != nil {
 			return err
 		}
-		if r.offset == end {
+		if visit != nil {
+			if err := visit(events); err != nil {
+				return err
+			}
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if r.offset == end && r.pending == nil {
 			return nil
 		}
 		if r.offset == before {
@@ -298,32 +349,49 @@ func (r *Reader) pollLocked(ctx context.Context, limit int64) ([]Event, error) {
 		return nil, ErrBinding
 	}
 	data = data[:n]
-	state := r.state
-	consumed := 0
+	offset, state := r.offset, r.state
+	pending, pendingStart := r.pending.Clone(), r.pendingStart
 	events := []Event{}
-	for len(data) > 0 {
+	for _, b := range data {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		end := bytes.IndexByte(data, '\n')
-		if end < 0 {
-			if len(data) > r.opts.MaxLineBytes {
-				return nil, ErrLimit
+		if pending == nil {
+			pending = &nativejsonline.Line{Max: r.opts.MaxLineBytes}
+			pendingStart = offset
+		}
+		done, frameErr := pending.Push(b)
+		if frameErr != nil {
+			if errors.Is(frameErr, nativejsonline.ErrLimit) || pending.Large {
+				return nil, &RecordLimitError{pendingStart, pending.Size, int64(r.opts.MaxLineBytes)}
 			}
-			break
+			return nil, ErrMalformed
 		}
-		if end > r.opts.MaxLineBytes {
-			return nil, ErrLimit
+		offset++
+		if !done {
+			continue
 		}
-		parsed, err := state.parse(data[:end], r.opts, r.offset+int64(consumed))
+		line := pending.Bytes()
+		if pending.Large {
+			rec, decodeErr := decode(line)
+			if decodeErr != nil {
+				return nil, decodeErr
+			}
+			if r.opts.Provider != "codex" || rec.Type != "event_msg" || rec.Payload.Type != "item_completed" {
+				return nil, &RecordLimitError{pendingStart, pending.Size, int64(r.opts.MaxLineBytes)}
+			}
+		}
+		parsed, err := state.parse(line, r.opts, pendingStart)
 		if err != nil {
 			return nil, err
 		}
 		events = append(events, parsed...)
-		consumed += end + 1
-		data = data[end+1:]
+		pending = nil
 	}
-	r.offset += int64(consumed)
-	r.state = state
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	r.offset, r.state = offset, state
+	r.pending, r.pendingStart = pending, pendingStart
 	return events, nil
 }

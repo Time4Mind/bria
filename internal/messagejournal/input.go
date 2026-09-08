@@ -133,7 +133,7 @@ func (journal *Journal) LeaseNextInput(
 		for index := range session.Inputs {
 			record := &session.Inputs[index]
 			switch record.Phase {
-			case InputAccepted, InputCompleted:
+			case InputAccepted, InputCompleted, InputTerminalFailed:
 				continue
 			case InputFailed, InputUnknown:
 				// A later message must not overtake an earlier failed
@@ -255,58 +255,28 @@ func (journal *Journal) MarkInputDeliveryUnknown(ctx context.Context, sessionID,
 }
 
 func (journal *Journal) CompleteInput(ctx context.Context, sessionID, messageID string) (Input, error) {
-	return journal.transitionInput(ctx, sessionID, messageID, func(record *inputRecord) error {
-		if record.Phase == InputCompleted {
-			return errNoMutation
-		}
-		if record.Phase != InputAccepted {
-			return ErrInvalidTransition
-		}
-		record.Phase = InputCompleted
-		return nil
-	})
+	return journal.transitionInputOutcome(ctx, sessionID, messageID, 0, InputCompleted, InputAccepted)
 }
 
 // FailInput records a terminal provider failure after the provider previously
 // acknowledged this input. Like a delivery failure, it requires an explicit
 // RetryInput before later pending input can advance.
 func (journal *Journal) FailInput(ctx context.Context, sessionID, messageID string) (Input, error) {
-	return journal.transitionInput(ctx, sessionID, messageID, func(record *inputRecord) error {
-		if record.Phase == InputFailed {
-			return errNoMutation
-		}
-		if record.Phase != InputAccepted {
-			return ErrInvalidTransition
-		}
-		record.Phase = InputFailed
-		return nil
-	})
+	return journal.transitionInputOutcome(ctx, sessionID, messageID, 0, InputFailed, InputAccepted)
 }
 
 // MarkInputUnknown records that an already accepted provider turn cannot be
 // reconciled with provider history after recovery. It is observable and
 // blocks automatic replay until an explicit RetryInput.
 func (journal *Journal) MarkInputUnknown(ctx context.Context, sessionID, messageID string) (Input, error) {
-	return journal.transitionInput(ctx, sessionID, messageID, func(record *inputRecord) error {
-		if record.Phase == InputUnknown {
-			return errNoMutation
-		}
-		if record.Phase != InputAccepted {
-			return ErrInvalidTransition
-		}
-		record.Phase = InputUnknown
-		return nil
-	})
+	return journal.transitionInputOutcome(ctx, sessionID, messageID, 0, InputUnknown, InputAccepted)
 }
 
 func (journal *Journal) RetryInput(ctx context.Context, sessionID, messageID string) (Input, error) {
 	if err := ctx.Err(); err != nil {
 		return Input{}, err
 	}
-	if err := validateOpaqueID(sessionID, journal.limits.MaxIDBytes, "session id"); err != nil {
-		return Input{}, err
-	}
-	if err := validateOpaqueID(messageID, journal.limits.MaxIDBytes, "message id"); err != nil {
+	if err := journal.validateInputIdentity(sessionID, messageID); err != nil {
 		return Input{}, err
 	}
 	var result Input
@@ -360,10 +330,7 @@ func (journal *Journal) transitionInput(
 	if err := ctx.Err(); err != nil {
 		return Input{}, err
 	}
-	if err := validateOpaqueID(sessionID, journal.limits.MaxIDBytes, "session id"); err != nil {
-		return Input{}, err
-	}
-	if err := validateOpaqueID(messageID, journal.limits.MaxIDBytes, "message id"); err != nil {
+	if err := journal.validateInputIdentity(sessionID, messageID); err != nil {
 		return Input{}, err
 	}
 	var result Input
@@ -389,11 +356,15 @@ func (journal *Journal) transitionInput(
 	return result, err
 }
 
-func (journal *Journal) validateInputValues(sessionID, messageID string, payload []byte, attachments []AttachmentRef) error {
+func (journal *Journal) validateInputIdentity(sessionID, messageID string) error {
 	if err := validateOpaqueID(sessionID, journal.limits.MaxIDBytes, "session id"); err != nil {
 		return err
 	}
-	if err := validateOpaqueID(messageID, journal.limits.MaxIDBytes, "message id"); err != nil {
+	return validateOpaqueID(messageID, journal.limits.MaxIDBytes, "message id")
+}
+
+func (journal *Journal) validateInputValues(sessionID, messageID string, payload []byte, attachments []AttachmentRef) error {
+	if err := journal.validateInputIdentity(sessionID, messageID); err != nil {
 		return err
 	}
 	if len(payload) > journal.limits.MaxPayloadBytes {

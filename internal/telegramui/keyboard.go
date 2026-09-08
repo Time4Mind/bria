@@ -68,6 +68,7 @@ const (
 	ActionSettingsPageLimit                    Action = "settings_page_limit"
 	ActionSettingsContinueExisting             Action = "settings_continue_existing"
 	ActionSettingsTechnicalActions             Action = "settings_technical_actions"
+	ActionSettingsTechnicalOutputLines         Action = "settings_technical_output_lines"
 	ActionSettingsBackgroundQuestions          Action = "settings_background_questions"
 	ActionSettingsBackgroundErrors             Action = "settings_background_errors"
 	ActionSettingsArchiveRecommendations       Action = "settings_archive_recommendations"
@@ -119,7 +120,7 @@ func IsGlobalAction(action Action) bool {
 		ActionCreateChoice, ActionCreatePrevious, ActionCreateFirst, ActionCreateNext,
 		ActionCreateUp, ActionCreatePick, ActionCreateDirectoryNew, ActionCreateBack, ActionCreateFresh,
 		ActionSettingsCategory, ActionSettingsScreen, ActionSettingsScreenCaptureLimit, ActionSettingsAutoApproveCommands, ActionSettingsDetail, ActionSettingsPageLimit, ActionSettingsContinueExisting,
-		ActionSettingsTechnicalActions, ActionSettingsBackgroundQuestions, ActionSettingsBackgroundErrors,
+		ActionSettingsTechnicalActions, ActionSettingsTechnicalOutputLines, ActionSettingsBackgroundQuestions, ActionSettingsBackgroundErrors,
 		ActionSettingsArchiveRecommendations,
 		ActionSettingsDefaultProvider, ActionSettingsDefaultWorkdir, ActionSettingsClearCreationDefaults,
 		ActionSettingsLifetimeNever, ActionSettingsLifetime6Hours, ActionSettingsLifetime12Hours,
@@ -228,6 +229,7 @@ type CardKeyboardInput struct {
 	Working            bool
 	OptionsExpanded    bool
 	Archived           bool
+	Recovery           bool
 	CloseConfirmation  bool
 	DeleteConfirmation bool
 	SessionRowSizes    []int
@@ -284,8 +286,12 @@ func ProjectCardKeyboard(input CardKeyboardInput) (CardKeyboard, error) {
 	} else if input.Working {
 		lifecycle = ActionStop
 	}
-	rows = append(rows, ButtonRow{{Action: lifecycle}, {Action: ActionOptions}})
-	if input.OptionsExpanded {
+	if input.Recovery {
+		rows = append(rows, ButtonRow{{Action: ActionResume, Label: "Восстановить"}, {Action: ActionClose}})
+	} else {
+		rows = append(rows, ButtonRow{{Action: lifecycle}, {Action: ActionOptions}})
+	}
+	if input.OptionsExpanded && !input.Recovery {
 		rows = append(rows, ButtonRow{{Action: ActionScreen}})
 	}
 

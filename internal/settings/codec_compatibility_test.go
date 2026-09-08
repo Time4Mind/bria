@@ -56,7 +56,7 @@ func TestCodecCompatibilityMigratesEveryVersionAndPersistsApprovalChoice(t *test
 				}
 				want := settings.Settings{
 					Version: 5, ContinueExisting: false, ScreenEnabled: true, ScreenCaptureLimitKiB: 48,
-					CardDetail: settings.CardDetailCompact, CardPageLimit: 64, ShowTechnicalActions: false,
+					CardDetail: settings.CardDetailCompact, CardPageLimit: 64, ShowTechnicalActions: false, TechnicalOutputLines: 10,
 					NotifyBackgroundQuestions: true, NotifyBackgroundErrors: false, SessionLifetime: settings.Lifetime48Hours,
 					QueueLimit: 41, VoiceRecognition: settings.VoiceParakeet, RetryUndeliveredFiles: true,
 					DefaultProviders: map[string]string{}, DefaultWorkdirs: map[string]string{}, AutoApproveCommands: choice != "false",

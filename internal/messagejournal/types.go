@@ -22,11 +22,12 @@ var (
 type InputPhase string
 
 const (
-	InputPending   InputPhase = "pending"
-	InputAccepted  InputPhase = "accepted"
-	InputCompleted InputPhase = "completed"
-	InputFailed    InputPhase = "failed"
-	InputUnknown   InputPhase = "unknown"
+	InputPending        InputPhase = "pending"
+	InputAccepted       InputPhase = "accepted"
+	InputCompleted      InputPhase = "completed"
+	InputFailed         InputPhase = "failed"
+	InputTerminalFailed InputPhase = "terminal_failed"
+	InputUnknown        InputPhase = "unknown"
 )
 
 type OutputPhase string

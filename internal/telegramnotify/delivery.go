@@ -7,24 +7,21 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"bria/internal/notificationstate"
 	"bria/internal/telegram"
 	"bria/internal/telegramcontroller"
-	"bria/internal/telegramformat"
 	"bria/internal/telegramui"
 )
 
-type DeliveryState string
+type DeliveryState = notificationstate.DeliveryState
 
 const (
-	DeliveryConfirmed DeliveryState = "confirmed"
-	DeliveryFailed    DeliveryState = "failed"
-	DeliveryUnknown   DeliveryState = "unknown"
+	DeliveryConfirmed = notificationstate.DeliveryConfirmed
+	DeliveryFailed    = notificationstate.DeliveryFailed
+	DeliveryUnknown   = notificationstate.DeliveryUnknown
 )
 
-type PartReceipt struct {
-	PartID    string
-	MessageID int64
-}
+type PartReceipt = notificationstate.PartReceipt
 
 type DeliveryReceipt struct {
 	OperationID string
@@ -62,7 +59,7 @@ func (notifier *Notifier) Deliver(
 	if notification.OperationID != "" && notification.OperationID != operationID {
 		return DeliveryReceipt{}, errors.New("Telegram delivery operation identity conflicts with notification")
 	}
-	pages, prefix, err := notificationPages(notification)
+	pages, plans, err := notifier.deliveryPages(ctx, notification, operationID)
 	if err != nil {
 		return DeliveryReceipt{}, err
 	}
@@ -103,12 +100,31 @@ func (notifier *Notifier) Deliver(
 			receipt.State = DeliveryUnknown
 			return receipt, fmt.Errorf("Telegram part %s has an unresolved ambiguous delivery", partID)
 		}
-		text, entities := telegramformat.Markdown(prefix + page.Content)
-		message, sendErr := notifier.client.SendMessage(ctx, telegram.SendMessageRequest{
-			ChatID: telegram.ChatID(notification.ConversationID), Text: text, Entities: entities,
+		if plans != nil {
+			messageID, claimErr := claimNotificationPage(ctx, plans, operationID, partID)
+			if claimErr != nil {
+				receipt.State = DeliveryUnknown
+				return receipt, claimErr
+			}
+			if messageID > 0 {
+				receipt.Parts = append(receipt.Parts, PartReceipt{PartID: partID, MessageID: messageID})
+				continue
+			}
+		}
+		message, sendErr := notifier.client.SendRichMessage(ctx, telegram.SendRichMessageRequest{
+			ChatID: telegram.ChatID(notification.ConversationID),
+			RichMessage: telegram.InputRichMessage{
+				Markdown: page,
+			},
 		})
 		if sendErr != nil || message.MessageID <= 0 {
 			receipt.State = deliveryFailureState(sendErr)
+			if plans != nil && receipt.State == DeliveryFailed {
+				if releaseErr := plans.ReleasePart(context.WithoutCancel(ctx), operationID, partID); releaseErr != nil {
+					receipt.State = DeliveryUnknown
+					sendErr = errors.Join(sendErr, releaseErr)
+				}
+			}
 			if notifier.partReceipts != nil && receipt.State == DeliveryUnknown {
 				_ = notifier.partReceipts.MarkPartUnknown(context.WithoutCancel(ctx), operationID, partID)
 			}
@@ -142,21 +158,10 @@ func (notifier *Notifier) Deliver(
 }
 
 func notificationPages(notification telegramcontroller.Notification) ([]telegramui.ContentPage, string, error) {
-	if notification.ConversationID <= 0 {
-		return nil, "", errors.New("Telegram notification conversation id must be positive")
-	}
-	shortID, err := logicalSessionShortID(notification.SessionID)
+	prefix, err := notificationPrefix(notification)
 	if err != nil {
 		return nil, "", err
 	}
-	kind, err := notificationKind(notification.Kind)
-	if err != nil {
-		return nil, "", err
-	}
-	if !utf8.ValidString(notification.Text) || strings.TrimSpace(notification.Text) == "" {
-		return nil, "", errors.New("Telegram notification text must be non-empty valid UTF-8")
-	}
-	prefix := "Сессия " + shortID + " - " + kind + "\n"
 	pagination, err := telegramui.PaginateContent([]telegramui.ContentBlock{{
 		Anchor: "notification", Content: notification.Text,
 	}}, telegramui.PageLimits{
@@ -169,11 +174,32 @@ func notificationPages(notification telegramcontroller.Notification) ([]telegram
 	return pagination.Pages, prefix, nil
 }
 
+func notificationPrefix(notification telegramcontroller.Notification) (string, error) {
+	if notification.ConversationID <= 0 {
+		return "", errors.New("Telegram notification conversation id must be positive")
+	}
+	shortID, err := logicalSessionShortID(notification.SessionID)
+	if err != nil {
+		return "", err
+	}
+	kind, err := notificationKind(notification.Kind)
+	if err != nil {
+		return "", err
+	}
+	if !utf8.ValidString(notification.Text) || strings.TrimSpace(notification.Text) == "" {
+		return "", errors.New("Telegram notification text must be non-empty valid UTF-8")
+	}
+	return "Сессия " + shortID + " - " + kind + "\n", nil
+}
+
 func deliveryPartID(operationID string, part, total int) string {
 	return fmt.Sprintf("%s:part:%d-of-%d", operationID, part, total)
 }
 
 func deliveryFailureState(err error) DeliveryState {
+	if errors.Is(err, telegram.ErrDeliveryUnknown) {
+		return DeliveryUnknown
+	}
 	var apiError *telegram.APIError
 	if errors.As(err, &apiError) && apiError.HTTPStatus >= 400 && apiError.HTTPStatus < 500 {
 		return DeliveryFailed

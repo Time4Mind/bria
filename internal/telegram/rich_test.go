@@ -27,3 +27,65 @@ func TestNormalizeRichMarkdownPreservesEscapesAndNonTables(t *testing.T) {
 		}
 	}
 }
+
+func TestNormalizeRichMarkdownTwoTablesIsIdempotent(t *testing.T) {
+	input := "| A | B |\n|---|---:|\n| x\\|y | z |\n\nSecond\n| C | D |\n|---|---|\n| <sub>ready</sub> | end |"
+	want := "\n\n| <sub>A</sub> | <sub>B</sub> |\n|---|---:|\n| <sub>x\\|y</sub> | <sub>z</sub> |\n\nSecond\n\n| <sub>C</sub> | <sub>D</sub> |\n|---|---|\n| <sub>ready</sub> | <sub>end</sub> |"
+	got := telegram.NormalizeRichMarkdown(input)
+	if got != want {
+		t.Fatalf("two tables = %q, want %q", got, want)
+	}
+	if again := telegram.NormalizeRichMarkdown(got); again != got {
+		t.Fatalf("normalization changed on second pass: %q", again)
+	}
+}
+
+func TestNormalizeRichMarkdownPreservesLiteralTables(t *testing.T) {
+	const table = "| A | B |\n|---|---|\n| one | two |"
+	for name, literal := range map[string]string{
+		"backtick fence":      "```markdown\n" + table + "\n```",
+		"tilde fence":         "~~~markdown\n" + table + "\n~~~",
+		"long fence":          "````markdown\n```\n" + table + "\n```\n````",
+		"inline backticks":    "`" + table + "`",
+		"multiline backticks": "``\n" + table + "\n``",
+		"code tag":            "<code>\n" + table + "\n</code>",
+		"code attributes":     "<pre><code class=\"language-markdown\">\n" + table + "\n</code></pre>",
+		"pre tag":             "<PRE>\n" + table + "\n</PRE>",
+		"unclosed fence":      "~~~\n" + table,
+		"unclosed code":       "<code>\n" + table,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := telegram.NormalizeRichMarkdown(literal); got != literal {
+				t.Fatalf("literal changed: %q, want %q", got, literal)
+			}
+		})
+	}
+}
+
+func TestNormalizeRichMarkdownSelectsOnlyRealTables(t *testing.T) {
+	const table = "| A | B |\n|---|---:|\n| x\\|y | z |"
+	const compact = "| <sub>A</sub> | <sub>B</sub> |\n|---|---:|\n| <sub>x\\|y</sub> | <sub>z</sub> |"
+	for name, tc := range map[string]struct {
+		text string
+		want string
+	}{
+		"table":               {table, "\n\n" + compact},
+		"two tables":          {table + "\n\nSecond\n" + table, "\n\n" + compact + "\n\nSecond\n\n" + compact},
+		"inline code cell":    {"| `A` | B |\n|---|---|\n| x | y |", "\n\n| <sub>`A`</sub> | <sub>B</sub> |\n|---|---|\n| <sub>x</sub> | <sub>y</sub> |"},
+		"pipe prose":          {"| prose | text |\n| still | prose |", "| prose | text |\n| still | prose |"},
+		"escaped pipes only":  {"| A \\| B |\n|---|---|", "| A \\| B |\n|---|---|"},
+		"backtick fence":      {"```md\n" + table + "\n```", "```md\n" + table + "\n```"},
+		"tilde fence":         {"~~~md\n" + table + "\n~~~", "~~~md\n" + table + "\n~~~"},
+		"multiline code span": {"``\n" + table + "\n``", "``\n" + table + "\n``"},
+		"HTML code":           {"<pre><code class=\"language-md\">\n" + table + "\n</code></pre>", "<pre><code class=\"language-md\">\n" + table + "\n</code></pre>"},
+		"table after literal": {"~~~\n" + table + "\n~~~\n\n" + table, "~~~\n" + table + "\n~~~\n\n" + compact},
+		"table after HTML":    {"<code>\n" + table + "\n</code>\n" + table, "<code>\n" + table + "\n</code>\n\n" + compact},
+		"empty":               {"", ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := telegram.NormalizeRichMarkdown(tc.text); got != tc.want {
+				t.Fatalf("NormalizeRichMarkdown(%q) = %q, want %q", tc.text, got, tc.want)
+			}
+		})
+	}
+}

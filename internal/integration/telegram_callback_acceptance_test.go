@@ -95,7 +95,7 @@ func TestTelegramCallbackEditIsOneInPlaceOperation(t *testing.T) {
 	if afterEdit.answerCalls != 2 {
 		t.Fatalf("callback answers after edit = %d, want one per callback", afterEdit.answerCalls)
 	}
-	if afterEdit.sendCalls != 1 || afterEdit.editCalls != 1 || afterEdit.lastEdit.MessageID != 77 || afterEdit.lastEdit.Text != "card page 2" {
+	if afterEdit.sendCalls != 1 || afterEdit.editCalls != 1 || afterEdit.lastEdit.MessageID != 77 || afterEdit.lastEdit.RichMessage == nil || afterEdit.lastEdit.RichMessage.Markdown != "card page 2" {
 		t.Fatalf("send/edit calls/body = %d/%d/%#v, want one in-place edit of message 77", afterEdit.sendCalls, afterEdit.editCalls, afterEdit.lastEdit)
 	}
 }
@@ -235,7 +235,7 @@ type callbackHTTPObservation struct {
 	answerCalls int
 	sendCalls   int
 	editCalls   int
-	lastSend    telegram.SendMessageRequest
+	lastSend    telegram.SendRichMessageRequest
 	lastEdit    telegram.EditMessageTextRequest
 }
 
@@ -273,7 +273,7 @@ func (c *callbackHTTPClient) record(request *http.Request) (string, error) {
 		}
 		c.answerCalls++
 		return string(answer.CallbackQueryID), nil
-	case strings.HasSuffix(request.URL.Path, "/sendMessage"):
+	case strings.HasSuffix(request.URL.Path, "/sendRichMessage"):
 		c.sendCalls++
 		if err := json.NewDecoder(request.Body).Decode(&c.lastSend); err != nil {
 			return "", err

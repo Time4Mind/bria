@@ -6,7 +6,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -371,12 +370,12 @@ func TestSenderReturnsOnlyPositiveTelegramReceipt(t *testing.T) {
 	t.Parallel()
 
 	client := mustTelegramClient(t, func(request *http.Request) (*http.Response, error) {
-		if request.URL.Path != "/bot123:test/bootstrap/sendMessage" {
-			t.Fatalf("path = %q, want sendMessage", request.URL.Path)
+		if request.URL.Path != "/bot123:test/bootstrap/sendRichMessage" {
+			t.Fatalf("path = %q, want sendRichMessage", request.URL.Path)
 		}
-		var body telegram.SendMessageRequest
+		var body telegram.SendRichMessageRequest
 		decodeJSON(t, request, &body)
-		if body.ChatID != 42 || body.Text != "Bria ready" || body.ReplyMarkup != nil {
+		if body.ChatID != 42 || body.RichMessage.Markdown != "Bria ready" || body.ReplyMarkup != nil {
 			t.Fatalf("send body = %#v", body)
 		}
 		return response(http.StatusOK, `{"ok":true,"result":{"message_id":501,"from":{"id":600,"is_bot":true},"chat":{"id":42,"type":"private"},"text":"Bria ready"}}`), nil
@@ -398,21 +397,14 @@ func TestSenderReturnsOnlyPositiveTelegramReceipt(t *testing.T) {
 	}
 }
 
-func TestSenderConvertsProviderMarkdownToTelegramEntities(t *testing.T) {
+func TestSenderPreservesProviderMarkdownForRichRendering(t *testing.T) {
 	t.Parallel()
 
 	client := mustTelegramClient(t, func(request *http.Request) (*http.Response, error) {
-		var body telegram.SendMessageRequest
+		var body telegram.SendRichMessageRequest
 		decodeJSON(t, request, &body)
-		if body.Text != "Проверка\n/root\n" {
-			t.Fatalf("formatted text = %q", body.Text)
-		}
-		want := []telegram.MessageEntity{
-			{Type: "bold", Offset: 0, Length: 8},
-			{Type: "pre", Offset: 9, Length: 6, Language: "text"},
-		}
-		if !reflect.DeepEqual(body.Entities, want) {
-			t.Fatalf("formatted entities = %#v, want %#v", body.Entities, want)
+		if body.RichMessage.Markdown != "**Проверка**\n```text\n/root\n```" {
+			t.Fatalf("formatted Markdown = %q", body.RichMessage.Markdown)
 		}
 		return response(http.StatusOK, `{"ok":true,"result":{"message_id":502,"from":{"id":600,"is_bot":true},"chat":{"id":42,"type":"private"},"text":"formatted"}}`), nil
 	})

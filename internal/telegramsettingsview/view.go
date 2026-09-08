@@ -66,6 +66,14 @@ func RenderCategory(ctx context.Context, preferences settingsport.Preferences, p
 		text = "🧾 Содержимое карточки"
 		fields = []Field{{"Детализация карточки", current.CardDetail}, {"Лимит страниц", fmt.Sprint(current.CardPageLimit)}, {"Технические действия", state(current.ShowTechnicalActions, true)}}
 		rows = onePerRow(Button{Label: "Детализация", Action: "settings_detail"}, Button{Label: "Страницы", Action: "settings_page_limit"}, Button{Label: "Технические действия", Action: "settings_technical_actions"})
+		lines := current.TechnicalOutputLines
+		if lines == 0 {
+			lines = 10
+		}
+		fields = append(fields, Field{"Строки технического вывода", fmt.Sprint(lines)})
+		if _, ok := preferences.(settingsport.TechnicalOutputPreferences); ok {
+			rows = append(rows, []Button{{Label: "Строки технического вывода", Action: "settings_technical_output_lines"}})
+		}
 	case CategorySessionButtons:
 		text = "🎛 Кнопки сессии"
 		captureLimit := current.ScreenCaptureLimitKiB
@@ -163,7 +171,7 @@ func defaultWorkdirValue(values map[domain.ComputerID]string) string {
 
 func CategoryForAction(action string) (Category, bool) {
 	switch action {
-	case "settings_detail", "settings_page_limit", "settings_technical_actions":
+	case "settings_detail", "settings_page_limit", "settings_technical_actions", "settings_technical_output_lines":
 		return CategoryCard, true
 	case "settings_screen", "settings_screen_capture_limit":
 		return CategorySessionButtons, true

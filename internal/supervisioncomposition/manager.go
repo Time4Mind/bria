@@ -9,7 +9,9 @@ import (
 	"time"
 
 	"bria/internal/app"
+	"bria/internal/controllertelemetry"
 	"bria/internal/domain"
+	"bria/internal/sessionrecoverycontrol"
 	"bria/internal/sessionsupervisor"
 )
 
@@ -46,14 +48,17 @@ type Manager struct {
 	computer  domain.ComputerID
 	store     Store
 	restarter sessionsupervisor.Restarter
-	live      *sessionsupervisor.Supervisor
+	control   *sessionrecoverycontrol.Control
 	startup   *sessionsupervisor.Supervisor
 	interval  time.Duration
 	report    func(error)
 
-	mu      sync.Mutex
-	workers map[domain.SessionID]watchedBinding
-	wait    sync.WaitGroup
+	mu               sync.Mutex
+	observer         controllertelemetry.Observer
+	recoveryNotifier func(context.Context, domain.SessionID)
+	now              func() time.Time
+	workers          map[domain.SessionID]watchedBinding
+	wait             sync.WaitGroup
 }
 
 func New(options Options) (*Manager, error) {
@@ -65,7 +70,7 @@ func New(options Options) (*Manager, error) {
 		MaxRestartAttempts: options.MaxRestartAttempts, WaitBeforeRetry: options.WaitBeforeRetry,
 		Now: options.Now, AcceptedTurns: options.AcceptedTurns,
 	}
-	live, err := sessionsupervisor.New(options.Store, options.Waiter, options.Restarter, supervisorOptions)
+	control, err := sessionrecoverycontrol.New(options.Store, options.Waiter, options.Restarter, supervisorOptions)
 	if err != nil {
 		return nil, ErrInvalidOptions
 	}
@@ -74,8 +79,8 @@ func New(options Options) (*Manager, error) {
 		return nil, ErrInvalidOptions
 	}
 	return &Manager{
-		computer: options.LocalComputerID, store: options.Store, restarter: options.Restarter, live: live, startup: startup,
-		interval: options.SweepInterval, report: options.Report, workers: make(map[domain.SessionID]watchedBinding),
+		computer: options.LocalComputerID, store: options.Store, restarter: options.Restarter, control: control, startup: startup,
+		interval: options.SweepInterval, now: options.Now, report: options.Report, workers: make(map[domain.SessionID]watchedBinding),
 	}, nil
 }
 
@@ -85,16 +90,7 @@ func RequireSafeFallback(ctx context.Context, store Store) error {
 	if ctx == nil || store == nil {
 		return ErrInvalidOptions
 	}
-	sessions, err := store.List(ctx)
-	if err != nil {
-		return err
-	}
-	for _, session := range sessions {
-		if hazardousRecovery(session) {
-			return sessionsupervisor.ErrReconciliationRequired
-		}
-	}
-	return nil
+	return sessionrecoverycontrol.RequireSafeFallback(ctx, store)
 }
 
 // RecoverStartup reconciles crash-sensitive sessions first, then delegates all
@@ -103,6 +99,8 @@ func (manager *Manager) RecoverStartup(ctx context.Context) (app.SessionRecovery
 	if manager == nil || ctx == nil {
 		return app.SessionRecoveryResult{}, ErrInvalidOptions
 	}
+	manager.control.Lock()
+	defer manager.control.Unlock()
 	sessions, err := manager.store.List(ctx)
 	if err != nil {
 		return app.SessionRecoveryResult{}, err
@@ -113,7 +111,7 @@ func (manager *Manager) RecoverStartup(ctx context.Context) (app.SessionRecovery
 	handled := make(map[domain.SessionID]struct{})
 	var result app.SessionRecoveryResult
 	for _, session := range sessions {
-		if session.ComputerID() != manager.computer || !hazardousRecovery(session) {
+		if session.ComputerID() != manager.computer || !sessionrecoverycontrol.HazardousRecovery(session) {
 			continue
 		}
 		binding, bound := session.Binding()
@@ -127,12 +125,13 @@ func (manager *Manager) RecoverStartup(ctx context.Context) (app.SessionRecovery
 		} else {
 			recovered, err = manager.startup.Watch(ctx, session.ID(), binding)
 		}
+		manager.observeRecovery(ctx, session.ID(), controllertelemetry.StartupRecovery, recovered, err)
 		if err != nil {
 			if errors.Is(err, sessionsupervisor.ErrReconciliationRequired) || errors.Is(err, sessionsupervisor.ErrRecoveryExhausted) {
 				manager.report(err)
-				if manager.deleteUnrecoverableRecovery(ctx, session) {
+				if manager.control.DeleteUnrecoverableRecovery(ctx, session) {
 					result.FinalizedClosing++
-				} else if manager.deleteEmptyRecovery(ctx, session) {
+				} else if manager.control.DeleteEmptyRecovery(ctx, session) {
 					result.FinalizedClosing++
 				} else {
 					result.Awaiting++
@@ -148,101 +147,31 @@ func (manager *Manager) RecoverStartup(ctx context.Context) (app.SessionRecovery
 		case recovered.Archived || recovered.Deleted:
 			result.FinalizedClosing++
 		case recovered.AwaitingRecovery:
-			if manager.deleteEmptyRecovery(ctx, recovered.Session) {
+			if manager.control.DeleteEmptyRecovery(ctx, recovered.Session) {
 				result.FinalizedClosing++
 			} else {
 				result.Awaiting++
 			}
 		}
 	}
-	ordinary, err := app.RecoverPersistedSessionsForComputer(ctx, manager.computer, filteredStore{Store: manager.store, excluded: handled}, manager.restarter)
+	ordinary, err := app.RecoverPersistedSessionsForComputer(ctx, manager.computer, sessionrecoverycontrol.FilteredStore{Store: manager.store, Excluded: handled}, manager.restarter)
+	for _, session := range ordinary.Sessions {
+		manager.observeRecovery(ctx, session.ID(), controllertelemetry.StartupRecovery, sessionsupervisor.Result{Session: session, Recovered: true}, nil)
+	}
+	if current, readErr := manager.store.List(ctx); readErr == nil {
+		for _, session := range current {
+			_, alreadyObserved := handled[session.ID()]
+			if !alreadyObserved && session.ComputerID() == manager.computer && session.Status() == domain.SessionAwaitingRecovery {
+				manager.observeRecovery(ctx, session.ID(), controllertelemetry.StartupRecovery, sessionsupervisor.Result{Session: session, AwaitingRecovery: true}, nil)
+			}
+		}
+	}
 	result.Recovered += ordinary.Recovered
 	result.Awaiting += ordinary.Awaiting
 	result.FinalizedClosing += ordinary.FinalizedClosing
 	result.SkippedRemote += ordinary.SkippedRemote
 	result.Sessions = append(result.Sessions, ordinary.Sessions...)
 	return result, err
-}
-
-func (manager *Manager) deleteUnrecoverableRecovery(ctx context.Context, session domain.Session) bool {
-	store, ok := manager.store.(interface {
-		DeleteUnrecoverableAwaitingRecovery(context.Context, domain.Session) (bool, error)
-	})
-	if !ok {
-		return false
-	}
-	deleted, err := store.DeleteUnrecoverableAwaitingRecovery(ctx, session)
-	return err == nil && deleted
-}
-
-func (manager *Manager) deleteEmptyRecovery(ctx context.Context, session domain.Session) bool {
-	if session.ID() == "" || session.Status() != domain.SessionAwaitingRecovery {
-		return false
-	}
-	store, ok := manager.store.(interface {
-		DeleteEmptyAwaitingRecovery(context.Context, domain.Session) (bool, error)
-	})
-	if !ok {
-		return false
-	}
-	deleted, err := store.DeleteEmptyAwaitingRecovery(ctx, session)
-	return err == nil && deleted
-}
-
-func startupRecoverable(status domain.SessionStatus) bool {
-	switch status {
-	case domain.SessionResuming, domain.SessionReady, domain.SessionRunning, domain.SessionStopping,
-		domain.SessionClosingAfterWork, domain.SessionAwaitingRecovery, domain.SessionClosing:
-		return true
-	default:
-		return false
-	}
-}
-
-type filteredStore struct {
-	Store
-	excluded map[domain.SessionID]struct{}
-}
-
-func (store filteredStore) DeleteEmptyClosing(ctx context.Context, session domain.Session) (bool, error) {
-	if empty, ok := store.Store.(interface {
-		DeleteEmptyClosing(context.Context, domain.Session) (bool, error)
-	}); ok {
-		return empty.DeleteEmptyClosing(ctx, session)
-	}
-	return false, nil
-}
-
-func (store filteredStore) DeleteEmptyAwaitingRecovery(ctx context.Context, session domain.Session) (bool, error) {
-	if empty, ok := store.Store.(interface {
-		DeleteEmptyAwaitingRecovery(context.Context, domain.Session) (bool, error)
-	}); ok {
-		return empty.DeleteEmptyAwaitingRecovery(ctx, session)
-	}
-	return false, nil
-}
-
-func (store filteredStore) DeleteUnrecoverableAwaitingRecovery(ctx context.Context, session domain.Session) (bool, error) {
-	if unrecoverable, ok := store.Store.(interface {
-		DeleteUnrecoverableAwaitingRecovery(context.Context, domain.Session) (bool, error)
-	}); ok {
-		return unrecoverable.DeleteUnrecoverableAwaitingRecovery(ctx, session)
-	}
-	return false, nil
-}
-
-func (store filteredStore) List(ctx context.Context) ([]domain.Session, error) {
-	sessions, err := store.Store.List(ctx)
-	if err != nil {
-		return nil, err
-	}
-	filtered := make([]domain.Session, 0, len(sessions))
-	for _, session := range sessions {
-		if _, excluded := store.excluded[session.ID()]; !excluded {
-			filtered = append(filtered, session)
-		}
-	}
-	return filtered, nil
 }
 
 func (manager *Manager) Run(ctx context.Context) error {
@@ -275,7 +204,7 @@ func (manager *Manager) sweep(ctx context.Context) error {
 	}
 	desired := make(map[domain.SessionID]domain.ProviderBinding)
 	for _, session := range sessions {
-		if session.ComputerID() != manager.computer || !liveSupervisable(session.Status()) {
+		if session.ComputerID() != manager.computer || !sessionrecoverycontrol.LiveSupervisable(session.Status()) {
 			continue
 		}
 		if binding, bound := session.Binding(); bound {
@@ -304,7 +233,8 @@ func (manager *Manager) sweep(ctx context.Context) error {
 
 func (manager *Manager) watch(ctx context.Context, id domain.SessionID, binding domain.ProviderBinding) {
 	defer manager.wait.Done()
-	_, err := manager.live.Watch(ctx, id, binding)
+	result, err := manager.control.Watch(ctx, id, binding)
+	manager.observeRecovery(ctx, id, controllertelemetry.LiveRecovery, result, err)
 	if err != nil && !errors.Is(err, context.Canceled) {
 		manager.report(err)
 	}
@@ -312,7 +242,13 @@ func (manager *Manager) watch(ctx context.Context, id domain.SessionID, binding 
 	if current, exists := manager.workers[id]; exists && current.binding == binding {
 		delete(manager.workers, id)
 	}
+	notify := manager.recoveryNotifier
 	manager.mu.Unlock()
+	if notify != nil && !result.Stale && (result.AwaitingRecovery || result.Recovered || result.Archived || result.Deleted) {
+		notifyCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		notify(notifyCtx, id)
+	}
 }
 
 func (manager *Manager) stopWorkers() {
@@ -323,28 +259,6 @@ func (manager *Manager) stopWorkers() {
 	}
 	manager.mu.Unlock()
 	manager.wait.Wait()
-}
-
-func hazardousRecovery(session domain.Session) bool {
-	status := session.Status()
-	if status == domain.SessionRunning || status == domain.SessionStopping || status == domain.SessionClosingAfterWork {
-		return true
-	}
-	if status == domain.SessionAwaitingRecovery {
-		target, ok := session.RecoveryTarget()
-		return ok && (target == domain.SessionRunning || target == domain.SessionStopping || target == domain.SessionClosingAfterWork)
-	}
-	return false
-}
-
-func liveSupervisable(status domain.SessionStatus) bool {
-	switch status {
-	case domain.SessionResuming, domain.SessionReady, domain.SessionRunning, domain.SessionStopping,
-		domain.SessionClosingAfterWork, domain.SessionClosing:
-		return true
-	default:
-		return false
-	}
 }
 
 type exitedWaiter struct{}

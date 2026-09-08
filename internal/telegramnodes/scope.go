@@ -296,23 +296,8 @@ func (scope *Scope) RestoreActive(ctx context.Context, nodeID domain.ComputerID,
 }
 
 func (scope *Scope) Remove(ctx context.Context, session domain.Session) (domain.SessionID, error) {
-	nodeID := session.ComputerID()
-	scope.mu.Lock()
-	history := remove(scope.recent[nodeID], session.ID())
-	scope.recent[nodeID] = history
-	wasActive := scope.active[nodeID] == session.ID()
-	scope.mu.Unlock()
-	if !wasActive {
-		return scope.Active(nodeID), nil
-	}
-	fallback := scope.firstValid(ctx, nodeID, history)
-	if fallback == "" {
-		fallback = scope.latest(ctx, nodeID)
-		if fallback == session.ID() {
-			fallback = ""
-		}
-	}
-	return fallback, scope.RestoreActive(ctx, nodeID, fallback)
+	result, err := scope.RemoveClosed(ctx, session)
+	return result.Active, err
 }
 
 func (scope *Scope) valid(ctx context.Context, nodeID domain.ComputerID, sessionID domain.SessionID) bool {
@@ -320,7 +305,7 @@ func (scope *Scope) valid(ctx context.Context, nodeID domain.ComputerID, session
 		return false
 	}
 	session, err := scope.sessions.Load(ctx, sessionID)
-	return err == nil && session.ComputerID() == nodeID && selectableStatus(session.Status())
+	return err == nil && session.ComputerID() == nodeID && (selectableStatus(session.Status()) || session.Status() == domain.SessionAwaitingRecovery)
 }
 
 func (scope *Scope) firstValid(ctx context.Context, nodeID domain.ComputerID, history []domain.SessionID) domain.SessionID {

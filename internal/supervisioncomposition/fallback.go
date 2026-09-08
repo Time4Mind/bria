@@ -5,6 +5,7 @@ import (
 
 	"bria/internal/app"
 	"bria/internal/domain"
+	"bria/internal/sessionrecoverycontrol"
 )
 
 // recordPersistedExits shares the established startup boundary with both
@@ -17,7 +18,7 @@ func recordPersistedExits(computer domain.ComputerID, sessions []domain.Session,
 	}
 	for _, session := range sessions {
 		binding, bound := session.Binding()
-		if session.ComputerID() != computer || !bound || !startupRecoverable(session.Status()) {
+		if session.ComputerID() != computer || !bound || !sessionrecoverycontrol.StartupRecoverable(session.Status()) {
 			continue
 		}
 		request := app.StartSessionRequest{

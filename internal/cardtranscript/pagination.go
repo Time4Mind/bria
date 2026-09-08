@@ -20,32 +20,52 @@ func Split(text string, maxBytes int) []string {
 			return parts
 		}
 	}
-	// Reserve room for a closing/reopening fence on every fragment.
-	parts := splitText(text, maxBytes-80)
-	fence := ""
-	for i, part := range parts {
-		prefix := ""
-		if fence != "" {
-			prefix = fence + "\n"
-		}
-		for _, line := range strings.Split(part, "\n") {
-			if strings.HasPrefix(strings.TrimSpace(line), "```") {
-				if fence == "" {
-					fence = strings.TrimSpace(line)
-					if len(fence) > 64 {
-						fence = "```"
-					}
-				} else {
-					fence = ""
-				}
-			}
-		}
-		suffix := ""
-		if fence != "" {
-			suffix = "\n```"
-		}
-		parts[i] = prefix + part + suffix
+	if parts := splitTables(text, maxBytes); parts != nil {
+		return parts
 	}
+	return splitMarkdown(text, maxBytes)
+}
+
+func splitMarkdown(text string, maxBytes int) []string {
+	lines := strings.SplitAfter(text, "\n")
+	var parts []string
+	start := 0
+	for i := 0; i < len(lines); i++ {
+		line := strings.TrimSpace(lines[i])
+		if !strings.HasPrefix(line, "```") && !strings.HasPrefix(line, "~~~") {
+			continue
+		}
+		marker := strings.TrimSuffix(line, strings.TrimLeft(line, line[:1]))
+		end := i + 1
+		for end < len(lines) {
+			closing := strings.TrimSpace(lines[end])
+			if strings.HasPrefix(closing, marker) && strings.TrimSpace(strings.TrimLeft(closing, marker[:1])) == "" {
+				break
+			}
+			end++
+		}
+		opening, closing, body := lines[i], "\n"+marker, strings.Join(lines[i+1:end], "")
+		if end < len(lines) {
+			closing = lines[end]
+			end++
+		}
+		budget := maxBytes - len(opening) - len(closing) - 1
+		if budget < 4 || body == "" {
+			// Impossible wrappers retain source bytes as bounded text.
+			opening, closing, body, budget = "", "", strings.Join(lines[i:end], ""), maxBytes
+		}
+		parts = append(parts, splitText(strings.Join(lines[start:i], ""), maxBytes)...)
+		chunks := splitText(body, budget)
+		for n, chunk := range chunks {
+			suffix := closing
+			if n < len(chunks)-1 && opening != "" {
+				suffix = "\n" + marker
+			}
+			parts = append(parts, opening+chunk+suffix)
+		}
+		i, start = end-1, end
+	}
+	parts = append(parts, splitText(strings.Join(lines[start:], ""), maxBytes)...)
 	return parts
 }
 

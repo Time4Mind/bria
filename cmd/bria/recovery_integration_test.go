@@ -152,7 +152,9 @@ func TestRunReconcilesAcceptedCodexTurnBeforeOneExactResume(t *testing.T) {
 	runtime.mu.Lock()
 	starts, reads := runtime.starts, runtime.reads
 	runtime.mu.Unlock()
-	if starts != 1 || reads != 1 || current.Status() != domain.SessionReady || !bound || binding.Generation != 5 ||
+	// Completion is reread at the final-restoration boundary, with one resume
+	// and no duplicate provider submission.
+	if starts != 1 || reads != 2 || current.Status() != domain.SessionReady || !bound || binding.Generation != 5 ||
 		len(inputs) != 1 || inputs[0].Phase != messagejournal.InputCompleted {
 		t.Fatalf("starts/reads=%d/%d session=%#v inputs=%#v", starts, reads, current, inputs)
 	}

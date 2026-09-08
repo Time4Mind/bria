@@ -1,6 +1,7 @@
 package telegramflow
 
 import (
+	"bria/internal/callbackdiagnostic"
 	"bria/internal/callbacktoken"
 	"bria/internal/coordinator"
 	"bria/internal/domain"
@@ -10,6 +11,7 @@ import (
 	"bria/internal/telegrampipeline"
 	"bria/internal/telegramrecovery"
 	"bria/internal/telegramstate"
+	"bria/internal/telegramtrace"
 	"bria/internal/telegramui"
 	"context"
 	"crypto/sha256"
@@ -21,17 +23,7 @@ import (
 	"time"
 )
 
-type TraceEvent struct {
-	Stage       string
-	OperationID string
-	UpdateID    int64
-	UpdateKind  coordinator.UpdateKind
-	Action      telegramui.Action
-	Effect      telegrampipeline.CallbackEffect
-	Result      string
-	Error       string
-	Duration    time.Duration
-}
+type TraceEvent = telegramtrace.Event
 
 type TraceObserver interface {
 	ObserveTelegramFlow(context.Context, TraceEvent)
@@ -319,9 +311,12 @@ func (handler *Handler) Handle(ctx context.Context, update coordinator.Update) (
 		handler.registry,
 		handler.presenter,
 	)
-	handler.trace(ctx, completedTrace("callback.accept", operationID, update, "", "", stageStarted, err))
+	acceptTrace := telegramtrace.Callback(operationID, update, accepted, stageStarted, err)
+	handler.trace(ctx, acceptTrace)
 	if err != nil {
 		if recoverableCallbackError(err) {
+			acceptTrace.Stage, acceptTrace.Result = "callback.discard", "skipped"
+			handler.trace(ctx, acceptTrace)
 			return coordinator.Decision{Kind: coordinator.DecisionSkip}, nil
 		}
 		return coordinator.Decision{}, err
@@ -554,44 +549,23 @@ func recoverableCallbackError(err error) bool {
 		errors.Is(err, telegrampipeline.ErrReplayedCallback)
 }
 
-func completedTrace(stage, operationID string, update coordinator.Update, action telegramui.Action, effect telegrampipeline.CallbackEffect, started time.Time, err error) TraceEvent {
-	result, errorText := traceResult(err), traceError(err)
-	return TraceEvent{Stage: stage, OperationID: operationID, UpdateID: update.ID, UpdateKind: update.Kind, Action: action, Effect: effect, Result: result, Error: errorText, Duration: time.Since(started)}
-}
-
-func traceResult(err error) string {
-	if err != nil {
-		return "failed"
-	}
-	return "completed"
-}
-
-func traceError(err error) string {
-	if err != nil {
-		return err.Error()
-	}
-	return ""
-}
+var completedTrace = telegramtrace.Completed
+var traceResult = telegramtrace.Result
+var traceError = telegramtrace.Error
 
 func (handler *Handler) trace(ctx context.Context, event TraceEvent) {
 	if handler != nil && handler.observer != nil {
-		handler.observer.ObserveTelegramFlow(ctx, event)
+		handler.observer.ObserveTelegramFlow(ctx, telegramtrace.Timestamp(event))
 	}
 }
 
 func (sender *Sender) trace(ctx context.Context, event TraceEvent) {
 	if sender != nil && sender.observer != nil {
-		sender.observer.ObserveTelegramFlow(ctx, event)
+		sender.observer.ObserveTelegramFlow(ctx, telegramtrace.Timestamp(event))
 	}
 }
 
-func transportTrace(stage, operationID string, plan telegrampipeline.CallbackPlan, started time.Time, err error) TraceEvent {
-	result, errorText := "completed", ""
-	if err != nil {
-		result, errorText = "failed", err.Error()
-	}
-	return TraceEvent{Stage: stage, OperationID: operationID, UpdateID: plan.UpdateID, UpdateKind: coordinator.UpdateCallback, Action: plan.Action, Effect: plan.Effect, Result: result, Error: errorText, Duration: time.Since(started)}
-}
+var transportTrace = telegramtrace.Transport
 
 type Prepared struct {
 	OperationID  string
@@ -665,7 +639,7 @@ func PrepareCardRefresh(
 	}
 	card := CardOutput{
 		SessionID: sessionID, Header: header, Projection: projection,
-		ScreenEligible:       !input.Keyboard.Archived && !input.Keyboard.CloseConfirmation && !input.Keyboard.DeleteConfirmation,
+		ScreenEligible:       !input.Keyboard.Archived && !input.Keyboard.Recovery && !input.Keyboard.CloseConfirmation && !input.Keyboard.DeleteConfirmation,
 		OptionsExpanded:      optionsExpanded,
 		SelectableSessionIDs: append([]domain.SessionID(nil), selectableSessionIDs...),
 	}
@@ -763,6 +737,7 @@ func prepareCard(
 		OperationID: operationID,
 		Status: coordinator.Status{
 			ScreenSessionID: screenSessionID,
+			RichMarkdown:    true,
 			ConversationID:  conversationID,
 			Text:            card.Header + projection.Card.Pages[projection.Card.View.Page-1].Content + card.Footer,
 			CallbackQueryID: callbackQueryID,
@@ -1233,13 +1208,18 @@ func (sender *Sender) sendPrepared(
 	var err error
 	transportStarted := time.Now()
 	transportStage := "transport.send"
+	startStage := "card.send_started"
+	if edit {
+		startStage = "card.edit_started"
+	}
+	sender.cardTrace(ctx, startStage, operationID, prepared, operation.Plan, status.SourceMessageID, transportStarted, nil)
 	if edit {
 		transportStage = "transport.edit"
 		receipt, err = sender.base.EditStatusWithKeyboard(ctx, operationID, status, keyboard)
 	} else {
 		receipt, err = sender.base.SendStatusWithKeyboard(ctx, operationID, status, keyboard)
 	}
-	sender.trace(ctx, transportTrace(transportStage, operationID, operation.Plan, transportStarted, err))
+	sender.cardTrace(ctx, transportStage, operationID, prepared, operation.Plan, receipt.MessageID, transportStarted, err)
 	if err != nil {
 		return coordinator.Receipt{}, err
 	}
@@ -1263,11 +1243,12 @@ func (sender *Sender) sendPrepared(
 		operation = confirmed
 	}
 	finalizeStarted := time.Now()
+	sender.cardTrace(ctx, "card.finalize_started", operationID, prepared, operation.Plan, receipt.MessageID, finalizeStarted, nil)
 	if err := finalizePrepared(ctx, sender.registry, sender.uiState, prepared, receipt.MessageID); err != nil {
-		sender.trace(ctx, transportTrace("state.commit", operationID, operation.Plan, finalizeStarted, err))
+		sender.cardTrace(ctx, "state.commit", operationID, prepared, operation.Plan, receipt.MessageID, finalizeStarted, err)
 		return coordinator.Receipt{}, err
 	}
-	sender.trace(ctx, transportTrace("state.commit", operationID, operation.Plan, finalizeStarted, nil))
+	sender.cardTrace(ctx, "state.commit", operationID, prepared, operation.Plan, receipt.MessageID, finalizeStarted, nil)
 	if durable {
 		committed := operation
 		committed.Phase = CallbackCommitted
@@ -1356,7 +1337,7 @@ func finalizePrepared(
 	}
 	if prepared.Card.SessionID != "" {
 		if err := commitCard(ctx, uiState, prepared.Card, carrier); err != nil {
-			return err
+			return callbackdiagnostic.Wrap(err, "card_commit_failed")
 		}
 	}
 	if prepared.Surface != nil && prepared.Surface.NativeSessionID != "" {
@@ -1368,7 +1349,7 @@ func finalizePrepared(
 		}
 	}
 	if err := telegrampipeline.BindPresentation(ctx, registry, carrier, prepared.Presentation); err != nil {
-		return fmt.Errorf("bind confirmed Telegram presentation: %w", err)
+		return callbackdiagnostic.Wrap(fmt.Errorf("bind confirmed Telegram presentation: %w", err), "presentation_bind_failed")
 	}
 	return nil
 }
@@ -1393,6 +1374,7 @@ func commitCard(ctx context.Context, uiState telegramstate.Store, output CardOut
 			want.EmptyCloseEligible = current.EmptyCloseEligible
 			want.History = append([]string(nil), current.History...)
 			want.HistoryKeys = append([]string(nil), current.HistoryKeys...)
+			want.HistoryTurnKeys = append([]string(nil), current.HistoryTurnKeys...)
 			want.HistoryKinds = append([]string(nil), current.HistoryKinds...)
 		} else {
 			want.History = make([]string, len(projected.Pages))

@@ -3,6 +3,7 @@ package turnprocessing_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"testing"
 
@@ -57,6 +58,69 @@ func TestExecuteOwnsExactAcceptanceInteractionAndAttachmentOrder(t *testing.T) {
 	}
 }
 
+func TestExecutePreservesDurableAcceptanceAfterAttachmentFailure(t *testing.T) {
+	for _, failureAt := range []int{1, 2} {
+		t.Run(fmt.Sprintf("attachment-%d", failureAt), func(t *testing.T) {
+			custodyErr := errors.New("synthetic attachment custody failure")
+			custody := &attachmentCustody{failAt: failureAt, err: custodyErr}
+			request := turnprocessing.Request{
+				SessionID: "logical-1", ProviderSessionID: "provider-1", MessageID: "telegram-update:1",
+				Input: turnprocessing.PreparedInput{Attachments: []turnprocessing.AttachmentRef{{Reference: "photo-1"}, {Reference: "photo-2"}}},
+			}
+			durablyAccepted := false
+			submitter := &preparedSubmitter{run: func(_ context.Context, _ domain.SessionID, _ turnprocessing.PreparedInput, callbacks sessionruntime.TurnCallbacks) (sessionruntime.TurnResult, error) {
+				if durablyAccepted {
+					t.Fatal("already accepted input was replayed")
+				}
+				return sessionruntime.TurnResult{}, callbacks.OnAccepted(request.MessageID)
+			}}
+			execution, err := turnprocessing.Execute(context.Background(), submitter, nil, custody, request, turnprocessing.Callbacks{
+				MarkInputAccepted: func(context.Context) error { durablyAccepted = true; return nil },
+				AfterAccepted:     func() { t.Fatal("post-custody callback ran after custody failure") },
+			})
+			if !durablyAccepted || !errors.Is(err, custodyErr) {
+				t.Fatalf("fixture did not reach post-acceptance custody failure: accepted=%v err=%v", durablyAccepted, err)
+			}
+			if !execution.Accepted {
+				t.Fatal("Execute lost durable acceptance after attachment custody failed")
+			}
+			if execution.Result.TerminalStatus != "" || execution.Result.Final != "" {
+				t.Fatalf("custody failure fabricated provider terminal proof: %+v", execution.Result)
+			}
+		})
+	}
+}
+
+func TestExecuteDistinguishesAcceptanceFailureFromMissingAttachmentCustody(t *testing.T) {
+	for _, acceptanceFails := range []bool{false, true} {
+		t.Run(fmt.Sprintf("acceptance-fails-%v", acceptanceFails), func(t *testing.T) {
+			acceptanceErr := errors.New("synthetic durable acceptance failure")
+			request := turnprocessing.Request{
+				SessionID: "logical-1", ProviderSessionID: "provider-1", MessageID: "telegram-update:1",
+				Input: turnprocessing.PreparedInput{Attachments: []turnprocessing.AttachmentRef{{Reference: "photo-1"}}},
+			}
+			submitter := &preparedSubmitter{run: func(_ context.Context, _ domain.SessionID, _ turnprocessing.PreparedInput, callbacks sessionruntime.TurnCallbacks) (sessionruntime.TurnResult, error) {
+				return sessionruntime.TurnResult{}, callbacks.OnAccepted(request.MessageID)
+			}}
+			execution, err := turnprocessing.Execute(context.Background(), submitter, nil, nil, request, turnprocessing.Callbacks{
+				MarkInputAccepted: func(context.Context) error {
+					if acceptanceFails {
+						return acceptanceErr
+					}
+					return nil
+				},
+				AfterAccepted: func() { t.Fatal("post-custody callback ran despite failure") },
+			})
+			if err == nil || execution.Accepted != !acceptanceFails || execution.Result.TerminalStatus != "" {
+				t.Fatalf("Execute crossed the wrong acceptance boundary: %+v, %v", execution, err)
+			}
+			if acceptanceFails && !errors.Is(err, acceptanceErr) {
+				t.Fatalf("durable acceptance error replaced: %v", err)
+			}
+		})
+	}
+}
+
 func TestExecuteRejectsMismatchedProviderAcceptanceBeforeCustody(t *testing.T) {
 	submitter := &preparedSubmitter{run: func(_ context.Context, _ domain.SessionID, _ turnprocessing.PreparedInput, callbacks sessionruntime.TurnCallbacks) (sessionruntime.TurnResult, error) {
 		return sessionruntime.TurnResult{}, callbacks.OnAccepted("different-message")
@@ -89,12 +153,17 @@ func (submitter *preparedSubmitter) SubmitPreparedWithCallbacks(ctx context.Cont
 type attachmentCustody struct {
 	events   *[]string
 	accepted int
+	failAt   int
+	err      error
 }
 
 func (custody *attachmentCustody) MarkAccepted(context.Context, turnprocessing.AttachmentReceipt) error {
 	custody.accepted++
 	if custody.events != nil {
 		*custody.events = append(*custody.events, "attachment-accepted")
+	}
+	if custody.accepted == custody.failAt {
+		return custody.err
 	}
 	return nil
 }

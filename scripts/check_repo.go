@@ -1090,21 +1090,29 @@ var runtimeFactoryAllowedImports = []string{
 }
 
 var sessionRuntimeAllowedImports = []string{
-	"internal/app", "internal/domain", "internal/nativecontrolport", "internal/orphanresume", "internal/processgroup", "internal/runtimeprotocol",
+	"internal/app", "internal/domain", "internal/nativecontrolport", "internal/orphanresume", "internal/processgroup", "internal/runtimediagnostic", "internal/runtimeprotocol",
 }
 
 var telegramControllerAllowedImports = []string{
+	"internal/finalpersist",
+	"internal/telegramsemantic",
+	"internal/telegramsessionview",
+	"internal/turnadmission",
+	"internal/turncompletion",
+	"internal/telegramcontrolport",
+	"internal/sessioncloseflow",
+	"internal/controllertelemetry",
 	"internal/telegramturnhelpers",
 	"internal/nativeapprovalflow",
 	"internal/app", "internal/cardtranscript", "internal/coordinator", "internal/domain", "internal/promptpreprocess", "internal/runtimeprotocol", "internal/sessioncreation", "internal/sessionruntime", "internal/settingsport", "internal/telegramcreationview", "internal/telegramnodes", "internal/telegramsettings", "internal/telegramsettingsview", "internal/telegramsessions", "internal/telegramstatus", "internal/turnprocessing",
 }
 
 var telegramBridgeAllowedImports = []string{
-	"internal/callbacktoken", "internal/coordinator", "internal/screen", "internal/telegram", "internal/telegramcallbackview", "internal/telegramformat", "internal/telegramrecovery", "internal/telegramui",
+	"internal/callbacktoken", "internal/coordinator", "internal/screen", "internal/telegram", "internal/telegramcallbackview", "internal/telegramrecovery", "internal/telegramui",
 }
 
 var telegramNotifyAllowedImports = []string{
-	"internal/domain", "internal/telegram", "internal/telegramcontroller", "internal/telegramformat", "internal/telegramui",
+	"internal/domain", "internal/notificationplan", "internal/notificationstate", "internal/telegram", "internal/telegramcontroller", "internal/telegramui",
 }
 
 type packagePolicy struct {
@@ -1125,6 +1133,80 @@ type packagePolicy struct {
 // dependencies and always blocks the strict release gate, regardless of any
 // supplied receipt. It must be removed as soon as composition becomes real.
 var packagePolicies = map[string]packagePolicy{
+	"internal/statejson": {
+		responsibility:     "validate canonical nonduplicated keys in persisted JSON values without schema or filesystem access",
+		maxProductionLines: 100,
+	},
+	"internal/finalpersist": {
+		responsibility:     "retry exact final persistence with paced cancellation and current binding guards",
+		allowedImports:     []string{"internal/cardhistory", "internal/domain"},
+		maxProductionLines: 200,
+	},
+	"internal/telegramsemantic": {
+		responsibility:     "define and validate transport-neutral session and menu action targets",
+		allowedImports:     []string{"internal/telegramcontrolport", "internal/telegramsettingsview"},
+		maxProductionLines: 200,
+	},
+	"internal/telegramsessionview": {
+		responsibility:     "format committed session lifecycle and recovery notices without I/O",
+		allowedImports:     []string{"internal/domain"},
+		maxProductionLines: 100,
+	},
+	"internal/durableinputbridge": {
+		responsibility:     "translate exact turn acceptance and asynchronous terminal callbacks into durable input custody",
+		allowedImports:     []string{"internal/domain", "internal/durableflow", "internal/messagejournal", "internal/turnprocessing"},
+		maxProductionLines: 100,
+	},
+	"internal/turncompletion": {
+		responsibility:     "publish one eventual terminal result to multiple exact-turn observers",
+		maxProductionLines: 70,
+	},
+	"internal/turnadmission": {
+		responsibility:     "gate next-turn admission on settlement of sealed root and steer completion commits",
+		maxProductionLines: 120,
+	},
+	"internal/nativerecoverycomposition": {
+		responsibility:     "bind native receipt and final readers to exact configured provider child environments",
+		allowedImports:     []string{"internal/config", "internal/domain", "internal/recoveryruntime", "internal/runtimefactory", "internal/sessionruntime"},
+		maxProductionLines: 100,
+		compositionRoot:    true,
+	},
+	"internal/nativeacceptance": {
+		responsibility:     "validate atomic native acceptance and exact turn correlation documents without I/O",
+		maxProductionLines: 180,
+	},
+	"internal/nativereceiptstore": {
+		responsibility:     "read and atomically persist private exactly bound native acceptance receipts",
+		allowedImports:     []string{"internal/nativeacceptance"},
+		maxProductionLines: 150,
+	},
+	"internal/sessionrecoverycontrol": {
+		responsibility:     "serialize exact-binding recovery decisions after independent process waits",
+		allowedImports:     []string{"internal/domain", "internal/sessionsupervisor"},
+		maxProductionLines: 250,
+	},
+	"internal/telegramcontrolport": {
+		responsibility:     "define neutral session, output and authorization contracts for controller composition",
+		allowedImports:     []string{"internal/app", "internal/cardtranscript", "internal/controllertelemetry", "internal/coordinator", "internal/domain", "internal/promptpreprocess", "internal/sessioncreation", "internal/sessionruntime", "internal/settingsport", "internal/telegramstatus", "internal/turnprocessing"},
+		maxProductionLines: 375,
+	},
+	"internal/cardhistory": {
+		responsibility:     "restore exact accepted finals and project typed histories without I/O",
+		allowedImports:     []string{"internal/cardtranscript", "internal/telegramhistory", "internal/telegramstate"},
+		maxProductionLines: 100,
+	},
+	"internal/runtimediagnostic": {
+		responsibility:     "drain bounded adapter diagnostics into payload-free closed failure classes",
+		maxProductionLines: 180,
+	},
+	"internal/tooltext": {
+		responsibility:     "retain and encode bounded readable tool text independently of transcript rendering",
+		maxProductionLines: 450,
+	},
+	"internal/settingscapability": {
+		responsibility:     "define optional preference mutations independently of base snapshot contracts",
+		maxProductionLines: 60,
+	},
 	"internal/telegramturnhelpers": {
 		responsibility:     "prepare media and preprocessed prompts and validate exact durable turn admission",
 		allowedImports:     []string{"internal/coordinator", "internal/domain", "internal/promptpreprocess", "internal/sessionruntime", "internal/settingsport", "internal/turnprocessing"},
@@ -1166,6 +1248,11 @@ var packagePolicies = map[string]packagePolicy{
 	},
 	"internal/telegramrich": {
 		responsibility:     "normalize rich Markdown without transport or product dependencies",
+		allowedImports:     []string{"internal/markdownliteral"},
+		maxProductionLines: 100,
+	},
+	"internal/markdownliteral": {
+		responsibility:     "identify literal Markdown code lines for rendering and pagination without I/O",
 		maxProductionLines: 100,
 	},
 	"cmd/bria": {
@@ -1197,7 +1284,7 @@ var packagePolicies = map[string]packagePolicy{
 	},
 	"internal/nativeadapter": {
 		responsibility:     "bridge exact native CLI terminal sessions, validated photo attachments, transcripts and throttled unsolicited screen observations",
-		allowedImports:     []string{"internal/domain", "internal/nativeattachment", "internal/nativecapture", "internal/nativecli", "internal/nativeterminal", "internal/nativetranscript", "internal/runtimeprotocol"},
+		allowedImports:     []string{"internal/domain", "internal/nativeacceptance", "internal/nativeattachment", "internal/nativecapture", "internal/nativecli", "internal/nativereceiptstore", "internal/nativeterminal", "internal/nativetranscript", "internal/runtimeprotocol"},
 		maxProductionLines: 850,
 	},
 	"internal/nativecapture": {
@@ -1239,8 +1326,12 @@ var packagePolicies = map[string]packagePolicy{
 	},
 	"internal/nativetranscript": {
 		responsibility:     "read bounded exact-session native transcripts and correlate accepted prompts, questions and final output",
-		allowedImports:     []string{"internal/runtimeprotocol"},
+		allowedImports:     []string{"internal/nativejsonline", "internal/runtimeprotocol", "internal/tooltext"},
 		maxProductionLines: 1000,
+	},
+	"internal/nativejsonline": {
+		responsibility:     "frame bounded-memory native JSONL diagnostic candidates without interpreting provider events",
+		maxProductionLines: 180,
 	},
 	"internal/app": {
 		responsibility:     "implement provider-independent session use cases",
@@ -1348,7 +1439,7 @@ var packagePolicies = map[string]packagePolicy{
 	"internal/durablecomposition": {
 		responsibility: "compose durable message custody and accepted-turn reconciliation",
 		allowedImports: []string{
-			"internal/domain", "internal/durableflow", "internal/messagejournal", "internal/sessionsupervisor", "internal/telegramcontroller", "internal/telegramnotify",
+			"internal/domain", "internal/durableflow", "internal/durableinputbridge", "internal/messagejournal", "internal/sessionruntime", "internal/sessionsupervisor", "internal/telegramcontroller", "internal/telegramnotify",
 		},
 		maxProductionLines: 500,
 	},
@@ -1505,7 +1596,7 @@ var packagePolicies = map[string]packagePolicy{
 	},
 	"internal/recoveryruntime": {
 		responsibility:     "run bounded provider adapters as read-only accepted-turn history readers",
-		allowedImports:     []string{"internal/claudestore", "internal/domain", "internal/processgroup", "internal/runtimeprotocol", "internal/sessionruntime"},
+		allowedImports:     []string{"internal/claudestore", "internal/domain", "internal/nativereceiptstore", "internal/nativetranscript", "internal/processgroup", "internal/runtimeprotocol", "internal/sessionruntime"},
 		maxProductionLines: 575,
 	},
 	"internal/coordinator/recoverycontrol": {
@@ -1528,6 +1619,7 @@ var packagePolicies = map[string]packagePolicy{
 	"internal/telegramruntimecomposition": {
 		responsibility: "project typed Telegram controller actions, signed model selectors and durable delivery receipts",
 		allowedImports: []string{
+			"internal/controllertelemetry",
 			"internal/coordinator", "internal/domain", "internal/telegramcontroller", "internal/telegramflow", "internal/telegrampipeline", "internal/telegramrecoverycomposition", "internal/telegramstate", "internal/telegramui",
 		},
 		maxProductionLines: 650,
@@ -1594,6 +1686,7 @@ var packagePolicies = map[string]packagePolicy{
 	},
 	"internal/cardtranscript": {
 		responsibility:     "render bounded structured session transcript blocks for Telegram cards",
+		allowedImports:     []string{"internal/markdownliteral", "internal/tooltext"},
 		maxProductionLines: 500,
 	},
 	"internal/promptpreprocesscommand": {
@@ -1614,7 +1707,7 @@ var packagePolicies = map[string]packagePolicy{
 	},
 	"internal/observability": {
 		responsibility:     "record safe terminal timing and non-blocking Telegram flow measurements",
-		allowedImports:     []string{"internal/safelog", "internal/telegramflow"},
+		allowedImports:     []string{"internal/controllertelemetry", "internal/safelog", "internal/telegramtrace"},
 		maxProductionLines: 350,
 	},
 	"internal/observabilitycomposition": {
@@ -1624,13 +1717,14 @@ var packagePolicies = map[string]packagePolicy{
 	},
 	"internal/safelog": {
 		responsibility:     "write redacted retention-bounded operational logs",
+		allowedImports:     []string{"internal/callbackdiagnostic", "internal/controllertelemetry"},
 		maxProductionLines: 700,
 	},
 	"internal/singlemachinecomposition": {
 		responsibility: "compose the single-computer Bria process",
 		allowedImports: []string{
 			"internal/providermodels",
-			"internal/app", "internal/authcomposition", "internal/callbacktoken", "internal/claudestore", "internal/config", "internal/coordinator", "internal/domain", "internal/durablecomposition", "internal/durableflow", "internal/interactioncomposition", "internal/messagejournal", "internal/observability", "internal/processenv", "internal/promptpreprocess", "internal/promptpreprocesscommand", "internal/providerquota", "internal/recoverycomposition", "internal/recoveryruntime", "internal/runtimefactory", "internal/safelog", "internal/screenproduction", "internal/sessioncreation", "internal/sessionexpiry", "internal/sessionid", "internal/sessionnaming", "internal/sessionruntime", "internal/sessionsupervisor", "internal/settings", "internal/settingscomposition", "internal/storage", "internal/supervisioncomposition", "internal/telegram", "internal/telegrambridge", "internal/telegramcompletioncomposition", "internal/telegramcontroller", "internal/telegramflow", "internal/telegramnotify", "internal/telegrampipeline", "internal/telegrampromptcomposition", "internal/telegramrecoverycomposition", "internal/telegramruntimecomposition", "internal/turnruntimecomposition", "internal/workdir",
+			"internal/app", "internal/authcomposition", "internal/callbacktoken", "internal/claudestore", "internal/config", "internal/coordinator", "internal/domain", "internal/durablecomposition", "internal/durableflow", "internal/interactioncomposition", "internal/messagejournal", "internal/nativerecoverycomposition", "internal/observability", "internal/processenv", "internal/promptpreprocess", "internal/promptpreprocesscommand", "internal/providerquota", "internal/recoverycomposition", "internal/recoveryruntime", "internal/runtimefactory", "internal/safelog", "internal/screenproduction", "internal/sessioncreation", "internal/sessionexpiry", "internal/sessionid", "internal/sessionnaming", "internal/sessionruntime", "internal/sessionsupervisor", "internal/settings", "internal/settingscomposition", "internal/storage", "internal/supervisioncomposition", "internal/telegram", "internal/telegrambridge", "internal/telegramcompletioncomposition", "internal/telegramcontroller", "internal/telegramflow", "internal/telegramnotify", "internal/telegrampipeline", "internal/telegrampromptcomposition", "internal/telegramrecoverycomposition", "internal/telegramruntimecomposition", "internal/turnruntimecomposition", "internal/workdir",
 		},
 		maxProductionLines: 950,
 	},
@@ -1673,7 +1767,7 @@ var packagePolicies = map[string]packagePolicy{
 	"internal/sessionruntime": {
 		responsibility: "supervise provider adapter sessions and exact native terminal key and screen requests",
 		allowedImports: []string{
-			"internal/app", "internal/domain", "internal/nativecontrolport", "internal/orphanresume", "internal/processgroup", "internal/runtimeprotocol",
+			"internal/app", "internal/domain", "internal/nativecontrolport", "internal/orphanresume", "internal/processgroup", "internal/runtimediagnostic", "internal/runtimeprotocol",
 		},
 		maxProductionLines: 1850,
 	},
@@ -1701,7 +1795,7 @@ var packagePolicies = map[string]packagePolicy{
 	},
 	"internal/settingsport": {
 		responsibility:     "define the storage-neutral preferences boundary used by Telegram control surfaces",
-		allowedImports:     []string{"internal/domain"},
+		allowedImports:     []string{"internal/domain", "internal/settingscapability"},
 		maxProductionLines: 100,
 	},
 	"internal/speech": {
@@ -1716,13 +1810,14 @@ var packagePolicies = map[string]packagePolicy{
 	"internal/storage": {
 		responsibility: "persist coordinator and session state, typed technical history, model preferences, atomic proven-empty deletion and exact finalization receipts",
 		allowedImports: []string{
-			"internal/archiveimport", "internal/cardtranscript", "internal/coordinator", "internal/domain", "internal/telegramhistory", "internal/telegramstate",
+			"internal/statejson",
+			"internal/archiveimport", "internal/cardhistory", "internal/cardtranscript", "internal/coordinator", "internal/domain", "internal/telegramhistory", "internal/telegramstate",
 		},
 		maxProductionLines: 1900,
 	},
 	"internal/supervisioncomposition": {
 		responsibility:     "compose startup and live supervision for exact local provider bindings",
-		allowedImports:     []string{"internal/app", "internal/domain", "internal/sessionsupervisor"},
+		allowedImports:     []string{"internal/app", "internal/controllertelemetry", "internal/domain", "internal/sessionrecoverycontrol", "internal/sessionsupervisor"},
 		maxProductionLines: 400,
 	},
 	"internal/telegram": {
@@ -1741,14 +1836,9 @@ var packagePolicies = map[string]packagePolicy{
 	"internal/telegrambridge": {
 		responsibility: "adapt Telegram transport payloads, active-card screen media and signed session-bound model selector callback tokens",
 		allowedImports: []string{
-			"internal/callbacktoken", "internal/coordinator", "internal/telegram", "internal/telegramcallbackview", "internal/telegramformat", "internal/telegramrecovery", "internal/telegramrecovery/statusrecovery", "internal/telegramui",
+			"internal/callbacktoken", "internal/coordinator", "internal/telegram", "internal/telegramcallbackview", "internal/telegramrecovery", "internal/telegramrecovery/statusrecovery", "internal/telegramui",
 		},
 		maxProductionLines: 1550,
-	},
-	"internal/telegramformat": {
-		responsibility:     "convert bounded provider Markdown into Telegram text entities",
-		allowedImports:     []string{"internal/telegram"},
-		maxProductionLines: 150,
 	},
 	"internal/mutationscheduler": {
 		responsibility:     "persist and schedule Telegram mutation admission and cooldown",
@@ -1778,6 +1868,14 @@ var packagePolicies = map[string]packagePolicy{
 	"internal/telegramcontroller": {
 		responsibility: "coordinate node-local session interactions, managed standby preparation, technical-history visibility, native-screen observation and paged archive",
 		allowedImports: []string{
+			"internal/finalpersist",
+			"internal/telegramsemantic",
+			"internal/telegramsessionview",
+			"internal/turnadmission",
+			"internal/turncompletion",
+			"internal/telegramcontrolport",
+			"internal/sessioncloseflow",
+			"internal/controllertelemetry",
 			"internal/telegramturnhelpers",
 			"internal/nativeapprovalflow",
 			"internal/app", "internal/cardtranscript", "internal/coordinator", "internal/domain", "internal/promptpreprocess", "internal/runtimeprotocol", "internal/sessioncreation", "internal/sessionruntime", "internal/settingsport", "internal/telegramcreationview", "internal/telegramnodes", "internal/telegramsettings", "internal/telegramsettingsview", "internal/telegramsessions", "internal/telegramstatus", "internal/turnprocessing",
@@ -1787,7 +1885,7 @@ var packagePolicies = map[string]packagePolicy{
 	"internal/telegramflow": {
 		responsibility: "join Telegram callback, presentation, and durable card boundaries",
 		allowedImports: []string{
-			"internal/callbacktoken", "internal/coordinator", "internal/domain", "internal/telegram", "internal/telegrambridge",
+			"internal/callbackdiagnostic", "internal/callbacktoken", "internal/coordinator", "internal/domain", "internal/telegram", "internal/telegrambridge", "internal/telegramtrace",
 			"internal/telegramops", "internal/telegrampipeline", "internal/telegramrecovery", "internal/telegramrecovery/statusrecovery", "internal/telegramstate", "internal/telegramui",
 		},
 		maxProductionLines: 2500,
@@ -1795,9 +1893,19 @@ var packagePolicies = map[string]packagePolicy{
 	"internal/telegramnotify": {
 		responsibility: "deliver final and background Telegram notifications",
 		allowedImports: []string{
-			"internal/domain", "internal/telegram", "internal/telegramcontroller", "internal/telegramformat", "internal/telegramui",
+			"internal/domain", "internal/notificationplan", "internal/notificationstate", "internal/telegram", "internal/telegramcontroller", "internal/telegramui",
 		},
 		maxProductionLines: 800,
+	},
+	"internal/notificationplan": {
+		responsibility:     "produce immutable byte-bounded rich notification page payloads without I/O",
+		allowedImports:     []string{"internal/cardtranscript", "internal/telegramrich"},
+		maxProductionLines: 250,
+	},
+	"internal/notificationstate": {
+		responsibility:     "persist notification page plans, confirmed receipts and pre-send unknown claims with legacy compatibility",
+		allowedImports:     []string{"internal/notificationplan"},
+		maxProductionLines: 650,
 	},
 	"internal/telegramnodes": {
 		responsibility:     "own selected-node inventory, provider scope, durable per-node active-session recency, and node-menu projection",
@@ -1816,10 +1924,28 @@ var packagePolicies = map[string]packagePolicy{
 	"internal/telegrampipeline": {
 		responsibility: "persist and execute Telegram callback/update pipeline including signed archive pages and session-bound native keys",
 		allowedImports: []string{
-			"internal/coordinator", "internal/domain", "internal/telegrambridge",
+			"internal/callbackdiagnostic", "internal/coordinator", "internal/domain", "internal/telegrambridge",
 			"internal/telegramrecovery", "internal/telegramrecovery/statusrecovery", "internal/telegramstate", "internal/telegramui",
 		},
 		maxProductionLines: 1700,
+	},
+	"internal/callbackdiagnostic": {
+		responsibility:     "carry typed callback rejection metadata without changing error semantics",
+		maxProductionLines: 180,
+	},
+	"internal/telegramtrace": {
+		responsibility:     "build and encode correlated payload-free Telegram flow diagnostics",
+		allowedImports:     []string{"internal/controllertelemetry", "internal/callbackdiagnostic", "internal/callbacktoken", "internal/coordinator", "internal/safelog", "internal/telegrambridge", "internal/telegrampipeline", "internal/telegramui"},
+		maxProductionLines: 400,
+	},
+	"internal/controllertelemetry": {
+		responsibility:     "define payload-free typed session lifecycle and selection diagnostics",
+		maxProductionLines: 175,
+	},
+	"internal/sessioncloseflow": {
+		responsibility:     "coordinate close completion and correlated lifecycle and selection diagnostics",
+		allowedImports:     []string{"internal/app", "internal/controllertelemetry", "internal/domain", "internal/telegramnodes"},
+		maxProductionLines: 225,
 	},
 	"internal/telegramsessions": {
 		responsibility:     "select, name, and paginate Telegram-visible sessions",

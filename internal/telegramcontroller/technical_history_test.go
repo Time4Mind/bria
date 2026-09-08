@@ -98,7 +98,7 @@ func TestTechnicalDisplayToggleFiltersOnlyTypedToolsAndKeepsHistory(t *testing.T
 			t.Fatalf("projection: %+v %v", r, err)
 		}
 		text := r.Card.Pages[0].Content
-		if strings.Contains(text, "EXACT_TOOL_PAYLOAD") != show || !strings.Contains(text, "🔧 ordinary explanation") || !strings.Contains(text, "🔧 user prompt") || !strings.Contains(text, "finished") {
+		if strings.Contains(text, "EXACT_TOOL_PAYLOAD") != show || !strings.Contains(text, "🔧 ordinary explanation") || !strings.Contains(text, "🔧 user prompt") || len(r.Card.Pages) != 2 || r.Card.Pages[1].Content != "finished" {
 			t.Fatalf("show=%t filtered wrong content: %q", show, text)
 		}
 		completion, _, err := c.ProjectCompletion(ctx, ready.ID())
@@ -106,8 +106,8 @@ func TestTechnicalDisplayToggleFiltersOnlyTypedToolsAndKeepsHistory(t *testing.T
 			t.Fatalf("completion ignores tool setting: %+v %v", completion, err)
 		}
 		legacy, err := c.Handle(ctx, message(991, "/status"))
-		if err != nil || strings.Contains(legacy.Status.Text, "EXACT_TOOL_PAYLOAD") != show {
-			t.Fatalf("legacy card ignores tool setting: %+v %v", legacy, err)
+		if err != nil || strings.Contains(legacy.Status.Text, "EXACT_TOOL_PAYLOAD") || !strings.Contains(legacy.Status.Text, "finished") {
+			t.Fatalf("legacy card did not isolate latest final: %+v %v", legacy, err)
 		}
 	}
 	if !strings.Contains(strings.Join(state.history[ready.ID()], "\n"), "EXACT_TOOL_PAYLOAD") {

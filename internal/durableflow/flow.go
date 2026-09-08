@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"bria/internal/messagejournal"
@@ -33,9 +34,12 @@ type InputProvider interface {
 type InputProcessState string
 
 const (
-	InputProcessCompleted InputProcessState = "completed"
-	InputProcessFailed    InputProcessState = "failed"
-	InputProcessUnknown   InputProcessState = "unknown"
+	InputProcessAccepted       InputProcessState = "accepted"
+	InputProcessDeferred       InputProcessState = "deferred"
+	InputProcessCompleted      InputProcessState = "completed"
+	InputProcessFailed         InputProcessState = "failed"
+	InputProcessTerminalFailed InputProcessState = "terminal_failed"
+	InputProcessUnknown        InputProcessState = "unknown"
 )
 
 type InputProcessCallbacks struct {
@@ -45,6 +49,8 @@ type InputProcessCallbacks struct {
 	// OnAccepted is the only path that may transition the leased input to
 	// accepted. The receipt must be the exact tuple supplied to Process.
 	OnAccepted func(context.Context, HandoffResult) error
+	// OnCompleted commits an exact result after acceptance, even after Process returns.
+	OnCompleted func(context.Context, InputProcessResult) error
 }
 
 type InputProcessResult struct {
@@ -80,6 +86,7 @@ type Journal interface {
 	CompleteInput(context.Context, string, string) (messagejournal.Input, error)
 	FailInput(context.Context, string, string) (messagejournal.Input, error)
 	MarkInputUnknown(context.Context, string, string) (messagejournal.Input, error)
+	ResolveAcceptedInput(context.Context, string, string, uint64, messagejournal.InputPhase) (messagejournal.Input, error)
 	RetryInput(context.Context, string, string) (messagejournal.Input, error)
 	EnqueueOutput(context.Context, string, string, string, []byte) (messagejournal.Output, bool, error)
 	LeaseNextOutput(context.Context, string, string, time.Time, time.Duration) (messagejournal.Output, error)
@@ -124,19 +131,22 @@ const (
 type AcceptedResolution string
 
 const (
-	AcceptedCompleted AcceptedResolution = "completed"
-	AcceptedFailed    AcceptedResolution = "failed"
-	AcceptedUnknown   AcceptedResolution = "unknown"
+	AcceptedCompleted      AcceptedResolution = "completed"
+	AcceptedFailed         AcceptedResolution = "failed"
+	AcceptedTerminalFailed AcceptedResolution = "terminal_failed"
+	AcceptedUnknown        AcceptedResolution = "unknown"
 )
 
 // AcceptedInput is the exact durable identity requiring provider-history
 // reconciliation after a process or machine restart.
 type AcceptedInput struct {
-	SessionID   string
-	MessageID   string
-	Sequence    uint64
-	Payload     []byte
-	Attachments []messagejournal.AttachmentRef
+	SessionID         string
+	MessageID         string
+	Sequence          uint64
+	PreviouslyUnknown bool
+	PreviouslyFailed  bool
+	Payload           []byte
+	Attachments       []messagejournal.AttachmentRef
 }
 
 // AcceptedResolutionResult is an exact provider-history receipt. All identity
@@ -339,7 +349,7 @@ func (flow *Flow) ProcessNextInput(ctx context.Context, sessionID string, proces
 	}
 	request := ProviderInput{SessionID: input.SessionID, MessageID: input.MessageID, Sequence: input.Sequence, Payload: append([]byte(nil), input.Payload...), Attachments: cloneAttachmentRefs(input.Attachments)}
 	result := InputProcessResult{SessionID: input.SessionID, MessageID: input.MessageID, Sequence: input.Sequence, State: InputProcessUnknown}
-	accepted := false
+	var accepted atomic.Bool
 	callbacks := InputProcessCallbacks{OnPrepared: func(callbackCtx context.Context, prepared ProviderInput) error {
 		if prepared.SessionID != input.SessionID || prepared.MessageID != input.MessageID || prepared.Sequence != input.Sequence {
 			return ErrInvalidHandoff
@@ -351,15 +361,20 @@ func (flow *Flow) ProcessNextInput(ctx context.Context, sessionID string, proces
 		input.Payload = append([]byte(nil), prepared.Payload...)
 		return nil
 	}, OnAccepted: func(callbackCtx context.Context, receipt HandoffResult) error {
-		if accepted || receipt.SessionID != input.SessionID || receipt.MessageID != input.MessageID || receipt.Sequence != input.Sequence || receipt.State != HandoffAccepted {
+		if accepted.Load() || receipt.SessionID != input.SessionID || receipt.MessageID != input.MessageID || receipt.Sequence != input.Sequence || receipt.State != HandoffAccepted {
 			return ErrInvalidHandoff
 		}
 		persisted, persistErr := flow.RecordLeasedInputAccepted(callbackCtx, input.SessionID, input.MessageID, input.Sequence)
 		if persistErr != nil || persisted.State != HandoffAccepted {
 			return errors.Join(ErrInvalidHandoff, persistErr)
 		}
-		accepted = true
+		accepted.Store(true)
 		return nil
+	}, OnCompleted: func(callbackCtx context.Context, receipt InputProcessResult) error {
+		if !accepted.Load() || receipt.SessionID != request.SessionID || receipt.MessageID != request.MessageID || receipt.Sequence != request.Sequence {
+			return ErrInvalidHandoff
+		}
+		return flow.recordProcessOutcome(callbackCtx, receipt)
 	}}
 	processed, processErr := processor.Process(ctx, request, callbacks)
 	if processed.SessionID != input.SessionID || processed.MessageID != input.MessageID || processed.Sequence != input.Sequence {
@@ -368,27 +383,27 @@ func (flow *Flow) ProcessNextInput(ctx context.Context, sessionID string, proces
 		result.State = processed.State
 	}
 	custodyCtx := context.WithoutCancel(ctx)
-	if processErr != nil || !accepted {
+	if processErr == nil && result.State == InputProcessDeferred && !accepted.Load() {
+		_, err := flow.journal.ReleaseInputLease(custodyCtx, input.SessionID, input.MessageID, flow.owner)
+		return result, err
+	}
+	if processErr != nil || !accepted.Load() {
 		result.State = InputProcessUnknown
 		var persistErr error
-		if accepted {
+		if accepted.Load() {
 			_, persistErr = flow.journal.MarkInputUnknown(custodyCtx, input.SessionID, input.MessageID)
 		} else {
 			persistErr = flow.markInputUnknown(custodyCtx, input)
 		}
 		return result, errors.Join(processErr, persistErr)
 	}
-	switch result.State {
-	case InputProcessCompleted:
-		err = flow.RecordInputCompletionExact(custodyCtx, input.SessionID, input.MessageID, input.Sequence, CompletionSucceeded)
-	case InputProcessFailed:
-		err = flow.RecordInputCompletionExact(custodyCtx, input.SessionID, input.MessageID, input.Sequence, CompletionFailed)
-	case InputProcessUnknown:
-		_, err = flow.journal.MarkInputUnknown(custodyCtx, input.SessionID, input.MessageID)
-	default:
+	if result.State == InputProcessAccepted {
+		return result, nil
+	}
+	err = callbacks.OnCompleted(custodyCtx, result)
+	if errors.Is(err, ErrInvalidHandoff) {
 		result.State = InputProcessUnknown
-		_, persistErr := flow.journal.MarkInputUnknown(custodyCtx, input.SessionID, input.MessageID)
-		return result, errors.Join(ErrInvalidHandoff, persistErr)
+		err = errors.Join(err, callbacks.OnCompleted(custodyCtx, result))
 	}
 	return result, err
 }
@@ -415,7 +430,7 @@ func (flow *Flow) RecordLeasedInputAccepted(ctx context.Context, sessionID, mess
 	if leased == nil || leased.Sequence != sequence {
 		return result, ErrInvalidHandoff
 	}
-	if leased.Phase == messagejournal.InputAccepted || leased.Phase == messagejournal.InputCompleted || leased.Phase == messagejournal.InputFailed {
+	if leased.Phase == messagejournal.InputAccepted || leased.Phase == messagejournal.InputCompleted || leased.Phase == messagejournal.InputFailed || leased.Phase == messagejournal.InputTerminalFailed {
 		result.State = HandoffAccepted
 		return result, nil
 	}
@@ -462,36 +477,24 @@ func (flow *Flow) RecordInputCompletion(ctx context.Context, sessionID, messageI
 // RecordInputCompletionExact applies a terminal outcome only to the exact
 // accepted tuple observed by the provider continuation.
 func (flow *Flow) RecordInputCompletionExact(ctx context.Context, sessionID, messageID string, sequence uint64, completion Completion) error {
-	if flow == nil || flow.journal == nil || strings.TrimSpace(sessionID) == "" || strings.TrimSpace(messageID) == "" || sequence == 0 {
+	state := InputProcessCompleted
+	if completion == CompletionFailed {
+		state = InputProcessFailed
+	} else if completion != CompletionSucceeded {
 		return ErrInvalidHandoff
 	}
-	inputs, err := flow.journal.Inputs(ctx, sessionID)
-	if err != nil {
-		return err
-	}
-	found := false
-	for _, input := range inputs {
-		if input.MessageID == messageID {
-			if input.Sequence != sequence {
-				return ErrInvalidHandoff
-			}
-			if completion == CompletionSucceeded && input.Phase == messagejournal.InputCompleted {
-				return nil
-			}
-			if completion == CompletionFailed && input.Phase == messagejournal.InputFailed {
-				return nil
-			}
-			if input.Phase != messagejournal.InputAccepted {
-				return ErrInvalidHandoff
-			}
-			found = true
-			break
-		}
-	}
-	if !found {
+	return flow.recordProcessOutcome(ctx, InputProcessResult{SessionID: sessionID, MessageID: messageID, Sequence: sequence, State: state})
+}
+
+func (flow *Flow) recordProcessOutcome(ctx context.Context, result InputProcessResult) error {
+	if flow == nil || flow.journal == nil || result.Sequence == 0 || result.State != InputProcessCompleted && result.State != InputProcessFailed && result.State != InputProcessUnknown && result.State != InputProcessTerminalFailed {
 		return ErrInvalidHandoff
 	}
-	return flow.RecordInputCompletion(context.WithoutCancel(ctx), sessionID, messageID, completion)
+	_, err := flow.journal.ResolveAcceptedInput(context.WithoutCancel(ctx), result.SessionID, result.MessageID, result.Sequence, messagejournal.InputPhase(result.State))
+	if errors.Is(err, messagejournal.ErrInvalidTransition) || errors.Is(err, messagejournal.ErrNotFound) {
+		return errors.Join(ErrInvalidHandoff, err)
+	}
+	return err
 }
 
 // ReconcileAcceptedInputs resolves durable provider acceptances after restart.
@@ -506,15 +509,17 @@ func (flow *Flow) ReconcileAcceptedInputs(ctx context.Context, sessionID string,
 	}
 	results := make([]AcceptedResolutionResult, 0)
 	for _, input := range inputs {
-		if input.Phase != messagejournal.InputAccepted {
+		if input.Phase != messagejournal.InputAccepted && input.Phase != messagejournal.InputUnknown && input.Phase != messagejournal.InputFailed {
 			continue
 		}
 		request := AcceptedInput{
-			SessionID:   input.SessionID,
-			MessageID:   input.MessageID,
-			Sequence:    input.Sequence,
-			Payload:     append([]byte(nil), input.Payload...),
-			Attachments: cloneAttachmentRefs(input.Attachments),
+			PreviouslyUnknown: input.Phase == messagejournal.InputUnknown,
+			PreviouslyFailed:  input.Phase == messagejournal.InputFailed,
+			SessionID:         input.SessionID,
+			MessageID:         input.MessageID,
+			Sequence:          input.Sequence,
+			Payload:           append([]byte(nil), input.Payload...),
+			Attachments:       cloneAttachmentRefs(input.Attachments),
 		}
 		resolved, resolveErr := resolver.ResolveAccepted(ctx, request)
 		result := AcceptedResolutionResult{
@@ -524,32 +529,16 @@ func (flow *Flow) ReconcileAcceptedInputs(ctx context.Context, sessionID string,
 			Resolution: resolved.Resolution,
 		}
 		custodyCtx := context.WithoutCancel(ctx)
+		if resolveErr == nil && (resolved.SessionID != input.SessionID || resolved.MessageID != input.MessageID || resolved.Sequence != input.Sequence || resolved.Resolution != AcceptedCompleted && resolved.Resolution != AcceptedFailed && resolved.Resolution != AcceptedUnknown && resolved.Resolution != AcceptedTerminalFailed) {
+			resolveErr = ErrInvalidResolution
+		}
 		if resolveErr != nil {
 			result.Resolution = AcceptedUnknown
 			_, persistErr := flow.journal.MarkInputUnknown(custodyCtx, input.SessionID, input.MessageID)
 			results = append(results, result)
 			return results, errors.Join(resolveErr, persistErr)
 		}
-		if resolved.SessionID != input.SessionID || resolved.MessageID != input.MessageID || resolved.Sequence != input.Sequence {
-			result.Resolution = AcceptedUnknown
-			_, persistErr := flow.journal.MarkInputUnknown(custodyCtx, input.SessionID, input.MessageID)
-			results = append(results, result)
-			return results, errors.Join(ErrInvalidResolution, persistErr)
-		}
-
-		switch resolved.Resolution {
-		case AcceptedCompleted:
-			_, err = flow.journal.CompleteInput(custodyCtx, input.SessionID, input.MessageID)
-		case AcceptedFailed:
-			_, err = flow.journal.FailInput(custodyCtx, input.SessionID, input.MessageID)
-		case AcceptedUnknown:
-			_, err = flow.journal.MarkInputUnknown(custodyCtx, input.SessionID, input.MessageID)
-		default:
-			result.Resolution = AcceptedUnknown
-			_, persistErr := flow.journal.MarkInputUnknown(custodyCtx, input.SessionID, input.MessageID)
-			results = append(results, result)
-			return results, errors.Join(ErrInvalidResolution, persistErr)
-		}
+		err = flow.commitRecoveredInput(custodyCtx, input, resolved.Resolution)
 		results = append(results, result)
 		if err != nil {
 			return results, err

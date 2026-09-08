@@ -43,15 +43,13 @@ func TestNotifierSendsCommentaryQuestionAndFinalAsNewRussianPrefixedMessages(t *
 		"Сессия 11111111 - вопрос\nКакой вариант выбрать?",
 		"Сессия 11111111 - итог\nГотово.",
 		"Сессия 11111111 - ошибка\nНе удалось завершить запрос.",
+		"Сессия 11111111 - статус запроса\n**Запрос принят.**",
+		"Сессия 11111111 - экран CLI\n`ready`",
 	}
 	call := 0
 	client := mustNotifyClient(t, func(request *http.Request) (*http.Response, error) {
-		if request.URL.Path != "/bot"+testBotToken+"/sendMessage" {
-			t.Fatalf("request path = %q, want a new sendMessage", request.URL.Path)
-		}
-		var body telegram.SendMessageRequest
-		decodeNotifyRequest(t, request, &body)
-		if body.ChatID != 42 || body.Text != wantText[call] || body.ReplyMarkup != nil {
+		body := decodeRichNotifyRequest(t, request)
+		if body.RichMessage.Markdown != wantText[call] {
 			t.Fatalf("send %d body = %#v, want chat 42 text %q without keyboard", call, body, wantText[call])
 		}
 		call++
@@ -67,13 +65,15 @@ func TestNotifierSendsCommentaryQuestionAndFinalAsNewRussianPrefixedMessages(t *
 		{ConversationID: 42, SessionID: testSessionID, Kind: telegramcontroller.NotificationQuestion, Text: "Какой вариант выбрать?"},
 		{ConversationID: 42, SessionID: testSessionID, Kind: telegramcontroller.NotificationFinal, Text: "Готово."},
 		{ConversationID: 42, SessionID: testSessionID, Kind: telegramcontroller.NotificationError, Text: "Не удалось завершить запрос."},
+		{ConversationID: 42, SessionID: testSessionID, Kind: telegramcontroller.NotificationPromptStatus, Text: "**Запрос принят.**"},
+		{ConversationID: 42, SessionID: testSessionID, Kind: telegramcontroller.NotificationNativeScreen, Text: "`ready`"},
 	} {
 		if err := notifier.Notify(context.Background(), notification); err != nil {
 			t.Fatalf("Notify(%q) error = %v", notification.Kind, err)
 		}
 	}
-	if call != 4 {
-		t.Fatalf("sendMessage calls = %d, want 4", call)
+	if call != len(wantText) {
+		t.Fatalf("sendRichMessage calls = %d, want %d", call, len(wantText))
 	}
 }
 
@@ -178,9 +178,8 @@ func TestNotifierSplitsLongUnicodeLosslesslyWithinTelegramLimits(t *testing.T) {
 	content := strings.Repeat("я🙂", 1200)
 	var sent []string
 	client := mustNotifyClient(t, func(request *http.Request) (*http.Response, error) {
-		var body telegram.SendMessageRequest
-		decodeNotifyRequest(t, request, &body)
-		sent = append(sent, body.Text)
+		body := decodeRichNotifyRequest(t, request)
+		sent = append(sent, body.RichMessage.Markdown)
 		messageID := len(sent)
 		return notifyResponse(http.StatusOK, `{"ok":true,"result":{"message_id":`+string(rune('0'+messageID))+`,"from":{"id":600,"is_bot":true},"chat":{"id":42,"type":"private"}}}`), nil
 	})
@@ -220,6 +219,7 @@ func TestNotifierStopsAfterFirstAmbiguousPageFailureWithoutRetryOrLeakage(t *tes
 	const providerSessionSecret = "provider-session-secret"
 	calls := 0
 	client := mustNotifyClient(t, func(request *http.Request) (*http.Response, error) {
+		decodeRichNotifyRequest(t, request)
 		calls++
 		if calls == 2 {
 			return nil, errors.New(testBotToken + " " + providerSessionSecret)
@@ -310,6 +310,20 @@ func decodeNotifyRequest(t *testing.T, request *http.Request, result any) {
 	if err := decoder.Decode(result); err != nil {
 		t.Fatalf("decode request: %v", err)
 	}
+}
+
+// Strict JSON decoding rejects text, entities and parse_mode fallback fields.
+func decodeRichNotifyRequest(t *testing.T, request *http.Request) telegram.SendRichMessageRequest {
+	t.Helper()
+	if request.Method != http.MethodPost || request.URL.Path != "/bot"+testBotToken+"/sendRichMessage" {
+		t.Fatalf("request = %s %s, want POST sendRichMessage", request.Method, request.URL.Path)
+	}
+	var body telegram.SendRichMessageRequest
+	decodeNotifyRequest(t, request, &body)
+	if body.ChatID != 42 || body.ReplyMarkup != nil || len(body.RichMessage.Media) != 0 || body.RichMessage.Markdown == "" {
+		t.Fatalf("rich notification = %#v, want chat 42 non-empty markdown without keyboard/media", body)
+	}
+	return body
 }
 
 func notifyResponse(status int, body string) *http.Response {

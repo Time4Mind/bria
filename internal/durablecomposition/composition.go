@@ -11,65 +11,18 @@ import (
 
 	"bria/internal/domain"
 	"bria/internal/durableflow"
+	"bria/internal/durableinputbridge"
 	"bria/internal/messagejournal"
 	"bria/internal/sessionsupervisor"
 	"bria/internal/telegramcontroller"
 	"bria/internal/telegramnotify"
 )
 
-type InputProcessor interface {
-	ProcessDurableInput(context.Context, telegramcontroller.DurableLeasedInput, telegramcontroller.DurableInputCallbacks) (telegramcontroller.DurableInputProcessReceipt, error)
-}
+type InputProcessor = durableinputbridge.InputProcessor
+type ControllerInputProcessor = durableinputbridge.Processor
 
-type ControllerInputProcessor struct{ processor InputProcessor }
-
-func NewControllerInputProcessor(processor InputProcessor) *ControllerInputProcessor {
-	return &ControllerInputProcessor{processor: processor}
-}
-
-func (processor *ControllerInputProcessor) Process(ctx context.Context, input durableflow.ProviderInput, callbacks durableflow.InputProcessCallbacks) (durableflow.InputProcessResult, error) {
-	result := durableflow.InputProcessResult{SessionID: input.SessionID, MessageID: input.MessageID, Sequence: input.Sequence, State: durableflow.InputProcessUnknown}
-	if processor == nil || processor.processor == nil || callbacks.OnAccepted == nil {
-		return result, errors.New("durable controller input processor is required")
-	}
-	receipt, processErr := processor.processor.ProcessDurableInput(ctx, telegramcontroller.DurableLeasedInput{
-		SessionID: domain.SessionID(input.SessionID), MessageID: input.MessageID, Sequence: input.Sequence,
-		Payload: append([]byte(nil), input.Payload...), Attachments: attachmentsFromJournal(input.Attachments),
-	}, telegramcontroller.DurableInputCallbacks{OnPrepared: func(callbackCtx context.Context, preparation telegramcontroller.DurableInputPreparation) error {
-		if preparation.SessionID != domain.SessionID(input.SessionID) || preparation.MessageID != input.MessageID || preparation.Sequence != input.Sequence {
-			return durableflow.ErrInvalidHandoff
-		}
-		return callbacks.OnPrepared(callbackCtx, durableflow.ProviderInput{
-			SessionID: input.SessionID, MessageID: input.MessageID, Sequence: input.Sequence,
-			Payload: append([]byte(nil), preparation.Payload...), Attachments: cloneControllerAttachments(input.Attachments),
-		})
-	}, OnAccepted: func(callbackCtx context.Context, acceptance telegramcontroller.DurableInputAcceptance) error {
-		if acceptance.SessionID != domain.SessionID(input.SessionID) || acceptance.MessageID != input.MessageID || acceptance.Sequence != input.Sequence {
-			return durableflow.ErrInvalidHandoff
-		}
-		return callbacks.OnAccepted(callbackCtx, durableflow.HandoffResult{SessionID: input.SessionID, MessageID: input.MessageID, Sequence: input.Sequence, State: durableflow.HandoffAccepted})
-	}})
-	if processErr != nil {
-		return result, processErr
-	}
-	if receipt.SessionID != domain.SessionID(input.SessionID) || receipt.MessageID != input.MessageID || receipt.Sequence != input.Sequence || !receipt.Accepted {
-		return result, errors.New("durable processor returned a mismatched receipt")
-	}
-	switch receipt.Completion {
-	case telegramcontroller.DurableInputSucceeded:
-		result.State = durableflow.InputProcessCompleted
-	case telegramcontroller.DurableInputFailed:
-		result.State = durableflow.InputProcessFailed
-	default:
-		return result, errors.New("durable processor returned an invalid completion")
-	}
-	return result, nil
-}
-
-func cloneControllerAttachments(source []messagejournal.AttachmentRef) []messagejournal.AttachmentRef {
-	result := make([]messagejournal.AttachmentRef, len(source))
-	copy(result, source)
-	return result
+func NewControllerInputProcessor(processor InputProcessor, notify ...func(domain.SessionID)) *ControllerInputProcessor {
+	return durableinputbridge.New(processor, notify...)
 }
 
 type InputCustody struct {
@@ -89,27 +42,25 @@ func (custody InputCustody) Accept(ctx context.Context, input telegramcontroller
 	if result.SessionID != input.SessionID || result.MessageID != input.MessageID || result.Sequence == 0 {
 		return telegramcontroller.InputReceipt{}, durableflow.ErrInvalidHandoff
 	}
-	if custody.Wake != nil {
-		select {
-		case custody.Wake <- input.SessionID:
-		default:
-		}
-	}
+	custody.WakeSession(input.SessionID)
 	return result, nil
+}
+
+// WakeSession coalesces a bounded, nonblocking dispatch hint for this session.
+func (custody InputCustody) WakeSession(id domain.SessionID) {
+	if id == "" {
+		return
+	}
+	select {
+	case custody.Wake <- id:
+	default:
+	}
 }
 
 func attachmentsToJournal(attachments []telegramcontroller.AttachmentRef) []messagejournal.AttachmentRef {
 	result := make([]messagejournal.AttachmentRef, len(attachments))
 	for index, attachment := range attachments {
 		result[index] = messagejournal.AttachmentRef{Reference: attachment.Reference, Size: attachment.Size, SHA256: attachment.SHA256}
-	}
-	return result
-}
-
-func attachmentsFromJournal(attachments []messagejournal.AttachmentRef) []telegramcontroller.AttachmentRef {
-	result := make([]telegramcontroller.AttachmentRef, len(attachments))
-	for index, attachment := range attachments {
-		result[index] = telegramcontroller.AttachmentRef{Reference: attachment.Reference, Size: attachment.Size, SHA256: attachment.SHA256}
 	}
 	return result
 }
@@ -193,7 +144,7 @@ func (dispatcher InputDispatcher) ProcessReadySession(ctx context.Context, id do
 	if err != nil {
 		return err
 	}
-	if session.Status() != domain.SessionReady {
+	if session.Status() != domain.SessionReady && session.Status() != domain.SessionRunning {
 		return nil
 	}
 	for {
@@ -204,7 +155,7 @@ func (dispatcher InputDispatcher) ProcessReadySession(ctx context.Context, id do
 		if err != nil {
 			return fmt.Errorf("process durable input for session %s: %w", id, err)
 		}
-		if result.State != durableflow.InputProcessCompleted {
+		if result.State != durableflow.InputProcessCompleted && result.State != durableflow.InputProcessAccepted && result.State != durableflow.InputProcessTerminalFailed {
 			return nil
 		}
 	}
@@ -355,15 +306,16 @@ func (dispatcher OutputDispatcher) Run(ctx context.Context) error {
 var errAcceptedTurnHistoryUnverifiable = errors.New("accepted turn provider history is unverifiable")
 
 type AcceptedTurnReconciler struct {
-	Flow      *durableflow.Flow
-	Histories map[domain.Provider]sessionsupervisor.AcceptedTurnReconciler
+	Flow          *durableflow.Flow
+	Histories     map[domain.Provider]sessionsupervisor.AcceptedTurnReconciler
+	FinalRestorer AcceptedFinalRestorer
 }
 
 func (reconciler AcceptedTurnReconciler) ReconcileAcceptedTurns(ctx context.Context, sessionID domain.SessionID, binding domain.ProviderBinding) (sessionsupervisor.AcceptedTurnReconciliation, error) {
 	if reconciler.Flow == nil || strings.TrimSpace(string(sessionID)) == "" {
 		return sessionsupervisor.AcceptedTurnReconciliation{}, errAcceptedTurnHistoryUnverifiable
 	}
-	resolver := &acceptedInputHistoryResolver{history: reconciler.Histories[binding.Provider], sessionID: sessionID, binding: binding}
+	resolver := &acceptedInputHistoryResolver{history: reconciler.Histories[binding.Provider], sessionID: sessionID, binding: binding, finals: reconciler.FinalRestorer}
 	results, err := reconciler.Flow.ReconcileAcceptedInputs(ctx, string(sessionID), resolver)
 	receipt := sessionsupervisor.AcceptedTurnReconciliation{Turns: make([]sessionsupervisor.ReconciledAcceptedTurn, 0, len(results))}
 	for _, result := range results {
@@ -371,7 +323,7 @@ func (reconciler AcceptedTurnReconciler) ReconcileAcceptedTurns(ctx context.Cont
 		switch result.Resolution {
 		case durableflow.AcceptedCompleted:
 			outcome = sessionsupervisor.AcceptedTurnCompleted
-		case durableflow.AcceptedFailed:
+		case durableflow.AcceptedFailed, durableflow.AcceptedTerminalFailed:
 			outcome = sessionsupervisor.AcceptedTurnFailed
 		case durableflow.AcceptedUnknown:
 		default:
@@ -389,6 +341,7 @@ type acceptedInputHistoryResolver struct {
 	loaded    bool
 	outcomes  map[string]sessionsupervisor.AcceptedTurnOutcome
 	err       error
+	finals    AcceptedFinalRestorer
 }
 
 func (resolver *acceptedInputHistoryResolver) ResolveAccepted(ctx context.Context, input durableflow.AcceptedInput) (durableflow.AcceptedResolutionResult, error) {
@@ -404,11 +357,20 @@ func (resolver *acceptedInputHistoryResolver) ResolveAccepted(ctx context.Contex
 	if !found {
 		return result, fmt.Errorf("%w: message %q is absent", errAcceptedTurnHistoryUnverifiable, input.MessageID)
 	}
+	if input.PreviouslyFailed && outcome != sessionsupervisor.AcceptedTurnFailed {
+		result.Resolution = durableflow.AcceptedFailed
+		return result, nil
+	}
 	switch outcome {
 	case sessionsupervisor.AcceptedTurnCompleted:
+		if err := resolver.restoreFinal(ctx, input.MessageID, input.PreviouslyUnknown); err != nil {
+			return result, err
+		}
 		result.Resolution = durableflow.AcceptedCompleted
 	case sessionsupervisor.AcceptedTurnFailed:
-		result.Resolution = durableflow.AcceptedFailed
+		resolution, err := resolver.resolveFailure(ctx, input.MessageID, input.PreviouslyUnknown)
+		result.Resolution = resolution
+		return result, err
 	case sessionsupervisor.AcceptedTurnUnknown:
 	default:
 		return result, errAcceptedTurnHistoryUnverifiable
@@ -432,11 +394,7 @@ func (resolver *acceptedInputHistoryResolver) load(ctx context.Context) {
 	}
 	resolver.outcomes = make(map[string]sessionsupervisor.AcceptedTurnOutcome, len(receipt.Turns))
 	for _, turn := range receipt.Turns {
-		if strings.TrimSpace(turn.MessageID) == "" || strings.TrimSpace(turn.MessageID) != turn.MessageID {
-			resolver.err = errAcceptedTurnHistoryUnverifiable
-			return
-		}
-		if _, duplicate := resolver.outcomes[turn.MessageID]; duplicate {
+		if strings.TrimSpace(turn.MessageID) == "" || strings.TrimSpace(turn.MessageID) != turn.MessageID || resolver.outcomes[turn.MessageID] != "" {
 			resolver.err = errAcceptedTurnHistoryUnverifiable
 			return
 		}

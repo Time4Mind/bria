@@ -1,6 +1,7 @@
 package telegrampipeline
 
 import (
+	"bria/internal/callbackdiagnostic"
 	"bria/internal/coordinator"
 	"bria/internal/domain"
 	"bria/internal/telegrambridge"
@@ -173,22 +174,25 @@ func acceptCallback(
 	registry CallbackRegistry,
 	decoder CallbackDecoder,
 	allowExactRecovery bool,
-) (AcceptedCallback, error) {
+) (accepted AcceptedCallback, err error) {
+	var details callbackdiagnostic.Details
+	defer func() { err = callbackdiagnostic.Annotate(err, details) }()
 	if decoder == nil {
-		return AcceptedCallback{}, errors.New("callback decoder is required")
+		return AcceptedCallback{}, callbackdiagnostic.Wrap(errors.New("callback decoder is required"), "operation_failed")
 	}
 	if registry == nil {
-		return AcceptedCallback{}, errors.New("callback registry is required")
+		return AcceptedCallback{}, callbackdiagnostic.Wrap(errors.New("callback registry is required"), "registry_failed")
 	}
 	if update.ID <= 0 || update.Text == "" {
-		return AcceptedCallback{}, errors.New("callback update identity and data are required")
+		return AcceptedCallback{}, callbackdiagnostic.Wrap(errors.New("callback update identity and data are required"), "callback_origin_invalid")
 	}
 	decoded, err := decoder.DecodeCallbackWithMetadata(update.Text)
 	if err != nil {
 		return AcceptedCallback{}, err
 	}
+	details = callbackdiagnostic.Details{Action: string(decoded.Callback.Action), SessionID: decoded.Callback.SessionID, TokenID: decoded.TokenID, Target: max(decoded.Callback.Target.Page, decoded.Callback.Target.Choice, decoded.Callback.Target.InteractionChoice)}
 	if err := validateCallbackOrigin(update, ownerUserID, ownerPrivateChatID); err != nil {
-		return AcceptedCallback{}, err
+		return AcceptedCallback{}, callbackdiagnostic.Wrap(err, "callback_origin_invalid")
 	}
 	claim := CallbackClaim{
 		SessionID:       domain.SessionID(decoded.Callback.SessionID),
@@ -199,21 +203,22 @@ func acceptCallback(
 		CallbackQueryID: update.CallbackQueryID,
 	}
 	claimResult, err := registry.Claim(ctx, claim)
+	details.PresentationID, details.Retired = string(claimResult.PresentationSessionID), claimResult.Retired
 	if err != nil {
-		return AcceptedCallback{}, fmt.Errorf("claim Telegram callback: %w", err)
+		return AcceptedCallback{}, callbackdiagnostic.Wrap(fmt.Errorf("claim Telegram callback: %w", err), "registry_failed")
 	}
 	switch claimResult.Outcome {
 	case ClaimAccepted:
 	case ClaimRecovered:
 		if !allowExactRecovery {
-			return AcceptedCallback{}, ErrReplayedCallback
+			return AcceptedCallback{}, callbackdiagnostic.Wrap(ErrReplayedCallback, "presentation_replayed")
 		}
 	case ClaimStale:
-		return AcceptedCallback{}, ErrStaleCallback
+		return AcceptedCallback{}, callbackdiagnostic.Wrap(ErrStaleCallback, "presentation_missing")
 	case ClaimReplayed:
-		return AcceptedCallback{}, ErrReplayedCallback
+		return AcceptedCallback{}, callbackdiagnostic.Wrap(ErrReplayedCallback, "presentation_replayed")
 	default:
-		return AcceptedCallback{}, errors.New("callback registry returned an unknown claim outcome")
+		return AcceptedCallback{}, callbackdiagnostic.Wrap(errors.New("callback registry returned an unknown claim outcome"), "registry_failed")
 	}
 	ownerIsGlobal := claimResult.PresentationSessionID == domain.SessionID(telegramui.GlobalSurfaceID)
 	if ownerIsGlobal {
@@ -236,7 +241,7 @@ func acceptCallback(
 		validSessionTarget := (decoded.Callback.Action == telegramui.ActionSelectSession || decoded.Callback.Action == telegramui.ActionResume || telegramui.IsSessionSurfaceAction(decoded.Callback.Action)) &&
 			decoded.Callback.SessionID != telegramui.GlobalSurfaceID && !outboundBound && !recoveryBound && !statusRecoveryBound
 		if !validGlobal && !validSessionTarget {
-			return AcceptedCallback{}, ErrStaleCallback
+			return AcceptedCallback{}, callbackdiagnostic.Wrap(ErrStaleCallback, "callback_binding_mismatch")
 		}
 		return AcceptedCallback{
 			UpdateID: update.ID, SessionID: domain.SessionID(decoded.Callback.SessionID),
@@ -251,19 +256,19 @@ func acceptCallback(
 		binding := claimResult.ArtifactRetry
 		if !telegramui.IsArtifactRetryAction(decoded.Callback.Action) || decoded.Callback.SessionID != binding.PresentationID ||
 			claimResult.PresentationSessionID != domain.SessionID(binding.PresentationID) || !validArtifactRetryBinding(binding) {
-			return AcceptedCallback{}, ErrStaleCallback
+			return AcceptedCallback{}, callbackdiagnostic.Wrap(ErrStaleCallback, "callback_binding_mismatch")
 		}
 		return AcceptedCallback{UpdateID: update.ID, SessionID: domain.SessionID(binding.SessionID), Carrier: claim.Carrier,
 			Action: decoded.Callback.Action, Target: decoded.Callback.Target, ArtifactRetry: cloneArtifactRetryBinding(binding)}, nil
 	}
 	if telegramui.IsArtifactRetryAction(decoded.Callback.Action) {
-		return AcceptedCallback{}, ErrStaleCallback
+		return AcceptedCallback{}, callbackdiagnostic.Wrap(ErrStaleCallback, "callback_binding_mismatch")
 	}
 	if claimResult.AcceptedTurnRecovery != nil {
 		binding := claimResult.AcceptedTurnRecovery
 		if !telegramui.IsAcceptedTurnRecoveryAction(decoded.Callback.Action) ||
 			domain.SessionID(decoded.Callback.SessionID) != binding.SessionID || binding.SessionID != claimResult.PresentationSessionID {
-			return AcceptedCallback{}, ErrStaleCallback
+			return AcceptedCallback{}, callbackdiagnostic.Wrap(ErrStaleCallback, "callback_binding_mismatch")
 		}
 		return AcceptedCallback{
 			UpdateID: update.ID, SessionID: binding.SessionID, Carrier: claim.Carrier,
@@ -272,12 +277,12 @@ func acceptCallback(
 		}, nil
 	}
 	if telegramui.IsAcceptedTurnRecoveryAction(decoded.Callback.Action) {
-		return AcceptedCallback{}, ErrStaleCallback
+		return AcceptedCallback{}, callbackdiagnostic.Wrap(ErrStaleCallback, "callback_binding_mismatch")
 	}
 	if claimResult.InteractionRequestID != "" {
 		if !telegramui.IsInteractionAction(decoded.Callback.Action) ||
 			domain.SessionID(decoded.Callback.SessionID) != claimResult.PresentationSessionID {
-			return AcceptedCallback{}, ErrStaleCallback
+			return AcceptedCallback{}, callbackdiagnostic.Wrap(ErrStaleCallback, "callback_binding_mismatch")
 		}
 		return AcceptedCallback{
 			UpdateID: update.ID, SessionID: domain.SessionID(decoded.Callback.SessionID),
@@ -286,18 +291,24 @@ func acceptCallback(
 		}, nil
 	}
 	if telegramui.IsInteractionAction(decoded.Callback.Action) {
-		return AcceptedCallback{}, ErrStaleCallback
+		return AcceptedCallback{}, callbackdiagnostic.Wrap(ErrStaleCallback, "callback_binding_mismatch")
 	}
 	if cards == nil {
-		return AcceptedCallback{}, errors.New("callback card store is required")
+		return AcceptedCallback{}, callbackdiagnostic.Wrap(errors.New("callback card store is required"), "card_load_failed")
 	}
 	card, ok, err := cards.Load(ctx, claimResult.PresentationSessionID)
 	if err != nil {
-		return AcceptedCallback{}, fmt.Errorf("load callback card: %w", err)
+		return AcceptedCallback{}, callbackdiagnostic.Wrap(fmt.Errorf("load callback card: %w", err), "card_load_failed")
 	}
-	if !ok || card.SessionID != claimResult.PresentationSessionID ||
-		card.Carrier.ChatID != ownerPrivateChatID || (!claimResult.Retired && card.Carrier.MessageID != update.SourceMessageID) {
-		return AcceptedCallback{}, ErrStaleCallback
+	if !ok {
+		return AcceptedCallback{}, callbackdiagnostic.Wrap(ErrStaleCallback, "card_missing")
+	}
+	details.CardChatID, details.CardMessageID = card.Carrier.ChatID, card.Carrier.MessageID
+	if card.SessionID != claimResult.PresentationSessionID {
+		return AcceptedCallback{}, callbackdiagnostic.Wrap(ErrStaleCallback, "callback_binding_mismatch")
+	}
+	if card.Carrier.ChatID != ownerPrivateChatID || (!claimResult.Retired && card.Carrier.MessageID != update.SourceMessageID) {
+		return AcceptedCallback{}, callbackdiagnostic.Wrap(ErrStaleCallback, "card_carrier_mismatch")
 	}
 	return AcceptedCallback{
 		UpdateID:             update.ID,
@@ -528,7 +539,7 @@ func PlanAcceptedCallback(callback AcceptedCallback) (CallbackPlan, error) {
 	case telegramui.ActionSettingsDetail:
 		effect = EffectToggleSettingsDetail
 	case telegramui.ActionSettingsPageLimit, telegramui.ActionSettingsScreenCaptureLimit, telegramui.ActionSettingsAutoApproveCommands, telegramui.ActionSettingsContinueExisting,
-		telegramui.ActionSettingsTechnicalActions, telegramui.ActionSettingsBackgroundQuestions,
+		telegramui.ActionSettingsTechnicalActions, telegramui.ActionSettingsTechnicalOutputLines, telegramui.ActionSettingsBackgroundQuestions,
 		telegramui.ActionSettingsBackgroundErrors, telegramui.ActionSettingsArchiveRecommendations,
 		telegramui.ActionSettingsDefaultProvider, telegramui.ActionSettingsDefaultWorkdir, telegramui.ActionSettingsClearCreationDefaults,
 		telegramui.ActionSettingsLifetimeNever,

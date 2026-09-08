@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -16,6 +17,7 @@ import (
 
 	"bria/internal/archiveimport"
 	"bria/internal/domain"
+	"bria/internal/statejson"
 	"bria/internal/telegramhistory"
 	"bria/internal/telegramstate"
 )
@@ -588,12 +590,25 @@ func (store *SessionStore) SetSelectedNode(ctx context.Context, nodeID domain.Co
 
 // SetNodeActiveSession selects nodeID and persists its last active session.
 func (store *SessionStore) SetNodeActiveSession(ctx context.Context, nodeID domain.ComputerID, sessionID domain.SessionID) error {
+	return store.setNodeActiveSession(ctx, nodeID, sessionID, true)
+}
+
+// SetNodeLastActiveSession updates one node without navigating the foreground.
+func (store *SessionStore) SetNodeLastActiveSession(ctx context.Context, nodeID domain.ComputerID, sessionID domain.SessionID) error {
+	return store.setNodeActiveSession(ctx, nodeID, sessionID, false)
+}
+
+func (store *SessionStore) setNodeActiveSession(ctx context.Context, nodeID domain.ComputerID, sessionID domain.SessionID, navigate bool) error {
 	if strings.TrimSpace(string(nodeID)) == "" || strings.TrimSpace(string(sessionID)) == "" {
 		return errors.New("node and active session ids are required")
 	}
 	return store.UpdateTelegramUI(ctx, func(state *telegramstate.State) error {
-		state.SelectedNode = nodeID
-		state.ActiveSession = sessionID
+		if navigate {
+			state.SelectedNode = nodeID
+		}
+		if state.SelectedNode == nodeID {
+			state.ActiveSession = sessionID
+		}
 		if state.ActiveSessions == nil {
 			state.ActiveSessions = make(map[domain.ComputerID]domain.SessionID)
 		}
@@ -729,7 +744,7 @@ func (store *SessionStore) SetCardPrompt(ctx context.Context, sessionID domain.S
 			return ErrSessionNotFound
 		}
 		session := store.byIntent[intent]
-		if session.Status() == domain.SessionClosing || session.Status() == domain.SessionArchived {
+		if session.Status() == domain.SessionClosing || session.Status() == domain.SessionArchived || session.Status() == domain.SessionAwaitingRecovery && !slices.Contains(state.Cards[sessionID].HistoryKeys, messageID) {
 			return fmt.Errorf("cannot accept request into %s session", session.Status())
 		}
 		card, ok := state.Cards[sessionID]
@@ -737,27 +752,17 @@ func (store *SessionStore) SetCardPrompt(ctx context.Context, sessionID domain.S
 			card = telegramstate.Card{SessionID: sessionID, Page: telegramstate.Page{Current: 1, Total: 1, FollowLatest: true}}
 		}
 		card.EmptyCloseEligible = false
-		if len(card.HistoryKeys) == 0 {
-			card.HistoryKeys = make([]string, len(card.History))
-		}
 		for index, key := range card.HistoryKeys {
 			if key == messageID {
 				card.History[index] = item
 				return state.SetCard(card)
 			}
 		}
-		if len(card.History) >= 512 {
-			card.History = append([]string(nil), card.History[len(card.History)-511:]...)
-			card.HistoryKeys = append([]string(nil), card.HistoryKeys[len(card.HistoryKeys)-511:]...)
-			if len(card.HistoryKinds) != 0 {
-				card.HistoryKinds = append([]string(nil), card.HistoryKinds[len(card.HistoryKinds)-511:]...)
-			}
+		telegramhistory.Append(&card, item, "")
+		if len(card.HistoryKeys) == 0 {
+			card.HistoryKeys = make([]string, len(card.History))
 		}
-		card.History = append(card.History, item)
-		card.HistoryKeys = append(card.HistoryKeys, messageID)
-		if len(card.HistoryKinds) != 0 {
-			card.HistoryKinds = append(card.HistoryKinds, "")
-		}
+		card.HistoryKeys[len(card.HistoryKeys)-1] = messageID
 		return state.SetCard(card)
 	})
 }
@@ -1053,68 +1058,7 @@ func readSessionFile(
 
 func ptrUI(s telegramstate.State) *telegramstate.State { return &s }
 
-func rejectDuplicateJSONKeys(reader io.Reader) error {
-	decoder := json.NewDecoder(reader)
-	var readValue func() error
-	readValue = func() error {
-		token, err := decoder.Token()
-		if err != nil {
-			return err
-		}
-		delimiter, ok := token.(json.Delim)
-		if !ok {
-			return nil
-		}
-		switch delimiter {
-		case '{':
-			seen := make(map[string]struct{})
-			for decoder.More() {
-				keyToken, err := decoder.Token()
-				if err != nil {
-					return err
-				}
-				key, ok := keyToken.(string)
-				if !ok {
-					return errors.New("object key is not a string")
-				}
-				if key != strings.ToLower(key) {
-					return fmt.Errorf("non-canonical object key %q", key)
-				}
-				if _, duplicate := seen[key]; duplicate {
-					return fmt.Errorf("duplicate object key %q", key)
-				}
-				seen[key] = struct{}{}
-				if err := readValue(); err != nil {
-					return err
-				}
-			}
-			closing, err := decoder.Token()
-			if err != nil {
-				return err
-			}
-			if closing != json.Delim('}') {
-				return errors.New("object has invalid closing delimiter")
-			}
-		case '[':
-			for decoder.More() {
-				if err := readValue(); err != nil {
-					return err
-				}
-			}
-			closing, err := decoder.Token()
-			if err != nil {
-				return err
-			}
-			if closing != json.Delim(']') {
-				return errors.New("array has invalid closing delimiter")
-			}
-		default:
-			return fmt.Errorf("unexpected delimiter %q", delimiter)
-		}
-		return nil
-	}
-	return readValue()
-}
+func rejectDuplicateJSONKeys(reader io.Reader) error { return statejson.ValidateKeys(reader) }
 
 func writeSessionFile(
 	path string,

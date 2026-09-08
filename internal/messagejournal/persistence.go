@@ -332,7 +332,7 @@ func validateSession(session sessionRecord, limits Limits) error {
 			if err := validateLease(input.Lease, limits); err != nil {
 				return err
 			}
-		case InputAccepted, InputCompleted, InputFailed, InputUnknown:
+		case InputAccepted, InputCompleted, InputFailed, InputUnknown, InputTerminalFailed:
 			if input.Lease != (leaseRecord{}) {
 				return errors.New("terminal or accepted input retains a lease")
 			}

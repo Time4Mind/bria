@@ -304,7 +304,7 @@ func validateJournalRecords(id domain.SessionID, inputs []messagejournal.Input, 
 
 func validInputPhase(phase messagejournal.InputPhase) bool {
 	switch phase {
-	case messagejournal.InputPending, messagejournal.InputAccepted, messagejournal.InputCompleted, messagejournal.InputFailed, messagejournal.InputUnknown:
+	case messagejournal.InputPending, messagejournal.InputAccepted, messagejournal.InputCompleted, messagejournal.InputTerminalFailed, messagejournal.InputFailed, messagejournal.InputUnknown:
 		return true
 	default:
 		return false

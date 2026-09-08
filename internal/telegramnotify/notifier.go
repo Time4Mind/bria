@@ -6,14 +6,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
-	"unicode/utf8"
 
 	"bria/internal/domain"
+	"bria/internal/notificationplan"
 	"bria/internal/telegram"
 	"bria/internal/telegramcontroller"
-	"bria/internal/telegramformat"
-	"bria/internal/telegramui"
 )
 
 const telegramTextLimit = 4096
@@ -61,45 +58,33 @@ func (notifier *Notifier) Notify(
 	ctx context.Context,
 	notification telegramcontroller.Notification,
 ) error {
-	if notification.ConversationID <= 0 {
-		return errors.New("Telegram notification conversation id must be positive")
+	if notifier == nil || notifier.client == nil {
+		return errors.New("Telegram notifier is required")
 	}
-	shortID, err := logicalSessionShortID(notification.SessionID)
+	if _, durable := notifier.partReceipts.(pagePlanStore); durable && notification.OperationID != "" {
+		_, err := notifier.Deliver(ctx, notification, notification.OperationID)
+		return err
+	}
+	prefix, err := notificationPrefix(notification)
 	if err != nil {
 		return err
 	}
-	kind, err := notificationKind(notification.Kind)
-	if err != nil {
-		return err
-	}
-	if !utf8.ValidString(notification.Text) || strings.TrimSpace(notification.Text) == "" {
-		return errors.New("Telegram notification text must be non-empty valid UTF-8")
-	}
-
-	prefix := "Сессия " + shortID + " - " + kind + "\n"
-	limits := telegramui.PageLimits{
-		MaxRunes: telegramTextLimit - utf8.RuneCountInString(prefix),
-		MaxBytes: telegramTextLimit - len(prefix),
-	}
-	pagination, err := telegramui.PaginateContent([]telegramui.ContentBlock{{
-		Anchor:  "notification",
-		Content: notification.Text,
-	}}, limits)
+	pages, err := notificationplan.Rich(prefix, notification.Text, telegramTextLimit)
 	if err != nil {
 		return errors.New("Telegram notification could not be paginated")
 	}
-	for index, page := range pagination.Pages {
-		text, entities := telegramformat.Markdown(prefix + page.Content)
-		message, sendErr := notifier.client.SendMessage(ctx, telegram.SendMessageRequest{
-			ChatID:   telegram.ChatID(notification.ConversationID),
-			Text:     text,
-			Entities: entities,
+	for index, page := range pages {
+		message, sendErr := notifier.client.SendRichMessage(ctx, telegram.SendRichMessageRequest{
+			ChatID: telegram.ChatID(notification.ConversationID),
+			RichMessage: telegram.InputRichMessage{
+				Markdown: page,
+			},
 		})
 		if sendErr != nil {
 			return fmt.Errorf(
 				"send Telegram notification page %d of %d: %w",
 				index+1,
-				len(pagination.Pages),
+				len(pages),
 				sendErr,
 			)
 		}
@@ -107,7 +92,7 @@ func (notifier *Notifier) Notify(
 			return fmt.Errorf(
 				"send Telegram notification page %d of %d returned no positive receipt",
 				index+1,
-				len(pagination.Pages),
+				len(pages),
 			)
 		}
 		if notifier.receiptRecorder != nil {
@@ -118,7 +103,7 @@ func (notifier *Notifier) Notify(
 				return fmt.Errorf(
 					"record Telegram notification page %d of %d receipt: %w",
 					index+1,
-					len(pagination.Pages),
+					len(pages),
 					recordErr,
 				)
 			}

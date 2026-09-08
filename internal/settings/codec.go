@@ -22,6 +22,7 @@ type settingsDocument struct {
 	CardDetail                CardDetail        `json:"card_detail"`
 	CardPageLimit             int               `json:"card_page_limit,omitempty"`
 	ShowTechnicalActions      bool              `json:"show_technical_actions"`
+	TechnicalOutputLines      int               `json:"technical_output_lines"`
 	NotifyBackgroundQuestions bool              `json:"notify_background_questions"`
 	NotifyBackgroundErrors    bool              `json:"notify_background_errors"`
 	SessionLifetime           SessionLifetime   `json:"session_lifetime"`
@@ -95,6 +96,12 @@ func Decode(reader io.Reader) (Snapshot, error) {
 	if _, ok := seen["auto_approve_commands"]; !ok {
 		decoded.AutoApproveCommands = true
 	}
+	// Additive v5 preference: old documents retain the default. A pre-feature
+	// strict codec cannot read documents written with this field; binary-only
+	// rollback therefore requires a separately prepared compatible document.
+	if _, ok := seen["technical_output_lines"]; !ok {
+		decoded.TechnicalOutputLines = DefaultTechnicalOutputLines
+	}
 	snapshot := decoded.snapshot()
 	if snapshot.Settings.ScreenCaptureLimitKiB == 0 {
 		snapshot.Settings.ScreenCaptureLimitKiB = DefaultScreenCaptureLimitKiB
@@ -111,6 +118,7 @@ func documentFromSnapshot(snapshot Snapshot) settingsDocument {
 		Version: s.Version, Revision: snapshot.Revision,
 		ContinueExisting: s.ContinueExisting, ScreenEnabled: s.ScreenEnabled, ScreenCaptureLimitKiB: s.ScreenCaptureLimitKiB,
 		CardDetail: s.CardDetail, CardPageLimit: s.CardPageLimit, ShowTechnicalActions: s.ShowTechnicalActions,
+		TechnicalOutputLines:      s.TechnicalOutputLines,
 		NotifyBackgroundQuestions: s.NotifyBackgroundQuestions,
 		NotifyBackgroundErrors:    s.NotifyBackgroundErrors,
 		SessionLifetime:           s.SessionLifetime, QueueLimit: s.QueueLimit,
@@ -136,6 +144,7 @@ func (document settingsDocument) snapshot() Snapshot {
 		CardDetail:                document.CardDetail,
 		CardPageLimit:             document.CardPageLimit,
 		ShowTechnicalActions:      document.ShowTechnicalActions,
+		TechnicalOutputLines:      document.TechnicalOutputLines,
 		NotifyBackgroundQuestions: document.NotifyBackgroundQuestions,
 		NotifyBackgroundErrors:    document.NotifyBackgroundErrors,
 		SessionLifetime:           document.SessionLifetime,

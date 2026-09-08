@@ -61,6 +61,9 @@ func (c *Controller) nativeCommand(ctx context.Context, id domain.SessionID, com
 	if id == "" {
 		return "Нет активной сессии для команды CLI."
 	}
+	if current, err := c.sessions.Load(ctx, id); err != nil || current.Status() == domain.SessionAwaitingRecovery {
+		return "Сессия ожидает восстановления. Ввод в CLI не отправлен; история доступна в карточке."
+	}
 	if c.native == nil {
 		return "Терминал CLI недоступен. Команда не отправлена модели."
 	}
@@ -116,6 +119,9 @@ func nativeSurface(id domain.SessionID, snapshot sessionruntime.NativeSnapshot) 
 // Projection observes the displayed overlay without reopening one behind a
 // menu. Explicit user navigation alone may restore an interactive screen.
 func (c *Controller) currentNativeSurface(id domain.SessionID) (SemanticActionResult, bool) {
+	if current, err := c.sessions.Load(c.rootContext, id); err != nil || current.Status() == domain.SessionAwaitingRecovery {
+		return SemanticActionResult{}, false
+	}
 	c.mu.Lock()
 	snapshot, ok := c.nativeSnapshots[id]
 	shown := c.nativeOverlay == id
@@ -127,6 +133,9 @@ func (c *Controller) currentNativeSurface(id domain.SessionID) (SemanticActionRe
 }
 
 func (c *Controller) restoreNativeSurface(id domain.SessionID) (SemanticActionResult, bool) {
+	if current, err := c.sessions.Load(c.rootContext, id); err != nil || current.Status() == domain.SessionAwaitingRecovery {
+		return SemanticActionResult{}, false
+	}
 	c.mu.Lock()
 	snapshot, ok := c.nativeSnapshots[id]
 	// Selecting the displayed native card's "К сессии" is Back, not a
@@ -146,6 +155,9 @@ func (c *Controller) restoreNativeSurface(id domain.SessionID) (SemanticActionRe
 }
 
 func (c *Controller) nativeKey(ctx context.Context, action SemanticAction) (SemanticActionResult, error) {
+	if current, err := c.sessions.Load(ctx, action.SessionID); err != nil || current.Status() == domain.SessionAwaitingRecovery {
+		return c.modelNotice(action.SessionID, "Сессия ожидает восстановления. Терминальный ввод не отправлен."), nil
+	}
 	c.mu.Lock()
 	id := c.active
 	snapshot, ok := c.nativeSnapshots[action.SessionID]

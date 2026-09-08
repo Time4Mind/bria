@@ -10,7 +10,6 @@ import (
 	"sync"
 	"testing"
 
-	"bria/internal/telegram"
 	"bria/internal/telegramcontroller"
 	"bria/internal/telegramnotify"
 )
@@ -50,9 +49,8 @@ func TestDeliverSkipsConfirmedPartsAndReturnsCompleteConfirmationSet(t *testing.
 	}}
 	var sent []string
 	client := mustNotifyClient(t, func(request *http.Request) (*http.Response, error) {
-		var body telegram.SendMessageRequest
-		decodeNotifyRequest(t, request, &body)
-		sent = append(sent, body.Text)
+		body := decodeRichNotifyRequest(t, request)
+		sent = append(sent, body.RichMessage.Markdown)
 		messageID := 701 + len(sent)
 		return notifyResponse(http.StatusOK, `{"ok":true,"result":{"message_id":`+strconv.Itoa(messageID)+`,"from":{"id":600,"is_bot":true},"chat":{"id":42,"type":"private"}}}`), nil
 	})
@@ -72,6 +70,12 @@ func TestDeliverSkipsConfirmedPartsAndReturnsCompleteConfirmationSet(t *testing.
 	}
 	if len(sent) != 2 {
 		t.Fatalf("send calls = %d, want only two unconfirmed pages", len(sent))
+	}
+	const prefix = "Сессия 11111111 - итог\n"
+	const pageBytes = 4096 - len(prefix)
+	wantSent := []string{prefix + strings.Repeat("a", pageBytes), prefix + strings.Repeat("a", 9000-2*pageBytes)}
+	if !reflect.DeepEqual(sent, wantSent) {
+		t.Fatal("unconfirmed page content/prefix changed")
 	}
 	wantIDs := []string{
 		operationID + ":part:1-of-3",
@@ -93,7 +97,8 @@ func TestDeliverMarksAmbiguousPartAndNeverRetriesItInCall(t *testing.T) {
 	const operationID = "turn:84:final"
 	store := &partReceiptStore{confirmed: make(map[string][]telegramnotify.PartReceipt)}
 	calls := 0
-	client := mustNotifyClient(t, func(*http.Request) (*http.Response, error) {
+	client := mustNotifyClient(t, func(request *http.Request) (*http.Response, error) {
+		decodeRichNotifyRequest(t, request)
 		calls++
 		if calls == 2 {
 			return nil, errors.New("connection closed after write")

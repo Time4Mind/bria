@@ -27,6 +27,25 @@ func TestBundleValidatesCompleteCredentialFreeCoordinatorState(t *testing.T) {
 	}
 }
 
+func TestBundlePreservesProvenTerminalFailureWithoutConvertingLegacyFailure(t *testing.T) {
+	for _, phase := range []messagejournal.InputPhase{"terminal_failed", messagejournal.InputFailed, messagejournal.InputUnknown} {
+		bundle := validBundle()
+		bundle.Inputs[0].Phase = phase
+		digest, err := bundle.Digest()
+		if err != nil || len(digest) != 64 {
+			t.Fatalf("phase %s rejected by coordinator state transfer: %v", phase, err)
+		}
+		if bundle.Inputs[0].Phase != phase {
+			t.Fatalf("phase %s was silently converted", phase)
+		}
+	}
+	bundle := validBundle()
+	bundle.Inputs[0].Phase = "unproven_terminal_failure"
+	if err := bundle.Validate(); err == nil {
+		t.Fatal("unknown phase accepted")
+	}
+}
+
 func TestBundleRejectsLossyOrUnboundState(t *testing.T) {
 	for name, mutate := range map[string]func(*coordinatorbundle.Bundle){
 		"missing session": func(bundle *coordinatorbundle.Bundle) { bundle.Sessions = nil },

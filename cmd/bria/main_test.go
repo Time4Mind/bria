@@ -411,15 +411,16 @@ func TestRunStartsControlPlaneWithNoEnabledProviders(t *testing.T) {
 	configPath, _ := writeStatusConfig(t, temporary, "123:no-provider-secret")
 	disableAllProviders(t, configPath)
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	calls := 0
 	dependencies := testCommandDependencies(t, &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		defer cancelFlowOnFailure(t, cancel)
 		calls++
 		switch calls {
 		case 1:
 			if request.URL.Path != "/bot123:no-provider-secret/getMe" {
-				t.Fatalf("request 1 path = %q, want getMe", request.URL.Path)
+				return nil, flowFixtureError(t, "request 1 path = %q, want getMe", request.URL.Path)
 			}
 			return telegramResponse(`{"ok":true,"result":{"id":600,"is_bot":true,"first_name":"Bria","username":"my_bria_bot"}}`), nil
 		case 2:
@@ -427,14 +428,17 @@ func TestRunStartsControlPlaneWithNoEnabledProviders(t *testing.T) {
 		case 3:
 			return telegramResponse(`{"ok":true,"result":[{"update_id":11,"message":{"message_id":12,"from":{"id":42,"is_bot":false,"first_name":"A"},"chat":{"id":42,"type":"private"},"text":"/status"}}]}`), nil
 		case 4:
-			if request.URL.Path != "/bot123:no-provider-secret/sendMessage" {
-				t.Fatalf("request 4 path = %q, want sendMessage", request.URL.Path)
+			if request.URL.Path != "/bot123:no-provider-secret/sendRichMessage" {
+				return nil, flowFixtureError(t, "request 4 path = %q, want sendRichMessage", request.URL.Path)
+			}
+			payload := decodeRichFlowBody(t, requestBody(t, request))
+			if payload.RichMessage.Markdown != "Bria готова. Нет активной сессии. Выберите «Новая» в меню." {
+				return nil, flowFixtureError(t, "status Markdown = %q", payload.RichMessage.Markdown)
 			}
 			cancel()
 			return telegramResponse(`{"ok":true,"result":{"message_id":13,"from":{"id":600,"is_bot":true},"chat":{"id":42,"type":"private"},"text":"No active session"}}`), nil
 		default:
-			t.Fatalf("unexpected request %d to %s", calls, request.URL.Redacted())
-			return nil, nil
+			return nil, flowFixtureError(t, "unexpected request %d to %s", calls, request.URL.Redacted())
 		}
 	})})
 	briaPath, err := dependencies.executable()
@@ -630,16 +634,20 @@ func TestRunAppliesEffectiveQueueLimitToController(t *testing.T) {
 	}
 
 	runtime := &blockingProviderRuntime{entered: make(chan struct{}, 1)}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	polls := 0
 	dependencies := testCommandDependencies(t, &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		defer cancelFlowOnFailure(t, cancel)
 		switch request.URL.Path {
 		case "/bot123:queue-secret/getMe":
 			return telegramResponse(`{"ok":true,"result":{"id":600,"is_bot":true,"first_name":"Bria","username":"my_bria_bot"}}`), nil
-		case "/bot123:queue-secret/sendMessage", "/bot123:queue-secret/editMessageText":
-			body := requestBody(t, request)
-			if strings.Contains(body, "🙅‍♂") {
+		case "/bot123:queue-secret/sendRichMessage", "/bot123:queue-secret/editMessageText":
+			payload := decodeRichFlowBody(t, requestBody(t, request))
+			if request.URL.Path == "/bot123:queue-secret/editMessageText" && payload.MessageID != 40 {
+				return nil, flowFixtureError(t, "queue card carrier = %d, want 40", payload.MessageID)
+			}
+			if strings.Contains(payload.RichMessage.Markdown, "🙅‍♂") {
 				cancel()
 			}
 			return telegramResponse(`{"ok":true,"result":{"message_id":40,"from":{"id":600,"is_bot":true},"chat":{"id":42,"type":"private"},"text":"card"}}`), nil
@@ -656,7 +664,7 @@ func TestRunAppliesEffectiveQueueLimitToController(t *testing.T) {
 				select {
 				case <-runtime.entered:
 				case <-time.After(time.Second):
-					t.Fatal("configured runtime did not start the first turn")
+					return nil, flowFixtureError(t, "configured runtime did not start the first turn")
 				}
 				return telegramResponse(`{"ok":true,"result":[{"update_id":33,"message":{"message_id":36,"from":{"id":42,"is_bot":false,"first_name":"A"},"chat":{"id":42,"type":"private"},"text":"second"}}]}`), nil
 			case 5:
@@ -671,8 +679,7 @@ func TestRunAppliesEffectiveQueueLimitToController(t *testing.T) {
 				}
 			}
 		default:
-			t.Fatalf("unexpected request to %s", request.URL.Redacted())
-			return nil, nil
+			return nil, flowFixtureError(t, "unexpected request to %s", request.URL.Redacted())
 		}
 	})})
 	dependencies.composeRuntime = func(config.Config, []string, string, sessionruntime.Options) (providerRuntime, error) {
@@ -761,7 +768,7 @@ func TestRunStatusFlowQuarantinesBacklogPersistsReceiptAndDoesNotReplay(t *testi
 
 	originalTransport := http.DefaultTransport
 	defer func() { http.DefaultTransport = originalTransport }()
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	transport := &statusFlowTransport{t: t, statePath: statePath, cancel: cancel}
 	http.DefaultTransport = transport
@@ -804,7 +811,7 @@ func TestRunStatusFlowQuarantinesBacklogPersistsReceiptAndDoesNotReplay(t *testi
 	}
 
 	transport.restart = true
-	restartContext, cancelRestart := context.WithCancel(context.Background())
+	restartContext, cancelRestart := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancelRestart()
 	transport.cancel = cancelRestart
 	stdout.Reset()
@@ -813,7 +820,7 @@ func TestRunStatusFlowQuarantinesBacklogPersistsReceiptAndDoesNotReplay(t *testi
 		t.Fatalf("restart exit code = %d, want graceful cancellation", code)
 	}
 	if transport.sendCalls != 2 {
-		t.Fatalf("sendMessage calls after restart = %d, want no replay", transport.sendCalls)
+		t.Fatalf("sendRichMessage calls after restart = %d, want no replay", transport.sendCalls)
 	}
 	if transport.restartCalls != 2 {
 		t.Fatalf("restart HTTP calls = %d, want identity preflight and resumed poll only", transport.restartCalls)
@@ -1145,70 +1152,69 @@ func (function roundTripFunc) RoundTrip(request *http.Request) (*http.Response, 
 
 func (transport *statusFlowTransport) RoundTrip(request *http.Request) (*http.Response, error) {
 	transport.t.Helper()
-	// Fatal assertions run on HTTP worker goroutines; cancel the outer run
-	// before Goexit so a failed expectation cannot hang the entire suite.
+	// Return fixture errors normally so the controller can finish its worker.
+	// Cancel the outer run on failure rather than retrying synthetic requests.
 	defer func() {
 		if transport.t.Failed() {
 			transport.cancel()
 		}
 	}()
 	if request.URL.Scheme != "https" || request.URL.Host != "api.telegram.org" {
-		transport.t.Fatalf("Telegram destination = %s, want official TLS endpoint", request.URL.Redacted())
+		return nil, flowFixtureError(transport.t, "Telegram destination = %s, want official TLS endpoint", request.URL.Redacted())
 	}
 	if transport.restart {
 		transport.restartCalls++
 		switch transport.restartCalls {
 		case 1:
 			if request.URL.Path != "/bot123:status-flow-secret/getMe" {
-				transport.t.Fatalf("restart request path = %q, want getMe", request.URL.Path)
+				return nil, flowFixtureError(transport.t, "restart request path = %q, want getMe", request.URL.Path)
 			}
 			return telegramResponse(`{"ok":true,"result":{"id":600,"is_bot":true,"first_name":"Bria","username":"my_bria_bot"}}`), nil
 		case 2:
 			if request.URL.Path != "/bot123:status-flow-secret/getUpdates" {
-				transport.t.Fatalf("restart request path = %q, want getUpdates", request.URL.Path)
+				return nil, flowFixtureError(transport.t, "restart request path = %q, want getUpdates", request.URL.Path)
 			}
 			transport.cancel()
 			return nil, errors.New("stop resumed test poll")
 		default:
-			transport.t.Fatalf("unexpected restart request %d", transport.restartCalls)
-			return nil, nil
+			return nil, flowFixtureError(transport.t, "unexpected restart request %d", transport.restartCalls)
 		}
 	}
 	transport.calls++
 	switch transport.calls {
 	case 1:
 		if request.URL.Path != "/bot123:status-flow-secret/getMe" {
-			transport.t.Fatalf("first request path = %q, want getMe identity preflight", request.URL.Path)
+			return nil, flowFixtureError(transport.t, "first request path = %q, want getMe identity preflight", request.URL.Path)
 		}
 		if _, err := os.Stat(transport.statePath); !os.IsNotExist(err) {
-			transport.t.Fatalf("state exists before identity preflight: %v", err)
+			return nil, flowFixtureError(transport.t, "state exists before identity preflight: %v", err)
 		}
 		lockPath := filepath.Join(filepath.Dir(transport.statePath), "."+filepath.Base(transport.statePath)+".lock")
 		if info, err := os.Stat(lockPath); err != nil || !info.Mode().IsRegular() {
-			transport.t.Fatalf("instance lock missing before identity preflight: %v", err)
+			return nil, flowFixtureError(transport.t, "instance lock missing before identity preflight: %v", err)
 		}
 		return telegramResponse(`{"ok":true,"result":{"id":600,"is_bot":true,"first_name":"Bria","username":"my_bria_bot"}}`), nil
 	case 2:
 		if request.URL.Path != "/bot123:status-flow-secret/getUpdates" {
-			transport.t.Fatalf("second request path = %q, want backlog quarantine", request.URL.Path)
+			return nil, flowFixtureError(transport.t, "second request path = %q, want backlog quarantine", request.URL.Path)
 		}
 		if body := requestBody(transport.t, request); !strings.Contains(body, `"offset":-1`) {
-			transport.t.Fatalf("bootstrap body = %q, want offset -1", body)
+			return nil, flowFixtureError(transport.t, "bootstrap body = %q, want offset -1", body)
 		}
 		return telegramResponse(`{"ok":true,"result":[{"update_id":77,"message":{"message_id":1,"from":{"id":42},"chat":{"id":42,"type":"private"},"text":"stale must not run"}}]}`), nil
 	case 3:
 		if request.URL.Path != "/bot123:status-flow-secret/getUpdates" {
-			transport.t.Fatalf("third request path = %q, want live poll after readiness", request.URL.Path)
+			return nil, flowFixtureError(transport.t, "third request path = %q, want live poll after readiness", request.URL.Path)
 		}
 		state, err := os.ReadFile(transport.statePath)
 		if err != nil {
-			transport.t.Fatalf("read persisted bootstrap checkpoint: %v", err)
+			return nil, flowFixtureError(transport.t, "read persisted bootstrap checkpoint: %v", err)
 		}
 		if !strings.Contains(string(state), `"next_update_id": 78`) {
-			transport.t.Fatalf("state before live poll = %s, want persisted bootstrap fence 78", state)
+			return nil, flowFixtureError(transport.t, "state before live poll = %s, want persisted bootstrap fence 78", state)
 		}
 		if body := requestBody(transport.t, request); !strings.Contains(body, `"offset":78`) {
-			transport.t.Fatalf("live poll body = %q, want offset 78", body)
+			return nil, flowFixtureError(transport.t, "live poll body = %q, want offset 78", body)
 		}
 		return telegramResponse(`{"ok":true,"result":[
   {"update_id":78,"message":{"message_id":2,"from":{"id":7},"chat":{"id":7,"type":"private"},"text":"/status"}},
@@ -1217,12 +1223,13 @@ func (transport *statusFlowTransport) RoundTrip(request *http.Request) (*http.Re
 ]}`), nil
 	case 4:
 		transport.sendCalls++
-		if request.URL.Path != "/bot123:status-flow-secret/sendMessage" {
-			transport.t.Fatalf("fourth request path = %q, want sendMessage", request.URL.Path)
+		if request.URL.Path != "/bot123:status-flow-secret/sendRichMessage" {
+			return nil, flowFixtureError(transport.t, "fourth request path = %q, want sendRichMessage", request.URL.Path)
 		}
 		body := requestBody(transport.t, request)
-		if !strings.Contains(body, `"chat_id":42`) || strings.Contains(body, "stale must not run") {
-			transport.t.Fatalf("sendMessage body = %q", body)
+		payload := decodeRichFlowBody(transport.t, body)
+		if payload.RichMessage.Markdown != "Bria готова. Нет активной сессии. Выберите «Новая» в меню." || strings.Contains(body, "stale must not run") {
+			return nil, flowFixtureError(transport.t, "sendRichMessage body = %q", body)
 		}
 		if strings.Contains(body, "menu:") || strings.Contains(body, "ft:") {
 			transport.unsignedKeyboard = true
@@ -1235,23 +1242,23 @@ func (transport *statusFlowTransport) RoundTrip(request *http.Request) (*http.Re
 		return telegramResponse(`{"ok":true,"result":{"message_id":901,"from":{"id":600,"is_bot":true},"chat":{"id":42,"type":"private"},"text":"Bria works"}}`), nil
 	case 5:
 		transport.sendCalls++
-		if request.URL.Path != "/bot123:status-flow-secret/sendMessage" {
-			transport.t.Fatalf("fifth request path = %q, want native-unavailable sendMessage", request.URL.Path)
+		if request.URL.Path != "/bot123:status-flow-secret/sendRichMessage" {
+			return nil, flowFixtureError(transport.t, "fifth request path = %q, want native-unavailable sendRichMessage", request.URL.Path)
 		}
 		body := requestBody(transport.t, request)
-		if !strings.Contains(body, "Нет активной сессии для команды CLI") {
-			transport.t.Fatalf("native command was not explicitly rejected: %s", body)
+		payload := decodeRichFlowBody(transport.t, body)
+		if payload.RichMessage.Markdown != "Нет активной сессии для команды CLI." {
+			return nil, flowFixtureError(transport.t, "native command was not explicitly rejected: %s", body)
 		}
 		return telegramResponse(`{"ok":true,"result":{"message_id":902,"from":{"id":600,"is_bot":true},"chat":{"id":42,"type":"private"},"text":"No active CLI"}}`), nil
 	case 6:
 		if request.URL.Path != "/bot123:status-flow-secret/getUpdates" {
-			transport.t.Fatalf("sixth request path = %q, want getUpdates", request.URL.Path)
+			return nil, flowFixtureError(transport.t, "sixth request path = %q, want getUpdates", request.URL.Path)
 		}
 		transport.cancel()
 		return nil, errors.New("stop initial test poll")
 	default:
-		transport.t.Fatalf("unexpected Telegram request %d: %s", transport.calls, request.URL.Redacted())
-		return nil, nil
+		return nil, flowFixtureError(transport.t, "unexpected Telegram request %d: %s", transport.calls, request.URL.Redacted())
 	}
 }
 
@@ -1382,6 +1389,35 @@ func requestBody(t *testing.T, request *http.Request) string {
 		t.Fatalf("read request body: %v", err)
 	}
 	return string(body)
+}
+
+type richFlowPayload struct {
+	ChatID      telegram.ChatID                `json:"chat_id"`
+	MessageID   telegram.MessageID             `json:"message_id,omitempty"`
+	RichMessage telegram.InputRichMessage      `json:"rich_message"`
+	ReplyMarkup *telegram.InlineKeyboardMarkup `json:"reply_markup,omitempty"`
+}
+
+func decodeRichFlowBody(t *testing.T, body string) richFlowPayload {
+	t.Helper()
+	var payload richFlowPayload
+	decoder := json.NewDecoder(strings.NewReader(body))
+	// Reject plain text, entities and parse_mode, including nested fallback fields.
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&payload); err != nil {
+		t.Errorf("decode Rich request: %v", err)
+		return payload
+	}
+	if payload.ChatID != 42 || strings.TrimSpace(payload.RichMessage.Markdown) == "" || len(payload.RichMessage.Media) != 0 {
+		t.Errorf("Rich request = %#v, want chat 42 non-empty Markdown without media", payload)
+	}
+	return payload
+}
+
+func cancelFlowOnFailure(t *testing.T, cancel context.CancelFunc) {
+	if t.Failed() {
+		cancel()
+	}
 }
 
 func testCommandDependencies(t *testing.T, httpClient telegram.HTTPClient) commandDependencies {
@@ -1516,4 +1552,10 @@ func assertRuntimeFilesAbsent(t *testing.T, statePath string) {
 			t.Fatalf("runtime file %q exists: %v", filepath.Base(path), err)
 		}
 	}
+}
+
+func flowFixtureError(t *testing.T, format string, args ...any) error {
+	t.Helper()
+	t.Errorf(format, args...)
+	return errors.New("Telegram fixture rejected request")
 }

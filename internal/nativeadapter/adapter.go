@@ -49,6 +49,7 @@ type adapter struct {
 	steers      []*activeInput
 	final       string
 	receipts    map[string]string
+	turnIDs     map[string]string
 	observation nativeObservationState
 }
 
@@ -373,8 +374,7 @@ func (a *adapter) consumeEvents(events []nativetranscript.Event) error {
 					}
 					p.accepted = true
 					p.turnID = event.TurnID
-					a.receipts[p.request.MessageID] = "unknown"
-					if err = a.saveReceipts(); err != nil {
+					if err = a.acceptReceipt(p.request.MessageID, event.TurnID); err != nil {
 						return err
 					}
 					if p.request.MessageID != "" {

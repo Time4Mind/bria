@@ -7,7 +7,14 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"bria/internal/tooltext"
 )
+
+func toolTextEquals(raw, want string) bool {
+	text, truncated := tooltext.Read(raw)
+	return text == want && !truncated
+}
 
 const testID = "01900000-0000-7000-8000-000000000001"
 
@@ -179,8 +186,8 @@ func TestClaudePreservesStructuredToolLifecycleWithoutTreatingResultAsPrompt(t *
 		}
 	}
 	if events[3].Text != "Read" || events[3].Metadata == nil || events[3].Metadata.ItemID != "tool-1" ||
-		events[3].Metadata.Arguments != `{"path":"README.md"}` || events[3].Metadata.Status != "in_progress" ||
-		events[4].Metadata == nil || events[4].Metadata.ItemID != "tool-1" || events[4].Metadata.Result != "ok" ||
+		!toolTextEquals(events[3].Metadata.Arguments, `{"path":"README.md"}`) || events[3].Metadata.Status != "in_progress" ||
+		events[4].Metadata == nil || events[4].Metadata.ItemID != "tool-1" || !toolTextEquals(events[4].Metadata.Result, "ok") ||
 		events[4].Metadata.Status != "completed" || events[6].TurnID != "u1" {
 		t.Fatalf("tools/turn=%#v", events)
 	}
@@ -240,8 +247,8 @@ func TestCodexPreservesThinkingAndStructuredToolLifecycle(t *testing.T) {
 	}
 	if len(events) != 5 || events[2].Kind != KindThinking || events[2].Text != "checking files" ||
 		events[3].Kind != KindTool || events[3].Metadata == nil || events[3].Metadata.ItemID != "call-1" ||
-		events[3].Metadata.Name != "read_file" || events[3].Metadata.Arguments != `{"path":"README.md"}` || events[3].Metadata.Status != "in_progress" ||
-		events[4].Metadata == nil || events[4].Metadata.ItemID != "call-1" || events[4].Metadata.Result != "ok" || events[4].Metadata.Status != "completed" {
+		events[3].Metadata.Name != "read_file" || !toolTextEquals(events[3].Metadata.Arguments, `{"path":"README.md"}`) || events[3].Metadata.Status != "in_progress" ||
+		events[4].Metadata == nil || events[4].Metadata.ItemID != "call-1" || !toolTextEquals(events[4].Metadata.Result, "ok") || events[4].Metadata.Status != "completed" {
 		t.Fatalf("events=%#v", events)
 	}
 }

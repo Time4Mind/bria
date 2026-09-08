@@ -6,6 +6,7 @@ import (
 	"context"
 
 	"bria/internal/domain"
+	"bria/internal/settingscapability"
 )
 
 type Snapshot struct {
@@ -15,6 +16,7 @@ type Snapshot struct {
 	CardDetail                string
 	CardPageLimit             int
 	ShowTechnicalActions      bool
+	TechnicalOutputLines      int
 	NotifyBackgroundQuestions bool
 	NotifyBackgroundErrors    bool
 	SessionLifetime           string
@@ -62,20 +64,14 @@ type StandbyPreferences interface {
 	ToggleStandby(context.Context) error
 }
 
-// AutoApprovalPreferences extends settings without changing existing mocks.
-type AutoApprovalPreferences interface {
-	ToggleAutoApproveCommands(context.Context) error
-}
+// Optional capability aliases preserve existing consumers.
+type AutoApprovalPreferences = settingscapability.AutoApprovalPreferences
+type ScreenCapturePreferences = settingscapability.ScreenCapturePreferences
+type TechnicalOutputPreferences = settingscapability.TechnicalOutputPreferences
 
 // NodeRenamer optionally persists the display name of a computer node.
 type NodeRenamer interface {
 	RenameNode(context.Context, domain.ComputerID, string) error
-}
-
-// ScreenCapturePreferences controls the bounded native terminal capture.
-// It is optional so older composition implementations remain compatible.
-type ScreenCapturePreferences interface {
-	CycleScreenCaptureLimit(context.Context) error
 }
 
 type ProviderPreference struct {

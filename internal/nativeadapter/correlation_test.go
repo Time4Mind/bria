@@ -2,6 +2,7 @@ package nativeadapter
 
 import (
 	"bytes"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -15,7 +16,7 @@ func correlationAdapter(t *testing.T) (*adapter, *bytes.Buffer) {
 	input := func(id, text string) *activeInput {
 		return &activeInput{request: runtimeprotocol.ParentMessage{RequestID: id, MessageID: id + "-message"}, text: text, sent: time.Now()}
 	}
-	return &adapter{config: Config{StateDir: t.TempDir()}, id: fixtureSession, output: output, receipts: map[string]string{}, active: input("root", "first"), steers: []*activeInput{input("steer", "second")}}, output
+	return &adapter{config: Config{StateDir: filepath.Join(t.TempDir(), "private")}, id: fixtureSession, output: output, receipts: map[string]string{}, active: input("root", "first"), steers: []*activeInput{input("steer", "second")}}, output
 }
 
 func TestQueuedSteerWaitsForOwnNativeTurnCompletion(t *testing.T) {

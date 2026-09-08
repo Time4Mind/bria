@@ -222,7 +222,7 @@ func TestSessionCardNeverOffersClear(t *testing.T) {
 	}
 }
 
-func TestUnavailableSessionCannotBecomePersistedActive(t *testing.T) {
+func TestRecoverySessionCanBecomePersistedHistorySelection(t *testing.T) {
 	workdir := t.TempDir()
 	ready := readySession(t, "11111111-1111-4111-9111-111111111111", domain.ProviderCodex, workdir, "provider-1", 1)
 	snapshot := ready.Snapshot()
@@ -244,11 +244,11 @@ func TestUnavailableSessionCannotBecomePersistedActive(t *testing.T) {
 	t.Cleanup(func() { _ = controller.Close(context.Background()) })
 
 	decision := mustStatus(t, controller, message(12, "/use "+string(unavailable.ID())))
-	if !strings.Contains(decision.Status.Text, "недоступна") {
-		t.Fatalf("status = %q, want unavailable", decision.Status.Text)
+	if !strings.Contains(decision.Status.Text, "ожидает восстановления") {
+		t.Fatalf("status = %q, want recovery history", decision.Status.Text)
 	}
-	if len(uiState.saved) != 0 {
-		t.Fatalf("persisted active sessions = %v, want none", uiState.saved)
+	if len(uiState.saved) != 1 || uiState.saved[0] != unavailable.ID() {
+		t.Fatalf("persisted active sessions = %v, want selected recovery history", uiState.saved)
 	}
 }
 
@@ -1326,7 +1326,7 @@ func TestProcessDurableInputCommitsExactAcceptanceBeforeEventsAndCompletion(t *t
 		}
 		return nil
 	}})
-	if err != nil || !receipt.Accepted || receipt.Completion != telegramcontroller.DurableInputSucceeded {
+	if err != nil || !receipt.Accepted || (receipt.Completion != telegramcontroller.DurableInputPending && receipt.Completion != telegramcontroller.DurableInputSucceeded) {
 		t.Fatalf("ProcessDurableInput() = (%#v, %v)", receipt, err)
 	}
 	want := []string{"custody-accepted", "provider-after-accepted"}
@@ -1369,7 +1369,7 @@ func TestProcessDurableInputKeepsAcceptedTurnAliveAfterReturningReceipt(t *testi
 	receipt, err := controller.ProcessDurableInput(context.Background(), telegramcontroller.DurableLeasedInput{
 		SessionID: ready.ID(), MessageID: "telegram-update:302", Sequence: 8, Payload: []byte("durable text"),
 	}, telegramcontroller.DurableInputCallbacks{OnAccepted: func(context.Context, telegramcontroller.DurableInputAcceptance) error { return nil }})
-	if err != nil || !receipt.Accepted || receipt.Completion != telegramcontroller.DurableInputSucceeded {
+	if err != nil || !receipt.Accepted || (receipt.Completion != telegramcontroller.DurableInputPending && receipt.Completion != telegramcontroller.DurableInputSucceeded) {
 		t.Fatalf("ProcessDurableInput() = (%#v, %v)", receipt, err)
 	}
 	select {
@@ -1430,7 +1430,7 @@ func TestProcessDurableInputSteersFollowUpIntoCurrentTurnWithoutWaitingForFinal(
 	second, err := controller.ProcessDurableInput(context.Background(), telegramcontroller.DurableLeasedInput{
 		SessionID: ready.ID(), MessageID: "telegram-update:402", Sequence: 2, Payload: []byte("follow-up"),
 	}, telegramcontroller.DurableInputCallbacks{OnAccepted: callback})
-	if err != nil || !second.Accepted || second.Completion != telegramcontroller.DurableInputSucceeded {
+	if err != nil || !second.Accepted || second.Completion != telegramcontroller.DurableInputPending {
 		t.Fatalf("current-turn input = (%#v, %v)", second, err)
 	}
 	if got := <-steered; got != "follow-up" {
@@ -1482,7 +1482,7 @@ func TestProcessDurableInputConfirmsExactProviderInteractionAcceptance(t *testin
 	receipt, err := controller.ProcessDurableInput(context.Background(), input, telegramcontroller.DurableInputCallbacks{
 		OnAccepted: func(context.Context, telegramcontroller.DurableInputAcceptance) error { return nil },
 	})
-	if err != nil || !receipt.Accepted || receipt.Completion != telegramcontroller.DurableInputSucceeded {
+	if err != nil || !receipt.Accepted || (receipt.Completion != telegramcontroller.DurableInputPending && receipt.Completion != telegramcontroller.DurableInputSucceeded) {
 		t.Fatalf("ProcessDurableInput() = (%#v, %v)", receipt, err)
 	}
 	select {
@@ -1542,7 +1542,7 @@ func TestDurableTurnObserversUseStableTypedIdentityAndCannotCorruptCompletion(t 
 		OnAccepted: func(context.Context, telegramcontroller.DurableInputAcceptance) error { return nil },
 	})
 	close(continueTurn)
-	if err != nil || !receipt.Accepted || receipt.Completion != telegramcontroller.DurableInputSucceeded {
+	if err != nil || !receipt.Accepted || (receipt.Completion != telegramcontroller.DurableInputPending && receipt.Completion != telegramcontroller.DurableInputSucceeded) {
 		t.Fatalf("ProcessDurableInput() = (%#v, %v)", receipt, err)
 	}
 	select {
@@ -2074,7 +2074,7 @@ func TestGlobalSemanticActionsExposeOnlyTypedSurfacesAndStableCreateIdentity(t *
 	}
 	result, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticCreatePick, UpdateID: 777})
 	if err != nil || result.Card == nil || !result.Card.MakeActive || strings.Contains(result.Card.Header, "Новая сессия") ||
-		!strings.HasSuffix(result.Card.Header, "\n\n─────\n") || intent.IntentID != "telegram-update:777" || intent.Name == "" || len([]rune(intent.Name)) > domain.MaxSessionNameRunes {
+		!strings.HasSuffix(result.Card.Header, "\n\n─────  \n") || intent.IntentID != "telegram-update:777" || intent.Name == "" || len([]rune(intent.Name)) > domain.MaxSessionNameRunes {
 		t.Fatalf("semantic create = (%#v, %v), intent=%#v", result, err, intent)
 	}
 	if _, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticCreateClaude}); err == nil {
@@ -2183,7 +2183,7 @@ func TestProjectCurrentReadsExactOrActiveSurfaceWithoutChangingDurableState(t *t
 	if err != nil || exact.Card == nil || exact.Card.SessionID != second.ID() || exact.Card.MakeActive {
 		t.Fatalf("exact ProjectCurrent() = (%#v, %v), want second read-only card", exact, err)
 	}
-	if strings.HasPrefix(exact.Card.Header, "Сессия ") || !strings.Contains(exact.Card.Header, " · ") || !strings.HasSuffix(exact.Card.Header, "\n\n─────\n") {
+	if strings.HasPrefix(exact.Card.Header, "Сессия ") || !strings.Contains(exact.Card.Header, " · ") || !strings.HasSuffix(exact.Card.Header, "\n\n─────  \n") {
 		t.Fatalf("active card header = %q, want compact legacy layout", exact.Card.Header)
 	}
 	if !strings.HasPrefix(exact.Card.Footer, "\n\n\u00a0\n\n─── фон ───") {

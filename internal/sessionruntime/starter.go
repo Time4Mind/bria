@@ -527,8 +527,9 @@ func (starter *Starter) submitWithCallbacks(ctx context.Context, sessionID domai
 		select {
 		case incoming, open := <-record.output:
 			if !open {
-				starter.finishTurn(record, turn, false, errors.New("provider process exited during turn"))
-				return TurnResult{}, errors.New("provider process exited during turn")
+				exitErr := turnExitError(record)
+				starter.finishTurn(record, turn, false, exitErr)
+				return TurnResult{}, exitErr
 			}
 			if incoming.err != nil {
 				starter.killAndWait(record)
@@ -645,16 +646,18 @@ func (starter *Starter) submitWithCallbacks(ctx context.Context, sessionID domai
 				return starter.protocolTurnFailure(record, requestID)
 			}
 		case <-record.done:
-			starter.finishTurn(record, turn, false, errors.New("provider process exited during turn"))
-			return TurnResult{}, errors.New("provider process exited during turn")
+			exitErr := turnExitError(record)
+			starter.finishTurn(record, turn, false, exitErr)
+			return TurnResult{}, exitErr
 		case <-ctx.Done():
 			interruptContext, cancel := context.WithTimeout(context.Background(), starter.closeTimeout)
 			if err := starter.sendInterrupt(interruptContext, record, turn); err != nil {
 				starter.killAndWait(record)
 			}
 			cancel()
-			starter.drainInterrupted(record, turn, accepted, finalSeen)
-			return TurnResult{}, ctx.Err()
+			// Cancellation remains observable as an error, but a correlated
+			// interrupted terminal is still proof that the accepted turn ended.
+			return starter.drainInterrupted(record, turn, accepted, finalSeen), ctx.Err()
 		}
 	}
 }
@@ -1051,7 +1054,7 @@ func (starter *Starter) sendInterrupt(ctx context.Context, record *processRecord
 	})
 }
 
-func (starter *Starter) drainInterrupted(record *processRecord, turn *activeTurn, accepted, finalSeen bool) {
+func (starter *Starter) drainInterrupted(record *processRecord, turn *activeTurn, accepted, finalSeen bool) TurnResult {
 	timer := time.NewTimer(starter.closeTimeout)
 	defer timer.Stop()
 	eventCount := 0
@@ -1060,44 +1063,44 @@ func (starter *Starter) drainInterrupted(record *processRecord, turn *activeTurn
 		case incoming, open := <-record.output:
 			if !open || incoming.err != nil || incoming.message.RequestID != turn.requestID {
 				starter.killAndWait(record)
-				return
+				return TurnResult{}
 			}
 			message := incoming.message
 			switch message.Type {
 			case "accepted":
 				if accepted || finalSeen {
 					starter.killAndWait(record)
-					return
+					return TurnResult{}
 				}
 				accepted = true
 			case "event":
 				if !accepted || finalSeen || eventCount >= starter.maxTurnEvents || validateEvent(message, starter.maxTextBytes) != nil {
 					starter.killAndWait(record)
-					return
+					return TurnResult{}
 				}
 				eventCount++
 			case "final":
 				if !accepted || finalSeen || validateText(message.Text, starter.maxTextBytes) != nil {
 					starter.killAndWait(record)
-					return
+					return TurnResult{}
 				}
 				finalSeen = true
 			case "completed":
 				if !accepted || message.Status != StatusInterrupted || message.ErrorCode != ErrorInterrupted {
 					starter.killAndWait(record)
-					return
+					return TurnResult{}
 				}
 				starter.finishTurn(record, turn, true, nil)
-				return
+				return TurnResult{TerminalStatus: StatusInterrupted, ErrorCode: ErrorInterrupted, ProviderSessionName: message.ProviderSessionName}
 			default:
 				starter.killAndWait(record)
-				return
+				return TurnResult{}
 			}
 		case <-record.done:
-			return
+			return TurnResult{}
 		case <-timer.C:
 			starter.killAndWait(record)
-			return
+			return TurnResult{}
 		}
 	}
 }
@@ -1252,7 +1255,7 @@ func (starter *Starter) finalizeReap(record *processRecord) {
 	}
 	record.turnMu.Lock()
 	if turn := record.turn; turn != nil {
-		turn.terminalErr = errors.New("provider process exited before turn terminal")
+		turn.terminalErr = record.startupDiagnostic.wrap(errors.New("provider process exited before turn terminal"))
 		record.turn = nil
 		close(turn.done)
 	}

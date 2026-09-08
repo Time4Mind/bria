@@ -21,7 +21,7 @@ func TestNativeMigrationKeepsExactPackageBoundaries(t *testing.T) {
 		path    string
 		imports []string
 	}{
-		{"internal/nativeadapter", []string{"internal/domain", "internal/nativeattachment", "internal/nativecapture", "internal/nativecli", "internal/nativeterminal", "internal/nativetranscript", "internal/runtimeprotocol"}},
+		{"internal/nativeadapter", []string{"internal/domain", "internal/nativeacceptance", "internal/nativeattachment", "internal/nativecapture", "internal/nativecli", "internal/nativereceiptstore", "internal/nativeterminal", "internal/nativetranscript", "internal/runtimeprotocol"}},
 		{"internal/nativecapture", nil},
 		{"internal/nativeattachment", nil},
 		{"internal/nativecli", []string{"internal/domain", "internal/nativeapproval"}},
@@ -29,7 +29,7 @@ func TestNativeMigrationKeepsExactPackageBoundaries(t *testing.T) {
 		{"internal/nativecontrolport", []string{"internal/domain"}},
 		{"internal/nativeapprovalflow", []string{"internal/domain", "internal/nativeapproval", "internal/nativecontrolport"}},
 		{"internal/nativeterminal", nil},
-		{"internal/nativetranscript", []string{"internal/runtimeprotocol"}},
+		{"internal/nativetranscript", []string{"internal/nativejsonline", "internal/runtimeprotocol", "internal/tooltext"}},
 	} {
 		policy, ok := packagePolicies[test.path]
 		if !ok || policy.responsibility == "" || policy.compositionRoot || strings.Join(policy.allowedImports, "\x00") != strings.Join(test.imports, "\x00") {
@@ -549,13 +549,13 @@ func TestArchitectureCheckerRegistersCurrentCompositionBoundaries(t *testing.T) 
 		{
 			path:           "internal/durablecomposition",
 			responsibility: "compose durable message custody and accepted-turn reconciliation",
-			imports:        []string{"internal/domain", "internal/durableflow", "internal/messagejournal", "internal/sessionsupervisor", "internal/telegramcontroller", "internal/telegramnotify"},
+			imports:        []string{"internal/domain", "internal/durableflow", "internal/durableinputbridge", "internal/messagejournal", "internal/sessionruntime", "internal/sessionsupervisor", "internal/telegramcontroller", "internal/telegramnotify"},
 			limit:          500,
 		},
 		{
 			path:           "internal/telegramruntimecomposition",
 			responsibility: "project typed Telegram controller actions, signed model selectors and durable delivery receipts",
-			imports:        []string{"internal/coordinator", "internal/domain", "internal/telegramcontroller", "internal/telegramflow", "internal/telegrampipeline", "internal/telegramrecoverycomposition", "internal/telegramstate", "internal/telegramui"},
+			imports:        []string{"internal/controllertelemetry", "internal/coordinator", "internal/domain", "internal/telegramcontroller", "internal/telegramflow", "internal/telegrampipeline", "internal/telegramrecoverycomposition", "internal/telegramstate", "internal/telegramui"},
 			limit:          650,
 		},
 		{
@@ -575,7 +575,7 @@ func TestArchitectureCheckerRegistersCurrentCompositionBoundaries(t *testing.T) 
 			responsibility: "compose the single-computer Bria process",
 			imports: []string{
 				"internal/providermodels",
-				"internal/app", "internal/authcomposition", "internal/callbacktoken", "internal/claudestore", "internal/config", "internal/coordinator", "internal/domain", "internal/durablecomposition", "internal/durableflow", "internal/interactioncomposition", "internal/messagejournal", "internal/observability", "internal/processenv", "internal/promptpreprocess", "internal/promptpreprocesscommand", "internal/providerquota", "internal/recoverycomposition", "internal/recoveryruntime", "internal/runtimefactory", "internal/safelog", "internal/screenproduction", "internal/sessioncreation", "internal/sessionexpiry", "internal/sessionid", "internal/sessionnaming", "internal/sessionruntime", "internal/sessionsupervisor", "internal/settings", "internal/settingscomposition", "internal/storage", "internal/supervisioncomposition", "internal/telegram", "internal/telegrambridge", "internal/telegramcompletioncomposition", "internal/telegramcontroller", "internal/telegramflow", "internal/telegramnotify", "internal/telegrampipeline", "internal/telegrampromptcomposition", "internal/telegramrecoverycomposition", "internal/telegramruntimecomposition", "internal/turnruntimecomposition", "internal/workdir",
+				"internal/app", "internal/authcomposition", "internal/callbacktoken", "internal/claudestore", "internal/config", "internal/coordinator", "internal/domain", "internal/durablecomposition", "internal/durableflow", "internal/interactioncomposition", "internal/messagejournal", "internal/nativerecoverycomposition", "internal/observability", "internal/processenv", "internal/promptpreprocess", "internal/promptpreprocesscommand", "internal/providerquota", "internal/recoverycomposition", "internal/recoveryruntime", "internal/runtimefactory", "internal/safelog", "internal/screenproduction", "internal/sessioncreation", "internal/sessionexpiry", "internal/sessionid", "internal/sessionnaming", "internal/sessionruntime", "internal/sessionsupervisor", "internal/settings", "internal/settingscomposition", "internal/storage", "internal/supervisioncomposition", "internal/telegram", "internal/telegrambridge", "internal/telegramcompletioncomposition", "internal/telegramcontroller", "internal/telegramflow", "internal/telegramnotify", "internal/telegrampipeline", "internal/telegrampromptcomposition", "internal/telegramrecoverycomposition", "internal/telegramruntimecomposition", "internal/turnruntimecomposition", "internal/workdir",
 			},
 			limit: 950,
 		},
@@ -588,7 +588,7 @@ func TestArchitectureCheckerRegistersCurrentCompositionBoundaries(t *testing.T) 
 		{
 			path:           "internal/observability",
 			responsibility: "record safe terminal timing and non-blocking Telegram flow measurements",
-			imports:        []string{"internal/safelog", "internal/telegramflow"},
+			imports:        []string{"internal/controllertelemetry", "internal/safelog", "internal/telegramtrace"},
 			limit:          350,
 		},
 	}
@@ -861,9 +861,13 @@ func TestArchitectureCheckerCapsCoherentCustodyResponsibilities(t *testing.T) {
 		{path: "internal/nativetranscript", limit: 1000},
 		{path: "internal/providerquota", limit: 350},
 		{path: "internal/storage", limit: 1900},
+		{path: "internal/statejson", limit: 100},
 		{path: "internal/telegram", limit: 1750},
 		{path: "internal/telegramcompletioncomposition", limit: 275},
 		{path: "internal/telegramcontroller", limit: 5500},
+		{path: "internal/finalpersist", limit: 200},
+		{path: "internal/turnadmission", limit: 120},
+		{path: "internal/telegramsemantic", limit: 200},
 		{path: "internal/domain", limit: 800},
 		{path: "internal/telegrambridge", limit: 1550},
 		{path: "internal/telegramui", limit: 800},
@@ -1546,7 +1550,7 @@ func TestArchitectureCheckerRegistersFrozenProductionPackagePolicies(t *testing.
 		{
 			path:           "internal/recoveryruntime",
 			responsibility: "run bounded provider adapters as read-only accepted-turn history readers",
-			imports:        []string{"internal/claudestore", "internal/domain", "internal/processgroup", "internal/runtimeprotocol", "internal/sessionruntime"},
+			imports:        []string{"internal/claudestore", "internal/domain", "internal/nativereceiptstore", "internal/nativetranscript", "internal/processgroup", "internal/runtimeprotocol", "internal/sessionruntime"},
 			limit:          575,
 		},
 		{
@@ -1590,7 +1594,7 @@ func TestArchitectureCheckerFrozenProductionPoliciesEnforceEdgesAndReleaseBlocke
 		{path: "internal/inputcomposition", imports: []string{"internal/mediaproduction", "internal/turnprocessing"}},
 		{path: "internal/screenproduction", imports: []string{"internal/domain", "internal/nativescreencache", "internal/screen", "internal/sessionruntime", "internal/settings", "internal/telegram", "internal/turnprocessing"}},
 		{path: "internal/containerpreflight", imports: []string{"internal/config"}, evidence: "platform_docker_executor"},
-		{path: "internal/recoveryruntime", imports: []string{"internal/claudestore", "internal/domain", "internal/processgroup", "internal/runtimeprotocol", "internal/sessionruntime"}},
+		{path: "internal/recoveryruntime", imports: []string{"internal/claudestore", "internal/domain", "internal/nativereceiptstore", "internal/nativetranscript", "internal/processgroup", "internal/runtimeprotocol", "internal/sessionruntime"}},
 		{path: "internal/updatecomposition", imports: []string{"internal/update", "internal/updateflow", "internal/updateinstall"}, evidence: "update_and_forced_rollback"},
 	}
 
@@ -1718,11 +1722,11 @@ func TestArchitectureCheckerExtendsStorageAndRecoveryRuntimeEdges(t *testing.T) 
 	}{
 		{
 			path:    "internal/storage",
-			imports: []string{"internal/archiveimport", "internal/cardtranscript", "internal/coordinator", "internal/domain", "internal/telegramhistory", "internal/telegramstate"},
+			imports: []string{"internal/statejson", "internal/archiveimport", "internal/cardhistory", "internal/cardtranscript", "internal/coordinator", "internal/domain", "internal/telegramhistory", "internal/telegramstate"},
 		},
 		{
 			path:    "internal/recoveryruntime",
-			imports: []string{"internal/claudestore", "internal/domain", "internal/processgroup", "internal/runtimeprotocol", "internal/sessionruntime"},
+			imports: []string{"internal/claudestore", "internal/domain", "internal/nativereceiptstore", "internal/nativetranscript", "internal/processgroup", "internal/runtimeprotocol", "internal/sessionruntime"},
 		},
 	}
 
@@ -1754,7 +1758,7 @@ func TestArchitectureCheckerRegistersSettingsAndProviderInputPolicies(t *testing
 		{
 			path:           "internal/settingsport",
 			responsibility: "define the storage-neutral preferences boundary used by Telegram control surfaces",
-			imports:        []string{"internal/domain"},
+			imports:        []string{"internal/domain", "internal/settingscapability"},
 			limit:          100,
 		},
 		{

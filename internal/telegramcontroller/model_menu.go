@@ -1,17 +1,13 @@
 package telegramcontroller
 
 import (
-	"context"
-
 	"bria/internal/domain"
-	"bria/internal/settingsport"
+	"bria/internal/telegramcontrolport"
 )
 
 // ModelCatalog remains a composition compatibility port, not a command menu.
 // Native CLI commands obtain their selected value directly from the CLI screen.
-type ModelCatalog interface {
-	Models(context.Context, domain.ComputerID, domain.Provider) ([]settingsport.Model, error)
-}
+type ModelCatalog = telegramcontrolport.ModelCatalog
 
 func (c *Controller) modelNotice(id domain.SessionID, text string) SemanticActionResult {
 	button := SemanticButton{Label: "← Сессии", Action: SemanticMenuSessions}

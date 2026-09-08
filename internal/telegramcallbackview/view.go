@@ -185,6 +185,8 @@ func PresentButton(button telegramui.Button) (string, callbacktoken.Action, int,
 		return presentGlobalButton(button, "Продолжение", callbacktoken.ActionSettingsContinueExisting)
 	case telegramui.ActionSettingsTechnicalActions:
 		return presentGlobalButton(button, "Тех. действия", callbacktoken.ActionSettingsTechnicalActions)
+	case telegramui.ActionSettingsTechnicalOutputLines:
+		return presentGlobalButton(button, "Строки технического вывода", callbacktoken.ActionSettingsTechnicalOutputLines)
 	case telegramui.ActionSettingsBackgroundQuestions:
 		return presentGlobalButton(button, "Вопросы", callbacktoken.ActionSettingsBackgroundQuestions)
 	case telegramui.ActionSettingsBackgroundErrors:
@@ -391,6 +393,8 @@ func DecodeFields(fields callbacktoken.Fields) (telegramui.Action, telegramui.Bu
 		return telegramui.ActionSettingsContinueExisting, telegramui.ButtonTarget{}, nil
 	case callbacktoken.ActionSettingsTechnicalActions:
 		return telegramui.ActionSettingsTechnicalActions, telegramui.ButtonTarget{}, nil
+	case callbacktoken.ActionSettingsTechnicalOutputLines:
+		return telegramui.ActionSettingsTechnicalOutputLines, telegramui.ButtonTarget{}, nil
 	case callbacktoken.ActionSettingsBackgroundQuestions:
 		return telegramui.ActionSettingsBackgroundQuestions, telegramui.ButtonTarget{}, nil
 	case callbacktoken.ActionSettingsBackgroundErrors:

@@ -258,7 +258,7 @@ func validateJournals(bundle Bundle, sessions map[domain.SessionID]domain.Sessio
 
 func validInputPhase(phase messagejournal.InputPhase) bool {
 	switch phase {
-	case messagejournal.InputPending, messagejournal.InputAccepted, messagejournal.InputCompleted, messagejournal.InputFailed, messagejournal.InputUnknown:
+	case messagejournal.InputPending, messagejournal.InputAccepted, messagejournal.InputCompleted, messagejournal.InputTerminalFailed, messagejournal.InputFailed, messagejournal.InputUnknown:
 		return true
 	}
 	return false

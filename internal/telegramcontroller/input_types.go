@@ -18,8 +18,11 @@ type DurableInputPreparation = turnprocessing.DurableInputPreparation
 type DurableInputCompletion = turnprocessing.DurableInputCompletion
 
 const (
-	DurableInputSucceeded = turnprocessing.DurableInputSucceeded
-	DurableInputFailed    = turnprocessing.DurableInputFailed
+	DurableInputSucceeded      = turnprocessing.DurableInputSucceeded
+	DurableInputFailed         = turnprocessing.DurableInputFailed
+	DurableInputTerminalFailed = turnprocessing.DurableInputTerminalFailed
+	DurableInputPending        = turnprocessing.DurableInputPending
+	DurableInputUnknown        = turnprocessing.DurableInputUnknown
 )
 
 type DurableInputCallbacks = turnprocessing.DurableInputCallbacks

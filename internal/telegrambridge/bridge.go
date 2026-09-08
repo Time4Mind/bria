@@ -3,7 +3,6 @@ package telegrambridge
 import (
 	"bria/internal/coordinator"
 	"bria/internal/telegram"
-	"bria/internal/telegramformat"
 	"context"
 	"errors"
 	"fmt"
@@ -238,34 +237,21 @@ func (sender *Sender) SendStatus(
 	status coordinator.Status,
 ) (coordinator.Receipt, error) {
 	sender.acknowledgeCallback(ctx, operationID, status.CallbackQueryID)
-	if status.RichMarkdown || (sender.screen != nil && status.ScreenSessionID != "") {
-		rich, png, screenReceipt, err := sender.screenMessage(ctx, status)
-		if err != nil {
-			return coordinator.Receipt{}, err
-		}
-		message, err := sender.client.SendRichMessage(ctx, telegram.SendRichMessageRequest{
-			ChatID: telegram.ChatID(status.ConversationID), RichMessage: rich, PhotoPNG: png,
-			Priority: callbackPriority(status.CallbackQueryID),
-		})
-		if err != nil {
-			return coordinator.Receipt{}, fmt.Errorf("send rich Telegram status: %w", err)
-		}
-		sender.rememberScreenReceipt(screenReceipt, message)
-		return coordinator.Receipt{MessageID: int64(message.MessageID)}, nil
+	rich, png, screenReceipt, err := sender.screenMessage(ctx, status)
+	if err != nil {
+		return coordinator.Receipt{}, err
 	}
-	text, entities := telegramformat.Markdown(status.Text)
-	message, err := sender.client.SendMessage(ctx, telegram.SendMessageRequest{
-		ChatID:   telegram.ChatID(status.ConversationID),
-		Text:     text,
-		Entities: entities,
+	message, err := sender.client.SendRichMessage(ctx, telegram.SendRichMessageRequest{
+		ChatID: telegram.ChatID(status.ConversationID), RichMessage: rich, PhotoPNG: png,
 		Priority: callbackPriority(status.CallbackQueryID),
 	})
 	if err != nil {
-		return coordinator.Receipt{}, fmt.Errorf("send Telegram status: %w", err)
+		return coordinator.Receipt{}, fmt.Errorf("send rich Telegram status: %w", err)
 	}
 	if message.MessageID <= 0 {
 		return coordinator.Receipt{}, errors.New("Telegram send returned a non-positive message id")
 	}
+	sender.rememberScreenReceipt(screenReceipt, message)
 	return coordinator.Receipt{MessageID: int64(message.MessageID)}, nil
 }
 
@@ -280,32 +266,21 @@ func (sender *Sender) SendStatusWithKeyboard(
 	}
 	sender.acknowledgeCallback(ctx, operationID, status.CallbackQueryID)
 	markup := coordinatorMarkup(keyboard)
-	if status.RichMarkdown || (sender.screen != nil && status.ScreenSessionID != "") {
-		rich, png, screenReceipt, err := sender.screenMessage(ctx, status)
-		if err != nil {
-			return coordinator.Receipt{}, err
-		}
-		message, err := sender.client.SendRichMessage(ctx, telegram.SendRichMessageRequest{
-			ChatID: telegram.ChatID(status.ConversationID), RichMessage: rich, PhotoPNG: png, ReplyMarkup: markup,
-			Priority: callbackPriority(status.CallbackQueryID),
-		})
-		if err != nil {
-			return coordinator.Receipt{}, fmt.Errorf("send rich Telegram status with keyboard: %w", err)
-		}
-		sender.rememberScreenReceipt(screenReceipt, message)
-		return coordinator.Receipt{MessageID: int64(message.MessageID)}, nil
+	rich, png, screenReceipt, err := sender.screenMessage(ctx, status)
+	if err != nil {
+		return coordinator.Receipt{}, err
 	}
-	text, entities := telegramformat.Markdown(status.Text)
-	message, err := sender.client.SendMessage(ctx, telegram.SendMessageRequest{
-		ChatID: telegram.ChatID(status.ConversationID), Text: text, Entities: entities, ReplyMarkup: markup,
+	message, err := sender.client.SendRichMessage(ctx, telegram.SendRichMessageRequest{
+		ChatID: telegram.ChatID(status.ConversationID), RichMessage: rich, PhotoPNG: png, ReplyMarkup: markup,
 		Priority: callbackPriority(status.CallbackQueryID),
 	})
 	if err != nil {
-		return coordinator.Receipt{}, fmt.Errorf("send Telegram status with keyboard: %w", err)
+		return coordinator.Receipt{}, fmt.Errorf("send rich Telegram status with keyboard: %w", err)
 	}
 	if message.MessageID <= 0 {
 		return coordinator.Receipt{}, errors.New("Telegram send returned a non-positive message id")
 	}
+	sender.rememberScreenReceipt(screenReceipt, message)
 	return coordinator.Receipt{MessageID: int64(message.MessageID)}, nil
 }
 
@@ -321,18 +296,12 @@ func (sender *Sender) EditStatusWithKeyboard(
 	sender.acknowledgeCallback(ctx, operationID, status.CallbackQueryID)
 	markup := coordinatorMarkup(keyboard)
 	request := telegram.EditMessageTextRequest{ChatID: telegram.ChatID(status.ConversationID), MessageID: telegram.MessageID(status.SourceMessageID), ReplyMarkup: markup, Priority: callbackPriority(status.CallbackQueryID)}
-	var screenshotReceipt screenReceipt
-	if status.RichMarkdown || (sender.screen != nil && status.ScreenSessionID != "") {
-		rich, png, receipt, err := sender.screenMessage(ctx, status)
-		if err != nil {
-			return coordinator.Receipt{}, err
-		}
-		request.RichMessage = &rich
-		request.PhotoPNG = png
-		screenshotReceipt = receipt
-	} else {
-		request.Text, request.Entities = telegramformat.Markdown(status.Text)
+	rich, png, screenshotReceipt, err := sender.screenMessage(ctx, status)
+	if err != nil {
+		return coordinator.Receipt{}, err
 	}
+	request.RichMessage = &rich
+	request.PhotoPNG = png
 	message, err := sender.client.EditMessageText(ctx, request)
 	if err != nil {
 		var apiErr *telegram.APIError

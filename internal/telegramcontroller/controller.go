@@ -3,20 +3,27 @@ package telegramcontroller
 import (
 	"bria/internal/app"
 	"bria/internal/cardtranscript"
+	"bria/internal/controllertelemetry"
 	"bria/internal/coordinator"
 	"bria/internal/domain"
 	"bria/internal/nativeapprovalflow"
 	"bria/internal/promptpreprocess"
+	"bria/internal/sessioncloseflow"
 	"bria/internal/sessioncreation"
 	"bria/internal/sessionruntime"
 	"bria/internal/settingsport"
+	"bria/internal/telegramcontrolport"
 	"bria/internal/telegramcreationview"
 	"bria/internal/telegramnodes"
+	"bria/internal/telegramsemantic"
 	"bria/internal/telegramsessions"
+	"bria/internal/telegramsessionview"
 	"bria/internal/telegramsettings"
 	"bria/internal/telegramsettingsview"
 	"bria/internal/telegramstatus"
 	"bria/internal/telegramturnhelpers"
+	"bria/internal/turnadmission"
+	"bria/internal/turncompletion"
 	"bria/internal/turnprocessing"
 	"context"
 	"errors"
@@ -32,332 +39,154 @@ const defaultQueueLimit = 16
 
 var errProviderUnavailable = errors.New("provider is not configured and enabled")
 
-type SessionCreator interface {
-	Create(context.Context, app.ConfirmedSessionIntent) (app.CreateSessionResult, error)
-}
-type PendingSessionStart struct {
-	Session domain.Session
-	Outcome <-chan SessionStartOutcome
-}
-type SessionStartOutcome struct {
-	Session    domain.Session
-	Replayed   bool
-	StartError error
-	Err        error
-}
-type AsyncSessionCreator interface {
-	BeginCreate(context.Context, app.ConfirmedSessionIntent) (PendingSessionStart, error)
-}
-type SessionStore interface {
-	List(context.Context) ([]domain.Session, error)
-	Load(context.Context, domain.SessionID) (domain.Session, error)
-}
-type SessionNamer interface {
-	Begin(context.Context, domain.Session, string, string) func(string)
-	Wait(context.Context) error
-}
-type Notifier interface {
-	Notify(context.Context, Notification) error
-}
-type DeliveryState string
-
-const DeliveryUnknown DeliveryState = "unknown"
-
-type NotificationFailure struct {
-	SessionID       domain.SessionID
-	Kind            NotificationKind
-	State           DeliveryState
-	DurablyRecorded bool
-}
-type OutputFailureRecorder interface {
-	RecordNotificationFailure(context.Context, NotificationFailure) error
-}
-type ActiveSessionStore interface {
-	SetActiveSession(context.Context, domain.SessionID) error
-}
-type CardCarrierStore interface {
-	SetCardCarrier(context.Context, domain.SessionID, int64, int64) error
-}
-type CardPageStore interface {
-	SetCardPage(context.Context, domain.SessionID, int, int, string, bool) error
-}
-type CardHistoryStore interface {
-	AppendCardHistory(context.Context, domain.SessionID, string) error
-	LoadCardHistory(context.Context, domain.SessionID) ([]string, error)
-}
-type CardPromptStore interface {
-	SetCardPrompt(context.Context, domain.SessionID, string, string) error
-}
-type ActiveSessionLoader interface {
-	LoadActiveSession(context.Context) (domain.SessionID, error)
-}
-type Preferences = settingsport.Preferences
-type PreferenceSnapshot = settingsport.Snapshot
-type ProviderPreference = settingsport.ProviderPreference
-type ProviderPreferences = settingsport.ProviderPreferences
-type Lifecycle interface {
-	Abort(context.Context, app.StartSessionRequest, domain.ProviderBinding) error
-}
-type ArchivedResumer interface {
-	Resume(context.Context, domain.SessionID) (domain.Session, error)
-}
-type AsyncArchivedResumer interface {
-	BeginResume(context.Context, domain.SessionID) (PendingSessionStart, error)
-}
-type SessionCloser interface {
-	Close(context.Context, domain.SessionID) (app.CloseSessionResult, error)
-}
-type InteractiveSessionCloser interface {
-	BeginClose(context.Context, domain.SessionID) (app.CloseSessionResult, error)
-}
-type TurnLifecycle interface {
-	Start(context.Context, domain.SessionID) (domain.Session, error)
-	BeginStop(context.Context, domain.SessionID) (domain.Session, error)
-	Finish(context.Context, domain.SessionID) (domain.Session, bool, error)
-}
-type NotificationKind string
+type SessionCreator = telegramcontrolport.SessionCreator
+type PendingSessionStart = telegramcontrolport.PendingSessionStart
+type SessionStartOutcome = telegramcontrolport.SessionStartOutcome
+type AsyncSessionCreator = telegramcontrolport.AsyncSessionCreator
+type SessionStore = telegramcontrolport.SessionStore
+type SessionNamer = telegramcontrolport.SessionNamer
+type Notifier = telegramcontrolport.Notifier
+type DeliveryState = telegramcontrolport.DeliveryState
+type NotificationFailure = telegramcontrolport.NotificationFailure
+type OutputFailureRecorder = telegramcontrolport.OutputFailureRecorder
+type ActiveSessionStore = telegramcontrolport.ActiveSessionStore
+type CardCarrierStore = telegramcontrolport.CardCarrierStore
+type CardPageStore = telegramcontrolport.CardPageStore
+type CardHistoryStore = telegramcontrolport.CardHistoryStore
+type CardPromptStore = telegramcontrolport.CardPromptStore
+type ActiveSessionLoader = telegramcontrolport.ActiveSessionLoader
+type Preferences = telegramcontrolport.Preferences
+type PreferenceSnapshot = telegramcontrolport.PreferenceSnapshot
+type ProviderPreference = telegramcontrolport.ProviderPreference
+type ProviderPreferences = telegramcontrolport.ProviderPreferences
+type Lifecycle = telegramcontrolport.Lifecycle
+type ArchivedResumer = telegramcontrolport.ArchivedResumer
+type AsyncArchivedResumer = telegramcontrolport.AsyncArchivedResumer
+type SessionCloser = telegramcontrolport.SessionCloser
+type InteractiveSessionCloser = telegramcontrolport.InteractiveSessionCloser
+type TurnLifecycle = telegramcontrolport.TurnLifecycle
+type NotificationKind = telegramcontrolport.NotificationKind
+type Notification = telegramcontrolport.Notification
+type OutgoingNotification = telegramcontrolport.OutgoingNotification
+type OutputReceipt = telegramcontrolport.OutputReceipt
+type DurableOutputCustody = telegramcontrolport.DurableOutputCustody
+type AuthorizationStart = telegramcontrolport.AuthorizationStart
+type AuthorizationChallenge = telegramcontrolport.AuthorizationChallenge
+type AuthorizationSecret = telegramcontrolport.AuthorizationSecret
+type AuthorizationResult = telegramcontrolport.AuthorizationResult
+type AuthorizationPendingLookup = telegramcontrolport.AuthorizationPendingLookup
+type PendingAuthorization = telegramcontrolport.PendingAuthorization
+type AuthorizationDiscard = telegramcontrolport.AuthorizationDiscard
+type AuthorizationMessageLookup = telegramcontrolport.AuthorizationMessageLookup
+type AuthorizationMessageBinding = telegramcontrolport.AuthorizationMessageBinding
+type AuthorizationFlow = telegramcontrolport.AuthorizationFlow
 
 const (
-	NotificationCommentary   NotificationKind = "commentary"
-	NotificationQuestion     NotificationKind = "question"
-	NotificationFinal        NotificationKind = "final"
-	NotificationError        NotificationKind = "error"
-	NotificationPromptStatus NotificationKind = "prompt_status"
-	NotificationNativeScreen NotificationKind = "native_screen"
+	DeliveryUnknown          = telegramcontrolport.DeliveryUnknown
+	NotificationCommentary   = telegramcontrolport.NotificationCommentary
+	NotificationQuestion     = telegramcontrolport.NotificationQuestion
+	NotificationFinal        = telegramcontrolport.NotificationFinal
+	NotificationError        = telegramcontrolport.NotificationError
+	NotificationPromptStatus = telegramcontrolport.NotificationPromptStatus
+	NotificationNativeScreen = telegramcontrolport.NotificationNativeScreen
 )
 
-type Notification struct {
-	OperationID    string
-	ConversationID int64
-	SessionID      domain.SessionID
-	Kind           NotificationKind
-	Text           string
-}
-type OutgoingNotification struct {
-	OperationID    string
-	ConversationID int64
-	SessionID      domain.SessionID
-	Kind           NotificationKind
-	Payload        []byte
-}
-type OutputReceipt struct {
-	Inserted    bool
-	SessionID   domain.SessionID
-	OperationID string
-	Sequence    uint64
-}
-type DurableOutputCustody interface {
-	AcceptOutput(context.Context, OutgoingNotification) (OutputReceipt, error)
-}
-type AuthorizationStart struct {
-	OperationID      string
-	ActorID          int64
-	PrivateChatID    int64
-	ConversationKind string
-	ComputerID       domain.ComputerID
-	Provider         domain.Provider
-}
-type AuthorizationChallenge struct {
-	OperationID        string
-	ComputerID         domain.ComputerID
-	Provider           domain.Provider
-	ChallengeReference string
-	Instruction        string
-}
-type AuthorizationSecret struct {
-	OperationID           string
-	SubmissionOperationID string
-	ActorID               int64
-	PrivateChatID         int64
-	ConversationKind      string
-	SourceMessageID       int64
-	ComputerID            domain.ComputerID
-	Provider              domain.Provider
-	ChallengeReference    string
-	Secret                []byte
-}
-type AuthorizationResult struct {
-	Authenticated bool
-	DeletionKnown bool
-}
-type AuthorizationPendingLookup struct {
-	ActorID          int64
-	PrivateChatID    int64
-	ConversationKind string
-}
-type PendingAuthorization struct {
-	AuthorizationChallenge
-	AcceptsSecret bool
-}
-type AuthorizationDiscard struct {
-	OperationID      string
-	ActorID          int64
-	PrivateChatID    int64
-	ConversationKind string
-	SourceMessageID  int64
-}
-type AuthorizationMessageLookup struct {
-	ActorID          int64
-	PrivateChatID    int64
-	ConversationKind string
-	SourceMessageID  int64
-}
-type AuthorizationMessageBinding struct {
-	Bound         bool
-	Provider      domain.Provider
-	Authenticated bool
-	DeletionKnown bool
-}
-type AuthorizationFlow interface {
-	SupportsAuthorization(domain.Provider) bool
-	StartAuthorization(context.Context, AuthorizationStart) (AuthorizationChallenge, error)
-	ConsumeAuthorizationMessage(context.Context, AuthorizationMessageLookup) (AuthorizationMessageBinding, error)
-	PendingAuthorizations(context.Context, AuthorizationPendingLookup) ([]PendingAuthorization, error)
-	SubmitAuthorization(context.Context, AuthorizationSecret) (AuthorizationResult, error)
-	DiscardAuthorizationMessage(context.Context, AuthorizationDiscard) (AuthorizationResult, error)
-}
-type SemanticActionKind string
+type SemanticActionKind = telegramcontrolport.SemanticActionKind
 
 const (
-	SemanticPagePrevious                     SemanticActionKind = "page_previous"
-	SemanticPageLatest                       SemanticActionKind = "page_latest"
-	SemanticPageNext                         SemanticActionKind = "page_next"
-	SemanticStop                             SemanticActionKind = "stop"
-	SemanticClose                            SemanticActionKind = "close"
-	SemanticOptions                          SemanticActionKind = "options"
-	SemanticModelMenu                        SemanticActionKind = "model_menu"
-	SemanticNativeKey                        SemanticActionKind = "native_key"
-	SemanticModelChoice                      SemanticActionKind = "model_choice"
-	SemanticEffortMenu                       SemanticActionKind = "effort_menu"
-	SemanticEffortChoice                     SemanticActionKind = "effort_choice"
-	SemanticScreen                           SemanticActionKind = "screen"
-	SemanticSelect                           SemanticActionKind = "select_session"
-	SemanticResume                           SemanticActionKind = "resume"
-	SemanticMenuSessions                     SemanticActionKind = "menu_sessions"
-	SemanticMenuNew                          SemanticActionKind = "menu_new"
-	SemanticMenuArchive                      SemanticActionKind = "menu_archive"
-	SemanticMenuStatus                       SemanticActionKind = "menu_status"
-	SemanticRefreshStatus                    SemanticActionKind = "refresh_status"
-	SemanticMenuSettings                     SemanticActionKind = "menu_settings"
-	SemanticMenuBack                         SemanticActionKind = "menu_back"
-	SemanticMenuNodes                        SemanticActionKind = "menu_nodes"
-	SemanticSelectNode                       SemanticActionKind = "select_node"
-	SemanticCreateSelectCodex                SemanticActionKind = "create_select_codex"
-	SemanticCreateSelectClaude               SemanticActionKind = "create_select_claude"
-	SemanticCreateWorkdir                    SemanticActionKind = "create_workdir"
-	SemanticCreateConfirm                    SemanticActionKind = "create_confirm"
-	SemanticCreateChoice                     SemanticActionKind = "create_choice"
-	SemanticCreatePrevious                   SemanticActionKind = "create_previous"
-	SemanticCreateFirst                      SemanticActionKind = "create_first"
-	SemanticCreateNext                       SemanticActionKind = "create_next"
-	SemanticCreateUp                         SemanticActionKind = "create_up"
-	SemanticCreatePick                       SemanticActionKind = "create_pick"
-	SemanticCreateDirectoryNew               SemanticActionKind = "create_directory_new"
-	SemanticCreateBack                       SemanticActionKind = "create_back"
-	SemanticCreateFresh                      SemanticActionKind = "create_fresh"
-	SemanticCreateCodex                      SemanticActionKind = "create_codex"
-	SemanticCreateClaude                     SemanticActionKind = "create_claude"
-	SemanticSettingsCategory                 SemanticActionKind = "settings_category"
-	SemanticSettingsScreen                   SemanticActionKind = "settings_screen"
-	SemanticSettingsScreenCaptureLimit       SemanticActionKind = "settings_screen_capture_limit"
-	SemanticSettingsAutoApproveCommands      SemanticActionKind = "settings_auto_approve_commands"
-	SemanticSettingsDetail                   SemanticActionKind = "settings_detail"
-	SemanticSettingsPageLimit                SemanticActionKind = "settings_page_limit"
-	SemanticSettingsContinueExisting         SemanticActionKind = "settings_continue_existing"
-	SemanticSettingsTechnicalActions         SemanticActionKind = "settings_technical_actions"
-	SemanticSettingsBackgroundQuestions      SemanticActionKind = "settings_background_questions"
-	SemanticSettingsBackgroundErrors         SemanticActionKind = "settings_background_errors"
-	SemanticSettingsArchiveRecommendations   SemanticActionKind = "settings_archive_recommendations"
-	SemanticSettingsDefaultProvider          SemanticActionKind = "settings_default_provider"
-	SemanticSettingsDefaultWorkdir           SemanticActionKind = "settings_default_workdir"
-	SemanticSettingsClearCreationDefaults    SemanticActionKind = "settings_clear_creation_defaults"
-	SemanticSettingsLifetimeNever            SemanticActionKind = "settings_lifetime_never"
-	SemanticSettingsLifetime6Hours           SemanticActionKind = "settings_lifetime_6h"
-	SemanticSettingsLifetime12Hours          SemanticActionKind = "settings_lifetime_12h"
-	SemanticSettingsLifetime24Hours          SemanticActionKind = "settings_lifetime_24h"
-	SemanticSettingsLifetime48Hours          SemanticActionKind = "settings_lifetime_48h"
-	SemanticSettingsProviderCodex            SemanticActionKind = "settings_provider_codex"
-	SemanticSettingsProviderClaude           SemanticActionKind = "settings_provider_claude"
-	SemanticSettingsPreprocessing            SemanticActionKind = "settings_preprocessing"
-	SemanticSettingsPreprocessingInstruction SemanticActionKind = "settings_preprocessing_instruction"
-	SemanticSettingsPreprocessingReset       SemanticActionKind = "settings_preprocessing_reset"
-	SemanticSettingsSessionNaming            SemanticActionKind = "settings_session_naming"
-	SemanticSettingsStandby                  SemanticActionKind = "settings_standby"
-	SemanticSettingsRenameNode               SemanticActionKind = "settings_rename_node"
-	SemanticAuthorizeCodex                   SemanticActionKind = "authorize_codex"
-	SemanticAuthorizeClaude                  SemanticActionKind = "authorize_claude"
+	SemanticPagePrevious                     = telegramsemantic.SemanticPagePrevious
+	SemanticPageLatest                       = telegramsemantic.SemanticPageLatest
+	SemanticPageNext                         = telegramsemantic.SemanticPageNext
+	SemanticStop                             = telegramsemantic.SemanticStop
+	SemanticClose                            = telegramsemantic.SemanticClose
+	SemanticOptions                          = telegramsemantic.SemanticOptions
+	SemanticModelMenu                        = telegramsemantic.SemanticModelMenu
+	SemanticNativeKey                        = telegramsemantic.SemanticNativeKey
+	SemanticModelChoice                      = telegramsemantic.SemanticModelChoice
+	SemanticEffortMenu                       = telegramsemantic.SemanticEffortMenu
+	SemanticEffortChoice                     = telegramsemantic.SemanticEffortChoice
+	SemanticScreen                           = telegramsemantic.SemanticScreen
+	SemanticSelect                           = telegramsemantic.SemanticSelect
+	SemanticResume                           = telegramsemantic.SemanticResume
+	SemanticMenuSessions                     = telegramsemantic.SemanticMenuSessions
+	SemanticMenuNew                          = telegramsemantic.SemanticMenuNew
+	SemanticMenuArchive                      = telegramsemantic.SemanticMenuArchive
+	SemanticMenuStatus                       = telegramsemantic.SemanticMenuStatus
+	SemanticRefreshStatus                    = telegramsemantic.SemanticRefreshStatus
+	SemanticMenuSettings                     = telegramsemantic.SemanticMenuSettings
+	SemanticMenuBack                         = telegramsemantic.SemanticMenuBack
+	SemanticMenuNodes                        = telegramsemantic.SemanticMenuNodes
+	SemanticSelectNode                       = telegramsemantic.SemanticSelectNode
+	SemanticCreateSelectCodex                = telegramsemantic.SemanticCreateSelectCodex
+	SemanticCreateSelectClaude               = telegramsemantic.SemanticCreateSelectClaude
+	SemanticCreateWorkdir                    = telegramsemantic.SemanticCreateWorkdir
+	SemanticCreateConfirm                    = telegramsemantic.SemanticCreateConfirm
+	SemanticCreateChoice                     = telegramsemantic.SemanticCreateChoice
+	SemanticCreatePrevious                   = telegramsemantic.SemanticCreatePrevious
+	SemanticCreateFirst                      = telegramsemantic.SemanticCreateFirst
+	SemanticCreateNext                       = telegramsemantic.SemanticCreateNext
+	SemanticCreateUp                         = telegramsemantic.SemanticCreateUp
+	SemanticCreatePick                       = telegramsemantic.SemanticCreatePick
+	SemanticCreateDirectoryNew               = telegramsemantic.SemanticCreateDirectoryNew
+	SemanticCreateBack                       = telegramsemantic.SemanticCreateBack
+	SemanticCreateFresh                      = telegramsemantic.SemanticCreateFresh
+	SemanticCreateCodex                      = telegramsemantic.SemanticCreateCodex
+	SemanticCreateClaude                     = telegramsemantic.SemanticCreateClaude
+	SemanticSettingsCategory                 = telegramsemantic.SemanticSettingsCategory
+	SemanticSettingsScreen                   = telegramsemantic.SemanticSettingsScreen
+	SemanticSettingsScreenCaptureLimit       = telegramsemantic.SemanticSettingsScreenCaptureLimit
+	SemanticSettingsAutoApproveCommands      = telegramsemantic.SemanticSettingsAutoApproveCommands
+	SemanticSettingsDetail                   = telegramsemantic.SemanticSettingsDetail
+	SemanticSettingsPageLimit                = telegramsemantic.SemanticSettingsPageLimit
+	SemanticSettingsContinueExisting         = telegramsemantic.SemanticSettingsContinueExisting
+	SemanticSettingsTechnicalActions         = telegramsemantic.SemanticSettingsTechnicalActions
+	SemanticSettingsTechnicalOutputLines     = telegramsemantic.SemanticSettingsTechnicalOutputLines
+	SemanticSettingsBackgroundQuestions      = telegramsemantic.SemanticSettingsBackgroundQuestions
+	SemanticSettingsBackgroundErrors         = telegramsemantic.SemanticSettingsBackgroundErrors
+	SemanticSettingsArchiveRecommendations   = telegramsemantic.SemanticSettingsArchiveRecommendations
+	SemanticSettingsDefaultProvider          = telegramsemantic.SemanticSettingsDefaultProvider
+	SemanticSettingsDefaultWorkdir           = telegramsemantic.SemanticSettingsDefaultWorkdir
+	SemanticSettingsClearCreationDefaults    = telegramsemantic.SemanticSettingsClearCreationDefaults
+	SemanticSettingsLifetimeNever            = telegramsemantic.SemanticSettingsLifetimeNever
+	SemanticSettingsLifetime6Hours           = telegramsemantic.SemanticSettingsLifetime6Hours
+	SemanticSettingsLifetime12Hours          = telegramsemantic.SemanticSettingsLifetime12Hours
+	SemanticSettingsLifetime24Hours          = telegramsemantic.SemanticSettingsLifetime24Hours
+	SemanticSettingsLifetime48Hours          = telegramsemantic.SemanticSettingsLifetime48Hours
+	SemanticSettingsProviderCodex            = telegramsemantic.SemanticSettingsProviderCodex
+	SemanticSettingsProviderClaude           = telegramsemantic.SemanticSettingsProviderClaude
+	SemanticSettingsPreprocessing            = telegramsemantic.SemanticSettingsPreprocessing
+	SemanticSettingsPreprocessingInstruction = telegramsemantic.SemanticSettingsPreprocessingInstruction
+	SemanticSettingsPreprocessingReset       = telegramsemantic.SemanticSettingsPreprocessingReset
+	SemanticSettingsSessionNaming            = telegramsemantic.SemanticSettingsSessionNaming
+	SemanticSettingsStandby                  = telegramsemantic.SemanticSettingsStandby
+	SemanticSettingsRenameNode               = telegramsemantic.SemanticSettingsRenameNode
+	SemanticAuthorizeCodex                   = telegramsemantic.SemanticAuthorizeCodex
+	SemanticAuthorizeClaude                  = telegramsemantic.SemanticAuthorizeClaude
 )
 
-type SemanticAction struct {
-	Kind         SemanticActionKind
-	SessionID    domain.SessionID
-	Page         int
-	FollowLatest bool
-	SessionSlot  int
-	Choice       int
-	UpdateID     int64
-}
-type SemanticCarrierEffect string
+type SemanticAction = telegramcontrolport.SemanticAction
+type SemanticCarrierEffect = telegramcontrolport.SemanticCarrierEffect
+type SemanticContentPage = telegramcontrolport.SemanticContentPage
+type SemanticPageView = telegramcontrolport.SemanticPageView
+type SemanticCard = telegramcontrolport.SemanticCard
+type SemanticActionResult = telegramcontrolport.SemanticActionResult
+type SemanticButton = telegramcontrolport.SemanticButton
+type SemanticSurface = telegramcontrolport.SemanticSurface
 
-const SemanticEditSameCarrier SemanticCarrierEffect = "edit_same_carrier"
-
-type SemanticContentPage struct {
-	Content string
-	Anchors []string
-}
-type SemanticPageView struct {
-	Page         int
-	Pages        int
-	Anchor       string
-	FollowLatest bool
-}
-type SemanticCard struct {
-	SessionID                          domain.SessionID
-	Effect                             SemanticCarrierEffect
-	Header                             string
-	Footer                             string
-	Pages                              []SemanticContentPage
-	View                               SemanticPageView
-	Working, Archived, OptionsExpanded bool
-	SelectableSessionIDs               []domain.SessionID
-	SelectableSessionLabels            []string
-	SessionRowSizes                    []int
-	CloseConfirmation, MakeActive      bool
-	DeleteConfirmation                 bool
-}
-type SemanticActionResult struct {
-	Decision coordinator.Decision
-	Card     *SemanticCard
-	Surface  *SemanticSurface
-}
-type SemanticButton struct {
-	Label     string
-	Action    SemanticActionKind
-	SessionID domain.SessionID
-	Choice    int
-}
-type SemanticSurface struct {
-	Text            string
-	RichMarkdown    bool
-	Rows            [][]SemanticButton
-	NativeSessionID domain.SessionID
-}
+const SemanticEditSameCarrier = telegramcontrolport.SemanticEditSameCarrier
 
 // ProjectCurrent returns a read-only exact-session or global-active projection.
-func (controller *Controller) ProjectCurrent(ctx context.Context, sessionID domain.SessionID) (SemanticActionResult, error) {
+func (controller *Controller) ProjectCurrent(ctx context.Context, sessionID domain.SessionID) (result SemanticActionResult, err error) {
+	defer func() { controller.projectedEvent(ctx, sessionID, result, err) }()
 	if sessionID == "" {
 		if !controller.nodeAvailable(ctx, controller.currentNodeID()) {
 			controller.cancelCreateDraft()
 			return controller.nodeListSemanticResult(ctx)
 		}
-		var err error
-		sessionID, err = controller.nodes.EnsureActive(ctx, controller.currentNodeID())
+		sessionID, err = controller.ensureCurrentActive(ctx)
 		if err != nil {
 			return SemanticActionResult{}, err
 		}
-		controller.mu.Lock()
-		controller.active = sessionID
-		controller.mu.Unlock()
 	}
 	if sessionID == "" {
 		return controller.sessionListSemanticResult(ctx)
@@ -496,7 +325,7 @@ func (controller *Controller) handleSemanticAction(ctx context.Context, action S
 			delete(controller.closeConfirmation, action.SessionID)
 			controller.mu.Unlock()
 			if interactive, ok := controller.sessionCloser.(InteractiveSessionCloser); ok {
-				decision, err = controller.closeSessionResult(ctx, action.SessionID, interactive.BeginClose)
+				decision, err = controller.beginInteractiveClose(ctx, action.SessionID, interactive)
 			} else {
 				decision, err = controller.CloseSession(ctx, action.SessionID)
 			}
@@ -504,9 +333,13 @@ func (controller *Controller) handleSemanticAction(ctx context.Context, action S
 				return SemanticActionResult{}, err
 			}
 			closed, loadErr := controller.sessions.Load(ctx, action.SessionID)
-			if loadErr == nil && closed.Status() != domain.SessionArchived {
-				card, cardErr := controller.semanticCard(ctx, action.SessionID, false)
-				return SemanticActionResult{Decision: decision, Card: &card}, cardErr
+			// BeginClose may return a scheduled result even though its async
+			// archive has already committed. Reconcile that durable outcome
+			// before choosing a projection from the controller's cached active.
+			if loadErr == nil && closed.Status() == domain.SessionArchived {
+				if err := controller.applyClosedSession(ctx, closed); err != nil {
+					return SemanticActionResult{}, err
+				}
 			}
 			controller.mu.Lock()
 			active := controller.active
@@ -555,7 +388,7 @@ func (controller *Controller) handleSemanticAction(ctx context.Context, action S
 		}
 		makeActive = true
 	case SemanticResume:
-		decision, err = controller.ResumeArchived(ctx, action.SessionID)
+		decision, err = controller.resumeOrRecover(ctx, action.SessionID)
 		makeActive = true
 	default:
 		return SemanticActionResult{}, fmt.Errorf("unsupported semantic action %q", action.Kind)
@@ -570,26 +403,7 @@ func (controller *Controller) handleSemanticAction(ctx context.Context, action S
 	return SemanticActionResult{Decision: decision, Card: &card}, nil
 }
 func isGlobalSemanticAction(kind SemanticActionKind) bool {
-	switch kind {
-	case SemanticMenuSessions, SemanticMenuNew, SemanticMenuArchive, SemanticMenuStatus, SemanticRefreshStatus, SemanticMenuNodes, SemanticSelectNode,
-		SemanticMenuSettings, SemanticMenuBack, SemanticCreateSelectCodex, SemanticCreateSelectClaude,
-		SemanticCreateWorkdir, SemanticCreateConfirm, SemanticCreateCodex, SemanticCreateClaude,
-		SemanticCreateChoice, SemanticCreatePrevious, SemanticCreateFirst, SemanticCreateNext,
-		SemanticCreateUp, SemanticCreatePick, SemanticCreateDirectoryNew, SemanticCreateBack, SemanticCreateFresh,
-		SemanticSettingsCategory, SemanticSettingsScreen, SemanticSettingsScreenCaptureLimit, SemanticSettingsAutoApproveCommands, SemanticSettingsDetail, SemanticSettingsPageLimit, SemanticSettingsContinueExisting,
-		SemanticSettingsTechnicalActions, SemanticSettingsBackgroundQuestions, SemanticSettingsBackgroundErrors,
-		SemanticSettingsArchiveRecommendations,
-		SemanticSettingsDefaultProvider, SemanticSettingsDefaultWorkdir, SemanticSettingsClearCreationDefaults,
-		SemanticSettingsLifetimeNever, SemanticSettingsLifetime6Hours, SemanticSettingsLifetime12Hours,
-		SemanticSettingsLifetime24Hours, SemanticSettingsLifetime48Hours,
-		SemanticSettingsProviderCodex, SemanticSettingsProviderClaude,
-		SemanticSettingsPreprocessing, SemanticSettingsPreprocessingInstruction, SemanticSettingsPreprocessingReset,
-		SemanticSettingsSessionNaming, SemanticSettingsStandby,
-		SemanticSettingsRenameNode,
-		SemanticAuthorizeCodex, SemanticAuthorizeClaude:
-		return true
-	}
-	return false
+	return telegramsemantic.IsGlobal(kind)
 }
 func (controller *Controller) handleGlobalSemanticAction(ctx context.Context, action SemanticAction) (SemanticActionResult, error) {
 	switch action.Kind {
@@ -694,6 +508,8 @@ func (controller *Controller) handleGlobalSemanticAction(ctx context.Context, ac
 			return SemanticActionResult{Surface: unavailableNewSessionSurface()}, nil
 		}
 		return controller.confirmCreateDraft(ctx, action.UpdateID)
+	case SemanticSettingsTechnicalOutputLines:
+		return controller.cycleTechnicalOutputLines(ctx)
 	case SemanticSettingsScreen, SemanticSettingsScreenCaptureLimit, SemanticSettingsDetail, SemanticSettingsPageLimit, SemanticSettingsContinueExisting, SemanticSettingsTechnicalActions,
 		SemanticSettingsBackgroundQuestions, SemanticSettingsBackgroundErrors,
 		SemanticSettingsArchiveRecommendations, SemanticSettingsSessionNaming, SemanticSettingsStandby,
@@ -868,7 +684,7 @@ func (controller *Controller) sessionListSemanticResult(ctx context.Context) (Se
 	rows := make([][]SemanticButton, 0, (len(sessions)+2)/3+2)
 	row := make([]SemanticButton, 0, 3)
 	for _, session := range sessions {
-		if session.ComputerID() != currentNode || !telegramsessions.Selectable(session.Status()) {
+		if session.ComputerID() != currentNode || !telegramsessions.Viewable(session.Status()) {
 			continue
 		}
 		fmt.Fprintf(&text, "\n%s %s %s", session.Provider(), labelsByID[session.ID()], session.Status())
@@ -1049,102 +865,10 @@ func (controller *Controller) discardAuthorizationMessage(ctx context.Context, u
 	return controller.status(reason + " Сообщение удалено."), nil
 }
 func validateSemanticAction(action SemanticAction) error {
-	if isGlobalSemanticAction(action.Kind) {
-		// Nodes and Back may originate on a session card. Preserve that
-		// session identity so navigation can return to the exact card.
-		allowSession := action.Kind == SemanticMenuNodes || action.Kind == SemanticMenuBack
-		if (!allowSession && action.SessionID != "") || action.Page != 0 || action.FollowLatest || action.SessionSlot != 0 {
-			return errors.New("global semantic action must not contain a session or target fields")
-		}
-		if action.Kind == SemanticCreateChoice || action.Kind == SemanticSettingsCategory || action.Kind == SemanticSelectNode {
-			if action.Choice <= 0 {
-				return errors.New("global choice must be positive")
-			}
-			if action.Kind == SemanticSettingsCategory && action.Choice > int(telegramsettingsview.CategoryProviders) {
-				return errors.New("settings category is invalid")
-			}
-		} else if action.Kind == SemanticMenuArchive {
-			if action.Choice < 0 {
-				return errors.New("archive page must not be negative")
-			}
-		} else if action.Choice != 0 {
-			return errors.New("global semantic action must not contain a choice")
-		}
-		if (action.Kind == SemanticCreateConfirm || action.Kind == SemanticCreateCodex || action.Kind == SemanticCreateClaude || action.Kind == SemanticAuthorizeCodex || action.Kind == SemanticAuthorizeClaude) && action.UpdateID <= 0 {
-			return errors.New("side-effecting global action requires the claimed Telegram update id")
-		}
-		return nil
-	}
-	if action.SessionID == "" {
-		return errors.New("semantic action session id is required")
-	}
-	switch action.Kind {
-	case SemanticNativeKey:
-		if action.Choice < 1 || action.Choice > 8 || action.Page != 0 || action.FollowLatest || action.SessionSlot != 0 {
-			return errors.New("native key target is invalid")
-		}
-	case SemanticModelMenu, SemanticEffortMenu, SemanticModelChoice, SemanticEffortChoice:
-		if action.Page != 0 || action.FollowLatest || action.SessionSlot != 0 || action.Choice < 0 || ((action.Kind == SemanticModelChoice || action.Kind == SemanticEffortChoice) && action.Choice == 0) {
-			return errors.New("model action target is invalid")
-		}
-	case SemanticPagePrevious, SemanticPageNext:
-		if action.Page < 1 || action.FollowLatest || action.SessionSlot != 0 {
-			return errors.New("semantic page action target is invalid")
-		}
-	case SemanticPageLatest:
-		if action.Page != 0 || !action.FollowLatest || action.SessionSlot != 0 {
-			return errors.New("semantic latest-page target is invalid")
-		}
-	case SemanticStop, SemanticOptions, SemanticScreen, SemanticSelect, SemanticResume:
-		if action.Page != 0 || action.FollowLatest || action.SessionSlot != 0 {
-			return errors.New("semantic non-page action must not contain target fields")
-		}
-	case SemanticClose:
-		if action.Page != 0 || action.FollowLatest || action.SessionSlot != 0 || action.Choice < 0 || action.Choice > 2 {
-			return errors.New("semantic close action target is invalid")
-		}
-	default:
-		return fmt.Errorf("unsupported semantic action %q", action.Kind)
-	}
-	return nil
+	return telegramsemantic.ValidateAction(action)
 }
 
-type Options struct {
-	QueueLimit int
-	Lifecycle  Lifecycle
-	UIState    ActiveSessionStore
-	Settings   Preferences
-	Providers  ProviderPreferences
-	Stopper    sessionruntime.TurnStopper
-	// InputPreparer is required for downloadable voice/photo content. Document
-	// preparation additionally requires AllowDocumentInput because documents
-	// can carry arbitrary bytes.
-	InputPreparer         InputPreparer
-	AllowDocumentInput    bool
-	DurableInput          DurableInputCustody
-	DurableOutput         DurableOutputCustody
-	Interactions          InteractionHandler
-	InteractionText       InteractionTextHandler
-	Authorization         AuthorizationFlow
-	Attachments           AttachmentCustody
-	RuntimeEvents         RuntimeEventObserver
-	Finals                FinalProcessor
-	AsyncCreator          AsyncSessionCreator
-	ArchivedResumer       ArchivedResumer
-	AsyncResumer          AsyncArchivedResumer
-	SessionCloser         SessionCloser
-	TurnLifecycle         TurnLifecycle
-	OutputFailures        OutputFailureRecorder
-	Recovered             []domain.Session
-	CreationEnvironment   sessioncreation.Environment
-	Quotas                telegramstatus.Reader
-	Models                ModelCatalog
-	Native                sessionruntime.NativeController
-	Preprocessor          promptpreprocess.Processor
-	SessionNamer          SessionNamer
-	PreprocessingObserver promptpreprocess.Observer
-	PreprocessingTimeout  time.Duration
-}
+type Options = telegramcontrolport.Options
 type Controller struct {
 	ownerUserID                     int64
 	ownerPrivateChatID              int64
@@ -1169,14 +893,18 @@ type Controller struct {
 	finals                          FinalProcessor
 	asyncCreator                    AsyncSessionCreator
 	archivedResumer                 ArchivedResumer
+	recoverer                       SessionRecoverer
+	recovering                      map[domain.SessionID]bool
 	asyncResumer                    AsyncArchivedResumer
 	sessionCloser                   SessionCloser
+	closeFlow                       sessioncloseflow.Flow
 	turnLifecycle                   TurnLifecycle
 	outputFailures                  OutputFailureRecorder
 	queueLimit                      int
 	rootContext                     context.Context
 	cancelRoot                      context.CancelFunc
 	mu                              sync.Mutex
+	selectionMu                     sync.Mutex
 	closed                          bool
 	closeDone                       chan struct{}
 	closeErr                        error
@@ -1231,15 +959,19 @@ type queuedTurn struct {
 	text        string
 	messageID   string
 	attachments []AttachmentRef
+	admission   *turnadmission.Admission
 }
 type sessionWorker struct {
-	controller   *Controller
-	sessionID    domain.SessionID
-	queue        chan queuedTurn
-	mu           sync.Mutex
-	activeCancel context.CancelFunc
-	activeTurn   uint64
-	stoppingTurn uint64
+	controller        *Controller
+	sessionID         domain.SessionID
+	queue             chan queuedTurn
+	mu                sync.Mutex
+	activeCancel      context.CancelFunc
+	activeTurn        uint64
+	stoppingTurn      uint64
+	completion        *turncompletion.Signal
+	completionBinding domain.ProviderBinding
+	admission         *turnadmission.Admission
 }
 
 var _ coordinator.Handler = (*Controller)(nil)
@@ -1297,8 +1029,11 @@ func New(
 		authorization:       options.Authorization,
 		asyncCreator:        options.AsyncCreator,
 		archivedResumer:     options.ArchivedResumer,
+		recoverer:           options.Recoverer,
+		recovering:          make(map[domain.SessionID]bool),
 		asyncResumer:        options.AsyncResumer,
 		sessionCloser:       options.SessionCloser,
+		closeFlow:           sessioncloseflow.Flow{Observer: options.ControllerObserver},
 		turnLifecycle:       options.TurnLifecycle,
 		attachments:         options.Attachments,
 		runtimeEvents:       options.RuntimeEvents,
@@ -1457,6 +1192,9 @@ func (controller *Controller) Handle(
 	controller.mu.Lock()
 	activeSession := controller.active
 	controller.mu.Unlock()
+	if current, loadErr := controller.sessions.Load(ctx, activeSession); loadErr == nil && current.Status() == domain.SessionAwaitingRecovery {
+		return controller.cardDecision(ctx, activeSession, "Исход предыдущего запроса не подтверждён. Доступна история; новый запрос не отправлен. Выбери восстановление или другую сессию.")
+	}
 	messageID := "telegram-update:" + strconv.FormatInt(update.ID, 10)
 	promptText := telegramturnhelpers.JoinPromptParts(update.Text, update.Caption)
 	if promptText == "" {
@@ -1762,7 +1500,7 @@ func (controller *Controller) cardDecision(ctx context.Context, sessionID domain
 			items, _ = historyStore.LoadCardHistory(ctx, sessionID)
 		}
 	}
-	items, err = controller.displayHistory(ctx, sessionID, items)
+	blocks, err := controller.displayHistory(ctx, sessionID, items)
 	if err != nil {
 		return coordinator.Decision{}, err
 	}
@@ -1770,7 +1508,7 @@ func (controller *Controller) cardDecision(ctx context.Context, sessionID domain
 	if err != nil {
 		return coordinator.Decision{}, err
 	}
-	semanticPages := paginateSemanticHistory(items, pageLimit)
+	semanticPages := cardtranscript.Paginate(blocks, pageLimit)
 	pages := make([]string, len(semanticPages))
 	for index := range semanticPages {
 		pages[index] = semanticPages[index].Content
@@ -1868,13 +1606,14 @@ func (controller *Controller) semanticCard(ctx context.Context, sessionID domain
 	followLatest := controller.followLatest[sessionID]
 	optionsExpanded := controller.optionsExpanded[sessionID]
 	closeConfirmation := controller.closeConfirmation[sessionID]
+	recoveryBusy := controller.recovering[sessionID]
 	controller.mu.Unlock()
 	if len(items) == 0 {
 		if historyStore, ok := controller.uiState.(CardHistoryStore); ok {
 			items, _ = historyStore.LoadCardHistory(ctx, sessionID)
 		}
 	}
-	items, err = controller.displayHistory(ctx, sessionID, items)
+	blocks, err := controller.displayHistory(ctx, sessionID, items)
 	if err != nil {
 		return SemanticCard{}, err
 	}
@@ -1882,7 +1621,7 @@ func (controller *Controller) semanticCard(ctx context.Context, sessionID domain
 	if err != nil {
 		return SemanticCard{}, err
 	}
-	pages := paginateSemanticHistory(items, pageLimit)
+	pages := cardtranscript.Paginate(blocks, pageLimit)
 	if page < 1 || page > len(pages) {
 		page = len(pages)
 		followLatest = true
@@ -1902,7 +1641,7 @@ func (controller *Controller) semanticCard(ctx context.Context, sessionID domain
 	selectableLabels := make([]string, 0, len(sessions))
 	background := make([]string, 0, 5)
 	for _, candidate := range sessions {
-		if candidate.ComputerID() != session.ComputerID() || !telegramsessions.Selectable(candidate.Status()) {
+		if candidate.ComputerID() != session.ComputerID() || !telegramsessions.Viewable(candidate.Status()) {
 			continue
 		}
 		selectable = append(selectable, candidate.ID())
@@ -1947,16 +1686,18 @@ func (controller *Controller) semanticCard(ctx context.Context, sessionID domain
 	card := SemanticCard{
 		SessionID: sessionID,
 		Effect:    SemanticEditSameCarrier,
-		Header:    fmt.Sprintf("%s · %s · %s · %s\n\n─────\n", labelsByID[sessionID], nodeName, session.Provider(), stateText),
+		Header:    fmt.Sprintf("%s · %s · %s · %s\n\n─────  \n", labelsByID[sessionID], nodeName, session.Provider(), stateText),
 		Footer:    footer,
 		Pages:     pages,
 		View: SemanticPageView{
 			Page: page, Pages: len(pages), Anchor: pages[page-1].Anchors[0], FollowLatest: followLatest,
 		},
 		Working: working, Archived: session.Status() == domain.SessionArchived,
+		Recovery:        session.Status() == domain.SessionAwaitingRecovery,
 		OptionsExpanded: optionsExpanded, SelectableSessionIDs: selectable,
 		SelectableSessionLabels: selectableLabels, SessionRowSizes: rowSizes, MakeActive: makeActive,
 	}
+	card.Header += telegramsessionview.RecoveryNotice(session, recoveryBusy, controller.recoverer != nil)
 	if closeConfirmation {
 		label := labelsByID[sessionID]
 		if label == "" {
@@ -1989,39 +1730,10 @@ func (controller *Controller) semanticCard(ctx context.Context, sessionID domain
 }
 
 func sessionStateText(status domain.SessionStatus) string {
-	switch status {
-	case domain.SessionStarting:
-		return "запускается"
-	case domain.SessionResuming:
-		return "возобновляется"
-	case domain.SessionReady:
-		return "готова"
-	case domain.SessionRunning:
-		return "в работе"
-	case domain.SessionStopping:
-		return "останавливается"
-	case domain.SessionClosingAfterWork, domain.SessionClosing:
-		return "архивируется"
-	case domain.SessionAwaitingRecovery:
-		return "ожидает восстановления"
-	case domain.SessionResumeFailed:
-		return "ошибка"
-	default:
-		return string(status)
-	}
+	return telegramsessionview.StateText(status)
 }
-
 func sessionStatusGlyph(status domain.SessionStatus) string {
-	switch status {
-	case domain.SessionRunning, domain.SessionStarting, domain.SessionResuming, domain.SessionStopping, domain.SessionClosingAfterWork, domain.SessionClosing:
-		return "⏳"
-	case domain.SessionResumeFailed:
-		return "❌"
-	case domain.SessionAwaitingRecovery:
-		return "❓"
-	default:
-		return "✅"
-	}
+	return telegramsessionview.StatusGlyph(status)
 }
 
 func (controller *Controller) availableSessionName(ctx context.Context, computerID domain.ComputerID, workdir string) (string, error) {
@@ -2048,57 +1760,6 @@ func (controller *Controller) cardPageLimit(ctx context.Context) (int, error) {
 	}
 }
 
-func paginateSemanticHistory(items []string, maxPages int) []SemanticContentPage {
-	if len(items) == 0 {
-		return []SemanticContentPage{{Content: "", Anchors: []string{"empty"}}}
-	}
-	const pageBytes = 3000
-	pages := make([]SemanticContentPage, 0, maxPages)
-	current := SemanticContentPage{}
-	appendCurrent := func() {
-		if current.Content == "" {
-			return
-		}
-		if len(pages) == maxPages {
-			copy(pages, pages[1:])
-			pages[len(pages)-1] = current
-		} else {
-			pages = append(pages, current)
-		}
-		current = SemanticContentPage{}
-	}
-	for index, item := range items {
-		parts := splitSemanticItem(item, pageBytes)
-		for partIndex, part := range parts {
-			separator := ""
-			if current.Content != "" {
-				separator = cardtranscript.Separator
-			}
-			if current.Content != "" && len(current.Content)+len(separator)+len(part) > pageBytes {
-				appendCurrent()
-				separator = ""
-			}
-			current.Content += separator + part
-			anchor := "history:" + strconv.Itoa(index+1)
-			if len(parts) > 1 {
-				anchor += ":part:" + strconv.Itoa(partIndex+1)
-			}
-			current.Anchors = append(current.Anchors, anchor)
-			if len(current.Content) == pageBytes {
-				appendCurrent()
-			}
-		}
-	}
-	appendCurrent()
-	if len(pages) == 0 {
-		return []SemanticContentPage{{Content: "", Anchors: []string{"empty"}}}
-	}
-	return pages
-}
-
-func splitSemanticItem(item string, maxBytes int) []string {
-	return cardtranscript.Split(item, maxBytes)
-}
 func (controller *Controller) settingsStatus(ctx context.Context) (coordinator.Decision, error) {
 	result, err := controller.settingsSemanticResult(ctx)
 	if err != nil {
@@ -2233,7 +1894,8 @@ func (controller *Controller) CloseSession(ctx context.Context, sessionID domain
 }
 
 func (controller *Controller) closeSessionResult(ctx context.Context, sessionID domain.SessionID, closeFn func(context.Context, domain.SessionID) (app.CloseSessionResult, error)) (coordinator.Decision, error) {
-	result, err := closeFn(ctx, sessionID)
+	result, err := controller.closeFlow.Close(ctx, sessionID, closeFn)
+	controller.closeFlow.Outcome(ctx, sessionID, result, err, controllertelemetry.ImmediateClose)
 	if err != nil {
 		return coordinator.Decision{}, fmt.Errorf("close session: %w", err)
 	}
@@ -2245,6 +1907,9 @@ func (controller *Controller) closeSessionResult(ctx context.Context, sessionID 
 			return coordinator.Decision{}, errors.New("scheduled close did not persist a closing state")
 		}
 		controller.replaceLive(result.Session)
+		if _, _, err := controller.selectAfterClose(ctx, result.Session); err != nil {
+			return coordinator.Decision{}, err
+		}
 		if result.Session.Status() == domain.SessionClosing {
 			return controller.status("Сессия закрывается…"), nil
 		}
@@ -2259,52 +1924,11 @@ func (controller *Controller) closeSessionResult(ctx context.Context, sessionID 
 	return controller.archiveMenu(ctx), nil
 }
 func (controller *Controller) applyClosedSession(ctx context.Context, session domain.Session) error {
-	controller.mu.Lock()
-	delete(controller.live, session.ID())
-	controller.mu.Unlock()
-	fallback, err := controller.nodes.Remove(ctx, session)
+	fallback, changed, err := controller.selectAfterClose(ctx, session)
 	if err != nil {
 		return err
 	}
-	// The node scope's recent list is intentionally bounded and may be empty
-	// after a restart. Never leave the carrier on an archived session: choose
-	// the newest still-selectable session on the same node by durable state
-	// timestamp, then persist it as the node's active session.
-	if fallback == "" {
-		if sessions, listErr := controller.sessions.List(ctx); listErr == nil {
-			var newest domain.Session
-			for _, candidate := range sessions {
-				if candidate.ID() == session.ID() || candidate.ComputerID() != session.ComputerID() || !telegramsessions.Selectable(candidate.Status()) {
-					continue
-				}
-				if newest.ID() == "" || candidate.StateChangedAt().After(newest.StateChangedAt()) {
-					newest = candidate
-				}
-			}
-			if newest.ID() != "" {
-				fallback = newest.ID()
-				_ = controller.nodes.RestoreActive(ctx, session.ComputerID(), fallback)
-			}
-		}
-	}
-	controller.mu.Lock()
-	if controller.currentNodeID() == session.ComputerID() {
-		// A stale node scope must never leave an archived/deleted session as
-		// the active target. With no fallback the session menu is intentionally
-		// empty until the optional standby session is prepared.
-		if fallback == session.ID() {
-			fallback = ""
-		}
-		controller.active = fallback
-	}
-	controller.mu.Unlock()
-	// A close of a busy session is finalized by the worker, outside the
-	// callback that showed the close confirmation.  The durable node scope is
-	// already switched by Remove above; refresh the newly selected card now so
-	// the Telegram carrier cannot remain on the archived session.  The
-	// notification is deliberately targeted at the fallback session: targeting
-	// the closed id would project an archived card and leave the old UI visible.
-	if fallback != "" {
+	if changed && fallback != "" {
 		controller.notify(context.WithoutCancel(ctx), Notification{
 			OperationID:    "session-close:" + string(session.ID()) + ":active:" + string(fallback),
 			ConversationID: controller.ownerPrivateChatID,
@@ -2733,18 +2357,15 @@ func (controller *Controller) use(
 	controller.mu.Lock()
 	_, usable := controller.usableLocked(session)
 	controller.mu.Unlock()
-	if !usable {
+	if !usable && session.Status() != domain.SessionAwaitingRecovery {
 		if session.Status() == domain.SessionReady {
 			return controller.cardDecision(ctx, sessionID, "")
 		}
 		return controller.status("Сессия " + string(sessionID) + " недоступна: " + string(session.Status()) + "."), nil
 	}
-	if err := controller.persistActive(ctx, sessionID); err != nil {
+	if err := controller.closeFlow.Selection(ctx, session, controller.nodes, func() error { return controller.persistActive(ctx, sessionID) }); err != nil {
 		return coordinator.Decision{}, fmt.Errorf("persist active Telegram session: %w", err)
 	}
-	controller.mu.Lock()
-	controller.active = sessionID
-	controller.mu.Unlock()
 	return controller.cardDecision(ctx, sessionID, "")
 }
 func (controller *Controller) listSessions(ctx context.Context) (coordinator.Decision, error) {
@@ -2954,7 +2575,7 @@ func (controller *Controller) publishProcessedPromptState(ctx context.Context, s
 }
 func acceptsDurableInput(status domain.SessionStatus) bool {
 	switch status {
-	case domain.SessionStarting, domain.SessionResuming, domain.SessionAwaitingRecovery:
+	case domain.SessionStarting, domain.SessionResuming:
 		return true
 	default:
 		return false
@@ -3017,13 +2638,15 @@ func (controller *Controller) ProcessDurableInput(
 		controller.publishProcessedPromptState(ctx, input.SessionID, input.MessageID, promptText, "🙅‍♂", preprocessingFailed)
 		return receipt, errors.New("attachment session has no exact provider binding")
 	}
-	if worker.hasActiveTurn() {
+	if terminal, ticket := worker.currentCompletion(); terminal != nil {
 		steerer, ok := controller.submitter.(sessionruntime.CurrentTurnSubmitter)
 		if !ok {
+			ticket.Finish(nil)
 			controller.publishProcessedPromptState(ctx, input.SessionID, input.MessageID, promptText, "🙅‍♂", preprocessingFailed)
 			return receipt, errors.New("provider does not support current-turn input")
 		}
 		if len(input.Attachments) != 0 {
+			ticket.Finish(nil)
 			controller.publishProcessedPromptState(ctx, input.SessionID, input.MessageID, promptText, "🙅‍♂", preprocessingFailed)
 			return receipt, errors.New("current-turn attachments require turn-scoped custody")
 		}
@@ -3031,6 +2654,9 @@ func (controller *Controller) ProcessDurableInput(
 		err := steerer.SubmitCurrentWithCallbacks(ctx, input.SessionID, sessionruntime.StructuredInput{Text: promptText}, sessionruntime.TurnCallbacks{
 			MessageID: input.MessageID,
 			OnAccepted: func(messageID string) error {
+				if !worker.sameCompletion(terminal) {
+					return errors.New("current-turn acceptance crossed a turn boundary")
+				}
 				if accepted || messageID != input.MessageID {
 					return errors.New("provider returned invalid current-turn acceptance")
 				}
@@ -3045,18 +2671,33 @@ func (controller *Controller) ProcessDurableInput(
 		receipt.Accepted = accepted
 		if err != nil || !accepted {
 			controller.publishProcessedPromptState(context.WithoutCancel(ctx), input.SessionID, input.MessageID, promptText, "🙅‍♂", preprocessingFailed)
-			return receipt, errors.Join(err, errors.New("provider did not accept current-turn input"))
+			err = errors.Join(err, errors.New("provider did not accept current-turn input"))
+			ticket.Finish(err)
+			return receipt, err
 		}
-		receipt.Completion = DurableInputSucceeded
+		receipt.Completion = DurableInputPending
+		controller.awaitInputCompletion(input, callbacks, terminal, ticket)
 		return receipt, nil
 	}
-	type turnResult struct {
-		completion DurableInputCompletion
-		accepted   bool
-		err        error
+	// A provider may be idle while its prior final is still being persisted.
+	// Do not overwrite that turn's completion signal or start from Running.
+	if err := worker.waitFinalization(ctx); err != nil {
+		return receipt, err
+	}
+	current, err := controller.sessions.Load(ctx, input.SessionID)
+	if err != nil {
+		return receipt, err
+	}
+	controller.mu.Lock()
+	session, usable = controller.usableLocked(current)
+	closed = controller.closed
+	controller.mu.Unlock()
+	if closed || !usable || controller.turnLifecycle != nil && session.Status() != domain.SessionReady {
+		return receipt, errors.New("durable input session is not ready for a new turn")
 	}
 	acceptedSignal := make(chan struct{}, 1)
-	resultSignal := make(chan turnResult, 1)
+	resultSignal := make(chan DurableInputProcessReceipt, 1)
+	admission := turnadmission.NewAdmission()
 	turnContext, cancelTurn := context.WithCancel(context.WithoutCancel(ctx))
 	stopTurnOnRootCancellation := context.AfterFunc(controller.rootContext, cancelTurn)
 	controller.durableWork.Add(1)
@@ -3066,7 +2707,7 @@ func (controller *Controller) ProcessDurableInput(
 		defer cancelTurn()
 		acceptedOnce := false
 		completion, accepted := worker.runTurnWithAcceptance(turnContext, queuedTurn{
-			text: promptText, messageID: input.MessageID, attachments: append([]AttachmentRef(nil), input.Attachments...),
+			text: promptText, messageID: input.MessageID, attachments: append([]AttachmentRef(nil), input.Attachments...), admission: admission,
 		}, func(callbackCtx context.Context) error {
 			if acceptedOnce {
 				return errors.New("provider repeated durable acceptance")
@@ -3081,29 +2722,23 @@ func (controller *Controller) ProcessDurableInput(
 			acceptedSignal <- struct{}{}
 			return nil
 		})
-		var completionErr error
+		var commitErr error
 		if accepted {
-			completionErr = turnprocessing.CompleteAttachments(context.WithoutCancel(turnContext), controller.attachments, turnprocessing.Request{
-				SessionID: input.SessionID, ProviderSessionID: binding.SessionID, MessageID: input.MessageID,
-				Input: PreparedInput{Text: promptText, Attachments: append([]AttachmentRef(nil), input.Attachments...)},
-			})
+			commitErr = controller.completeInput(callbacks, input, completion)
 		}
-		resultSignal <- turnResult{completion: completion, accepted: accepted, err: completionErr}
+		admission.FinishRoot(commitErr)
+		resultSignal <- DurableInputProcessReceipt{SessionID: input.SessionID, MessageID: input.MessageID, Sequence: input.Sequence, Completion: completion, Accepted: accepted}
 	}()
 	select {
 	case <-acceptedSignal:
 		receipt.Accepted = true
-		receipt.Completion = DurableInputSucceeded
+		receipt.Completion = DurableInputPending
 		return receipt, nil
 	case result := <-resultSignal:
-		receipt.Accepted = result.accepted
-		receipt.Completion = result.completion
-		if !result.accepted {
+		receipt = result
+		if !receipt.Accepted {
 			controller.publishProcessedPromptState(context.WithoutCancel(ctx), input.SessionID, input.MessageID, promptText, "🙅‍♂", preprocessingFailed)
 			return receipt, errors.New("provider did not durably accept input")
-		}
-		if result.err != nil {
-			return receipt, errors.New("complete attachment custody")
 		}
 		return receipt, nil
 	case <-ctx.Done():
@@ -3220,14 +2855,41 @@ func (worker *sessionWorker) runTurnWithAcceptance(
 	ctx context.Context,
 	turn queuedTurn,
 	onAccepted func(context.Context) error,
-) (DurableInputCompletion, bool) {
+) (completion DurableInputCompletion, wasAccepted bool) {
+	worker.controller.mu.Lock()
+	current := worker.controller.live[worker.sessionID]
+	worker.controller.mu.Unlock()
 	turnContext, cancelTurn := context.WithCancel(ctx)
 	worker.mu.Lock()
 	worker.activeTurn++
 	activeTurn := worker.activeTurn
 	worker.stoppingTurn = 0
 	worker.activeCancel = cancelTurn
+	terminal := turncompletion.New()
+	admission := turn.admission
+	if admission == nil {
+		admission = turnadmission.NewAdmission()
+	}
+	worker.completion = terminal
+	worker.admission = admission
+	worker.completionBinding, _ = current.Binding()
 	worker.mu.Unlock()
+	var request turnprocessing.Request
+	defer func() {
+		// Only the durable path previously owned attachment completion. Finish
+		// custody once before publishing the same outcome to main and steers.
+		if onAccepted != nil && wasAccepted {
+			if err := turnprocessing.CompleteAttachments(context.WithoutCancel(ctx), worker.controller.attachments, request); err != nil {
+				completion = DurableInputUnknown
+				worker.notifyTurnError(turn.messageID+":custody-error", "Не удалось сохранить исход вложений. Очередь приостановлена.")
+			}
+		}
+		admission.Seal()
+		terminal.Resolve(string(completion))
+		if turn.admission == nil {
+			admission.FinishRoot(nil)
+		}
+	}()
 	if worker.controller.turnLifecycle != nil {
 		running, err := worker.controller.turnLifecycle.Start(turnContext, worker.sessionID)
 		if err != nil {
@@ -3237,21 +2899,23 @@ func (worker *sessionWorker) runTurnWithAcceptance(
 			return DurableInputFailed, false
 		}
 		worker.controller.replaceLive(running)
+		current = running
 	}
 	eventIndex := 0
-	worker.controller.mu.Lock()
-	current := worker.controller.live[worker.sessionID]
-	worker.controller.mu.Unlock()
 	binding, _ := current.Binding()
+	worker.mu.Lock()
+	worker.completionBinding = binding
+	worker.mu.Unlock()
+	request = turnprocessing.Request{
+		SessionID: worker.sessionID, ProviderSessionID: binding.SessionID, MessageID: turn.messageID,
+		Input: PreparedInput{Text: turn.text, Attachments: append([]AttachmentRef(nil), turn.attachments...)},
+	}
 	var finishName func(string)
 	if worker.controller.sessionNamer != nil {
 		finishName = worker.controller.sessionNamer.Begin(worker.controller.rootContext, current, turn.messageID, turn.text)
 	}
 	execution, err := turnprocessing.Execute(turnContext, worker.controller.submitter, worker.controller.interactions, worker.controller.attachments,
-		turnprocessing.Request{
-			SessionID: worker.sessionID, ProviderSessionID: binding.SessionID, MessageID: turn.messageID,
-			Input: PreparedInput{Text: turn.text, Attachments: append([]AttachmentRef(nil), turn.attachments...)},
-		}, turnprocessing.Callbacks{
+		request, turnprocessing.Callbacks{
 			MarkInputAccepted: onAccepted,
 			OnEvent: func(event sessionruntime.TurnEvent) error {
 				eventIndex++
@@ -3260,9 +2924,29 @@ func (worker *sessionWorker) runTurnWithAcceptance(
 			},
 		})
 	result, accepted, streamedEvents := execution.Result, execution.Accepted, execution.StreamedEvents
+	if err != nil {
+		worker.controller.closeFlow.Observe(controllertelemetry.WithOperation(context.WithoutCancel(ctx), turn.messageID), controllertelemetry.Event{Stage: controllertelemetry.ProviderFailure, Reason: controllertelemetry.RuntimeFailureReason(sessionruntime.RuntimeFailureClass(err)), Outcome: controllertelemetry.Failed, SessionID: string(worker.sessionID), NodeID: string(current.ComputerID())})
+	}
 	cancelTurn()
 	worker.clearActiveTurn(activeTurn)
-	if worker.controller.turnLifecycle != nil {
+	// An accepted transport failure is not a provider terminal. Leave its
+	// running/closing recovery target intact for exact supervisor reconciliation.
+	unknown := accepted && err != nil && result.TerminalStatus != sessionruntime.StatusCompleted && result.TerminalStatus != sessionruntime.StatusFailed && result.TerminalStatus != sessionruntime.StatusInterrupted
+	terminalFailure := accepted && (result.TerminalStatus == sessionruntime.StatusFailed || result.TerminalStatus == sessionruntime.StatusInterrupted)
+	terminalStateValid := worker.controller.turnLifecycle == nil && current.Status() == domain.SessionReady
+	if err == nil && result.TerminalStatus == sessionruntime.StatusCompleted {
+		if !streamedEvents {
+			for eventIndex, event := range result.Events {
+				worker.emitTurnEvent(turn.messageID, eventIndex+1, event)
+			}
+		}
+		if result.Final != "" {
+			if persistErr := worker.controller.persistFinal(worker.controller.rootContext, worker.sessionID, turn.messageID, result.Final, binding); persistErr != nil {
+				return DurableInputUnknown, accepted
+			}
+		}
+	}
+	if worker.controller.turnLifecycle != nil && !unknown {
 		finishContext := context.WithoutCancel(worker.controller.rootContext)
 		finished, closeAfter, finishErr := worker.controller.turnLifecycle.Finish(finishContext, worker.sessionID)
 		if finishErr != nil {
@@ -3270,12 +2954,15 @@ func (worker *sessionWorker) runTurnWithAcceptance(
 			return DurableInputFailed, accepted
 		}
 		worker.controller.replaceLive(finished)
+		terminalStateValid = finished.Status() == domain.SessionReady
 		if closeAfter {
+			finishContext = worker.controller.closeFlow.CompletionContext(finishContext, worker.sessionID)
 			if worker.controller.sessionCloser == nil {
 				worker.notifyTurnError(turn.messageID+":close-missing", "Сессия ожидает закрытия, но обработчик закрытия не настроен.")
 				return DurableInputFailed, accepted
 			}
 			closed, closeErr := worker.controller.sessionCloser.Close(finishContext, worker.sessionID)
+			worker.controller.closeFlow.Outcome(finishContext, worker.sessionID, closed, closeErr, controllertelemetry.ScheduledClose)
 			if closeErr != nil {
 				worker.notifyTurnError(turn.messageID+":close-error", "Не удалось подтвердить закрытие сессии.")
 				return DurableInputFailed, accepted
@@ -3284,6 +2971,7 @@ func (worker *sessionWorker) runTurnWithAcceptance(
 				worker.notifyTurnError(turn.messageID+":close-ui-state", "Не удалось сохранить закрытие сессии.")
 				return DurableInputFailed, accepted
 			}
+			terminalStateValid = closed.Deleted || closed.Session.Status() == domain.SessionArchived
 		}
 	}
 	if finishName != nil {
@@ -3291,28 +2979,32 @@ func (worker *sessionWorker) runTurnWithAcceptance(
 	}
 	if err != nil || result.TerminalStatus != sessionruntime.StatusCompleted {
 		errorText := "Ошибка CLI: запрос не выполнен."
+		if unknown {
+			errorText = "Связь с CLI прервалась. Исход запроса пока не подтверждён."
+		}
 		if result.ErrorCode == sessionruntime.ErrorAuthenticationFailed {
 			errorText = "Ошибка авторизации Claude: требуется выполнить вход (/login)."
+		}
+		if terminalFailure && result.TerminalStatus == sessionruntime.StatusInterrupted {
+			errorText = "Запрос остановлен."
 		}
 		worker.controller.mu.Lock()
 		worker.controller.history[worker.sessionID] = append(worker.controller.history[worker.sessionID], errorText)
 		worker.controller.mu.Unlock()
 		if historyStore, ok := worker.controller.uiState.(CardHistoryStore); ok {
-			_ = historyStore.AppendCardHistory(worker.controller.rootContext, worker.sessionID, errorText)
+			if err := historyStore.AppendCardHistory(context.WithoutCancel(worker.controller.rootContext), worker.sessionID, errorText); err != nil {
+				worker.notifyTurnError(turn.messageID+":terminal-history-error", "Не удалось сохранить исход запроса. Очередь приостановлена.")
+				return DurableInputUnknown, accepted
+			}
 		}
-		worker.controller.notify(worker.controller.rootContext, Notification{
-			OperationID:    turn.messageID + ":error",
-			ConversationID: worker.controller.ownerPrivateChatID,
-			SessionID:      worker.sessionID,
-			Kind:           NotificationError,
-			Text:           errorText,
-		})
+		worker.notifyTurnError(turn.messageID+":error", errorText)
+		if unknown {
+			return DurableInputUnknown, accepted
+		}
+		if terminalFailure && terminalStateValid {
+			return DurableInputTerminalFailed, accepted
+		}
 		return DurableInputFailed, accepted
-	}
-	if !streamedEvents {
-		for eventIndex, event := range result.Events {
-			worker.emitTurnEvent(turn.messageID, eventIndex+1, event)
-		}
 	}
 	if worker.controller.finals != nil {
 		if err := worker.controller.finals.ProcessFinal(context.WithoutCancel(worker.controller.rootContext), FinalObservation{
@@ -3320,9 +3012,6 @@ func (worker *sessionWorker) runTurnWithAcceptance(
 		}); err != nil {
 			worker.notifyTurnError(turn.messageID+":final-processor-error", "Не удалось обработать итоговые артефакты.")
 		}
-	}
-	if result.Final != "" {
-		worker.controller.appendRuntimeHistoryForMessage(worker.controller.rootContext, worker.sessionID, turn.messageID, sessionruntime.TurnEvent{Kind: "final", Text: result.Final})
 	}
 	worker.controller.notify(worker.controller.rootContext, Notification{
 		OperationID:    turn.messageID + ":final",
