@@ -84,6 +84,9 @@ func (scheduler *Scheduler) Run(ctx context.Context, interval time.Duration, rep
 		if err == nil {
 			return nil
 		}
+		if termination := ctx.Err(); termination != nil && onlyTermination(err, termination) {
+			return termination
+		}
 		if report == nil {
 			return err
 		}
@@ -104,6 +107,31 @@ func (scheduler *Scheduler) Run(ctx context.Context, interval time.Duration, rep
 				return err
 			}
 		}
+	}
+}
+
+// A joined real failure must stay observable even if shutdown also interrupted
+// the sweep. errors.Is alone would hide that failure along with cancellation.
+func onlyTermination(err, termination error) bool {
+	if err == termination {
+		return true
+	}
+	switch wrapped := err.(type) {
+	case interface{ Unwrap() []error }:
+		children := wrapped.Unwrap()
+		if len(children) == 0 {
+			return false
+		}
+		for _, child := range children {
+			if !onlyTermination(child, termination) {
+				return false
+			}
+		}
+		return true
+	case interface{ Unwrap() error }:
+		return onlyTermination(wrapped.Unwrap(), termination)
+	default:
+		return false
 	}
 }
 

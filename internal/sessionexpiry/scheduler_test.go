@@ -3,6 +3,7 @@ package sessionexpiry_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"testing"
 	"time"
@@ -94,6 +95,56 @@ func TestRunSweepsImmediatelyAndStopsWithContext(t *testing.T) {
 	err := scheduler.Run(ctx, time.Hour, nil)
 	if !errors.Is(err, context.Canceled) || closed != 1 {
 		t.Fatalf("Run() = %v, closed=%d, want context cancellation after immediate sweep", err, closed)
+	}
+}
+
+func TestRunReportsRealFailuresButNotItsOwnShutdownCancellation(t *testing.T) {
+	storageErr := errors.New("storage unavailable")
+	for _, test := range []struct {
+		name       string
+		cancelList bool
+		failure    error
+		wantReport bool
+	}{
+		{"shutdown", true, context.Canceled, false},
+		{"wrapped shutdown", true, fmt.Errorf("read interrupted: %w", context.Canceled), false},
+		{"joined shutdown", true, errors.Join(context.Canceled, fmt.Errorf("close interrupted: %w", context.Canceled)), false},
+		{"real failure during shutdown", true, errors.Join(context.Canceled, storageErr), true},
+		{"unrelated failure during shutdown", true, storageErr, true},
+		{"child cancellation while active", false, context.Canceled, true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			source := sourceFunc(func(context.Context) ([]domain.Session, error) {
+				if test.cancelList {
+					cancel()
+				}
+				return nil, test.failure
+			})
+			scheduler, err := sessionexpiry.New(source, closeFunc(func(context.Context, domain.SessionID) error {
+				t.Fatal("failed list must not close sessions")
+				return nil
+			}), time.Now)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var reported []error
+			err = scheduler.Run(ctx, time.Hour, func(err error) {
+				reported = append(reported, err)
+				cancel()
+			})
+			if !errors.Is(err, context.Canceled) {
+				t.Fatalf("Run() = %v, want cancellation", err)
+			}
+			if test.wantReport {
+				if len(reported) != 1 || !errors.Is(reported[0], test.failure) {
+					t.Fatalf("real failure not preserved: %v", reported)
+				}
+			} else if len(reported) != 0 {
+				t.Fatalf("normal shutdown reported as failure: %v", reported)
+			}
+		})
 	}
 }
 

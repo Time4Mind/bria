@@ -1,6 +1,7 @@
 package safelog_test
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,7 +13,9 @@ import (
 
 func TestTimingFieldsAreAllowlistedAsBoundedNonNegativeDecimals(t *testing.T) {
 	dir := t.TempDir()
-	log, err := safelog.Open(safelog.Options{Directory: dir})
+	// The timestamp deliberately contains "1.5", an invalid timing value.
+	now := time.Date(2026, 9, 9, 6, 15, 31, 544917000, time.UTC)
+	log, err := safelog.Open(safelog.Options{Directory: dir, Now: func() time.Time { return now }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,18 +36,30 @@ func TestTimingFieldsAreAllowlistedAsBoundedNonNegativeDecimals(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for key, value := range valid {
-		if !strings.Contains(string(raw), `"`+key+`":"`+value+`"`) {
-			t.Errorf("valid timing field %s=%s was not persisted: %s", key, value, raw)
-		}
+	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	if len(lines) != 5 {
+		t.Fatalf("timing event count = %d, want 5", len(lines))
 	}
-	for _, invalid := range []string{"-1", "+1", "1.5", "9223372036854775808"} {
-		if strings.Contains(string(raw), invalid) {
-			t.Errorf("invalid timing value leaked: %q in %s", invalid, raw)
+	for i, line := range lines {
+		var event safelog.Event
+		if err := json.Unmarshal([]byte(line), &event); err != nil {
+			t.Fatalf("event %d: invalid JSON: %v", i, err)
 		}
-	}
-	if count := strings.Count(string(raw), `"queue_wait_ms":"[REDACTED]"`); count != 4 {
-		t.Fatalf("redacted invalid count = %d, want 4: %s", count, raw)
+		if event.Class != safelog.Service || event.Type != "timing.terminal" || !event.Time.Equal(now) {
+			t.Fatalf("event %d: unexpected envelope: %+v", i, event)
+		}
+		want := valid
+		if i > 0 {
+			want = map[string]string{"queue_wait_ms": "[REDACTED]"}
+		}
+		if len(event.Fields) != len(want) {
+			t.Errorf("event %d: fields = %v, want %v", i, event.Fields, want)
+		}
+		for key, value := range want {
+			if actual, ok := event.Fields[key]; !ok || actual != value {
+				t.Errorf("event %d: field %s = %q, want %q", i, key, actual, value)
+			}
+		}
 	}
 }
 

@@ -36,6 +36,8 @@ history or unrelated feature work. Existing A29 obligations remain closed.
 | A30.1 | Exact requested default, custom instruction unchanged | released | Default/blank literal RED->GREEN; exact prompt in installed/running binary; custom/settings unchanged |
 | A30.2 | Targeted/full tests and independent review | complete | Independent review approve; targeted race/full make check-full and physical binary PASS |
 | A30.R | Push/CI/install/restart and preservation postflight | complete | 1cbe166 both CI success; new version running PID83890/sole lock; artifact/getMe/logs/preservation PASS |
+| A30.C1 | Resolve final-HEAD macOS CI timing-field assertion | locally verified | Fixed timestamp RED->GREEN parsed-event oracle; invalid-field mutation still fails; full safelog race PASS |
+| A30.C2 | Resolve final-HEAD Ubuntu CI critical-log assertion | locally verified, release pending | Pure own-context cancellation no longer reported; mixed/real errors preserved; RED->GREEN/race20/original cmd race10 PASS |
 
 ## Evidence and release manifest
 
@@ -104,3 +106,57 @@ main reread flow_ready06:10:50.015 and two startup recovered receipts at
 window. Two preceding shutdown live_recovery/skipped are not failures. Journal
 outputs344=confirmed257/superseded83/unknown4, unchanged, pending finals/leases0.
 All A30 obligations complete; no custom setting or existing request was rewritten.
+
+## Final-HEAD CI continuation
+
+The completion receipt above applies to installed source1cbe166. Docs-only
+c75b8ef exposed two independent CI failures in matrix34318151300; final HEAD
+checks remain open, not proof of deployed regression. Same authorized CI-fix
+iteration, no new service/host/data targets. Main owns this todo/status and
+Ubuntu critical-log diagnosis; Carver owns only
+internal/safelog/timing_fields_test.go for macOS oracle fix, with RED/GREEN and
+negative leak-control proof. No safelog production edit in that zone. Stop at
+exact failing assertions, bounded tests/full gate/new exact-SHA CI. Any runtime
+change requires fresh artifacts and deployment; test-only changes do not.
+
+Ranked hypotheses: C1 substring search matches real timestamp31.54 rather than
+queue_wait_ms (log shows field REDACTED), vs actual redaction failure (inspect
+decoded field), vs malformed JSON (parse). C2 concurrent shutdown expiry emits
+its own error (trace context), vs real storage failure (inspect error boundary),
+vs identity retry regression (inspect expected controller event and call receipt).
+Do not weaken secret redaction or discard unexpected production errors blindly.
+
+C2 cause confirmed in source: sessionexpiry.Run reports every Sweep error,
+including wrapped context cancellation after the controller has canceled its
+maintenance context. State.List returns ctx.Err on that boundary. Main owns
+internal/sessionexpiry/scheduler.go and scheduler_test.go for a public Run
+regression: suppress only pure matching context termination when that context
+is already done; preserve mixed cancellation+real errors and cancellation from
+an active context. cmd/bria/main_test.go assertions remain unchanged. This is
+a small runtime correction, so fresh full gate/artifacts/CI/redeployment are
+required. Bernoulli independently reviews this narrow cancellation/logging fix;
+Carver's test-only safelog ownership remains separate. Release target becomes
+20260909-speech-cleanup-shutdown under the same existing releases directory and
+service; no config/data/host expansion. Installed speech-cleanup-prompt stays
+healthy until the corrected code passes all checks.
+
+C1 independent test patch reviewed by main: real JSONL decoded into events,
+exact valid map and four REDACTED values checked; unrelated timestamp cannot
+match the field assertion. Fixed collision timestamp reproduces old RED, an
+invalid field mutation reproduces sensitivity RED; both removed/fixed correctly.
+Safelog full race3.294s. C2 public Run RED3 -> GREEN; scheduler full race20
+PASS0.379s, original unmodified cmd identity-retry acceptance race10 PASS40.971s.
+Independent C2 review approves all-leaf classification; architecture PASS with
+no package-cap increase. Full gate required before new release.
+Exact follow-up manifest: internal/sessionexpiry/scheduler.go,
+internal/sessionexpiry/scheduler_test.go, internal/safelog/timing_fields_test.go,
+this todo and docs/STATUS_AND_NEXT.md. No other source/settings changes.
+
+C1/C2 full make check-full PASS 2026-09-09 06:24UTC, including race cmd63.685s,
+integration8.932s and scripts9.649s plus unchanged cached packages. Physical trio
+acceptance/check-config PASS. New version20260909-speech-cleanup-shutdown;
+bria SHA256672d930d92fe67d2bd34b3231648c4e567d1a68af59179f036a752d2ea90639b,
+adapter hashes unchanged above. Before release06:24:18UTC installed prompt
+version still healthy PID83890 with all six preservation hashes unchanged.
+One-shot helper mechanically updates the prior verified A30 targets/PID/hash,
+retains bounded asynchronous-stop and recovery guards; ignored, not published.
