@@ -32,6 +32,12 @@ func (c *Controller) RefreshRecoveryCard(ctx context.Context, id domain.SessionI
 	}
 	c.mu.Unlock()
 	telegramturnhelpers.WakeReadyInput(c.durableInput, current)
+	// Recovery refreshes may arrive periodically while a legacy/native
+	// attachment is unavailable. Do not append a new suppressed durable output
+	// for every tick; only a committed Ready transition needs a card refresh.
+	if current.Status() != domain.SessionReady {
+		return
+	}
 	c.notify(ctx, Notification{OperationID: fmt.Sprintf("recovery-state:%s:%d", id, time.Now().UnixNano()), ConversationID: c.ownerPrivateChatID, SessionID: id, Kind: NotificationPromptStatus, Text: "session-state"})
 }
 
