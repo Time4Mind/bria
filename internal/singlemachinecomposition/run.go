@@ -393,7 +393,7 @@ func runTelegramController(
 		if err != nil {
 			return fmt.Errorf("compose provider recovery reader: %w", err)
 		}
-		durableRecovery := durablecomposition.AcceptedTurnReconciler{Flow: flow, FinalRestorer: state, Histories: map[domain.Provider]sessionsupervisor.AcceptedTurnReconciler{
+		durableRecovery := durablecomposition.AcceptedTurnReconciler{Flow: flow, FinalRestorer: durablecomposition.RecoveredFinalRestorer{History: state, Output: outputCustody}, Histories: map[domain.Provider]sessionsupervisor.AcceptedTurnReconciler{
 			domain.ProviderCodex: providerHistory, domain.ProviderClaude: providerHistory,
 		}}
 		resumeReconciler = &durableRecovery

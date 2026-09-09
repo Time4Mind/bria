@@ -5,6 +5,9 @@ import "strconv"
 type Page struct {
 	Content string
 	Anchors []string
+	// FinalStart identifies the first page of a typed final, never a continuation.
+	FinalStart       bool   `json:",omitempty"`
+	FinalOperationID string `json:",omitempty"`
 }
 
 // Paginate packs rendered blocks without losing semantic final boundaries.
@@ -51,6 +54,10 @@ func Paginate(blocks []Block, maxPages int) []Page {
 				anchor += ":part:" + strconv.Itoa(partIndex+1)
 			}
 			current.Anchors = append(current.Anchors, anchor)
+			current.FinalStart = block.Kind == "final" && !block.FinalContinuation && partIndex == 0
+			if block.Kind == "final" {
+				current.FinalOperationID = block.FinalOperationID
+			}
 			if block.Kind == "final" || len(current.Content) == pageBytes {
 				appendCurrent()
 			}

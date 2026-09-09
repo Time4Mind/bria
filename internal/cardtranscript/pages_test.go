@@ -16,7 +16,7 @@ func TestFinalPageBoundariesIgnoreEmptyBlocksAndPreserveAnchors(t *testing.T) {
 		want   []cardtranscript.Page
 	}{
 		{"empty", nil, []cardtranscript.Page{{Anchors: []string{"empty"}}}},
-		{"first final", []cardtranscript.Block{{Kind: "final", Text: "done"}}, []cardtranscript.Page{{Content: "done", Anchors: []string{"history:1"}}}},
+		{"first final", []cardtranscript.Block{{Kind: "final", Text: "done"}}, []cardtranscript.Page{{Content: "done", Anchors: []string{"history:1"}, FinalStart: true}}},
 		{"empty final", []cardtranscript.Block{{Text: "before"}, {Kind: "final", Text: " \n"}, {Text: "after"}}, []cardtranscript.Page{{Content: "before" + cardtranscript.Separator + "after", Anchors: []string{"history:1", "history:2"}}}},
 		{"no text heuristic", []cardtranscript.Block{{Text: "final"}, {Text: "answer"}}, []cardtranscript.Page{{Content: "final" + cardtranscript.Separator + "answer", Anchors: []string{"history:1", "history:2"}}}},
 	} {

@@ -2,6 +2,7 @@ package telegramcontroller
 
 import (
 	"bria/internal/app"
+	"bria/internal/cardpageselection"
 	"bria/internal/cardtranscript"
 	"bria/internal/controllertelemetry"
 	"bria/internal/coordinator"
@@ -918,6 +919,7 @@ type Controller struct {
 	transcriptKinds                 map[domain.SessionID]map[int]string
 	page                            map[domain.SessionID]int
 	followLatest                    map[domain.SessionID]bool
+	pageAnchor                      map[domain.SessionID]string
 	optionsExpanded                 map[domain.SessionID]bool
 	closeConfirmation               map[domain.SessionID]bool
 	deliveryFailures                map[domain.SessionID]NotificationFailure
@@ -938,6 +940,8 @@ type Controller struct {
 	nativeCardVisible               bool
 	nativeViewContext               context.Context
 	nativeViewCancel                context.CancelFunc
+	nativeViewSession               domain.SessionID
+	finalWrites                     map[domain.SessionID]int
 	nativeObserverStarted           bool
 	nodeBackSession                 domain.SessionID
 	sessionNamer                    SessionNamer
@@ -1047,6 +1051,8 @@ func New(
 		history:             make(map[domain.SessionID][]string),
 		page:                make(map[domain.SessionID]int),
 		followLatest:        make(map[domain.SessionID]bool),
+		pageAnchor:          make(map[domain.SessionID]string),
+		finalWrites:         make(map[domain.SessionID]int),
 		optionsExpanded:     make(map[domain.SessionID]bool),
 		closeConfirmation:   make(map[domain.SessionID]bool),
 		deliveryFailures:    make(map[domain.SessionID]NotificationFailure),
@@ -1508,46 +1514,23 @@ func (controller *Controller) cardDecision(ctx context.Context, sessionID domain
 	if err != nil {
 		return coordinator.Decision{}, err
 	}
-	semanticPages := cardtranscript.Paginate(blocks, pageLimit)
-	pages := make([]string, len(semanticPages))
-	for index := range semanticPages {
-		pages[index] = semanticPages[index].Content
-	}
+	pages := cardtranscript.Paginate(blocks, pageLimit)
 	controller.mu.Lock()
-	page := controller.page[sessionID]
-	followLatest := controller.followLatest[sessionID]
-	if page < 1 || page > len(pages) {
-		page = len(pages)
-		followLatest = true
-	} else if followLatest && action == "" {
-		page = len(pages)
-	}
-	if action == "card:prev" || action == "pg:prev" {
-		page--
-		if page < 1 {
-			page = len(pages)
-		}
-	}
-	if action == "card:next" || action == "pg:next" {
-		page++
-		if page > len(pages) {
-			page = 1
-		}
-	}
-	if action == "card:latest" || action == "pg:jump" {
-		page = len(pages)
-	}
-	if action != "" {
-		followLatest = page == len(pages)
-	}
-	controller.page[sessionID] = page
-	controller.followLatest[sessionID] = followLatest
+	fallback := cardpageselection.View{Page: controller.page[sessionID], Pages: max(controller.page[sessionID], len(pages)), Anchor: controller.pageAnchor[sessionID], FollowLatest: controller.followLatest[sessionID]}
 	controller.mu.Unlock()
+	view, err := cardpageselection.Select(ctx, controller.uiState, sessionID, fallback, pages, action)
+	if err != nil {
+		return coordinator.Decision{}, err
+	}
 	if pager, ok := controller.uiState.(CardPageStore); ok {
-		if err := pager.SetCardPage(ctx, sessionID, page, len(pages), "", page == len(pages)); err != nil {
+		if err := pager.SetCardPage(ctx, sessionID, view.Page, view.Pages, view.Anchor, view.FollowLatest); err != nil {
 			return coordinator.Decision{}, err
 		}
 	}
+	controller.mu.Lock()
+	controller.page[sessionID], controller.followLatest[sessionID], controller.pageAnchor[sessionID] = view.Page, view.FollowLatest, view.Anchor
+	controller.mu.Unlock()
+	page := view.Page
 	stateText := string(session.Status())
 	if session.Status() == domain.SessionReady {
 		stateText = "готова"
@@ -1593,7 +1576,7 @@ func (controller *Controller) cardDecision(ctx context.Context, sessionID domain
 		{Text: "Ноды", CallbackData: "mm:nodes"},
 		{Text: "➕ Новая", CallbackData: "mm:new"},
 	})
-	return coordinator.Decision{Kind: coordinator.DecisionStatus, Status: coordinator.Status{ConversationID: controller.ownerPrivateChatID, Text: header + pages[page-1]}, Keyboard: &keyboard}, nil
+	return coordinator.Decision{Kind: coordinator.DecisionStatus, Status: coordinator.Status{ConversationID: controller.ownerPrivateChatID, Text: header + pages[page-1].Content}, Keyboard: &keyboard}, nil
 }
 func (controller *Controller) semanticCard(ctx context.Context, sessionID domain.SessionID, makeActive bool) (SemanticCard, error) {
 	session, err := controller.sessions.Load(ctx, sessionID)
@@ -1604,6 +1587,7 @@ func (controller *Controller) semanticCard(ctx context.Context, sessionID domain
 	items := append([]string(nil), controller.history[sessionID]...)
 	page := controller.page[sessionID]
 	followLatest := controller.followLatest[sessionID]
+	anchor := controller.pageAnchor[sessionID]
 	optionsExpanded := controller.optionsExpanded[sessionID]
 	closeConfirmation := controller.closeConfirmation[sessionID]
 	recoveryBusy := controller.recovering[sessionID]
@@ -1622,9 +1606,9 @@ func (controller *Controller) semanticCard(ctx context.Context, sessionID domain
 		return SemanticCard{}, err
 	}
 	pages := cardtranscript.Paginate(blocks, pageLimit)
-	if page < 1 || page > len(pages) {
-		page = len(pages)
-		followLatest = true
+	view, err := cardpageselection.Select(ctx, controller.uiState, sessionID, cardpageselection.View{Page: page, Pages: max(page, len(pages)), Anchor: anchor, FollowLatest: followLatest}, pages, "")
+	if err != nil {
+		return SemanticCard{}, err
 	}
 	sessions, err := controller.sessions.List(ctx)
 	if err != nil {
@@ -1689,10 +1673,8 @@ func (controller *Controller) semanticCard(ctx context.Context, sessionID domain
 		Header:    fmt.Sprintf("%s · %s · %s · %s\n\n─────  \n", labelsByID[sessionID], nodeName, session.Provider(), stateText),
 		Footer:    footer,
 		Pages:     pages,
-		View: SemanticPageView{
-			Page: page, Pages: len(pages), Anchor: pages[page-1].Anchors[0], FollowLatest: followLatest,
-		},
-		Working: working, Archived: session.Status() == domain.SessionArchived,
+		View:      SemanticPageView{Page: view.Page, Pages: view.Pages, Anchor: view.Anchor, FollowLatest: view.FollowLatest},
+		Working:   working, Archived: session.Status() == domain.SessionArchived,
 		Recovery:        session.Status() == domain.SessionAwaitingRecovery,
 		OptionsExpanded: optionsExpanded, SelectableSessionIDs: selectable,
 		SelectableSessionLabels: selectableLabels, SessionRowSizes: rowSizes, MakeActive: makeActive,
@@ -1961,14 +1943,14 @@ func (controller *Controller) DeliveryFailure(sessionID domain.SessionID) (Notif
 	return failure, ok
 }
 
-// notify makes exactly one transport attempt. A failed attempt has unknown
-// delivery state: Telegram may have accepted it even though no receipt reached
-// Bria, so retrying here could duplicate a user-visible message.
-func (controller *Controller) notify(ctx context.Context, notification Notification) {
+// notify confirms exact durable custody, or one direct transport attempt.
+// Final completion requires custody success; ambiguous enqueue is reconciled
+// by exact operation identity, never by replaying the provider request.
+func (controller *Controller) notify(ctx context.Context, notification Notification) bool {
 	if controller.durableOutput != nil {
 		if notification.OperationID == "" {
 			controller.recordNotificationFailure(ctx, notification, false)
-			return
+			return false
 		}
 		receipt, err := controller.durableOutput.AcceptOutput(ctx, OutgoingNotification{
 			OperationID: notification.OperationID, ConversationID: notification.ConversationID,
@@ -1977,13 +1959,15 @@ func (controller *Controller) notify(ctx context.Context, notification Notificat
 		if err != nil || receipt.SessionID != notification.SessionID ||
 			receipt.OperationID != notification.OperationID || receipt.Sequence == 0 {
 			controller.recordNotificationFailure(ctx, notification, false)
+			return false
 		}
-		return
+		return true
 	}
 	if err := controller.notifier.Notify(ctx, notification); err == nil {
-		return
+		return true
 	}
 	controller.recordNotificationFailure(ctx, notification, true)
+	return false
 }
 func (controller *Controller) recordNotificationFailure(ctx context.Context, notification Notification, attempted bool) {
 	failure := NotificationFailure{
@@ -3021,13 +3005,15 @@ func (worker *sessionWorker) runTurnWithAcceptance(
 			worker.notifyTurnError(turn.messageID+":final-processor-error", "Не удалось обработать итоговые артефакты.")
 		}
 	}
-	worker.controller.notify(worker.controller.rootContext, Notification{
+	if !worker.controller.notify(worker.controller.rootContext, Notification{
 		OperationID:    turn.messageID + ":final",
 		ConversationID: worker.controller.ownerPrivateChatID,
 		SessionID:      worker.sessionID,
 		Kind:           NotificationFinal,
 		Text:           result.Final,
-	})
+	}) && worker.controller.durableOutput != nil {
+		return DurableInputAwaitingRecovery, accepted
+	}
 	return DurableInputSucceeded, accepted
 }
 func (worker *sessionWorker) emitTurnEvent(messageID string, eventIndex int, event sessionruntime.TurnEvent) {

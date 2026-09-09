@@ -1081,7 +1081,7 @@ var configAllowedImports = []string{"internal/domain"}
 
 var workdirAllowedImports = []string{"internal/app", "internal/domain"}
 
-var telegramUIAllowedImports = []string{"internal/app", "internal/domain"}
+var telegramUIAllowedImports = []string{"internal/app", "internal/cardpageselection", "internal/domain"}
 
 var providerAdapterAllowedImports = []string{
 	"internal/app", "internal/domain", "internal/processgroup",
@@ -1100,6 +1100,8 @@ var sessionRuntimeAllowedImports = []string{
 }
 
 var telegramControllerAllowedImports = []string{
+	"internal/viewdeliverycontext",
+	"internal/cardpageselection",
 	"internal/finalpersist",
 	"internal/telegramsemantic",
 	"internal/telegramsessionview",
@@ -1200,6 +1202,20 @@ var packagePolicies = map[string]packagePolicy{
 		responsibility:     "restore exact accepted finals and project typed histories without I/O",
 		allowedImports:     []string{"internal/cardtranscript", "internal/telegramhistory", "internal/telegramstate"},
 		maxProductionLines: 100,
+	},
+	"internal/cardpageselection": {
+		responsibility:     "resolve persisted reading intent and shared page navigation without transport dependencies",
+		allowedImports:     []string{"internal/cardtranscript", "internal/domain"},
+		maxProductionLines: 200,
+	},
+	"internal/carddeliveryguard": {
+		responsibility:     "gate routine card delivery by visible view and durable final publication ownership",
+		allowedImports:     []string{"internal/domain", "internal/telegramstate"},
+		maxProductionLines: 100,
+	},
+	"internal/viewdeliverycontext": {
+		responsibility:     "derive cancellable delivery contexts distinguishing view replacement from service shutdown",
+		maxProductionLines: 75,
 	},
 	"internal/runtimediagnostic": {
 		responsibility:     "drain bounded adapter diagnostics into payload-free closed failure classes",
@@ -1643,7 +1659,7 @@ var packagePolicies = map[string]packagePolicy{
 	"internal/telegramcompletioncomposition": {
 		responsibility: "route durable session output into active cards or policy-controlled background notifications",
 		allowedImports: []string{
-			"internal/coordinator", "internal/domain", "internal/telegrambridge", "internal/telegramcontroller",
+			"internal/carddeliveryguard", "internal/coordinator", "internal/domain", "internal/telegrambridge", "internal/telegramcontroller",
 			"internal/settingsport", "internal/telegramflow", "internal/telegramnotify", "internal/telegramstate", "internal/telegramui",
 		},
 		maxProductionLines: 275,
@@ -1651,7 +1667,7 @@ var packagePolicies = map[string]packagePolicy{
 	"internal/telegrampromptcomposition": {
 		responsibility: "refresh active prompt and native-screen cards with visibility-scoped cancellation",
 		allowedImports: []string{
-			"internal/coordinator", "internal/domain", "internal/telegrambridge", "internal/telegramcontroller",
+			"internal/carddeliveryguard", "internal/coordinator", "internal/domain", "internal/telegrambridge", "internal/telegramcontroller",
 			"internal/telegramflow", "internal/telegramnotify", "internal/telegramstate", "internal/telegramui",
 		},
 		maxProductionLines: 225,
@@ -1884,6 +1900,8 @@ var packagePolicies = map[string]packagePolicy{
 	"internal/telegramcontroller": {
 		responsibility: "coordinate node-local session interactions, managed standby preparation, technical-history visibility, native-screen observation and paged archive",
 		allowedImports: []string{
+			"internal/viewdeliverycontext",
+			"internal/cardpageselection",
 			"internal/finalpersist",
 			"internal/telegramsemantic",
 			"internal/telegramsessionview",
@@ -1990,7 +2008,7 @@ var packagePolicies = map[string]packagePolicy{
 	},
 	"internal/telegramui": {
 		responsibility:     "define transport-neutral Telegram views and session-bound model selector actions",
-		allowedImports:     []string{"internal/app", "internal/domain"},
+		allowedImports:     []string{"internal/app", "internal/cardpageselection", "internal/domain"},
 		maxProductionLines: 800,
 	},
 	"internal/turnprocessing": {

@@ -67,6 +67,7 @@ type TerminalOutput struct {
 	Text string
 }
 type CardOutput struct {
+	FinalOperationID     string `json:",omitempty"`
 	ScreenEligible       bool
 	SessionID            domain.SessionID
 	Header               string
@@ -1379,6 +1380,7 @@ func commitCard(ctx context.Context, uiState telegramstate.Store, output CardOut
 		// history. Preserve the independently maintained timeline and its prompt
 		// keys while updating only carrier and view state.
 		if current, ok := state.Card(output.SessionID); ok {
+			want.PendingFinalOperations = current.PendingFinalsAfter(output.FinalOperationID)
 			want.EmptyCloseEligible = current.EmptyCloseEligible
 			want.History = append([]string(nil), current.History...)
 			want.HistoryKeys = append([]string(nil), current.HistoryKeys...)
@@ -1390,7 +1392,7 @@ func commitCard(ctx context.Context, uiState telegramstate.Store, output CardOut
 				want.History[index] = page.Content
 			}
 		}
-		if output.MakeActive {
+		if output.MakeActive && output.FinalOperationID == "" {
 			state.ActiveSession = output.SessionID
 		}
 		return state.SetCard(want)
@@ -1402,7 +1404,7 @@ func commitCard(ctx context.Context, uiState telegramstate.Store, output CardOut
 		return fmt.Errorf("reread confirmed Telegram card: %w", err)
 	}
 	got, ok := reread.Card(output.SessionID)
-	if !ok || !reflect.DeepEqual(got, want) || (output.MakeActive && reread.ActiveSession != output.SessionID) {
+	if !ok || !reflect.DeepEqual(got, want) || (output.MakeActive && output.FinalOperationID == "" && reread.ActiveSession != output.SessionID) {
 		return errors.New("confirmed Telegram card reread mismatch")
 	}
 	return nil

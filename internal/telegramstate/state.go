@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"unicode/utf8"
@@ -59,6 +60,23 @@ type Card struct {
 	// exact provider tool event; empty values are ordinary history. A missing
 	// legacy slice means every retained item is ordinary.
 	HistoryKinds []string `json:"history_kinds,omitempty"`
+	// PendingFinalOperations fences routine edits until each exact final has
+	// committed its new carrier. Missing legacy state does not invent custody.
+	PendingFinalOperations []string `json:"pending_final_operations,omitempty"`
+}
+
+// PendingFinalsAfter returns an independent copy excluding only the exact
+// nonempty confirmed operation. Empty or unknown operations preserve custody.
+func (c Card) PendingFinalsAfter(operationID string) []string {
+	pending := append([]string(nil), c.PendingFinalOperations...)
+	if operationID == "" {
+		return pending
+	}
+	pending = slices.DeleteFunc(pending, func(operation string) bool { return operation == operationID })
+	if len(pending) == 0 {
+		return nil // Match omitempty JSON and physical confirmed-card rereads.
+	}
+	return pending
 }
 
 // State is the complete Telegram UI state for the configured owner chat.
@@ -95,6 +113,7 @@ func (s State) Clone() State {
 		card.HistoryKeys = append([]string(nil), card.HistoryKeys...)
 		card.HistoryTurnKeys = append([]string(nil), card.HistoryTurnKeys...)
 		card.HistoryKinds = append([]string(nil), card.HistoryKinds...)
+		card.PendingFinalOperations = card.PendingFinalsAfter("")
 		clone.Cards[id] = card
 	}
 	return clone
@@ -160,6 +179,19 @@ func (s State) Validate() error {
 		if len(card.History) > 512 {
 			return fmt.Errorf("card %q history is too long", id)
 		}
+		if len(card.PendingFinalOperations) > 512 {
+			return errors.New("pending final operations exceed capacity")
+		}
+		seenFinals := make(map[string]struct{}, len(card.PendingFinalOperations))
+		for _, operation := range card.PendingFinalOperations {
+			if operation == "" || strings.TrimSpace(operation) != operation || len(operation) > maxAnchor+6 || !utf8.ValidString(operation) {
+				return errors.New("pending final operation is invalid")
+			}
+			if _, duplicate := seenFinals[operation]; duplicate {
+				return errors.New("pending final operation is duplicated")
+			}
+			seenFinals[operation] = struct{}{}
+		}
 		if len(card.HistoryKeys) != 0 && len(card.HistoryKeys) != len(card.History) {
 			return fmt.Errorf("card %q history keys are not aligned", id)
 		}
@@ -222,7 +254,11 @@ func (c Carrier) validate() error {
 }
 
 // Card returns a copy of a session card.
-func (s State) Card(id domain.SessionID) (Card, bool) { card, ok := s.Cards[id]; return card, ok }
+func (s State) Card(id domain.SessionID) (Card, bool) {
+	card, ok := s.Cards[id]
+	card.PendingFinalOperations = card.PendingFinalsAfter("")
+	return card, ok
+}
 
 // SetCard validates and replaces one card, returning an error without mutation.
 func (s *State) SetCard(card Card) error {
@@ -238,6 +274,7 @@ func (s *State) SetCard(card Card) error {
 	if s.Cards == nil {
 		s.Cards = make(map[domain.SessionID]Card)
 	}
+	card.PendingFinalOperations = card.PendingFinalsAfter("")
 	s.Cards[card.SessionID] = card
 	return nil
 }

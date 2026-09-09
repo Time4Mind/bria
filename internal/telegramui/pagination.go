@@ -26,6 +26,9 @@ type ContentBlock struct {
 type ContentPage struct {
 	Content string
 	Anchors []string
+	// FinalStart is supplied by typed transcript pagination, not inferred from text.
+	FinalStart       bool   `json:",omitempty"`
+	FinalOperationID string `json:",omitempty"`
 }
 
 type ContentPagination struct {

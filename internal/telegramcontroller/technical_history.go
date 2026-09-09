@@ -17,6 +17,8 @@ type typedTranscriptStore = telegramcontrolport.TypedTranscriptStore
 type typedTranscriptInserter = telegramcontrolport.TypedTranscriptInserter
 
 func (c *Controller) persistFinal(ctx context.Context, id domain.SessionID, messageID, text string, binding domain.ProviderBinding) error {
+	c.changeFinalWrite(id, 1)
+	defer c.changeFinalWrite(id, -1)
 	if store, ok := c.uiState.(finalpersist.Writer); ok {
 		ctx = controllertelemetry.WithOperation(ctx, messageID+":final-save")
 		retrying := false

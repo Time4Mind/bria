@@ -3,6 +3,7 @@ package cardhistory
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -19,7 +20,7 @@ var (
 )
 
 func RestoreFinal(card *telegramstate.Card, messageID, final string) error {
-	if messageID == "" || final == "" || !utf8.ValidString(final) || len(final) > 32<<10 {
+	if card == nil || messageID == "" || strings.TrimSpace(messageID) != messageID || len(messageID) > 1024 || !utf8.ValidString(messageID) || final == "" || !utf8.ValidString(final) || len(final) > 32<<10 {
 		return ErrFinalInvalid
 	}
 	var existing strings.Builder
@@ -34,6 +35,11 @@ func RestoreFinal(card *telegramstate.Card, messageID, final string) error {
 		}
 		return ErrFinalConflict
 	}
+	operation := messageID + ":final"
+	alreadyPending := slices.Contains(card.PendingFinalOperations, operation)
+	if !alreadyPending && len(card.PendingFinalOperations) >= 512 {
+		return ErrFinalCapacity
+	}
 	for text := final; text != ""; {
 		size := min(len(text), 16<<10)
 		for !utf8.ValidString(text[:size]) {
@@ -46,6 +52,9 @@ func RestoreFinal(card *telegramstate.Card, messageID, final string) error {
 			return ErrFinalAnchor
 		}
 		text = text[size:]
+	}
+	if !alreadyPending {
+		card.PendingFinalOperations = append(card.PendingFinalsAfter(""), operation)
 	}
 	return nil
 }
@@ -64,7 +73,14 @@ func Blocks(card telegramstate.Card, showTechnical bool) []cardtranscript.Block 
 		if kind == "tool" && !showTechnical {
 			continue
 		}
-		blocks = append(blocks, cardtranscript.Block{Kind: kind, Text: text})
+		continuation := kind == "final" && index > 0 && len(card.HistoryTurnKeys) > index &&
+			card.HistoryTurnKeys[index] != "" && card.HistoryTurnKeys[index] == card.HistoryTurnKeys[index-1] &&
+			len(card.HistoryKinds) > index-1 && card.HistoryKinds[index-1] == "final" && strings.TrimSpace(card.History[index-1]) != ""
+		operation := ""
+		if kind == "final" && len(card.HistoryTurnKeys) > index && card.HistoryTurnKeys[index] != "" {
+			operation = card.HistoryTurnKeys[index] + ":final"
+		}
+		blocks = append(blocks, cardtranscript.Block{Kind: kind, Text: text, FinalContinuation: continuation, FinalOperationID: operation})
 	}
 	return blocks
 }

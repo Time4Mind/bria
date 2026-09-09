@@ -13,10 +13,12 @@ import (
 const Separator = "\n\n\u00a0\n\n"
 
 type Block struct {
-	Kind         string
-	Text         string
-	CommandLines int // Zero and unsupported values select ten command lines.
-	ToolLines    int // Zero and unsupported values select ten output lines.
+	Kind              string
+	Text              string
+	FinalContinuation bool   // Exact persisted identity proves this is a later chunk of one final.
+	FinalOperationID  string `json:",omitempty"` // Exact final operation, supplied by trusted history metadata.
+	CommandLines      int    // Zero and unsupported values select ten command lines.
+	ToolLines         int    // Zero and unsupported values select ten output lines.
 }
 
 // Tool updates share an ID; a result enriches its call, never another tool.
@@ -57,7 +59,7 @@ func RenderBlocks(blocks []Block) []Block {
 		default:
 			text = NormalizeMarkdown(text)
 		}
-		result = append(result, Block{Kind: block.Kind, Text: text})
+		result = append(result, Block{Kind: block.Kind, Text: text, FinalContinuation: block.FinalContinuation, FinalOperationID: block.FinalOperationID})
 	}
 	return result
 }

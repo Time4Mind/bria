@@ -8,6 +8,7 @@ import (
 	"errors"
 	"sync"
 
+	"bria/internal/carddeliveryguard"
 	"bria/internal/coordinator"
 	"bria/internal/domain"
 	"bria/internal/settingsport"
@@ -104,14 +105,13 @@ type CompletionDeliverer struct {
 	ConversationID int64
 }
 
-func (deliverer CompletionDeliverer) Deliver(ctx context.Context, notification telegramcontroller.Notification, operationID string) (telegramnotify.DeliveryReceipt, error) {
-	receipt := telegramnotify.DeliveryReceipt{OperationID: operationID, State: telegramnotify.DeliveryUnknown}
+func (deliverer CompletionDeliverer) Deliver(ctx context.Context, notification telegramcontroller.Notification, operationID string) (receipt telegramnotify.DeliveryReceipt, err error) {
+	receipt = telegramnotify.DeliveryReceipt{OperationID: operationID, State: telegramnotify.DeliveryUnknown}
 	if deliverer.Controller == nil || deliverer.Presenter == nil || deliverer.Sender == nil || deliverer.ConversationID <= 0 ||
 		!stateNotification(notification.Kind) || notification.SessionID == "" || operationID == "" {
 		return receipt, errors.New("completion delivery identity is invalid")
 	}
 	var storedState telegramstate.State
-	var err error
 	question := notification.Kind == telegramcontroller.NotificationQuestion
 	if question {
 		var allowed bool
@@ -120,9 +120,7 @@ func (deliverer CompletionDeliverer) Deliver(ctx context.Context, notification t
 			return receipt, err
 		}
 		if !allowed {
-			receipt.State = telegramnotify.DeliveryConfirmed
-			receipt.Suppressed = true
-			return receipt, nil
+			return suppressedReceipt(operationID), nil
 		}
 	}
 	if notification.Kind == telegramcontroller.NotificationCommentary {
@@ -134,9 +132,28 @@ func (deliverer CompletionDeliverer) Deliver(ctx context.Context, notification t
 			return receipt, err
 		}
 		if storedState.ActiveSession != notification.SessionID {
-			receipt.State = telegramnotify.DeliveryConfirmed
-			receipt.Suppressed = true
-			return receipt, nil
+			return suppressedReceipt(operationID), nil
+		}
+	}
+	if notification.Kind == telegramcontroller.NotificationCommentary || question && storedState.ActiveSession == notification.SessionID {
+		scope := carddeliveryguard.Capture(ctx, deliverer.Controller, notification.SessionID)
+		defer func() {
+			if scope.Suppressed(err) {
+				receipt = suppressedReceipt(operationID)
+				err = nil
+			}
+			scope.Close()
+		}()
+		if err = scope.Context.Err(); err != nil {
+			return receipt, err
+		}
+		if !scope.Visible {
+			return suppressedReceipt(operationID), nil
+		}
+		ctx = scope.Context
+		stored, _ := storedState.Card(notification.SessionID)
+		if err = carddeliveryguard.Check(ctx, deliverer.Cards, notification.SessionID, stored.Carrier); err != nil {
+			return receipt, err
 		}
 	}
 	card, active, err := deliverer.Controller.ProjectCompletion(ctx, notification.SessionID)
@@ -145,15 +162,8 @@ func (deliverer CompletionDeliverer) Deliver(ctx context.Context, notification t
 	}
 	// A native overlay owns its screen and arrow controls. Its passive observer
 	// renders questions; don't replace it with a transcript card or duplicate alert.
-	if question && storedState.ActiveSession == notification.SessionID && !active {
-		receipt.State = telegramnotify.DeliveryConfirmed
-		receipt.Suppressed = true
-		return receipt, nil
-	}
-	if notification.Kind == telegramcontroller.NotificationCommentary && !active {
-		receipt.State = telegramnotify.DeliveryConfirmed
-		receipt.Suppressed = true
-		return receipt, nil
+	if (question && storedState.ActiveSession == notification.SessionID || notification.Kind == telegramcontroller.NotificationCommentary) && !active {
+		return suppressedReceipt(operationID), nil
 	}
 	if notification.Kind == telegramcontroller.NotificationError && !active && deliverer.Preferences != nil {
 		preferences, snapshotErr := deliverer.Preferences.Snapshot(ctx)
@@ -161,14 +171,14 @@ func (deliverer CompletionDeliverer) Deliver(ctx context.Context, notification t
 			return receipt, snapshotErr
 		}
 		if !preferences.NotifyBackgroundErrors {
-			receipt.State = telegramnotify.DeliveryConfirmed
-			receipt.Suppressed = true
-			return receipt, nil
+			return suppressedReceipt(operationID), nil
 		}
 	}
 	pages := make([]telegramui.ContentPage, len(card.Pages))
+	knownFinal := false
 	for index, page := range card.Pages {
-		pages[index] = telegramui.ContentPage{Content: page.Content, Anchors: append([]string(nil), page.Anchors...)}
+		pages[index] = telegramui.ContentPage{Content: page.Content, Anchors: append([]string(nil), page.Anchors...), FinalStart: page.FinalStart, FinalOperationID: page.FinalOperationID}
+		knownFinal = knownFinal || page.FinalOperationID != ""
 	}
 	view := telegramui.PageView{Page: card.View.Page, Pages: card.View.Pages, Anchor: card.View.Anchor, FollowLatest: card.View.FollowLatest}
 	input := telegramui.CardProjectionInput{
@@ -179,6 +189,12 @@ func (deliverer CompletionDeliverer) Deliver(ctx context.Context, notification t
 			SessionRowSizes: append([]int(nil), card.SessionRowSizes...),
 			SessionLabels:   append([]string(nil), card.SelectableSessionLabels...),
 		},
+	}
+	if notification.Kind == telegramcontroller.NotificationFinal {
+		input.TargetFinalOperationID, err = carddeliveryguard.Target(ctx, deliverer.Cards, notification.SessionID, operationID, knownFinal)
+		if err != nil {
+			return receipt, err
+		}
 	}
 	var prepared telegramflow.Prepared
 	if notification.Kind == telegramcontroller.NotificationCommentary || question && active {
@@ -199,17 +215,20 @@ func (deliverer CompletionDeliverer) Deliver(ctx context.Context, notification t
 		prepared.Status.Text = "Фоновая сессия ждёт ответа."
 	}
 	prepared.Card.Header = card.Header
+	if notification.Kind == telegramcontroller.NotificationFinal {
+		prepared.Card.FinalOperationID = operationID
+	}
 	if active {
 		prepared.Status.Text = prepared.Card.Header + prepared.Card.Projection.Card.Pages[prepared.Card.Projection.Card.View.Page-1].Content
 	}
-	if question && active {
-		if visibility, ok := deliverer.Controller.(interface{ NativeScreenVisible(domain.SessionID) bool }); ok && !visibility.NativeScreenVisible(notification.SessionID) {
-			receipt.State = telegramnotify.DeliveryConfirmed
-			receipt.Suppressed = true
-			return receipt, nil
-		}
+	carrier := telegramstate.Carrier{ChatID: prepared.Status.ConversationID, MessageID: prepared.Status.SourceMessageID}
+	if err = carddeliveryguard.CheckEdit(ctx, deliverer.Cards, card.SessionID, carrier, prepared.Edit); err != nil {
+		return receipt, err
 	}
 	if err := deliverer.Sender.Register(prepared); err != nil {
+		return receipt, err
+	}
+	if err = carddeliveryguard.CheckEdit(ctx, deliverer.Cards, card.SessionID, carrier, prepared.Edit); err != nil {
 		return receipt, err
 	}
 	var telegramReceipt coordinator.Receipt
@@ -224,6 +243,10 @@ func (deliverer CompletionDeliverer) Deliver(ctx context.Context, notification t
 	receipt.State = telegramnotify.DeliveryConfirmed
 	receipt.Parts = []telegramnotify.PartReceipt{{PartID: operationID + ":1/1", MessageID: telegramReceipt.MessageID}}
 	return receipt, nil
+}
+
+func suppressedReceipt(operationID string) telegramnotify.DeliveryReceipt {
+	return telegramnotify.DeliveryReceipt{OperationID: operationID, State: telegramnotify.DeliveryConfirmed, Suppressed: true}
 }
 
 func stateNotification(kind telegramcontroller.NotificationKind) bool {

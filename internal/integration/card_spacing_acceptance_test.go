@@ -131,7 +131,7 @@ func TestCardSpacingAcceptanceControllerToWire(t *testing.T) {
 				})
 				t.Run("completion-send", func(t *testing.T) {
 					deliverer := telegramcompletioncomposition.CompletionDeliverer{Controller: controller, Cards: uiStore, Presenter: presenter, Sender: outbound, ConversationID: 42}
-					receipt, err := deliverer.Deliver(ctx, telegramcontroller.Notification{Kind: telegramcontroller.NotificationFinal, SessionID: session.ID()}, "spacing:completion")
+					receipt, err := deliverer.Deliver(ctx, telegramcontroller.Notification{Kind: telegramcontroller.NotificationFinal, SessionID: session.ID()}, "prompt-1:final")
 					if err != nil || receipt.State != "confirmed" {
 						t.Fatalf("completion receipt = %+v, %v", receipt, err)
 					}

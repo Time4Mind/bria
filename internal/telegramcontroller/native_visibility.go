@@ -2,15 +2,17 @@ package telegramcontroller
 
 import (
 	"context"
+	"strings"
 
 	"bria/internal/coordinator"
 	"bria/internal/domain"
+	"bria/internal/viewdeliverycontext"
 )
 
 // Only user-driven projections change visibility. Background completion and
 // ProjectCurrent cannot reopen a CLI picker over menus or close confirmation.
 func (c *Controller) HandleSemanticAction(ctx context.Context, action SemanticAction) (SemanticActionResult, error) {
-	c.hideNativeVisibility()
+	c.recordNativeVisibility(SemanticActionResult{})
 	result, err := c.handleSemanticAction(ctx, action)
 	c.projectedEvent(ctx, action.SessionID, result, err)
 	if err == nil {
@@ -23,7 +25,11 @@ func (c *Controller) HandleSemanticMessage(ctx context.Context, update coordinat
 	if update.ActorID != c.ownerUserID || update.ConversationID != c.ownerPrivateChatID || update.ConversationKind != "private" {
 		return c.handleSemanticMessage(ctx, update)
 	}
-	c.hideNativeVisibility()
+	// Ordinary input can publish prompt state before returning its projection.
+	// Keep the existing view alive; slash commands may navigate away immediately.
+	if strings.HasPrefix(strings.TrimSpace(update.Text), "/") {
+		c.recordNativeVisibility(SemanticActionResult{})
+	}
 	result, err := c.handleSemanticMessage(ctx, update)
 	if err == nil {
 		c.recordNativeVisibility(result)
@@ -34,23 +40,12 @@ func (c *Controller) HandleSemanticMessage(ctx context.Context, update coordinat
 func (c *Controller) recordNativeVisibility(result SemanticActionResult) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.nativeCardVisible = result.Card != nil && !result.Card.Recovery && !result.Card.CloseConfirmation && !result.Card.DeleteConfirmation
-	if result.Surface != nil && result.Surface.NativeSessionID != "" {
-		c.nativeCardVisible = true
+	c.nativeCardVisible = result.Card != nil && !result.Card.Recovery && !result.Card.CloseConfirmation && !result.Card.DeleteConfirmation || result.Surface != nil && result.Surface.NativeSessionID != ""
+	if c.nativeCardVisible && c.nativeViewSession == c.active && c.nativeViewContext != nil && c.nativeViewContext.Err() == nil {
+		return
 	}
-	if c.nativeCardVisible {
-		c.nativeViewContext, c.nativeViewCancel = context.WithCancel(c.rootContext)
-	}
-}
-
-func (c *Controller) hideNativeVisibility() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.nativeCardVisible = false
-	if c.nativeViewCancel != nil {
-		c.nativeViewCancel()
-	}
-	c.nativeViewContext, c.nativeViewCancel = nil, nil
+	c.nativeViewContext, c.nativeViewCancel = viewdeliverycontext.Renew(c.rootContext, c.nativeViewCancel, c.nativeCardVisible)
+	c.nativeViewSession = c.active
 }
 
 // NativeDeliveryContext cancels only an observation's Telegram delivery when
@@ -58,15 +53,26 @@ func (c *Controller) hideNativeVisibility() {
 func (c *Controller) NativeDeliveryContext(parent context.Context, id domain.SessionID) (context.Context, context.CancelFunc, bool) {
 	c.mu.Lock()
 	view := c.nativeViewContext
-	visible := !c.closed && c.nativeCardVisible && c.active == id && view != nil
+	visible := !c.closed && c.nativeCardVisible && c.active == id && c.nativeViewSession == id && c.finalWrites[id] == 0 && view != nil
 	c.mu.Unlock()
-	if !visible || view.Err() != nil {
-		return parent, func() {}, false
+	if !visible {
+		if c.rootContext.Err() == nil {
+			return parent, func() {}, false
+		}
+		view = c.rootContext
 	}
-	ctx, cancel := context.WithCancel(parent)
-	stop := context.AfterFunc(view, cancel)
-	if view.Err() != nil {
-		cancel()
+	ctx, cancel := viewdeliverycontext.Capture(parent, view, c.rootContext)
+	return ctx, cancel, visible
+}
+
+// Invalidate projections during writes; durable pending state guards publication.
+func (c *Controller) changeFinalWrite(id domain.SessionID, delta int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.finalWrites[id] += delta
+	if c.active != id {
+		return
 	}
-	return ctx, func() { stop(); cancel() }, true
+	c.nativeViewContext, c.nativeViewCancel = viewdeliverycontext.Renew(c.rootContext, c.nativeViewCancel, !c.closed && c.nativeCardVisible && c.finalWrites[id] == 0)
+	c.nativeViewSession = id
 }

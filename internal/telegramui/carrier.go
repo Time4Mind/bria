@@ -1,5 +1,7 @@
 package telegramui
 
+import "errors"
+
 // CarrierEffect describes the single Telegram carrier operation requested by
 // a projection. It deliberately contains no chat or message identifiers.
 type CarrierEffect string
@@ -13,9 +15,10 @@ const (
 // CardProjectionInput contains current semantic content and keyboard context.
 // Keyboard.View is derived from View and ignored.
 type CardProjectionInput struct {
-	Pages    []ContentPage
-	View     PageView
-	Keyboard CardKeyboardInput
+	Pages                  []ContentPage
+	View                   PageView
+	Keyboard               CardKeyboardInput
+	TargetFinalOperationID string `json:",omitempty"`
 }
 
 type ProjectedCard struct {
@@ -64,10 +67,10 @@ func ProjectPageNavigation(input CardProjectionInput, action Action) (CarrierPro
 	return CarrierProjection{Effect: EffectEditSameCarrier, Card: card}, nil
 }
 
-// ProjectActiveFinal requests exactly one new carrier, opens its latest page,
+// ProjectActiveFinal requests exactly one new carrier, opens the final start,
 // and explicitly retains the previously pinned card without editing it.
 func ProjectActiveFinal(input CardProjectionInput) (CarrierProjection, error) {
-	view, err := NavigatePage(input.View, ActionPageLatest, input.Pages)
+	view, err := completionPageView(input)
 	if err != nil {
 		return CarrierProjection{}, err
 	}
@@ -89,7 +92,7 @@ func ProjectCompletion(input CardProjectionInput, active bool) (CarrierProjectio
 	if active {
 		return ProjectActiveFinal(input)
 	}
-	view, err := NavigatePage(input.View, ActionPageLatest, input.Pages)
+	view, err := completionPageView(input)
 	if err != nil {
 		return CarrierProjection{}, err
 	}
@@ -106,6 +109,34 @@ func ProjectCompletion(input CardProjectionInput, active bool) (CarrierProjectio
 			Action: ActionSelectSession,
 		},
 	}, nil
+}
+
+func completionPageView(input CardProjectionInput) (PageView, error) {
+	view, err := NavigatePage(input.View, ActionPageLatest, input.Pages)
+	if err != nil {
+		return PageView{}, err
+	}
+	if input.TargetFinalOperationID != "" {
+		matched := 0
+		for index, page := range input.Pages {
+			if page.FinalStart && page.FinalOperationID == input.TargetFinalOperationID {
+				if matched != 0 {
+					return PageView{}, errors.New("exact final start is ambiguous")
+				}
+				matched = index + 1
+			}
+		}
+		if matched == 0 {
+			return PageView{}, errors.New("exact final start is unavailable")
+		}
+		return pageViewAt(input.Pages, matched, false), nil
+	}
+	for index := len(input.Pages) - 1; index >= 0; index-- {
+		if input.Pages[index].FinalStart {
+			return pageViewAt(input.Pages, index+1, false), nil
+		}
+	}
+	return view, nil // Old projections without typed metadata retain their behavior.
 }
 
 func projectCard(input CardProjectionInput, view PageView) (ProjectedCard, error) {

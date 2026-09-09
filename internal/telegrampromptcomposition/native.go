@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"bria/internal/carddeliveryguard"
 	"bria/internal/domain"
 	"bria/internal/telegramcontroller"
 	"bria/internal/telegramflow"
@@ -53,6 +54,9 @@ func (d Deliverer) deliverNativeSurface(ctx context.Context, operation string, i
 		return receipt, err
 	}
 	if err := d.Sender.Register(prepared); err != nil {
+		return receipt, err
+	}
+	if err := carddeliveryguard.Check(ctx, d.Cards, id, carrier); err != nil {
 		return receipt, err
 	}
 	delivered, err := d.Sender.EditStatusWithKeyboard(ctx, operation, prepared.Status, prepared.Keyboard)

@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 
+	"bria/internal/carddeliveryguard"
 	"bria/internal/coordinator"
 	"bria/internal/domain"
 	"bria/internal/telegrambridge"
@@ -36,34 +37,30 @@ type Deliverer struct {
 	Sender     Sender
 }
 
-func (deliverer Deliverer) Deliver(ctx context.Context, notification telegramcontroller.Notification, operationID string) (telegramnotify.DeliveryReceipt, error) {
-	receipt := telegramnotify.DeliveryReceipt{OperationID: operationID, State: telegramnotify.DeliveryUnknown}
+func (deliverer Deliverer) Deliver(ctx context.Context, notification telegramcontroller.Notification, operationID string) (receipt telegramnotify.DeliveryReceipt, err error) {
+	receipt = telegramnotify.DeliveryReceipt{OperationID: operationID, State: telegramnotify.DeliveryUnknown}
 	if deliverer.Controller == nil || deliverer.Cards == nil || deliverer.Presenter == nil || deliverer.Sender == nil ||
 		(notification.Kind != telegramcontroller.NotificationPromptStatus && notification.Kind != telegramcontroller.NotificationNativeScreen) || notification.SessionID == "" || operationID == "" {
 		return receipt, errors.New("prompt status delivery identity is invalid")
 	}
-	if notification.Kind == telegramcontroller.NotificationNativeScreen {
-		if view, ok := deliverer.Controller.(interface {
-			NativeDeliveryContext(context.Context, domain.SessionID) (context.Context, context.CancelFunc, bool)
-		}); ok {
-			guarded, cancel, visible := view.NativeDeliveryContext(ctx, notification.SessionID)
-			defer cancel()
-			if !visible {
-				receipt.State, receipt.Suppressed = telegramnotify.DeliveryConfirmed, true
-				return receipt, nil
-			}
-			ctx = guarded
+	// Every routine edit belongs to the selected view, not merely the active
+	// session. Navigation cancels projection, scheduler waits and HTTP together.
+	scope := carddeliveryguard.Capture(ctx, deliverer.Controller, notification.SessionID)
+	defer func() {
+		if scope.Suppressed(err) {
+			receipt = telegramnotify.DeliveryReceipt{OperationID: operationID, State: telegramnotify.DeliveryConfirmed, Suppressed: true}
+			err = nil
 		}
+		scope.Close()
+	}()
+	if err = scope.Context.Err(); err != nil {
+		return receipt, err
 	}
-	// Native-screen notifications are suppressed while the user is not
-	// viewing the CLI overlay. Prompt-status notifications, including voice
-	// recognition and queue transitions, must still refresh the active card.
-	if notification.Kind == telegramcontroller.NotificationNativeScreen {
-		if visibility, ok := deliverer.Controller.(interface{ NativeScreenVisible(domain.SessionID) bool }); ok && !visibility.NativeScreenVisible(notification.SessionID) {
-			receipt.State, receipt.Suppressed = telegramnotify.DeliveryConfirmed, true
-			return receipt, nil
-		}
+	if !scope.Visible {
+		receipt.State, receipt.Suppressed = telegramnotify.DeliveryConfirmed, true
+		return receipt, nil
 	}
+	ctx = scope.Context
 	state, err := deliverer.Cards.Load(ctx)
 	if err != nil {
 		return receipt, err
@@ -72,12 +69,13 @@ func (deliverer Deliverer) Deliver(ctx context.Context, notification telegramcon
 	if !ok || stored.Carrier.ChatID <= 0 || stored.Carrier.MessageID <= 0 {
 		return receipt, errors.New("active prompt card carrier is not confirmed")
 	}
-	if state.ActiveSession != notification.SessionID {
-		receipt.State = telegramnotify.DeliveryConfirmed
-		receipt.Parts = []telegramnotify.PartReceipt{{PartID: operationID + ":stored", MessageID: stored.Carrier.MessageID}}
-		return receipt, nil
+	if err = carddeliveryguard.Check(ctx, deliverer.Cards, notification.SessionID, stored.Carrier); err != nil {
+		return receipt, err
 	}
 	result, err := deliverer.Controller.ProjectCurrent(ctx, notification.SessionID)
+	if err == nil {
+		err = carddeliveryguard.Check(ctx, deliverer.Cards, notification.SessionID, stored.Carrier)
+	}
 	if err == nil && result.Surface != nil && result.Surface.NativeSessionID == notification.SessionID {
 		if notification.Kind == telegramcontroller.NotificationNativeScreen {
 			return deliverer.deliverNativeSurface(ctx, operationID, notification.SessionID, stored.Carrier, *result.Surface)
@@ -95,7 +93,7 @@ func (deliverer Deliverer) Deliver(ctx context.Context, notification telegramcon
 	card := result.Card
 	pages := make([]telegramui.ContentPage, len(card.Pages))
 	for index, page := range card.Pages {
-		pages[index] = telegramui.ContentPage{Content: page.Content, Anchors: append([]string(nil), page.Anchors...)}
+		pages[index] = telegramui.ContentPage{Content: page.Content, Anchors: append([]string(nil), page.Anchors...), FinalStart: page.FinalStart, FinalOperationID: page.FinalOperationID}
 	}
 	view := telegramui.PageView{Page: card.View.Page, Pages: card.View.Pages, Anchor: card.View.Anchor, FollowLatest: card.View.FollowLatest}
 	prepared, err := telegramflow.PrepareCardRefresh(operationID, card.SessionID, stored.Carrier.ChatID, stored.Carrier.MessageID,
@@ -108,6 +106,9 @@ func (deliverer Deliverer) Deliver(ctx context.Context, notification telegramcon
 		return receipt, err
 	}
 	if err := deliverer.Sender.Register(prepared); err != nil {
+		return receipt, err
+	}
+	if err = carddeliveryguard.Check(ctx, deliverer.Cards, notification.SessionID, stored.Carrier); err != nil {
 		return receipt, err
 	}
 	telegramReceipt, err := deliverer.Sender.EditStatusWithKeyboard(ctx, operationID, prepared.Status, prepared.Keyboard)

@@ -3,6 +3,7 @@ package telegrampromptcomposition
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -126,18 +127,17 @@ func TestDelivererEditsActiveCardWithInCardMarker(t *testing.T) {
 	if !foundName {
 		t.Fatalf("prompt refresh lost selected session name: %+v", sender.prepared.Keyboard)
 	}
-	// A hidden native overlay must not suppress ordinary prompt/card updates.
-	// Voice recognition happens asynchronously and relies on this path to
-	// refresh the already visible session card without a menu round-trip.
+	// Voice recognition must refresh a visible transcript without requiring
+	// a menu round-trip. Hidden views are covered by real navigation tests.
 	sender = &senderStub{}
-	deliverer.Controller = visibleNativeController{controllerStub: controllerStub{card: card}, visible: false}
+	deliverer.Controller = visibleNativeController{controllerStub: controllerStub{card: card}, visible: true}
 	deliverer.Sender = sender
 	receipt, err = deliverer.Deliver(context.Background(), telegramcontroller.Notification{
 		OperationID: "prompt-status:recognized", ConversationID: 42, SessionID: sessionID,
 		Kind: telegramcontroller.NotificationPromptStatus, Text: "🙋‍♂",
 	}, "prompt-status:recognized")
 	if err != nil || receipt.State != "confirmed" || receipt.Suppressed || sender.status.SourceMessageID != 77 {
-		t.Fatalf("prompt status was suppressed while native overlay hidden: %#v %v", receipt, err)
+		t.Fatalf("prompt status was suppressed while transcript visible: %#v %v", receipt, err)
 	}
 	for _, nativeID := range []domain.SessionID{sessionID, "wrong-session", ""} {
 		sender := &senderStub{}
@@ -191,7 +191,10 @@ func TestDelivererEditsActiveCardWithInCardMarker(t *testing.T) {
 	deliverer.Sender = queued
 	finished := make(chan error, 1)
 	go func() {
-		_, err := deliverer.Deliver(context.Background(), telegramcontroller.Notification{Kind: telegramcontroller.NotificationNativeScreen, SessionID: sessionID}, "native:queued")
+		receipt, err := deliverer.Deliver(context.Background(), telegramcontroller.Notification{Kind: telegramcontroller.NotificationNativeScreen, SessionID: sessionID}, "native:queued")
+		if err == nil && (!receipt.Suppressed || receipt.State != "confirmed" || len(receipt.Parts) != 0) {
+			err = fmt.Errorf("navigation cancellation receipt=%+v", receipt)
+		}
 		finished <- err
 	}()
 	select {
@@ -202,8 +205,8 @@ func TestDelivererEditsActiveCardWithInCardMarker(t *testing.T) {
 	cancelView() // user navigation replaced the view while its edit waited
 	select {
 	case err := <-finished:
-		if err == nil {
-			t.Fatal("canceled queued edit reported delivery")
+		if err != nil {
+			t.Fatalf("canceled queued edit was not suppressed: %v", err)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("menu cancellation did not leave edit queue")

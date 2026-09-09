@@ -579,7 +579,7 @@ func TestArchitectureCheckerRegistersCurrentCompositionBoundaries(t *testing.T) 
 		{
 			path:           "internal/telegrampromptcomposition",
 			responsibility: "refresh active prompt and native-screen cards with visibility-scoped cancellation",
-			imports:        []string{"internal/coordinator", "internal/domain", "internal/telegrambridge", "internal/telegramcontroller", "internal/telegramflow", "internal/telegramnotify", "internal/telegramstate", "internal/telegramui"},
+			imports:        []string{"internal/carddeliveryguard", "internal/coordinator", "internal/domain", "internal/telegrambridge", "internal/telegramcontroller", "internal/telegramflow", "internal/telegramnotify", "internal/telegramstate", "internal/telegramui"},
 			limit:          225,
 		},
 		{

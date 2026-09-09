@@ -215,6 +215,7 @@ func TestVoiceLifecycleDividerOnEveryRichWirePhase(t *testing.T) {
 		before := wireCalls
 		operation := fmt.Sprintf("voice-lifecycle:%d", wireCalls)
 		if n.Kind == telegramcontroller.NotificationFinal {
+			operation = n.OperationID
 			if phase != 3 {
 				t.Fatalf("final skipped voice phases: %d", phase)
 			}

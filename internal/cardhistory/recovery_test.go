@@ -26,10 +26,11 @@ func TestA25RestoreFinalPreservesUnicodeTurnAndTechnicalProjection(t *testing.T)
 		t.Fatal(err)
 	}
 	want := telegramstate.Card{
-		History:         []string{"first prompt", "tool output", strings.Repeat("界", 5461), strings.Repeat("界", 539), "queued prompt"},
-		HistoryKeys:     []string{"first", "", "", "", "queued"},
-		HistoryKinds:    []string{"prompt", "tool", "final", "final", "prompt"},
-		HistoryTurnKeys: []string{"", "first", "first", "first", ""},
+		PendingFinalOperations: []string{"first:final"},
+		History:                []string{"first prompt", "tool output", strings.Repeat("界", 5461), strings.Repeat("界", 539), "queued prompt"},
+		HistoryKeys:            []string{"first", "", "", "", "queued"},
+		HistoryKinds:           []string{"prompt", "tool", "final", "final", "prompt"},
+		HistoryTurnKeys:        []string{"", "first", "first", "first", ""},
 	}
 	if !reflect.DeepEqual(card, want) {
 		t.Fatal("final was truncated, split within a rune, or misplaced relative to its turn")
