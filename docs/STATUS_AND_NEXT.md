@@ -1,18 +1,17 @@
 # Handoff: статус и следующий план
 
-> A30 выпущен: базовый промпт препроцессора заменён дословно на текст Артёма.
-> Закрытый todo и evidence - [PREPROCESS_PROMPT_TODO.md](PREPROCESS_PROMPT_TODO.md).
-> Source1cbe166 в origin/main, RED/GREEN/full gate и оба CI точного SHA PASS
-> (34317609232,34317609160). В06:10UTC 2026-09-09 установлен speech-cleanup-prompt;
-> PID83890 running/sole lock, binary literal/hashes/getMe/startup recovery OK.
-> Сессии, история, journal и настройки сохранены; custom инструкции не менялись.
-> Live preprocessing включён с пустой инструкцией: новые запросы берут новый default.
-> Проверка качества ответа живой модели не выполнялась. Docs-only c75b8ef выявил
-> два CI-сбоя: ошибку сравнения timing field с timestamp и логирование штатной
-> отмены expiry как критической ошибки. Оба локально исправлены, RED/GREEN,
-> профильные race и независимое review PASS. Тесты cmd не ослаблены.
-> A30.C1/C2 в том же todo: следующий шаг полный gate/CI и обновление на
-> speech-cleanup-shutdown, поскольку C2 изменяет runtime; targets прежние.
+> A30 и CI-fix C1/C2 выпущены: базовый промпт дословно заменён на текст Артёма;
+> исправлены ошибочный timing-test и ложная критическая ошибка штатной отмены
+> expiry. Настоящие и смешанные ошибки не скрываются, cmd assertions не ослаблены.
+> Закрытый todo/evidence - [PREPROCESS_PROMPT_TODO.md](PREPROCESS_PROMPT_TODO.md).
+> Sourcedcb09d8 в origin/main, RED/GREEN/full gate и оба CI точного SHA PASS
+> (34318996509,34318996449). В06:30UTC 2026-09-09 установлен speech-cleanup-shutdown;
+> PID18322 running/sole lock, hashes/exact prompt/getMe/startup recovery OK.
+> Сессии, история, journal и настройки сохранены, custom инструкции не менялись.
+> Preprocessing включён с пустой инструкцией: новые запросы берут новый default.
+> Ошибок в проверенном стартовом окне нет. Живая модель на качество переписывания
+> не тестировалась. Эта запись docs-only; повторный deploy того же кода не нужен.
+> Обязательства A30/C1/C2 закрыты, прежние промежуточные статусы ниже исторические.
 
 > A29 выпущен: навигация не перерисовывает меню/Ноды, последняя страница следует
 > за генерацией, финал публикуется новой карточкой с началом ответа.

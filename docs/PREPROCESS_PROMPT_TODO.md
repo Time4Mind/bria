@@ -36,8 +36,8 @@ history or unrelated feature work. Existing A29 obligations remain closed.
 | A30.1 | Exact requested default, custom instruction unchanged | released | Default/blank literal RED->GREEN; exact prompt in installed/running binary; custom/settings unchanged |
 | A30.2 | Targeted/full tests and independent review | complete | Independent review approve; targeted race/full make check-full and physical binary PASS |
 | A30.R | Push/CI/install/restart and preservation postflight | complete | 1cbe166 both CI success; new version running PID83890/sole lock; artifact/getMe/logs/preservation PASS |
-| A30.C1 | Resolve final-HEAD macOS CI timing-field assertion | locally verified | Fixed timestamp RED->GREEN parsed-event oracle; invalid-field mutation still fails; full safelog race PASS |
-| A30.C2 | Resolve final-HEAD Ubuntu CI critical-log assertion | locally verified, release pending | Pure own-context cancellation no longer reported; mixed/real errors preserved; RED->GREEN/race20/original cmd race10 PASS |
+| A30.C1 | Resolve final-HEAD macOS CI timing-field assertion | complete | dcb09d8 full gate/CI PASS; fixed-timestamp regression and invalid-field sensitivity preserved |
+| A30.C2 | Resolve final-HEAD Ubuntu CI critical-log assertion | complete | dcb09d8 full gate/CI PASS; shutdown build running PID18322, hashes/getMe/logs/preservation PASS |
 
 ## Evidence and release manifest
 
@@ -160,3 +160,26 @@ adapter hashes unchanged above. Before release06:24:18UTC installed prompt
 version still healthy PID83890 with all six preservation hashes unchanged.
 One-shot helper mechanically updates the prior verified A30 targets/PID/hash,
 retains bounded asynchronous-stop and recovery guards; ignored, not published.
+
+## C1/C2 corrected release receipt
+
+dcb09d8395678068c38406bbd81297c860557cd9 pushed/read back in origin/main;
+exact-SHA runs34318996509 Platform build matrix and34318996449 Stage 1 checks
+both success. At06:30:17UTC guarded stop began; absence/old-process exit/lock
+release confirmed06:30:22UTC. New speech-cleanup-shutdown version verified at
+06:30:41UTC (09:30:41 Europe/Moscow), running PID18322/runs1/never exited, sole
+lock18322; installed trio hashes match the corrected artifact receipt, getMe OK.
+Main confirms actual mapped executable path and exact requested default literal
+in the installed binary. Before/stopped/after six preservation hashes identical:
+5sessions ready3/archived2,5cards/history146,16completedinputs. Settings unchanged,
+new requests still use the new default. Previous prompt release retained.
+No provider replay, manual config/state writes or user message. Final receipt
+is docs-only; no further deploy of identical binaries is required.
+
+Independent postflight06:31:32UTC confirms the same preservation hashes and
+unknown4 outputs, pending finals/leases0. Main reread flow_ready06:30:22.939 and
+two startup recovery receipts06:30:24.123/06:30:24.962. No errors or damaged
+records in06:30:17-06:31:32UTC, including no session.expiry_failed. This is
+startup/preservation acceptance, not an extra live shutdown injection on the
+new version; cancellation correctness is proven by deterministic Run regression
+and unchanged real-composition cmd acceptance. All A30/C1/C2 obligations closed.
