@@ -2472,9 +2472,11 @@ func (controller *Controller) enqueueSession(ctx context.Context, updateID, sour
 	if state, decodeErr := promptpreprocess.DecodeState(payload); decodeErr == nil && state.Enabled {
 		controller.publishPreprocessingState(ctx, sessionID, messageID, input.Text, preprocessingFailed)
 	}
+	// Publish the prompt before the worker can append a fast response. Loading
+	// the prompt history afterwards could replace that response with a stale copy.
+	controller.setProcessedPromptState(ctx, sessionID, messageID, input.Text, "👨‍💻", preprocessingFailed)
 	select {
 	case worker.queue <- queuedTurn{text: input.Text, messageID: messageID}:
-		controller.setProcessedPromptState(ctx, sessionID, messageID, input.Text, "👨‍💻", preprocessingFailed)
 		return coordinator.Decision{Kind: coordinator.DecisionSkip}
 	case <-controller.rootContext.Done():
 		controller.setProcessedPromptState(ctx, sessionID, messageID, input.Text, "🙅‍♂", preprocessingFailed)

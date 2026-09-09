@@ -66,6 +66,24 @@ Preflight at 11:42 UTC: 6 sessions, 6 cards, 300 history entries, 18 journal inp
 config/settings and identities unchanged. Prepared local release helper is
 `.tmp/archive-release.rb`; reread current service/paths/hashes before using it.
 
+11:56 UTC follow-up: CI started for docs SHA0fde645. Platform matrix34347792046
+passed; Stage134347792011 passed normal tests but race detected unsynchronized
+projectionUIState test maps (SetCardPrompt versus AppendCardHistory), in
+TestTechnicalDisplayToggleFiltersOnlyTypedToolsAndKeepsHistory. Native harness
+fix passed. Galileo owns telegramcontroller test-only correction, Mencius reviews,
+parent integrates and reruns gates. Release remains pending.
+Additional acceptance failure: after mutex-only correction, ungated instant-provider
+test failed functionally 1/1000 under race. Worker received input before prompt
+publication; a subsequent history load could replace fast response projection.
+Parent made the minimal fallback enqueue ordering fix: publish processed prompt
+before queue send, retaining rejected-prompt updates for full/closed queue. No
+delay added to provider fixture. Contract clarification announced to owner/agents;
+scope remains card history correctness, no new feature or external target.
+Ungated original test now passes all1000 race repetitions; complete controller
+race passed14.362s. Independent review approved runtime reorder and synchronized
+fixture consumers. Fresh full make check-full PASS after all corrections, including
+race, architecture, packaging and executable trio. Release waits for latest CI.
+
 Native app-server probe in previous turn did not obtain a resume response and
 does not establish provider health. Live restoration has not been verified.
 Prior claim that Luna probe PID 48913/48927 belonged to this exact session was

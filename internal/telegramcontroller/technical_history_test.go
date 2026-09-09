@@ -39,6 +39,8 @@ type typedProjectionState struct {
 }
 
 func (s *typedProjectionState) LoadCardDisplayHistory(_ context.Context, id domain.SessionID, show bool) ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.reads++
 	var result []string
 	for index, text := range s.history[id] {
@@ -63,8 +65,11 @@ func TestTechnicalDisplayReadsPersistedKindsAfterControllerRestart(t *testing.T)
 			t.Fatalf("persisted kind projection show=%t: %+v %v", show, r, err)
 		}
 	}
-	if state.reads != 2 || len(state.history[ready.ID()]) != 3 {
-		t.Fatalf("typed metadata not used or source mutated: %+v", state)
+	state.mu.Lock()
+	reads, count := state.reads, len(state.history[ready.ID()])
+	state.mu.Unlock()
+	if reads != 2 || count != 3 {
+		t.Fatalf("typed metadata not used or source mutated: reads=%d history=%d", reads, count)
 	}
 }
 
@@ -110,7 +115,11 @@ func TestTechnicalDisplayToggleFiltersOnlyTypedToolsAndKeepsHistory(t *testing.T
 			t.Fatalf("legacy card did not isolate latest final: %+v %v", legacy, err)
 		}
 	}
-	if !strings.Contains(strings.Join(state.history[ready.ID()], "\n"), "EXACT_TOOL_PAYLOAD") {
+	history, err := state.LoadCardHistory(ctx, ready.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(strings.Join(history, "\n"), "EXACT_TOOL_PAYLOAD") {
 		t.Fatal("display filter erased stored tool history")
 	}
 }

@@ -89,7 +89,11 @@ func TestDurablePreprocessingPersistsCleanedTextBeforeProviderAcceptance(t *test
 	case <-time.After(time.Second):
 		t.Fatal("accepted turn did not complete")
 	}
-	if history := ui.history[ready.ID()]; len(history) < 1 || !strings.HasPrefix(history[0], "👨") || !strings.Contains(history[0], "cleaned prompt") {
+	history, err := ui.LoadCardHistory(context.Background(), ready.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(history) < 1 || !strings.HasPrefix(history[0], "👨") || !strings.Contains(history[0], "cleaned prompt") {
 		t.Fatalf("card history = %#v", history)
 	}
 }
@@ -136,7 +140,11 @@ func TestDurablePreprocessingFailurePersistsAndSendsOriginal(t *testing.T) {
 	if err != nil || !receipt.Accepted || providerText != "original request" || !preparedFailed {
 		t.Fatalf("fallback = (%#v, %v), text=%q prepared=%v", receipt, err, providerText, preparedFailed)
 	}
-	if history := ui.history[ready.ID()]; len(history) < 1 || !strings.HasPrefix(history[0], "❌ Ошибка препроцессинга\n👨") || !strings.Contains(history[0], "original request") {
+	history, err := ui.LoadCardHistory(context.Background(), ready.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(history) < 1 || !strings.HasPrefix(history[0], "❌ Ошибка препроцессинга\n👨") || !strings.Contains(history[0], "original request") {
 		t.Fatalf("card history = %#v", history)
 	}
 	if observed.SessionID != ready.ID() || observed.MessageID != "telegram-update:502" || observed.Attempts != 1 || observed.Category != "provider" || strings.Contains(observed.Error, "original request") {

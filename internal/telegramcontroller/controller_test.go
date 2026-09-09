@@ -379,6 +379,7 @@ type recordingActiveStore struct {
 }
 
 type projectionUIState struct {
+	mu      sync.Mutex
 	saved   []domain.SessionID
 	pages   []string
 	history map[domain.SessionID][]string
@@ -391,20 +392,28 @@ type projectionUISnapshot struct {
 }
 
 func (s *projectionUIState) SetActiveSession(_ context.Context, id domain.SessionID) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.saved = append(s.saved, id)
 	return nil
 }
 
 func (s *projectionUIState) SetCardPage(_ context.Context, id domain.SessionID, page, pages int, anchor string, latest bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.pages = append(s.pages, string(id)+":"+strconv.Itoa(page)+":"+strconv.Itoa(pages)+":"+anchor+":"+strconv.FormatBool(latest))
 	return nil
 }
 
 func (s *projectionUIState) LoadCardHistory(_ context.Context, id domain.SessionID) ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return append([]string(nil), s.history[id]...), nil
 }
 
 func (s *projectionUIState) AppendCardHistory(_ context.Context, id domain.SessionID, item string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.history == nil {
 		s.history = make(map[domain.SessionID][]string)
 	}
@@ -413,6 +422,8 @@ func (s *projectionUIState) AppendCardHistory(_ context.Context, id domain.Sessi
 }
 
 func (s *projectionUIState) SetCardPrompt(_ context.Context, id domain.SessionID, messageID, item string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.history == nil {
 		s.history = make(map[domain.SessionID][]string)
 	}
@@ -432,6 +443,8 @@ func (s *projectionUIState) SetCardPrompt(_ context.Context, id domain.SessionID
 }
 
 func (s *projectionUIState) snapshot() projectionUISnapshot {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return projectionUISnapshot{Saved: append([]domain.SessionID(nil), s.saved...), Pages: append([]string(nil), s.pages...)}
 }
 
