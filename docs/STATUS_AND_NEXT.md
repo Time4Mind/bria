@@ -651,6 +651,15 @@ canonical `Time4Mind/bria-legacy`; это не текущий checkout, не и�
 commit после проверки содержимого и секретного скана; публикация remote в этот
 документ не предполагается.
 
+Deployment postflight 2026-09-09: commit `817888e` was installed as
+`/Users/a-s-nosko/.local/opt/bria-v2/releases/20260909-persistent-terminal-final`
+and only `gui/501/com.time4mind.bria.v2` was restarted. New PID `4795` is
+stable (`runs=1`, `last exit code=never exited`), lock ownership is correct,
+`check-state`, config and Telegram identity probes pass, and two snapshots three
+seconds apart are identical. The pre-existing legacy session without a saved
+terminal attach manifest remains in `awaiting_recovery`; it cannot be safely
+adopted after the old binary was stopped. No session input was replayed.
+
 ## Current release checkpoint 2026-09-09
 
 После одобрения полного объёма A31+A32 реализованы persistent terminal attach/
