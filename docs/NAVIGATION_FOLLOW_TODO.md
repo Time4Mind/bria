@@ -8,6 +8,22 @@ current limits without a separate full-final mode. This resolves the prior
 retention choice and releases the already authorized normal release sequence.
 The known over-cap limitation is not fixed and must not be described as fixed.
 
+Amendment 2026-09-09 A29.R1: owner explicitly reaffirms automatic push, merge and
+deploy immediately after completed development and requests removal of rules
+requiring repeat approval. This supersedes the mistaken prior approval pause.
+Source: current user instruction; evidence: current repo, exact-SHA CI and live
+local service. Unit: one completed Bria release; times in UTC/Moscow receipts.
+Allowed changes: AGENTS release section, matching policy/test checks, this todo
+and status pointer; normal task-branch push/merge or direct main push, same exact
+local install/service targets below. No force/protection bypass, config/state/
+secrets edits, deletion, provider prompts or outgoing user messages. Acceptance:
+machine policy rejects removal of automatic release rule; full gate, exact main
+SHA CI, installed artifact/process/lock and data-preservation postflight pass.
+Coverage: main owns AGENTS/docs, integration and serialized Git/deploy; Carver
+owns scripts/check_repo.go and scripts/check_repo_test.go only (RED/GREEN policy
+coverage); Bernoulli read-only owns fresh service/lock/log/state preflight. Stop
+at bounded proof or concrete blocker; no overlapping writers or broad searches.
+
 Source: Artem's next request after A26-A28 release, 2026-09-09 Europe/Moscow.
 Current source is this repository only, baseline main 1d0d77a. No legacy reads.
 Result: background updates of a working session never overwrite Nodes, menu or
@@ -98,8 +114,9 @@ independent navigation/follow/normal-final tests. Preserve this open question.
 | A29.1 | Navigation never overwritten by stale/background session rendering | locally verified | Joined menu/Nodes/scheduler/HTTP RED->GREEN; shutdown stays Unknown, navigation suppressed; full gate PASS |
 | A29.2 | Latest page follows growth; historical page remains stable | locally verified | Public growth/pinned/reopen/shared resolver checks and full gate PASS |
 | A29.3 | In-scope final new card, old retained, new selects start | locally verified | Short/long/pinned/split/A+B/reopen/late navigation/recovery PASS; owner excludes over-cap finals |
-| A29.4 | Public RED/GREEN, race/integration/full gate and review | current code verified | Full check-full and physical trio PASS23:46UTC; retention change will require fresh checks |
-| A29.R | Exact pushed SHA CI green, installed/restarted and postflight | preparing release | Retention exclusion accepted; fresh full gate and exact-SHA release/postflight remain |
+| A29.4 | Public RED/GREEN, race/integration/full gate and review | current code verified | Fresh full check-full PASS04:46UTC 2026-09-09; physical trio and independent review PASS |
+| A29.R | Exact pushed SHA CI green, installed/restarted and postflight | release resumed | ed0fdbc pushed and both CI success; owner reaffirmed automatic release, new rules gate and deployment remain |
+| A29.R1 | Automatic push/merge/deploy requires no repeated approval | locally verified | AGENTS and machine protection updated together; removal/old-conflict RED->GREEN, full gate PASS |
 
 Initial hypotheses: (1) navigation does not invalidate pending view generation;
 (2) already waiting transport mutations survive invalidation; (3) page follow
@@ -286,6 +303,39 @@ applies automatically to the already bounded repo/service targets; no additional
 release request is needed. A26-A28 remain released and are not reopened.
 
 ## Release continuation after owner exclusion
+
+A29.R1 exact follow-up manifest: AGENTS.md, scripts/check_repo.go,
+scripts/check_repo_test.go, docs/NAVIGATION_FOLLOW_TODO.md,
+docs/STATUS_AND_NEXT.md, scripts/standing_release_policy_test.go (main-owned
+two-line migration of existing fixture to amended wording, same safeguards).
+Current branch is main and GitHub has no open PR;
+perform direct normal push, no artificial merge. Read-only instruction review
+approves automatic future releases with the same safety/target boundaries.
+Preflight 2026-09-09 05:13:25 UTC: PID90706 running/sole lock; 5 sessions
+(ready3/archived2), 5 cards/146 history, 16 completed inputs, no pending finals
+or input/output leases. Four old unknown outputs unchanged. Safe ten-minute log
+window has zero new records/errors; no broader absence-of-errors claim.
+
+A29.R1 checks: seven removal mutations RED then GREEN, two restorations of the
+old unconditional deploy-consent rule RED (errors=[]) then GREEN. Main migrated
+two wording assertions in existing standing-release fixture without removing
+their safeguards. All TestPolicyChecker race tests PASS5.619s. Fresh full
+make check-full PASS 2026-09-09 05:18 UTC (policy/architecture/plain/vet/packaging/
+race/build and executable trio); scripts race7.903s, integration race8.345s,
+unchanged packages may use Go cache. No runtime source changed after ed0fdbc.
+
+Latest receipt: source ed0fdbced60f50f0a62232c17599888789820eee is pushed to
+origin/main. Exact-SHA GitHub runs 34312399038 (Platform build matrix) and
+34312399039 (Stage 1 checks) both completed successfully. The independent helper
+review approves the healthy/quiescent path after ambiguity/recovery guards.
+No install/restart had occurred at that receipt. Owner has now explicitly
+reaffirmed automatic release and removed the repeat-confirmation requirement.
+Next authorized sequence after rules checks/push/CI: install the verified trio to the
+exact directory below, switch existing current, restart only the named local
+service, then verify hashes/version/process/lock/logs/getMe/data preservation.
+Before stopping, repeat quiescence and identity checks because the user can act
+while release checks run. Four pre-existing unknown output deliveries remain
+untouched; no resend or model replay is authorized.
 
 User: "(таких кейсов не будет в моей работе)". Current acceptance excludes final
 answers beyond the configured history page cap, keeps that setting unchanged,

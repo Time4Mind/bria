@@ -192,13 +192,51 @@ var requiredPolicyClauseLines = map[string][]string{
 		"Новые или расширенные targets требуют нового подтверждения.",
 		"Deploy вне standing authorization ниже, изменения secrets, исходящие messages и любое destructive действие, включая destructive write к уже перечисленной цели, всегда требуют нового подтверждения, даже если они заранее перечислены.",
 		"Неопределённый сетевой ответ не считать ни успехом, ни отказом: сначала безопасно перечитать состояние, затем решать вопрос о повторе.",
-		"По явному указанию Артёма от 2026-09-08 для обычной явно запрошенной разработки Bria действует standing authorization: после полного завершения задачи владелец объединения автоматически выполняет согласованный выпуск без повторного запроса подтверждения. Review, диагностика и незавершённая задача не запускают выпуск; явные ограничения пользователя local-only, no-push или запрет restart имеют приоритет.",
-		"Разрешённые targets: только текущий репозиторий Time4Mind/bria, обычный commit и push в его origin/main без force, и установка/перезапуск существующего локального сервиса gui/501/com.time4mind.bria.v2 на текущей машине. Другие клоны, репозитории, hosts и services не получают разрешения автоматически.",
+		"По явному указанию Артёма от 2026-09-08, повторно подтверждённому 2026-09-09, для обычной явно запрошенной разработки Bria действует standing authorization: после полного завершения разработки владелец объединения автоматически выполняет commit, push, merge при работе через ветку/PR и deploy с перезапуском без повторного запроса подтверждения. Review, диагностика и незавершённая задача не запускают выпуск; явные ограничения пользователя local-only, no-push или запрет restart имеют приоритет.",
+		"Для этого выпуска подтверждение уже дано. Общие требования отдельного согласования внешних writes или deploy не являются причиной снова спрашивать разрешение либо останавливаться перед push, merge или restart. Это явное указание Артёма заменяет прежние конфликтующие правила и исторические записи ожидания согласования выпуска Bria. Оно не отменяет проверки готовности и ограничения targets ниже.",
+		"Разрешённые targets: только текущий репозиторий Time4Mind/bria, обычные commit и push своей ветки задачи, её merge/PR merge в origin/main без force и обхода branch protection, и установка/перезапуск существующего локального сервиса gui/501/com.time4mind.bria.v2 на текущей машине. При работе непосредственно в main отдельный merge не нужен; нельзя создавать фиктивную ветку/PR ради этого шага. Другие клоны, репозитории, hosts и services не получают разрешения автоматически.",
 		"До записи владелец объединения read-only проверяет фактические origin, ветку, service и пути установки, показывает точный manifest изменений и артефактов, bounded последовательность и terminal criterion. Git и deploy выполняет только владелец объединения последовательно; read-only исполнители не выполняют mutations.",
-		"Последовательность выпуска: закрыть все обязательства задачи и проверить физический результат; выполнить полный make check-full; проверить и commit только согласованный manifest; выполнить обычный push в origin/main; дождаться успешных обязательных CI для точного текущего SHA; установить проверенные бинарники и перезапустить только указанный существующий Bria service. Необходимые CI-fix iterations в рамках задачи включены; изменённую версию снова полностью проверить до установки.",
+		"Последовательность выпуска: закрыть все обязательства разработки и проверить физический результат; выполнить полный make check-full; проверить и commit только согласованный manifest; выполнить обычный push. При работе через ветку/PR дождаться её обязательных checks и выполнить merge в main без обхода защиты; при работе в main выполнить push напрямую. Дождаться успешных обязательных CI для точного итогового SHA в origin/main; установить проверенные бинарники этого кода и перезапустить только указанный существующий Bria service. Необходимые CI-fix iterations в рамках задачи включены; изменённую версию снова полностью проверить до установки.",
 		"После каждого существенного write повторно read-only проверить целевое состояние. Terminal criterion: remote HEAD соответствует проверенному commit, обязательные CI этого SHA зелёные, установленные версии и hashes совпадают с проверенными артефактами, process/lock и свежие безопасные логи подтверждают healthy service, пользовательские settings/session/history/journal сохранены. Не выдавать непроверенный live-сценарий за доказанный.",
 		"Standing authorization не разрешает изменения secrets, config/state, исходящие messages, destructive операции или расширение targets; для них нужно отдельное явное разрешение. Ограничения и запросы разрешений инструментов более высокого приоритета сохраняются; этот текст их не обходит.",
 	},
+}
+
+func TestPolicyCheckerProtectsAutomaticReleaseAmendment(t *testing.T) {
+	original := readProjectPolicy(t)
+	for _, test := range []struct{ name, clause string }{
+		{"automatic release", "автоматически выполняет commit, push, merge при работе через ветку/PR и deploy с перезапуском без повторного запроса подтверждения."},
+		{"no repeat approval", "Общие требования отдельного согласования внешних writes или deploy не являются причиной снова спрашивать разрешение либо останавливаться перед push, merge или restart."},
+		{"supersedes old approval pauses", "Это явное указание Артёма заменяет прежние конфликтующие правила и исторические записи ожидания согласования выпуска Bria."},
+		{"protected merge", "её merge/PR merge в origin/main без force и обхода branch protection"},
+		{"no fake merge", "При работе непосредственно в main отдельный merge не нужен; нельзя создавать фиктивную ветку/PR ради этого шага."},
+		{"branch checks and direct main", "При работе через ветку/PR дождаться её обязательных checks и выполнить merge в main без обхода защиты; при работе в main выполнить push напрямую."},
+		{"exact final main SHA", "Дождаться успешных обязательных CI для точного итогового SHA в origin/main; установить проверенные бинарники этого кода и перезапустить только указанный существующий Bria service."},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if !strings.Contains(original, test.clause) {
+				t.Fatalf("amended AGENTS.md lacks the acceptance fixture %q", test.clause)
+			}
+			repo := makeRepo(t, strings.Replace(original, test.clause, "", 1))
+			// Require the removed rule's diagnostic, not an unrelated failure
+			// from an outdated policy clause or another repository check.
+			assertErrorContains(t, checkPolicy(repo), test.clause)
+		})
+	}
+}
+
+func TestPolicyCheckerRejectsRestoredUnconditionalDeployApproval(t *testing.T) {
+	original := readProjectPolicy(t)
+	obsolete := "Deploy, изменения secrets, исходящие messages и любое destructive действие, включая destructive write к уже перечисленной цели, всегда требуют нового подтверждения, даже если они заранее перечислены."
+	for _, test := range []struct{ name, policy string }{
+		{"alongside standing authorization", strings.Replace(original, "### Standing authorization for Bria release", obsolete+"\n\n### Standing authorization for Bria release", 1)},
+		{"appended requirement", original + "\n" + obsolete + "\n"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			repo := makeRepo(t, test.policy)
+			assertErrorContains(t, checkPolicy(repo), "conflicting unconditional deploy approval")
+		})
+	}
 }
 
 func TestPolicyCheckerEnforcesEveryMandatoryInvariant(t *testing.T) {

@@ -14,7 +14,7 @@ func TestPolicyCheckerAcceptsBoundedStandingRelease(t *testing.T) {
 func TestPolicyCheckerProtectsStandingReleaseLimits(t *testing.T) {
 	policy := readProjectPolicy(t)
 	for _, limit := range []string{
-		"после полного завершения задачи",
+		"после полного завершения разработки",
 		"Review, диагностика и незавершённая задача не запускают выпуск",
 		"local-only, no-push или запрет restart имеют приоритет",
 		"только текущий репозиторий Time4Mind/bria",
@@ -24,7 +24,7 @@ func TestPolicyCheckerProtectsStandingReleaseLimits(t *testing.T) {
 		"read-only исполнители не выполняют mutations",
 		"показывает точный manifest изменений и артефактов",
 		"выполнить полный make check-full",
-		"дождаться успешных обязательных CI для точного текущего SHA",
+		"Дождаться успешных обязательных CI для точного итогового SHA в origin/main",
 		"изменённую версию снова полностью проверить до установки",
 		"После каждого существенного write повторно read-only проверить целевое состояние",
 		"пользовательские settings/session/history/journal сохранены",
