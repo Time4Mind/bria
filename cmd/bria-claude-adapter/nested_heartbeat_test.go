@@ -65,7 +65,13 @@ func waitNestedHeartbeatIncrease(path string, prior uint64, timeout time.Duratio
 }
 
 func waitNestedHeartbeatQuiet(path string, stableFor, timeout time.Duration) error {
-	prior, err := readNestedHeartbeat(path)
+	return waitNestedHeartbeatQuietSamples(func() (uint64, error) {
+		return readNestedHeartbeat(path)
+	}, stableFor, timeout)
+}
+
+func waitNestedHeartbeatQuietSamples(read func() (uint64, error), stableFor, timeout time.Duration) error {
+	prior, err := read()
 	if err != nil {
 		return err
 	}
@@ -79,7 +85,7 @@ func waitNestedHeartbeatQuiet(path string, stableFor, timeout time.Duration) err
 		case <-deadline.C:
 			return errNestedHeartbeatActive
 		case <-ticker.C:
-			current, err := readNestedHeartbeat(path)
+			current, err := read()
 			if err != nil {
 				return err
 			}
@@ -143,37 +149,22 @@ func TestNestedHeartbeatRejectsInvalidQuiescenceEvidence(t *testing.T) {
 	}
 }
 
-func TestNestedHeartbeatLivePublisherNeverPassesQuiescence(t *testing.T) {
+func TestNestedHeartbeatAdvancingSamplesNeverPassQuiescence(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "beat")
-	if err := publishNestedHeartbeat(path, 1); err != nil {
-		t.Fatal(err)
+	var counter uint64
+	// Publish before each sample: a ticker on a different goroutine cannot
+	// guarantee progress under CI scheduling delays. Keep real atomic file IO,
+	// but make the negative control's strictly advancing evidence explicit.
+	read := func() (uint64, error) {
+		counter++
+		if err := publishNestedHeartbeat(path, counter); err != nil {
+			return 0, err
+		}
+		return readNestedHeartbeat(path)
 	}
-	stop, done := make(chan struct{}), make(chan error, 1)
-	go func() {
-		ticker := time.NewTicker(5 * time.Millisecond)
-		defer ticker.Stop()
-		for counter := uint64(2); ; counter++ {
-			select {
-			case <-stop:
-				done <- nil
-				return
-			case <-ticker.C:
-				if err := publishNestedHeartbeat(path, counter); err != nil {
-					done <- err
-					return
-				}
-			}
-		}
-	}()
-	defer func() {
-		close(stop)
-		if err := <-done; err != nil {
-			t.Error(err)
-		}
-	}()
 	started := time.Now()
-	err := waitNestedHeartbeatQuiet(path, 100*time.Millisecond, 200*time.Millisecond)
+	err := waitNestedHeartbeatQuietSamples(read, 100*time.Millisecond, 200*time.Millisecond)
 	if !errors.Is(err, errNestedHeartbeatActive) || time.Since(started) < 200*time.Millisecond {
-		t.Fatalf("live heartbeat quiescence=%v elapsed=%v; want bounded timeout, never success", err, time.Since(started))
+		t.Fatalf("advancing heartbeat quiescence=%v elapsed=%v; want bounded timeout, never success", err, time.Since(started))
 	}
 }

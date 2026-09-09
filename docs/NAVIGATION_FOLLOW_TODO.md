@@ -117,6 +117,7 @@ independent navigation/follow/normal-final tests. Preserve this open question.
 | A29.4 | Public RED/GREEN, race/integration/full gate and review | current code verified | Fresh full check-full PASS04:46UTC 2026-09-09; physical trio and independent review PASS |
 | A29.R | Exact pushed SHA CI green, installed/restarted and postflight | release resumed | ed0fdbc pushed and both CI success; owner reaffirmed automatic release, new rules gate and deployment remain |
 | A29.R1 | Automatic push/merge/deploy requires no repeated approval | locally verified | AGENTS and machine protection updated together; removal/old-conflict RED->GREEN, full gate PASS |
+| A29.R2 | Resolve exact CI failure before release | locally verified, new CI pending | Controlled scheduling delay reproduces false negative control; deterministic sample oracle, race20 and full gate PASS; no runtime edit |
 
 Initial hypotheses: (1) navigation does not invalidate pending view generation;
 (2) already waiting transport mutations survive invalidation; (3) page follow
@@ -303,6 +304,31 @@ applies automatically to the already bounded repo/service targets; no additional
 release request is needed. A26-A28 remain released and are not reopened.
 
 ## Release continuation after owner exclusion
+
+A29.R2 bounded CI-fix iteration, same authorized release contract: main owns
+cmd/bria-claude-adapter/nested_heartbeat_test.go and docs; Carver independently
+reviews the test-only diagnosis/fix. No runtime/provider changes or new targets.
+Exact failure: 8e9a017 Stage1 run34314357545, 2026-09-09 05:20:18 UTC,
+TestNestedHeartbeatLivePublisherNeverPassesQuiescence got nil at155.597154ms
+instead of200ms timeout. Matrix run34314357568 succeeded. Ranked hypotheses:
+(1) publisher scheduling pause exceeds100ms observation window - reproduce with
+controlled writer delay; (2) malformed atomic counter - predicts read error,
+not observed nil; (3) real adapter Abort - absent in this test (in-process Go
+publisher only); (4) deadline selection - nil before200ms instead matches quiet
+threshold, inspect using the controlled probe. Acceptance: reproduced false
+negative-control assumption, deterministic advancing-sample oracle and original
+actual subprocess abort test preserved, stress/race/full gate/new exact-SHA CI.
+
+Controlled 250ms publisher delay reproduced nil at100.461125ms; temporary delay
+removed. The old test assumed a live goroutine guarantees file writes every5ms,
+which is not a scheduling guarantee. Exact GitHub scheduler delay was not traced;
+the invalid test assumption is independently reproduced. Replaced only its oracle:
+each sample publishes/reads an advancing counter through actual atomic file IO;
+the path wrapper and real subprocess Abort test remain intact. Test name now
+states advancing samples, not guaranteed live-process liveness. No production
+change. Full adapter race count20 PASS12.933s; fresh make check-full PASS
+2026-09-09 05:24 UTC and all three binary hashes unchanged. Follow-up manifest:
+cmd/bria-claude-adapter/nested_heartbeat_test.go, this todo and status pointer.
 
 A29.R1 exact follow-up manifest: AGENTS.md, scripts/check_repo.go,
 scripts/check_repo_test.go, docs/NAVIGATION_FOLLOW_TODO.md,
