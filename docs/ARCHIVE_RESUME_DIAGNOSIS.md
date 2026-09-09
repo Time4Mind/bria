@@ -47,6 +47,18 @@ replayed.
   19 inputs, config/plist/settings hashes and the live terminal. There were no
   critical/error events after the new `telegram.flow_ready`. R6 is complete.
 
+### Release receipt CI follow-up
+
+The docs-only receipt commit `699bf2e` kept Platform matrix green but exposed a
+pre-existing Stage 1 race in `TestKillCurrentTreeKillsInheritedDescendantAndRejectsNonLeader`:
+the helper published a PID with non-atomic `WriteFile`, so the reader could see
+the file between truncate and write and decode an empty value. All helper PID
+receipts now use write-then-rename atomic publication. The exact failing test
+passes 100/100 under the race detector and the full `make check-full` passes.
+This follow-up changes tests and Harness only; the installed runtime and hashes
+remain the verified `0e78f26` release, so no repeat restart is required. Final
+remote CI for the follow-up commit must be read live.
+
 ## Reopened user acceptance defect: new input blocked
 
 2026-09-09 owner reports archive reopen succeeded but next request is not accepted.

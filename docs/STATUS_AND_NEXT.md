@@ -16,6 +16,11 @@
 > Старый accepted558 не replay-ился. Сохранены 6 сессий, 6 карточек,
 > 337 history, 19 inputs, settings/config; Telegram identity OK, свежих
 > critical/error после flow_ready нет. R6 закрыт; repeat deploy не нужен.
+> Docs-only receipt699bf2e выявил независимую CI-race: PID helper публиковал
+> файл неатомарно, reader иногда видел пустое значение. Test-only fix
+> публикует PID через atomic rename; race stress100/100 и полный
+> `make check-full` PASS. Runtime/hash/service не изменились, repeat restart не нужен;
+> final CI follow-up коммита проверяется live.
 
 > Повторная приёмка: владелец восстановил workdir5, новый запрос был сохранён,
 > Проверено12:27UTC: ready/gen2; новый783531603 сохранён pending, старый558 accepted.

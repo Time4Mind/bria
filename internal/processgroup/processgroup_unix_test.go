@@ -443,11 +443,7 @@ func TestProcessGroupHelper(t *testing.T) {
 		if err := grandchild.Start(); err != nil {
 			os.Exit(22)
 		}
-		if err := os.WriteFile(
-			os.Getenv(helperReadyEnvironment),
-			[]byte(strconv.Itoa(grandchild.Process.Pid)),
-			0o600,
-		); err != nil {
+		if err := publishPID(os.Getenv(helperReadyEnvironment), grandchild.Process.Pid); err != nil {
 			os.Exit(23)
 		}
 		for {
@@ -503,11 +499,7 @@ func TestProcessGroupHelper(t *testing.T) {
 		if err := grandchild.Start(); err != nil {
 			os.Exit(33)
 		}
-		if err := os.WriteFile(
-			os.Getenv(helperReadyEnvironment),
-			[]byte(strconv.Itoa(grandchild.Process.Pid)),
-			0o600,
-		); err != nil {
+		if err := publishPID(os.Getenv(helperReadyEnvironment), grandchild.Process.Pid); err != nil {
 			os.Exit(34)
 		}
 		for {
@@ -535,11 +527,7 @@ func TestProcessGroupHelper(t *testing.T) {
 		}
 		os.Exit(40)
 	case "current-tree-grandchild":
-		if err := os.WriteFile(
-			os.Getenv(helperReadyEnvironment),
-			[]byte(strconv.Itoa(os.Getpid())),
-			0o600,
-		); err != nil {
+		if err := publishPID(os.Getenv(helperReadyEnvironment), os.Getpid()); err != nil {
 			os.Exit(41)
 		}
 		for {
@@ -576,11 +564,7 @@ func TestProcessGroupHelper(t *testing.T) {
 		if err := grandchild.Start(); err != nil {
 			os.Exit(48)
 		}
-		if err := os.WriteFile(
-			os.Getenv(helperReadyEnvironment),
-			[]byte(strconv.Itoa(grandchild.Process.Pid)),
-			0o600,
-		); err != nil {
+		if err := publishPID(os.Getenv(helperReadyEnvironment), grandchild.Process.Pid); err != nil {
 			os.Exit(49)
 		}
 		return
@@ -593,6 +577,14 @@ func TestProcessGroupHelper(t *testing.T) {
 	default:
 		os.Exit(24)
 	}
+}
+
+func publishPID(path string, pid int) error {
+	temporary := path + ".tmp"
+	if err := os.WriteFile(temporary, []byte(strconv.Itoa(pid)), 0o600); err != nil {
+		return err
+	}
+	return os.Rename(temporary, path)
 }
 
 func assertDedicatedTree(t *testing.T, parentPID, grandchildPID int) {
