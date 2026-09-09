@@ -31,4 +31,12 @@ the task.
 | A33.2 | Stale/unknown outcomes cannot duplicate an Enter | verified | Typed pre-Enter stale retries only on changed hash; unknown post-Enter outcome blocks the generation |
 | A33.3 | Auto-approve OFF and foreign pickers remain untouched | verified | Focused OFF, duplicate and generic-picker regressions pass |
 | A33.4 | Approval text is literal and structurally readable in Rich Telegram wire | verified | Dedicated view bounds every literal block and the whole Rich card; transport test requires `sendRichMessage` |
-| A33.5 | Full verification and standing-authorized release | in progress | Fresh `make check-full` passes after the live receipt-handoff fix; exact follow-up CI and redeploy remain |
+| A33.5 | Full verification and standing-authorized release | verified | Runtime commit `bdbb754f3f95f1e5b92811c21ebc635c61dd6f9c`; fresh `make check-full`, Stage 1 `34373293896` and platform matrix `34373293806` passed; release `20260909-approval-handoff-final` runs as PID/sole lock holder `68122` with matching trio hashes |
+
+Live postflight preserved all 7 session IDs, 7 card IDs, 20 journal input
+identities, config, settings and plist while keeping the active tmux session.
+Without manual terminal input, the restored Codex session accepted and ran four
+visible command approvals in sequence, including the previously failing direct
+approval-to-approval handoff. Telegram Rich formatting is verified through the
+view/controller/bridge contract and wire test; the short-lived approval card
+was not manually captured in Telegram before auto-approval.
