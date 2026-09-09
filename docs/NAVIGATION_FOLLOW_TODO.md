@@ -111,13 +111,13 @@ independent navigation/follow/normal-final tests. Preserve this open question.
 
 | ID | Acceptance | Status | Evidence |
 |---|---|---|---|
-| A29.1 | Navigation never overwritten by stale/background session rendering | locally verified | Joined menu/Nodes/scheduler/HTTP RED->GREEN; shutdown stays Unknown, navigation suppressed; full gate PASS |
-| A29.2 | Latest page follows growth; historical page remains stable | locally verified | Public growth/pinned/reopen/shared resolver checks and full gate PASS |
-| A29.3 | In-scope final new card, old retained, new selects start | locally verified | Short/long/pinned/split/A+B/reopen/late navigation/recovery PASS; owner excludes over-cap finals |
+| A29.1 | Navigation never overwritten by stale/background session rendering | released, automated acceptance verified | Joined menu/Nodes/scheduler/HTTP RED->GREEN; shutdown stays Unknown, navigation suppressed; full gate/CI PASS |
+| A29.2 | Latest page follows growth; historical page remains stable | released, automated acceptance verified | Public growth/pinned/reopen/shared resolver checks and full gate/CI PASS |
+| A29.3 | In-scope final new card, old retained, new selects start | released, automated acceptance verified | Short/long/pinned/split/A+B/reopen/late navigation/recovery PASS; owner excludes over-cap finals |
 | A29.4 | Public RED/GREEN, race/integration/full gate and review | current code verified | Fresh full check-full PASS04:46UTC 2026-09-09; physical trio and independent review PASS |
-| A29.R | Exact pushed SHA CI green, installed/restarted and postflight | release resumed | ed0fdbc pushed and both CI success; owner reaffirmed automatic release, new rules gate and deployment remain |
-| A29.R1 | Automatic push/merge/deploy requires no repeated approval | locally verified | AGENTS and machine protection updated together; removal/old-conflict RED->GREEN, full gate PASS |
-| A29.R2 | Resolve exact CI failure before release | locally verified, new CI pending | Controlled scheduling delay reproduces false negative control; deterministic sample oracle, race20 and full gate PASS; no runtime edit |
+| A29.R | Exact pushed SHA CI green, installed/restarted and postflight | complete | 6eba913 both CI success; navigation-follow running PID23498/sole lock; hashes/getMe/logs/preservation PASS |
+| A29.R1 | Automatic push/merge/deploy requires no repeated approval | complete | 8e9a017 rules and machine protection published; no repeat consent, full gate and subsequent CI PASS |
+| A29.R2 | Resolve exact CI failure before release | complete | 6eba913 deterministic sample oracle, race20/full gate/CI PASS; no runtime edit |
 
 Initial hypotheses: (1) navigation does not invalidate pending view generation;
 (2) already waiting transport mutations survive invalidation; (3) page follow
@@ -304,6 +304,47 @@ applies automatically to the already bounded repo/service targets; no additional
 release request is needed. A26-A28 remain released and are not reopened.
 
 ## Release continuation after owner exclusion
+
+### Installed release receipt 2026-09-09
+
+Code is in origin/main: 6eba913f67f2269b0300cab444d1145656c78876, including
+automatic-release rules8e9a017 and A29 runtimeed0fdbc. Exact-SHA CI runs
+34314902178 (Platform build matrix) and34314902107 (Stage 1 checks) both success.
+Normal direct-main push; no PR existed and no artificial merge was created.
+
+Installed trio: 20260909-navigation-follow, hashes exactly match the physical
+artifact receipt above. At05:33:46UTC (08:33:46 Europe/Moscow), service
+gui/501/com.time4mind.bria.v2 is running PID23498/runs1/never exited, sole lock
+holder23498. At05:34:02UTC lsof confirms that process maps the new release's
+actual executable, not merely the current symlink. Telegram getMe succeeds.
+Snapshot before stop05:32:03UTC, after stop05:32:18UTC, and after start05:33:46UTC
+has identical session identities, cards, journal, settings, config and plist
+hashes. Counts5 sessions (ready3/archived2), 5 cards/146 history, 16 completed
+inputs retained. No manual data/config edits, provider replay or user message.
+
+One-off install helper stopped early because launchctl bootout completion was
+asynchronous: its immediate read still saw a retiring service. Subsequent
+read-only probe confirmed service absent, PID90706 gone, lock free and data
+unchanged. Main did not repeat stop: the guarded finish-stopped helper verified
+source/artifact/config/plist identities and quiescence, switched current, then
+bootstrapped the existing plist. Both helpers are ignored local one-shot files,
+not deployed product code. Do not reuse their stale PID/target assumptions.
+Future stop orchestration must allow bounded asynchronous removal before
+classifying a readback as failure. Previous release directory retained.
+
+User-facing behavior has real-consumer/injected-HTTP automated acceptance, not
+manual visual Telegram acceptance. Over-cap finals remain explicitly excluded,
+not fixed. A docs-only follow-up records this receipt; no redundant deployment
+for unchanged runtime binaries is needed.
+
+Independent postflight05:34:34UTC confirms same PID/sole lock and all six
+preservation hashes; journal outputs344=confirmed257/superseded83/unknown4,
+no pending finals or leases. Log window05:32:03-05:34:34UTC has zero errors or
+damaged records. Main reread safe events: flow_ready05:33:27.332 and two startup
+recovered receipts05:33:28.547/05:33:29.441. The earlier two skipped receipts
+belong to shutdown live recovery, not failures. No unfinished A29 obligation
+remains within the owner's amended scope. Later unrelated backlog is not
+authorized automatically by this receipt.
 
 A29.R2 bounded CI-fix iteration, same authorized release contract: main owns
 cmd/bria-claude-adapter/nested_heartbeat_test.go and docs; Carver independently
