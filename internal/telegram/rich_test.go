@@ -14,6 +14,14 @@ func TestNormalizeRichMarkdownCompactsTable(t *testing.T) {
 	}
 }
 
+func TestNormalizeRichMarkdownConvertsShellFenceForRichClients(t *testing.T) {
+	input := "<details><summary>✓ exec</summary>\n\n```shell\nprintf '<tag>&value\\n'\n```\n\n---\n\nplain &lt;result&gt;&amp;\n\n</details>"
+	want := "<details><summary>✓ exec</summary>\n\n<pre><code class=\"language-shell\">printf &#39;&lt;tag&gt;&amp;value\\n&#39;</code></pre>\n\n---\n\nplain &lt;result&gt;&amp;\n\n</details>"
+	if got := telegram.NormalizeRichMarkdown(input); got != want {
+		t.Fatalf("normalized shell block = %q, want %q", got, want)
+	}
+}
+
 func TestNormalizeRichMarkdownPreservesEscapesAndNonTables(t *testing.T) {
 	cases := []struct{ input, want string }{
 		{"Before\n| A | B |\n|:---|---:|\n| x\\|y |  |\nAfter", "Before\n\n| <sub>A</sub> | <sub>B</sub> |\n|:---|---:|\n| <sub>x\\|y</sub> |  |\nAfter"},
@@ -43,9 +51,7 @@ func TestNormalizeRichMarkdownTwoTablesIsIdempotent(t *testing.T) {
 func TestNormalizeRichMarkdownPreservesLiteralTables(t *testing.T) {
 	const table = "| A | B |\n|---|---|\n| one | two |"
 	for name, literal := range map[string]string{
-		"backtick fence":      "```markdown\n" + table + "\n```",
 		"tilde fence":         "~~~markdown\n" + table + "\n~~~",
-		"long fence":          "````markdown\n```\n" + table + "\n```\n````",
 		"inline backticks":    "`" + table + "`",
 		"multiline backticks": "``\n" + table + "\n``",
 		"code tag":            "<code>\n" + table + "\n</code>",
@@ -59,6 +65,13 @@ func TestNormalizeRichMarkdownPreservesLiteralTables(t *testing.T) {
 				t.Fatalf("literal changed: %q, want %q", got, literal)
 			}
 		})
+	}
+	if got, want := telegram.NormalizeRichMarkdown("```markdown\n"+table+"\n```"), `<pre><code class="language-markdown">`+table+`</code></pre>`; got != want {
+		t.Fatalf("backtick code table = %q, want %q", got, want)
+	}
+	longFence := "````markdown\n```\n" + table + "\n```\n````"
+	if got, want := telegram.NormalizeRichMarkdown(longFence), `<pre><code class="language-markdown">`+"```\n"+table+"\n```"+`</code></pre>`; got != want {
+		t.Fatalf("long backtick code table = %q, want %q", got, want)
 	}
 }
 
@@ -74,7 +87,7 @@ func TestNormalizeRichMarkdownSelectsOnlyRealTables(t *testing.T) {
 		"inline code cell":    {"| `A` | B |\n|---|---|\n| x | y |", "\n\n| <sub>`A`</sub> | <sub>B</sub> |\n|---|---|\n| <sub>x</sub> | <sub>y</sub> |"},
 		"pipe prose":          {"| prose | text |\n| still | prose |", "| prose | text |\n| still | prose |"},
 		"escaped pipes only":  {"| A \\| B |\n|---|---|", "| A \\| B |\n|---|---|"},
-		"backtick fence":      {"```md\n" + table + "\n```", "```md\n" + table + "\n```"},
+		"backtick fence":      {"```md\n" + table + "\n```", `<pre><code class="language-md">` + table + `</code></pre>`},
 		"tilde fence":         {"~~~md\n" + table + "\n~~~", "~~~md\n" + table + "\n~~~"},
 		"multiline code span": {"``\n" + table + "\n``", "``\n" + table + "\n``"},
 		"HTML code":           {"<pre><code class=\"language-md\">\n" + table + "\n</code></pre>", "<pre><code class=\"language-md\">\n" + table + "\n</code></pre>"},

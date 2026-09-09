@@ -37,6 +37,9 @@ func TestCardSpacingAcceptanceControllerToWire(t *testing.T) {
 		for _, mode := range []string{"plain", "rich"} {
 			t.Run(body.name+"/"+mode, func(t *testing.T) {
 				wantMode, wantMarkdown := "rich", body.markdown
+				if body.name == "code" {
+					wantMarkdown = `<pre><code class="language-go">finalAnswer()</code></pre>`
+				}
 				completionMode := "rich"
 				if body.tableRich != "" {
 					wantMode, completionMode, wantMarkdown = "rich", "rich", body.tableRich

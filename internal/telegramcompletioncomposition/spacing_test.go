@@ -94,8 +94,12 @@ func TestCompletionDividerHasOneNewlineOnSendAndEditWire(t *testing.T) {
 						t.Fatalf("edit carrier = %d, want 55", wire.MessageID)
 					}
 				}
-				if method != wantMethod || wire.Rich == nil || wire.Rich.Markdown != header+body.markdown || wire.Text != "" {
-					t.Fatalf("wire = %s %+v; want %s %q", method, wire, wantMethod, header+body.markdown)
+				wantMarkdown := body.markdown
+				if body.name == "code" {
+					wantMarkdown = `<pre><code class="language-go">answer()</code></pre>`
+				}
+				if method != wantMethod || wire.Rich == nil || wire.Rich.Markdown != header+wantMarkdown || wire.Text != "" {
+					t.Fatalf("wire = %s %+v; want %s %q", method, wire, wantMethod, header+wantMarkdown)
 				}
 			})
 		}

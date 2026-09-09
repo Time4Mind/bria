@@ -113,6 +113,8 @@ func renderTool(text string, commandLines, outputLines int) string {
 	summary := html.EscapeString(limit(status+" "+tool.Name, 64))
 	body, commandCut := tooltext.Bound(tool.Arguments, displayBudget(commandLines))
 	output, outputCut := tooltext.Bound(tool.Output, displayBudget(outputLines))
+	body = renderToolArguments(tool.Name, body)
+	output = html.EscapeString(output)
 	if output != "" {
 		if body != "" {
 			body += tooltext.Separator
@@ -123,9 +125,37 @@ func renderTool(text string, commandLines, outputLines int) string {
 		return summary
 	}
 	if commandCut || outputCut || tool.Truncated {
-		body += "\n" + tooltext.Notice
+		body += "\n" + html.EscapeString(tooltext.Notice)
 	}
-	return details(summary, html.EscapeString(body))
+	return details(summary, body)
+}
+
+func renderToolArguments(name, arguments string) string {
+	if arguments == "" {
+		return ""
+	}
+	switch strings.ToLower(name) {
+	case "exec", "bash", "shell":
+		fence := commandFence(arguments)
+		return fence + "shell\n" + arguments + "\n" + fence
+	default:
+		return html.EscapeString(arguments)
+	}
+}
+
+func commandFence(text string) string {
+	longest, current := 0, 0
+	for _, r := range text {
+		if r == '`' {
+			current++
+			if current > longest {
+				longest = current
+			}
+		} else {
+			current = 0
+		}
+	}
+	return strings.Repeat("`", max(3, longest+1))
 }
 
 func displayBudget(lines int) int {

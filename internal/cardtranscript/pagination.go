@@ -13,6 +13,19 @@ func Split(text string, maxBytes int) []string {
 			end += len("</summary>\n\n")
 			prefix, suffix := text[:end], "\n\n</details>"
 			body := strings.TrimSuffix(text[end:], suffix)
+			parts := splitMarkdown(body, maxBytes-len(prefix)-len(suffix))
+			for i := range parts {
+				parts[i] = prefix + parts[i] + suffix
+			}
+			return parts
+		}
+	}
+	if strings.HasPrefix(strings.ToLower(text), "<pre><code") && strings.HasSuffix(strings.ToLower(text), "</code></pre>") {
+		const codeStart = "<pre><code"
+		if relative := strings.IndexByte(text[len(codeStart):], '>'); relative >= 0 {
+			end := len(codeStart) + relative
+			prefix, suffix := text[:end+1], "</code></pre>"
+			body := text[end+1 : len(text)-len(suffix)]
 			parts := splitText(body, maxBytes-len(prefix)-len(suffix))
 			for i := range parts {
 				parts[i] = prefix + parts[i] + suffix

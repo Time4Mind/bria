@@ -23,11 +23,11 @@ func TestCardDividerHardBreakOnUniformRichWire(t *testing.T) {
 	// The semantic card header owns the explicit Rich Markdown hard break.
 	const header = "📋 Session\n\n─────  \n"
 	for _, body := range []struct {
-		name, markdown string
+		name, markdown, rich string
 	}{
-		{"ordinary", "**Answer**\n\nNext"},
-		{"code", "```go\nanswer()\n```"},
-		{"list", "- **First**\n- Second"},
+		{"ordinary", "**Answer**\n\nNext", "**Answer**\n\nNext"},
+		{"code", "```go\nanswer()\n```", `<pre><code class="language-go">answer()</code></pre>`},
+		{"list", "- **First**\n- Second", "- **First**\n- Second"},
 	} {
 		for _, mode := range []string{"legacy-off", "legacy-on"} {
 			for _, action := range []string{"send", "send-keyboard", "edit"} {
@@ -72,11 +72,43 @@ func TestCardDividerHardBreakOnUniformRichWire(t *testing.T) {
 					if !strings.HasSuffix(method, wantMethod) {
 						t.Fatalf("wire method = %q, want %q", method, wantMethod)
 					}
-					if wire.Rich == nil || wire.Rich.Markdown != header+body.markdown || wire.Text != "" || len(wire.Entities) != 0 {
+					if wire.Rich == nil || wire.Rich.Markdown != header+body.rich || wire.Text != "" || len(wire.Entities) != 0 {
 						t.Fatalf("wire = %+v, want uniform Rich hardbreak regardless of legacy flag", wire)
 					}
 				})
 			}
 		}
+	}
+}
+
+func TestActiveCardExecUsesNativeRichCodeOnWire(t *testing.T) {
+	var wire struct {
+		Rich *telegram.InputRichMessage `json:"rich_message"`
+	}
+	client, err := telegram.NewClient("123:rich-code-test", spacingHTTPClient(func(request *http.Request) (*http.Response, error) {
+		if err := json.NewDecoder(request.Body).Decode(&wire); err != nil {
+			t.Fatal(err)
+		}
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"ok":true,"result":{"message_id":55,"from":{"id":600,"is_bot":true},"chat":{"id":42,"type":"private"}}}`))}, nil
+	}), telegram.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sender, err := telegrambridge.NewSender(client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sender.Close(context.Background())
+	body := "<details><summary>✓ exec</summary>\n\n```shell\nprintf '<tag>&value\\n'\n```\n\n---\n\nplain &lt;result&gt;&amp;\n\n</details>"
+	status := coordinator.Status{ConversationID: 42, SourceMessageID: 55, Text: "workdir · local · codex · работает\n\n─────  \n" + body, RichMarkdown: true}
+	keyboard := coordinator.KeyboardMarkup{{{Text: "1/1", CallbackData: "signed"}}}
+	if _, err := sender.EditStatusWithKeyboard(context.Background(), "active-card-code", status, &keyboard); err != nil {
+		t.Fatal(err)
+	}
+	if wire.Rich == nil || strings.Contains(wire.Rich.Markdown, "```") ||
+		!strings.Contains(wire.Rich.Markdown, `<details><summary>✓ exec</summary>`) ||
+		!strings.Contains(wire.Rich.Markdown, `<pre><code class="language-shell">printf &#39;&lt;tag&gt;&amp;value\n&#39;</code></pre>`) ||
+		!strings.Contains(wire.Rich.Markdown, "\n\n---\n\nplain &lt;result&gt;&amp;") {
+		t.Fatalf("active card tool formatting = %q", wire.Rich.Markdown)
 	}
 }

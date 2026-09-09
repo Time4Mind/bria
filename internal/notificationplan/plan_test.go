@@ -3,6 +3,7 @@ package notificationplan_test
 import (
 	"encoding/json"
 	"fmt"
+	"html"
 	"reflect"
 	"strings"
 	"testing"
@@ -72,18 +73,22 @@ func TestRichCodeFencePreservesBody(t *testing.T) {
 	}
 	assertFinal(t, pages, 240)
 	var recovered strings.Builder
-	for i, page := range pages {
-		if !strings.HasPrefix(page, "Result\n```python\n") || !strings.HasSuffix(page, "```") {
-			t.Fatal("code wrapper lost")
+	for _, page := range pages {
+		const prefix = `Result
+<pre><code class="language-python">`
+		const suffix = `</code></pre>`
+		if !strings.HasPrefix(page, prefix) || !strings.HasSuffix(page, suffix) {
+			t.Fatalf("code wrapper lost: %q", page)
 		}
-		chunk := strings.TrimSuffix(strings.TrimPrefix(page, "Result\n```python\n"), "```")
-		if i < len(pages)-1 {
-			chunk = strings.TrimSuffix(chunk, "\n")
-		}
-		recovered.WriteString(chunk)
+		recovered.WriteString(html.UnescapeString(strings.TrimSuffix(strings.TrimPrefix(page, prefix), suffix)))
 	}
-	if recovered.String() != body {
-		t.Fatal("code body changed")
+	wantBody := strings.TrimSuffix(body, "\n")
+	if got := recovered.String(); got != wantBody {
+		at := 0
+		for at < len(got) && at < len(wantBody) && got[at] == wantBody[at] {
+			at++
+		}
+		t.Fatalf("code body changed: got_bytes=%d want_bytes=%d first_diff=%d", len(got), len(wantBody), at)
 	}
 }
 

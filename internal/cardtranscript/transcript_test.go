@@ -24,7 +24,7 @@ func TestToolResultMergesWithExactCallAndPreservesOtherBlocks(t *testing.T) {
 	if len(blocks) != 5 {
 		t.Fatalf("rendered blocks: %#v", blocks)
 	}
-	if !strings.Contains(blocks[1], "✓ exec</summary>\n\nls\n\n---\n\none\ntwo") || strings.Contains(blocks[2], "one") {
+	if !strings.Contains(blocks[1], "✓ exec</summary>\n\n```shell\nls\n```\n\n---\n\none\ntwo") || strings.Contains(blocks[2], "one") {
 		t.Fatalf("result merged incorrectly: %#v", blocks)
 	}
 	if blocks[0] != "👨‍💻 inspect files" || blocks[3] != "Checking **files**" || blocks[4] != "Done" {

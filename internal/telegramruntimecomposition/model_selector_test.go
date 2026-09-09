@@ -56,6 +56,34 @@ func TestModelSelectorAndBackSignedRoundTrip(t *testing.T) {
 	}
 }
 
+func TestNodesAndStatusBackButtonKeepsVisibleLabel(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0).UTC()
+	codec, err := callbacktoken.New(bytes.Repeat([]byte{9}, 32), nil, func() time.Time { return now })
+	if err != nil {
+		t.Fatal(err)
+	}
+	presenter, err := telegrambridge.NewPresenter(codec, func() time.Time { return now }, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, title := range []string{"Ноды", "Статус"} {
+		surface, err := projectSemanticSurface(telegramcontroller.SemanticSurface{
+			Text: title,
+			Rows: [][]telegramcontroller.SemanticButton{{{Label: "Назад", Action: telegramcontroller.SemanticMenuBack}}},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		markup, err := presenter.PresentKeyboard(telegramui.GlobalSurfaceID, nil, surface.Keyboard)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := markup.InlineKeyboard[0][0].Text; got != "Назад" {
+			t.Fatalf("%s back label=%q want=%q", title, got, "Назад")
+		}
+	}
+}
+
 func TestModelSelectorSurfaceAndCallbackKeepExactChoiceAndSession(t *testing.T) {
 	const session = domain.SessionID("11111111-1111-4111-9111-111111111111")
 	for _, kind := range []telegramcontroller.SemanticActionKind{telegramcontroller.SemanticNativeKey, telegramcontroller.SemanticModelMenu, telegramcontroller.SemanticModelChoice, telegramcontroller.SemanticEffortMenu, telegramcontroller.SemanticEffortChoice} {

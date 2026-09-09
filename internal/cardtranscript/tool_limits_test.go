@@ -31,6 +31,32 @@ func TestToolCommandAndOutputEachKeepDefaultBudget(t *testing.T) {
 	}
 }
 
+func TestExecArgumentsRenderAsRichShellCodeSeparateFromOutput(t *testing.T) {
+	rendered := renderedTool(t, cardtranscript.Tool{
+		Name:      "exec",
+		Arguments: "printf '<tag>&value\\n'",
+		Output:    "plain <result>&",
+		Encoding:  "text-v1",
+	})
+	if !strings.Contains(rendered, "```shell\nprintf '<tag>&value\\n'\n```") {
+		t.Fatalf("exec command is not a shell code block: %q", rendered)
+	}
+	if !strings.Contains(rendered, tooltext.Separator+"plain &lt;result&gt;&amp;") {
+		t.Fatalf("tool output is not a separate escaped block: %q", rendered)
+	}
+}
+
+func TestExecArgumentsChooseFenceLongerThanCommandContent(t *testing.T) {
+	rendered := renderedTool(t, cardtranscript.Tool{
+		Name:      "exec",
+		Arguments: "printf 'before'\n```\nprintf 'after'",
+		Encoding:  "text-v1",
+	})
+	if !strings.Contains(rendered, "````shell\nprintf 'before'\n```\nprintf 'after'\n````") {
+		t.Fatalf("embedded command fence broke shell block: %q", rendered)
+	}
+}
+
 func TestEncodeAndRenderTwentyOneCommandAndOutputLines(t *testing.T) {
 	encoded := cardtranscript.EncodeTool(cardtranscript.Tool{Name: "exec", Arguments: strings.Repeat("a", 2100), Output: strings.Repeat("界", 2100)})
 	body := spoilerBody(t, cardtranscript.Render([]cardtranscript.Block{{Kind: "tool", Text: encoded, CommandLines: 20, ToolLines: 20}})[0])
@@ -127,8 +153,8 @@ func TestPairedToolBudgetsKeepIdentityAndTransportNotice(t *testing.T) {
 	if len(got) != 2 || spoilerBody(t, got[0]) != want || spoilerBody(t, got[1]) != "unrelated" {
 		t.Fatal("paired identity or independent explicit/wrapped lines changed")
 	}
-	if strings.Contains(got[0], "<cmd>") || !strings.Contains(got[0], "&lt;cmd&gt;") || !strings.Contains(got[0], "✓ exec") {
-		t.Fatal("literal escaping or completed status changed")
+	if !strings.Contains(got[0], "```shell\n") || !strings.Contains(got[0], "<cmd>") || !strings.Contains(got[0], "✓ exec") {
+		t.Fatal("command code block or completed status changed")
 	}
 	if blocks[0].Text != call || blocks[2].Text != result {
 		t.Fatal("render mutated stored history")
@@ -171,7 +197,14 @@ func spoilerBody(t *testing.T, text string) string {
 	if !ok || !strings.HasSuffix(body, "\n\n</details>") {
 		t.Fatalf("invalid spoiler: %q", text)
 	}
-	return html.UnescapeString(strings.TrimSuffix(body, "\n\n</details>"))
+	body = html.UnescapeString(strings.TrimSuffix(body, "\n\n</details>"))
+	if strings.HasPrefix(body, "```shell\n") {
+		body = strings.TrimPrefix(body, "```shell\n")
+		if closing := strings.Index(body, "\n```"); closing >= 0 {
+			body = body[:closing] + body[closing+4:]
+		}
+	}
+	return body
 }
 
 func TestToolDefaultBudgetCountsWrappedUnicodeLines(t *testing.T) {

@@ -318,6 +318,8 @@ func assertRetentionRichWire(t *testing.T, ctx context.Context, c2 *telegramcont
 			if !found {
 				return nil, errors.New("unbalanced wire spoiler")
 			}
+			body = strings.Replace(body, `<pre><code class="language-shell">`, "", 1)
+			body = strings.Replace(body, "</code></pre>", "", 1)
 			bodies.WriteString(html.UnescapeString(body))
 		}
 		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"ok":true,"result":{"message_id":55,"from":{"id":600,"is_bot":true},"chat":{"id":42,"type":"private"}}}`))}, nil

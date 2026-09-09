@@ -26,6 +26,24 @@ Their scopes do not overlap and no agent writes. Stop when the public test prove
 cached immediate receipt plus automatic fresh edit, stale navigation is fenced,
 single-flight is retained, safe timing is observable, and full/live gates pass.
 
+Task amendment A36: before the pending release, Artem also requires the Nodes and
+Status screens to expose `Назад`, not `Меню`, and the currently active session
+card to use the clearer formatting demonstrated by historical `bria-legacy` and
+ccbot. Evidence sources are the current repository, a bounded read-only projection
+of the current active card/state and safe service logs, plus historical formatting
+code only in the two explicitly requested projects. Unit: projected Telegram
+button and one rendered active-card page. Population: Nodes, Status, and all
+session-card rich-Markdown blocks; exclusions: other menu labels, semantic content,
+pagination rules, provider output, config/state and manual Telegram input.
+
+A36 coverage: the integration owner owns the task contract, current-code tests,
+fix, synthesis and release. A read-only active-card investigator owns current
+state/log/render evidence. A read-only historical investigator owns the
+`bria-legacy`/ccbot comparison. They do not edit files. Stop when the visible
+defect is reproduced at a public projection/render seam, the requested historical
+behavior is isolated without importing legacy state, focused RED/GREEN and race
+tests pass, and the combined exact release completes the full and live gates.
+
 | ID | Required outcome | Status | Evidence / open boundary |
 | --- | --- | --- | --- |
 | A35.1 | Identify the latest individual Status callback chains | verified | Two double-click groups: 17:50:25/27 UTC and 17:57:03/08 UTC; every callback/edit completed without an error |
@@ -33,8 +51,12 @@ single-flight is retained, safe timing is observable, and full/live gates pass.
 | A35.3 | Decide whether first-click stale/second-click fresh is real | verified | First controller responses took 7-9 ms and Telegram edits 162-174 ms, before a bounded provider CLI poll can complete; no completion-driven edit exists, so a later click is required to display that result |
 | A35.4 | Implement completion-driven refresh with stale-navigation fencing | verified locally | Cached edit commits before one background poll; completion conditionally edits the exact current signed global presentation, and repeated taps retarget the same poll |
 | A35.5 | Add safe refresh lifecycle timing | verified locally | `quota.refresh` emits start and completed/skipped/failed timing through the payload-free Telegram trace; no quota values or provider payload are present |
-| A35.6 | Full verification and automatic release | in progress | Public RED failed on missing auto-edit seam; GREEN, focused 10x race and final versioned `make check-full` pass; Git/CI/install/restart/live acceptance remain |
-| A35.7 | Fix mandatory macOS CI readiness/abort race | verified locally | Exact-record readiness fence added; 10,000 stress interleavings, 2,500 race-detector interleavings and a fresh full `make check-full` pass |
+| A35.6 | Full verification and automatic release | verified through source CI | Public RED/GREEN and full gate passed; `d3ce82b` passed Stage 1 `34403466785` and Platform matrix `34403466737`; installation was deliberately deferred when A36 enlarged the same release |
+| A35.7 | Fix mandatory macOS CI readiness/abort race | verified in exact-SHA CI | Exact-record readiness fence passed 10,000 stress and 2,500 race interleavings plus all eight platform jobs in run `34403466737` |
+| A36.1 | Nodes and Status show `Назад`, not `Меню` | verified locally | Public signed-button RED produced `≡ Меню`; preserving the semantic label through projection/presentation is GREEN and keeps the authenticated action unchanged |
+| A36.2 | Diagnose the malformed current active-card formatting | verified | Active `workdir6` card was on page 53/54 inside technical history; bounded neighboring metadata contained 10-16-line `exec` commands rendered as undifferentiated spoiler text |
+| A36.3 | Match the useful historical formatting without legacy-state coupling | verified locally | Historical legacy/ccbot comparison isolated native Rich code blocks as the useful difference; current spacing is already equivalent and remains unchanged |
+| A36.4 | Verify and release the combined A35+A36 version | in progress | Public wire, pagination, independent 20+20 limits, notification, approval and 10x focused race checks pass; full `VERSION=20260910-status-formatting make check-full` passes; Git/CI/install/restart/postflight remain |
 
 Ranked hypotheses: (1) the callback renders before an asynchronous quota refresh
 updates the cache; (2) the first transport edit completes late and is mistaken for
@@ -94,4 +116,34 @@ readiness/abort race. `finalizeReap` can remove a just-exited process under
 verify under the same lock that the exact process record is still tracked.
 The existing public regression test then passed 10,000 interleavings normally
 and 2,500 under the race detector; the complete versioned gate also passed with
-the CI-fix. A follow-up commit and exact-SHA CI rerun remain before installation.
+the CI-fix. Follow-up `d3ce82b` passed Stage 1 run `34403466785` and all eight
+Platform matrix jobs in run `34403466737`. Installation was deferred because
+Artem added A36 before the pending restart, so the combined version is released
+once rather than briefly installing the superseded A35-only candidate.
+
+## A36 diagnosis and implementation receipt
+
+The Nodes/Status controller already emitted `Назад`, but semantic projection
+dropped that label and callback presentation substituted its global fallback
+`≡ Меню`. The public signed-presenter regression failed with that exact visible
+label before the fix and now preserves `Назад`; empty or explicitly menu-labelled
+uses retain the existing fallback behavior.
+
+A bounded read of the current active card identified `workdir6`, page 53 of 54,
+anchored in technical history. Neighboring entries were completed `exec` calls
+with 10-16 command lines. Current rendering placed those arguments in ordinary
+spoiler text. The explicitly requested historical comparison showed both
+`bria-legacy` and ccbot using native Rich code blocks for commands, while their
+inter-event spacing matches the current NBSP separator. No legacy state or
+unrelated renderer was imported.
+
+The current renderer now places `exec`/Bash/shell arguments in a language-shell
+code fence, keeps output in a separate escaped block, chooses a fence longer than
+embedded backticks, and preserves balanced wrappers while paginating. The central
+Rich boundary converts fenced code to Telegram-native `<pre><code>`; tables,
+independent command/output line limits and saved notification pages remain intact.
+RED/GREEN covered command formatting, nested fences, Rich conversion and the
+signed back label. Focused affected-package race tests passed ten repetitions and
+the complete `VERSION=20260910-status-formatting make check-full` passed. No
+state, settings, config, Telegram input or live message was modified during
+diagnosis and local verification.

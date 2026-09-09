@@ -113,7 +113,11 @@ func PresentButton(button telegramui.Button) (string, callbacktoken.Action, int,
 		}
 		return presentGlobalButton(button, label, callbacktoken.ActionMenuSettings)
 	case telegramui.ActionMenuBack:
-		return presentGlobalButton(button, "≡ Меню", callbacktoken.ActionMenuBack)
+		label := button.Label
+		if label == "" {
+			label = "≡ Меню"
+		}
+		return presentGlobalButton(button, label, callbacktoken.ActionMenuBack)
 	case telegramui.ActionMenuNodes:
 		return presentGlobalButton(button, "Ноды", callbacktoken.ActionMenuNodes)
 	case telegramui.ActionSelectNode:

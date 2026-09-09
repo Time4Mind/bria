@@ -383,7 +383,7 @@ func projectSemanticSurface(surface telegramcontroller.SemanticSurface) (*telegr
 				telegramui.ActionNativeKey, telegramui.ActionModelMenu, telegramui.ActionModelChoice, telegramui.ActionEffortMenu, telegramui.ActionEffortChoice,
 				telegramui.ActionCreateChoice, telegramui.ActionCreateFirst,
 				telegramui.ActionCreateSelectCodex, telegramui.ActionCreateSelectClaude,
-				telegramui.ActionSelectSession, telegramui.ActionResume, telegramui.ActionMenuArchive:
+				telegramui.ActionSelectSession, telegramui.ActionResume, telegramui.ActionMenuArchive, telegramui.ActionMenuBack:
 				button.Label = semantic.Label
 			}
 			if action == telegramui.ActionCreateChoice || action == telegramui.ActionSettingsCategory || action == telegramui.ActionSelectNode || action == telegramui.ActionMenuArchive || telegramui.IsSessionSurfaceAction(action) {

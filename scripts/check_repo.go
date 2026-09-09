@@ -1307,7 +1307,7 @@ var packagePolicies = map[string]packagePolicy{
 	"internal/telegramrich": {
 		responsibility:     "normalize rich Markdown without transport or product dependencies",
 		allowedImports:     []string{"internal/markdownliteral"},
-		maxProductionLines: 100,
+		maxProductionLines: 200,
 	},
 	"internal/markdownliteral": {
 		responsibility:     "identify literal Markdown code lines for rendering and pagination without I/O",

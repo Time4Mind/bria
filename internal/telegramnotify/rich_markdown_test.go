@@ -21,7 +21,9 @@ func TestNotifierRichMarkdownContent(t *testing.T) {
 			{"plain", "Фоновая сессия завершена.", "Фоновая сессия завершена."},
 			{"formatting", "**Готово**\n\n`auth_status` 🙂\n[отчёт](https://example.test/report)", "**Готово**\n\n`auth_status` 🙂\n[отчёт](https://example.test/report)"},
 			{"table", "| Статус | Значение |\n| --- | --- |\n| Готово | 42 |", "\n| <sub>Статус</sub> | <sub>Значение</sub> |\n| --- | --- |\n| <sub>Готово</sub> | <sub>42</sub> |"},
-			{"literal table", "```markdown\n| A | B |\n| --- | --- |\n| x | y |\n```", "```markdown\n| A | B |\n| --- | --- |\n| x | y |\n```"},
+			{"literal table", "```markdown\n| A | B |\n| --- | --- |\n| x | y |\n```", `<pre><code class="language-markdown">| A | B |
+| --- | --- |
+| x | y |</code></pre>`},
 		} {
 			t.Run(seam+"/"+fixture.name, func(t *testing.T) {
 				t.Parallel()

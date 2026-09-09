@@ -1,5 +1,14 @@
 # Handoff: статус и следующий план
 
+> Текущий объединённый выпуск A35+A36 готов локально. Status после первого клика
+> автоматически публикует свежую квоту; Ноды/Статус теперь сохраняют подпись
+> `Назад`; активная карточка форматирует многострочные exec-команды нативным Rich
+> code-блоком отдельно от вывода. Вложенные backticks, пагинация, лимиты 20+20,
+> approval/notification wire и focused race проверены. Полный
+> `VERSION=20260910-status-formatting make check-full` PASS. Далее точный
+> manifest, commit/push, exact-SHA CI, установка и restart с postflight.
+> Договор/evidence: [STATUS_REFRESH_DIAGNOSIS_TODO.md](STATUS_REFRESH_DIAGNOSIS_TODO.md).
+
 > A35 исправлен локально: кешированная карточка сначала подтверждается Telegram,
 > затем один background poll автоматически редактирует только ту же всё ещё
 > текущую signed Status-проекцию. Повторные клики используют один poll, а уход в

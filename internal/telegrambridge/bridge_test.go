@@ -397,13 +397,13 @@ func TestSenderReturnsOnlyPositiveTelegramReceipt(t *testing.T) {
 	}
 }
 
-func TestSenderPreservesProviderMarkdownForRichRendering(t *testing.T) {
+func TestSenderNormalizesProviderCodeForRichRendering(t *testing.T) {
 	t.Parallel()
 
 	client := mustTelegramClient(t, func(request *http.Request) (*http.Response, error) {
 		var body telegram.SendRichMessageRequest
 		decodeJSON(t, request, &body)
-		if body.RichMessage.Markdown != "**Проверка**\n```text\n/root\n```" {
+		if body.RichMessage.Markdown != "**Проверка**\n<pre><code class=\"language-text\">/root</code></pre>" {
 			t.Fatalf("formatted Markdown = %q", body.RichMessage.Markdown)
 		}
 		return response(http.StatusOK, `{"ok":true,"result":{"message_id":502,"from":{"id":600,"is_bot":true},"chat":{"id":42,"type":"private"},"text":"formatted"}}`), nil

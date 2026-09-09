@@ -12,8 +12,9 @@ import (
 	"bria/internal/telegrambridge"
 )
 
-func TestCommandApprovalReachesTelegramAsLiteralRichMarkdown(t *testing.T) {
+func TestCommandApprovalReachesTelegramAsNativeRichCode(t *testing.T) {
 	formatted := "**Command**\n\n```shell\nprintf '%s' '$HOME'\n```"
+	want := "**Command**\n\n<pre><code class=\"language-shell\">printf &#39;%s&#39; &#39;$HOME&#39;</code></pre>"
 	client := mustTelegramClient(t, func(request *http.Request) (*http.Response, error) {
 		var body struct {
 			Text string                     `json:"text"`
@@ -22,8 +23,8 @@ func TestCommandApprovalReachesTelegramAsLiteralRichMarkdown(t *testing.T) {
 		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
 			t.Fatal(err)
 		}
-		if !strings.HasSuffix(request.URL.Path, "/sendRichMessage") || body.Text != "" || body.Rich == nil || body.Rich.Markdown != formatted {
-			t.Fatalf("approval took a non-literal Rich route: path=%s body=%+v", request.URL.Path, body)
+		if !strings.HasSuffix(request.URL.Path, "/sendRichMessage") || body.Text != "" || body.Rich == nil || body.Rich.Markdown != want {
+			t.Fatalf("approval took a non-native Rich route: path=%s body=%+v", request.URL.Path, body)
 		}
 		return response(http.StatusOK, `{"ok":true,"result":{"message_id":55,"from":{"id":600,"is_bot":true},"chat":{"id":42,"type":"private"}}}`), nil
 	})
