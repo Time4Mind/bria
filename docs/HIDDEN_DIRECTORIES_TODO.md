@@ -162,3 +162,30 @@ Preflight06:56:46UTC: 6sessions, ready2/archived3/running1, history246,17inputs;
 изменение истории произошло до выпуска в работающем сервисе. Перед restart
 нужно заново проверить idle и взять актуальную базу сохранности, не сравнивать
 ожидаемый пользовательский прогресс с устаревшим snapshot.
+
+## A31.C1 - обязательный CI
+
+7ce5ab0 запушен/readback origin/main. Platform34321594447 success;
+Stage1 34321594611 failure: TestSecretSourceTombstoneSurvivesProviderAckPruneAndRestart,
+flow_test.go:350, stale provider interaction callback. Локальный full gate до push
+PASS. Выпуск не установлен. Разрешённая CI-fix iteration, не исправление A31.5.
+Main диагностирует exact failing seam, independent agent проверяет гипотезу.
+Начальная гипотеза: checkingSender.wait возвращает начало Deliver до сохранения
+PhaseWaiting/carrier, тест преждевременно вызывает HandleCallback. Альтернативы:
+таймаут, реальные ошибки persistence либо неверная correlation; проверить кодом
+и контролируемым воспроизведением. Не ослаблять secret/source tombstone assertions.
+
+Причина подтверждена: Deliver публикует sender.sent до receipt CAS PhaseWaiting;
+сырой wait мог вернуть carrier ещё не зафиксированным. В FileStore на CI это
+попало в окно 0.43с. Timeout=1minute и correlation fixture корректны.
+Main владеет только internal/interactionflow/flow_test.go: каналами задержал
+первый PhaseWaiting commit, первый Load возвращает прежнее состояние и освобождает
+writer. Старый callback-тест детерминированно RED stale callback0.02s; теперь
+9 callback-сценариев ждут durable PhaseWaiting с точным carrier, а raw delivery
+wait сохранён для timeout/cancellation. Secret assertions и production не менялись.
+Package race-count20 PASS2.366s; full gate повторяется. Этот test-only файл
+добавлен к bounded manifest выпуска, новых runtime targets нет.
+
+Повторный full make check-full PASS07:07UTC; физические trio hashes прежние.
+Bernoulli независимо проверил CI-fix и подтвердил сохранность secret/tombstone
+assertions, approve. C1 реализация проверена, требуется CI нового commit.

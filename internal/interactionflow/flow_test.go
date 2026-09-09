@@ -39,7 +39,7 @@ func TestFlowPersistsBeforeSendAndReturnsOneExactlyCorrelatedQuestionResponse(t 
 		responseCh <- response
 		errorCh <- err
 	}()
-	delivery := sender.wait(t)
+	delivery := sender.waitReady(t)
 	if delivery.SessionID != envelope.SessionID || delivery.MessageID != envelope.MessageID || delivery.ProviderRequestID != envelope.Request.ID {
 		t.Fatalf("delivery correlation = %#v", delivery)
 	}
@@ -93,7 +93,7 @@ func TestFlowProgressesMultipleQuestionsAndRecoversSameCallbackWithoutDoubleAdva
 		response, _ := flow.ResolveInteraction(context.Background(), envelope)
 		done <- response
 	}()
-	delivery := sender.wait(t)
+	delivery := sender.waitReady(t)
 	firstPlan := interactionPlan(delivery.OperationID, "telegram-callback:21", telegramui.ActionInteractionSubmit, 0)
 	first, err := flow.HandleCallback(context.Background(), firstPlan)
 	if err != nil || first.Surface == nil || first.Terminal != nil {
@@ -245,7 +245,7 @@ func TestFlowRoutesSignedOtherToExactlyNextOwnerTextBeforeNormalInput(t *testing
 		response, _ := flow.ResolveInteraction(context.Background(), envelope)
 		done <- response
 	}()
-	delivery := sender.wait(t)
+	delivery := sender.waitReady(t)
 	other, err := flow.HandleCallback(context.Background(), interactionPlan(
 		delivery.OperationID, "telegram-callback:other", telegramui.ActionInteractionOther, 0,
 	))
@@ -288,7 +288,7 @@ func TestFlowDeletesSecretOtherBeforeOneShotProviderHandoffAndNeverPersistsIt(t 
 		response, _ := flow.ResolveInteraction(context.Background(), envelope)
 		done <- response
 	}()
-	delivery := sender.wait(t)
+	delivery := sender.waitReady(t)
 	if _, err := flow.HandleCallback(context.Background(), interactionPlan(
 		delivery.OperationID, "telegram-callback:secret-other", telegramui.ActionInteractionOther, 0,
 	)); err != nil {
@@ -326,12 +326,17 @@ func TestFlowDeletesSecretOtherBeforeOneShotProviderHandoffAndNeverPersistsIt(t 
 
 func TestSecretSourceTombstoneSurvivesProviderAckPruneAndRestart(t *testing.T) {
 	t.Parallel()
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
 
 	path := filepath.Join(t.TempDir(), "interactions.json")
-	store, err := interactionflow.OpenFileStore(path)
+	fileStore, err := interactionflow.OpenFileStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Reproduce slow receipt persistence without relying on disk/scheduler timing.
+	store := &heldWaitingStore{Store: fileStore, started: make(chan struct{}), release: make(chan struct{})}
+	t.Cleanup(func() { store.once.Do(func() { close(store.release) }) })
 	sender := &checkingSender{store: store, receipt: interactionflow.DeliveryReceipt{CarrierMessageID: 91}}
 	deleter := &checkingSecretDeleter{store: store}
 	flow := mustTextFlow(t, store, sender, deleter)
@@ -340,10 +345,15 @@ func TestSecretSourceTombstoneSurvivesProviderAckPruneAndRestart(t *testing.T) {
 	envelope.Request.Questions[0].IsSecret = true
 	done := make(chan sessionruntime.InteractionResponse, 1)
 	go func() {
-		response, _ := flow.ResolveInteraction(context.Background(), envelope)
+		response, _ := flow.ResolveInteraction(ctx, envelope)
 		done <- response
 	}()
-	delivery := sender.wait(t)
+	select {
+	case <-store.started:
+	case <-time.After(time.Second):
+		t.Fatal("receipt persistence did not start")
+	}
+	delivery := sender.waitReady(t)
 	if _, err := flow.HandleCallback(context.Background(), interactionPlan(
 		delivery.OperationID, "telegram-callback:secret-replay", telegramui.ActionInteractionOther, 0,
 	)); err != nil {
@@ -402,7 +412,7 @@ func TestExactSecretRedeliveryRetriesUnknownDeletionAndCompletesLiveProviderRequ
 		response, _ := flow.ResolveInteraction(context.Background(), envelope)
 		done <- response
 	}()
-	delivery := sender.wait(t)
+	delivery := sender.waitReady(t)
 	if _, err := flow.HandleCallback(context.Background(), interactionPlan(
 		delivery.OperationID, "telegram-callback:secret-delete-retry", telegramui.ActionInteractionOther, 0,
 	)); err != nil {
@@ -450,7 +460,7 @@ func TestSecretRedeliveryRepairsCrashGapBetweenOperationFenceAndSourceTombstone(
 		_, _ = flow.ResolveInteraction(context.Background(), envelope)
 		done <- struct{}{}
 	}()
-	delivery := sender.wait(t)
+	delivery := sender.waitReady(t)
 	if _, err := flow.HandleCallback(context.Background(), interactionPlan(
 		delivery.OperationID, "telegram-callback:split-gap", telegramui.ActionInteractionOther, 0,
 	)); err != nil {
@@ -488,7 +498,7 @@ func TestFlowRejectsOtherWhenProviderDidNotAdvertiseIt(t *testing.T) {
 	sender := &checkingSender{store: store, receipt: interactionflow.DeliveryReceipt{CarrierMessageID: 91}}
 	flow := mustTextFlow(t, store, sender, nil)
 	go func() { _, _ = flow.ResolveInteraction(context.Background(), questionEnvelope()) }()
-	delivery := sender.wait(t)
+	delivery := sender.waitReady(t)
 	if _, err := flow.HandleCallback(context.Background(), interactionPlan(
 		delivery.OperationID, "telegram-callback:unadvertised-other", telegramui.ActionInteractionOther, 0,
 	)); !errors.Is(err, interactionflow.ErrInvalidCallback) {
@@ -508,7 +518,7 @@ func TestFlowPrunesOnlyAfterExactProviderResponseAcceptance(t *testing.T) {
 		response, _ := flow.ResolveInteraction(context.Background(), envelope)
 		done <- response
 	}()
-	delivery := sender.wait(t)
+	delivery := sender.waitReady(t)
 	if _, err := flow.HandleCallback(context.Background(), interactionPlan(delivery.OperationID, "telegram-callback:confirm", telegramui.ActionInteractionChoice, 1)); err != nil {
 		t.Fatal(err)
 	}
@@ -588,6 +598,36 @@ type checkingSender struct {
 	wake    chan struct{}
 }
 
+// heldWaitingStore freezes the first receipt commit. The first reader observes
+// the old state, then releases the writer: callbacks before readiness are stale.
+type heldWaitingStore struct {
+	interactionflow.Store
+	started, release chan struct{}
+	once             sync.Once
+}
+
+func (s *heldWaitingStore) CompareAndSwap(ctx context.Context, id string, revision uint64, next interactionflow.Operation) (interactionflow.Operation, bool, error) {
+	if next.Phase == interactionflow.PhaseWaiting && next.CarrierMessageID > 0 {
+		select {
+		case <-s.started:
+		default:
+			close(s.started)
+			<-s.release
+		}
+	}
+	return s.Store.CompareAndSwap(ctx, id, revision, next)
+}
+
+func (s *heldWaitingStore) Load(ctx context.Context, id string) (interactionflow.Operation, bool, error) {
+	operation, found, err := s.Store.Load(ctx, id)
+	select {
+	case <-s.started:
+		s.once.Do(func() { close(s.release) })
+	default:
+	}
+	return operation, found, err
+}
+
 type checkingSecretDeleter struct {
 	store     interactionflow.Store
 	chatID    int64
@@ -658,6 +698,26 @@ func (sender *checkingSender) wait(t *testing.T) interactionflow.Delivery {
 			t.Fatal("delivery did not occur")
 		}
 	}
+}
+
+// waitReady waits for the committed carrier, not merely entry into Deliver.
+// Delivery-only tests keep using wait to exercise unknown/cancellation timing.
+func (sender *checkingSender) waitReady(t *testing.T) interactionflow.Delivery {
+	t.Helper()
+	delivery := sender.wait(t)
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		operation, found, err := sender.store.Load(context.Background(), delivery.OperationID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if found && operation.Phase == interactionflow.PhaseWaiting && operation.CarrierMessageID == sender.receipt.CarrierMessageID {
+			return delivery
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("delivered interaction did not become callback-ready")
+	return interactionflow.Delivery{}
 }
 
 func (sender *checkingSender) calls() int {
