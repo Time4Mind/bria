@@ -1,10 +1,11 @@
 # Handoff: статус и следующий план
 
-> Текущий запрос: исправить GitHub Issue #1 - Codex quota collector не должен
-> наследовать session-only bypass, при этом рабочая конфигурация не меняется.
-> Экраны Ноды/Статус исключены. Договор, coverage и durable todo:
+> GitHub Issue #1 исправлен: Codex quota collector удаляет session-only bypass
+> только из собственной копии argv; рабочая конфигурация и экраны Ноды/Статус
+> не менялись. Runtime `f67434d` в origin/main, полный gate и оба CI PASS.
+> Установлен `20260909-codex-quota-bypass`, PID4746 running/sole lock; hashes,
+> state preservation и реальный Codex quota RPC подтверждены. Договор и receipt:
 > [GITHUB_ISSUE_1_QUOTA_BYPASS_TODO.md](GITHUB_ISSUE_1_QUOTA_BYPASS_TODO.md).
-> После RED/GREEN и полного gate действует автоматический push/CI/deploy.
 
 > Follow-up R6: после выпуска RootReady live-проверка выявила второй блокер.
 > Startup attach зарегистрировал observer старого accepted558, сохранил gen3
