@@ -1,12 +1,14 @@
 # Handoff: статус и следующий план
 
-> Текущий запрос A34: после рестарта в активной `workdir6` остался распознанный
-> command approval при effective auto-approve ON. Live evidence показывает
-> generation4 и стабильный fingerprint; код после любого non-stale исхода ставит
-> generation-wide uncertain barrier и молча отбрасывает ошибку. Исправление готово:
-> generation хранит набор command-derived uncertain DecisionID, поэтому старый
-> запрос не replay-ится, а distinct проходит; lifecycle безопасно логируется.
-> RED/GREEN, review и полный check-full PASS. Выпуск выполняется. Договор/todo:
+> A34 закрыт: generation хранит набор command-derived uncertain DecisionID,
+> поэтому старый запрос не replay-ится, а distinct approval проходит. Runtime
+> `d4d5430` в origin/main, полный versioned gate и оба exact-SHA CI PASS.
+> Установлен `20260909-approval-restart-stall`, PID41157 running/sole lock,
+> hashes и сохранность 7 сессий/7 карточек подтверждены. Активная `workdir6`
+> сохранила provider session и без ручного ввода приняла исходный зависший плюс
+> ещё четыре разных approval в generation5. Пять safe lifecycle-событий не
+> содержат command/reason payload; Telegram identity OK, свежих errors нет.
+> Исторические recovery errors не повторились в release window. Договор/receipt:
 > [APPROVAL_RESTART_STALL_TODO.md](APPROVAL_RESTART_STALL_TODO.md).
 
 > GitHub Issue #1 исправлен: Codex quota collector удаляет session-only bypass
