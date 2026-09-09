@@ -1,5 +1,34 @@
 # Archive resume diagnosis 2026-09-09
 
+## Follow-up: retained accepted observer blocks queued successor
+
+Task contract: keep the old accepted receipt without replay, but when a newer
+pending input already exists, recover the attached session as Ready and dispatch
+that successor instead of starting a blocking observer for the historical turn.
+Unknown/failed custody, close intent and accepted turns without a successor keep
+their existing recovery barrier. Acceptance: focused RED/GREEN tests, full
+`make check-full`, exact origin/main CI, install/restart of only
+`gui/501/com.time4mind.bria.v2`, then journal/native/log proof that input
+`telegram-update:783531603` advances while `telegram-update:783531558` is not
+replayed.
+
+- F6 verified: release `20260909-archive-root-unblock` fixed fresh-root admission,
+  but startup attachment registered the older accepted continuation first,
+  persisted generation 3 as Running and caused the newer pending input to defer.
+- R6 code complete: explicit continuation eligibility is isolated in
+  `internal/acceptedcontinuation`; the durable journal decides only the
+  accepted-plus-newer-pending case, while session attachment owns the resulting
+  Ready lifecycle state. Accepted without a successor and unknown custody retain
+  observation; closing states never yield. RED/GREEN, focused race and full
+  `make check-full` PASS at 13:53 UTC, including architecture and executable trio.
+  Candidate `20260909-archive-successor-unblock` is darwin/arm64; SHA-256:
+  Bria `f78b48bd451d22ef18e8c7b776d6a7d15da729bd335452caed2e7bdc2506c699`,
+  Codex adapter `f68d871a964fe2fe2701317543ff9543ff16d45d080e0bbc519f677f851052c5`,
+  Claude adapter `7c8eb38b4d6489ff12c24fb624da2adc265ead8ded18dada2ab574fff7b6388c`.
+  No state or terminal input was edited manually. Commit/push/CI/deploy and live
+  successor acceptance remain in progress. The final full gate after fail-closed
+  protection for all retained unknown/failed custody also PASS.
+
 ## Reopened user acceptance defect: new input blocked
 
 2026-09-09 owner reports archive reopen succeeded but next request is not accepted.

@@ -24,17 +24,18 @@ type Store interface {
 }
 
 type Options struct {
-	LocalComputerID       domain.ComputerID
-	Store                 Store
-	Waiter                sessionsupervisor.ProcessWaiter
-	Restarter             sessionsupervisor.Restarter
-	AcceptedTurns         sessionsupervisor.AcceptedTurnReconciler
-	ContinueAcceptedTurns func(context.Context, domain.Session, domain.ProviderBinding, sessionsupervisor.AcceptedTurnReconciliation) error
-	MaxRestartAttempts    int
-	SweepInterval         time.Duration
-	WaitBeforeRetry       sessionsupervisor.RetryWaiter
-	Now                   func() time.Time
-	Report                func(error)
+	LocalComputerID             domain.ComputerID
+	Store                       Store
+	Waiter                      sessionsupervisor.ProcessWaiter
+	Restarter                   sessionsupervisor.Restarter
+	AcceptedTurns               sessionsupervisor.AcceptedTurnReconciler
+	ShouldContinueAcceptedTurns func(context.Context, domain.Session, domain.ProviderBinding, sessionsupervisor.AcceptedTurnReconciliation) (bool, error)
+	ContinueAcceptedTurns       func(context.Context, domain.Session, domain.ProviderBinding, sessionsupervisor.AcceptedTurnReconciliation) error
+	MaxRestartAttempts          int
+	SweepInterval               time.Duration
+	WaitBeforeRetry             sessionsupervisor.RetryWaiter
+	Now                         func() time.Time
+	Report                      func(error)
 }
 
 type watchedBinding struct {
@@ -67,7 +68,8 @@ func New(options Options) (*Manager, error) {
 	supervisorOptions := sessionsupervisor.Options{
 		MaxRestartAttempts: options.MaxRestartAttempts, WaitBeforeRetry: options.WaitBeforeRetry,
 		Now: options.Now, AcceptedTurns: options.AcceptedTurns,
-		ContinueAcceptedTurns: options.ContinueAcceptedTurns,
+		ShouldContinueAcceptedTurns: options.ShouldContinueAcceptedTurns,
+		ContinueAcceptedTurns:       options.ContinueAcceptedTurns,
 	}
 	control, err := sessionrecoverycontrol.New(options.Store, options.Waiter, options.Restarter, supervisorOptions)
 	if err != nil {

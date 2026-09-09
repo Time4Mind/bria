@@ -10,7 +10,7 @@ import (
 func (s *Supervisor) attach(ctx context.Context, awaiting domain.Session, prior domain.ProviderBinding, attacher app.SessionAttacher) (Result, error) {
 	return sessionattachment.Recover(ctx, awaiting, prior, sessionattachment.Options{
 		Store: s.store, Attacher: attacher, Abort: s.restarter.Abort, Now: s.now,
-		AcceptedTurns: s.reconciler, ContinueAcceptedTurns: s.continuation,
+		AcceptedTurns: s.reconciler, ShouldContinueAcceptedTurns: s.shouldContinue, ContinueAcceptedTurns: s.continuation,
 		Conflict: s.staleAfterConflict, Archive: archiveExited,
 	})
 }

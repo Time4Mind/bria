@@ -60,13 +60,14 @@ type Options struct {
 	Store interface {
 		Replace(context.Context, domain.Session, domain.Session) error
 	}
-	Attacher              providerattachport.SessionAttacher
-	Abort                 func(context.Context, providerattachport.StartSessionRequest, domain.ProviderBinding) error
-	Now                   func() time.Time
-	AcceptedTurns         AcceptedTurnReconciler
-	ContinueAcceptedTurns func(context.Context, domain.Session, domain.ProviderBinding, AcceptedTurnReconciliation) error
-	Conflict              func(context.Context, domain.Session, error) (Result, error)
-	Archive               func(domain.Session, time.Time) (domain.Session, error)
+	Attacher                    providerattachport.SessionAttacher
+	Abort                       func(context.Context, providerattachport.StartSessionRequest, domain.ProviderBinding) error
+	Now                         func() time.Time
+	AcceptedTurns               AcceptedTurnReconciler
+	ShouldContinueAcceptedTurns func(context.Context, domain.Session, domain.ProviderBinding, AcceptedTurnReconciliation) (bool, error)
+	ContinueAcceptedTurns       func(context.Context, domain.Session, domain.ProviderBinding, AcceptedTurnReconciliation) error
+	Conflict                    func(context.Context, domain.Session, error) (Result, error)
+	Archive                     func(domain.Session, time.Time) (domain.Session, error)
 }
 
 func ValidateReconciliation(reconciliation AcceptedTurnReconciliation) error {

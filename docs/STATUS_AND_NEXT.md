@@ -1,5 +1,17 @@
 # Handoff: статус и следующий план
 
+> Follow-up R6: после выпуска RootReady live-проверка выявила второй блокер.
+> Startup attach зарегистрировал observer старого accepted558, сохранил gen3
+> Running и отложил новый pending603. Исправляется eligibility: accepted history
+> уступает только более новому pending, session возвращается Ready; unknown/failed,
+> close intent и accepted без successor сохраняют прежний барьер. Договор/todo -
+> [ARCHIVE_RESUME_DIAGNOSIS.md](ARCHIVE_RESUME_DIAGNOSIS.md). После полного gate
+> автоматически push/CI/deploy и live-проверка без ручной правки state/terminal.
+> Код и изолированный policy-пакет готовы; RED/GREEN, focused race и
+> полный `make check-full` PASS 13:53 UTC. Candidate
+> `20260909-archive-successor-unblock`, Bria hash `f78b48bd...`. Выпуск
+> и физическая приёмка pending603 ещё не завершены.
+
 > Повторная приёмка: владелец восстановил workdir5, новый запрос был сохранён,
 > Проверено12:27UTC: ready/gen2; новый783531603 сохранён pending, старый558 accepted.
 > Public RootReady на live-snapshot возвращал false: отдельный admission guard

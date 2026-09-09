@@ -52,6 +52,12 @@ func Recover(ctx context.Context, awaiting domain.Session, prior domain.Provider
 	for _, turn := range result.Reconciliation.Turns {
 		active = active || turn.Outcome == AcceptedTurnUnknown
 	}
+	if active && options.ShouldContinueAcceptedTurns != nil {
+		active, err = options.ShouldContinueAcceptedTurns(ctx, recovered, prior, result.Reconciliation)
+		if err != nil {
+			return result, errors.Join(ErrReconciliationRequired, fmt.Errorf("select accepted continuation: %w", err))
+		}
+	}
 	if active && options.ContinueAcceptedTurns == nil {
 		return result, ErrReconciliationRequired
 	}

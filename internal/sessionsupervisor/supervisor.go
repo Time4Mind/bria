@@ -49,25 +49,27 @@ type AcceptedTurnReconciliation = sessionattachment.AcceptedTurnReconciliation
 type AcceptedTurnReconciler = sessionattachment.AcceptedTurnReconciler
 
 type Options struct {
-	MaxRestartAttempts    int
-	WaitBeforeRetry       RetryWaiter
-	Now                   func() time.Time
-	AcceptedTurns         AcceptedTurnReconciler
-	ContinueAcceptedTurns func(context.Context, domain.Session, domain.ProviderBinding, AcceptedTurnReconciliation) error
+	MaxRestartAttempts          int
+	WaitBeforeRetry             RetryWaiter
+	Now                         func() time.Time
+	AcceptedTurns               AcceptedTurnReconciler
+	ShouldContinueAcceptedTurns func(context.Context, domain.Session, domain.ProviderBinding, AcceptedTurnReconciliation) (bool, error)
+	ContinueAcceptedTurns       func(context.Context, domain.Session, domain.ProviderBinding, AcceptedTurnReconciliation) error
 }
 
 type Result = sessionattachment.Result
 
 type Supervisor struct {
-	store        Store
-	waiter       ProcessWaiter
-	restarter    Restarter
-	maxAttempts  int
-	retry        RetryWaiter
-	now          func() time.Time
-	reconciler   AcceptedTurnReconciler
-	continuation func(context.Context, domain.Session, domain.ProviderBinding, AcceptedTurnReconciliation) error
-	recoveryMu   sync.Mutex
+	store          Store
+	waiter         ProcessWaiter
+	restarter      Restarter
+	maxAttempts    int
+	retry          RetryWaiter
+	now            func() time.Time
+	reconciler     AcceptedTurnReconciler
+	shouldContinue func(context.Context, domain.Session, domain.ProviderBinding, AcceptedTurnReconciliation) (bool, error)
+	continuation   func(context.Context, domain.Session, domain.ProviderBinding, AcceptedTurnReconciliation) error
+	recoveryMu     sync.Mutex
 }
 
 func New(store Store, waiter ProcessWaiter, restarter Restarter, options Options) (*Supervisor, error) {
@@ -80,8 +82,9 @@ func New(store Store, waiter ProcessWaiter, restarter Restarter, options Options
 	return &Supervisor{
 		store: store, waiter: waiter, restarter: restarter,
 		maxAttempts: options.MaxRestartAttempts, retry: options.WaitBeforeRetry, now: options.Now,
-		reconciler:   options.AcceptedTurns,
-		continuation: options.ContinueAcceptedTurns,
+		reconciler:     options.AcceptedTurns,
+		shouldContinue: options.ShouldContinueAcceptedTurns,
+		continuation:   options.ContinueAcceptedTurns,
 	}, nil
 }
 

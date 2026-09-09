@@ -258,6 +258,41 @@ func TestAttachedUnknownRequiresContinuationAndNeverBecomesDurablyReady(t *testi
 	}
 }
 
+func TestAttachedAcceptedHistoryYieldsReadyStateToQueuedSuccessor(t *testing.T) {
+	current := readySession(t, "attached-successor")
+	prior, _ := current.Binding()
+	next := prior
+	next.Generation++
+	store := &memoryStore{session: current}
+	runtime := &attachRuntime{binding: next}
+	continued := false
+	supervisor, err := sessionsupervisor.New(store, waitFunc(func(context.Context, domain.SessionID, domain.ProviderBinding) error { return nil }), runtime, sessionsupervisor.Options{
+		MaxRestartAttempts: 1,
+		Now:                time.Now,
+		WaitBeforeRetry:    func(context.Context, int) error { return nil },
+		AcceptedTurns: &fakeReconciler{reconciliation: sessionsupervisor.AcceptedTurnReconciliation{Turns: []sessionsupervisor.ReconciledAcceptedTurn{{
+			MessageID: "accepted-old", Outcome: sessionsupervisor.AcceptedTurnUnknown,
+		}}}},
+		ShouldContinueAcceptedTurns: func(context.Context, domain.Session, domain.ProviderBinding, sessionsupervisor.AcceptedTurnReconciliation) (bool, error) {
+			return false, nil
+		},
+		ContinueAcceptedTurns: func(context.Context, domain.Session, domain.ProviderBinding, sessionsupervisor.AcceptedTurnReconciliation) error {
+			continued = true
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := supervisor.Watch(context.Background(), current.ID(), prior)
+	if err != nil || !result.Recovered || result.Session.Status() != domain.SessionReady || store.session.Status() != domain.SessionReady {
+		t.Fatalf("queued successor did not receive ready recovery: result=%+v status=%s err=%v", result, store.session.Status(), err)
+	}
+	if continued || runtime.detached || len(runtime.requests) != 0 || len(runtime.aborted) != 0 {
+		t.Fatalf("historical observer or replacement started: continued=%t detached=%t starts=%d aborts=%d", continued, runtime.detached, len(runtime.requests), len(runtime.aborted))
+	}
+}
+
 func TestNativeRecoveryAttachesBeforeAcceptedReconciliationWithoutStartingCLI(t *testing.T) {
 	for _, failure := range []error{nil, errors.New("observer disconnected")} {
 		t.Run(fmt.Sprint(failure), func(t *testing.T) { testAttachedIdle(t, failure) })

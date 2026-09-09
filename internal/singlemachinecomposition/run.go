@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"time"
 
+	"bria/internal/acceptedcontinuation"
 	"bria/internal/app"
 	"bria/internal/authcomposition"
 	"bria/internal/callbacktoken"
@@ -398,8 +399,9 @@ func runTelegramController(
 		supervision, err := supervisioncomposition.New(supervisioncomposition.Options{
 			LocalComputerID: computerID, Store: state, Waiter: waiter, Restarter: starter,
 			AcceptedTurns: durableRecovery, MaxRestartAttempts: 3, SweepInterval: supervisionSweepInterval,
-			ContinueAcceptedTurns: continueAccepted,
-			Now:                   clock, WaitBeforeRetry: waitRecoveryRetry, Report: reportRecovery,
+			ShouldContinueAcceptedTurns: (acceptedcontinuation.Selector{Journal: journal}).Required,
+			ContinueAcceptedTurns:       continueAccepted,
+			Now:                         clock, WaitBeforeRetry: waitRecoveryRetry, Report: reportRecovery,
 		})
 		if err != nil {
 			return fmt.Errorf("compose session supervision: %w", err)
@@ -635,8 +637,7 @@ func runTelegramController(
 	}); err != nil {
 		return fmt.Errorf("bind Telegram prompt status delivery: %w", err)
 	}
-	// Attach only after history, final custody and card consumers are bound.
-	// An accepted turn may already have a final waiting in its native transcript.
+	// Attach after consumers are bound: an accepted turn may already have a native final.
 	if supervision, ok := sessionRecoverer.(*supervisioncomposition.Manager); ok {
 		recovery, err = supervision.RecoverStartup(ctx)
 		if err != nil {
