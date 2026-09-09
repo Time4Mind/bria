@@ -5,6 +5,26 @@ import (
 	"testing"
 )
 
+func TestEncodeUsesExactSpeechCleanupDefaultAndPreservesCustomInstruction(t *testing.T) {
+	wantDefault := "Преобразуй распознанную речь в короткий и понятный запрос. Удали нецензурную лексику, слова-паразиты, повторы и не относящийся к задаче речевой мусор. Исправь грамматику и только очевидные ошибки распознавания. Сохрани исходное намерение, все существенные условия, отрицания, имена, числа, даты и команды. Ничего не додумывай. Если исправление неоднозначно, оставь сомнительный фрагмент максимально близко к оригиналу. Верни только готовый запрос."
+	for _, test := range []struct{ name, configured, want string }{
+		{"default", "", wantDefault},
+		{"blank", " \n\t", wantDefault},
+		{"custom", "Сохрани текст дословно.", "Сохрани текст дословно."},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			payload, err := Encode(test.configured, "Не запускай команду 12 сентября.")
+			if err != nil {
+				t.Fatal(err)
+			}
+			instruction, original, enabled, err := Decode(payload)
+			if err != nil || !enabled || instruction != test.want || original != "Не запускай команду 12 сентября." {
+				t.Fatalf("Decode() = (%q, %q, %v, %v)", instruction, original, enabled, err)
+			}
+		})
+	}
+}
+
 func TestEnvelopeRoundTripAndLegacyPayload(t *testing.T) {
 	payload, err := Encode("clean", "raw text")
 	if err != nil {
