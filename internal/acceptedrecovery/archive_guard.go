@@ -30,7 +30,15 @@ func (resumer GuardedArchivedResumer) Resume(ctx context.Context, id domain.Sess
 	if archived.ID() != id || archived.Status() != domain.SessionArchived {
 		return domain.Session{}, sessionsupervisor.ErrReconciliationRequired
 	}
-	if err := resumer.Reconciler.CheckResume(ctx, archived); err != nil {
+	// Explicit reopening preserves pending acceptance but does not require a
+	// terminal receipt. Reconcile any available final before starting; the
+	// journal, not opening the CLI, fences replay of previously accepted input.
+	// Actual history/persistence errors still prevent an inconsistent resume.
+	binding, bound := archived.Binding()
+	if !bound {
+		return domain.Session{}, sessionsupervisor.ErrReconciliationRequired
+	}
+	if _, err := resumer.Reconciler.ReconcileAcceptedTurns(ctx, id, binding); err != nil {
 		return domain.Session{}, err
 	}
 	current, err := resumer.Sessions.Load(ctx, id)

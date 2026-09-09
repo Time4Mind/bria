@@ -36,14 +36,18 @@ func (f restoreFinal) RestoreAcceptedFinal(ctx context.Context, id domain.Sessio
 }
 
 func TestGuardedArchiveResumePersistsLateFinalBeforeStartingExactSession(t *testing.T) {
-	guardedArchiveResume(t, false)
+	guardedArchiveResume(t, false, false)
 }
 
 func TestGuardedArchiveResumeRejectsBindingChangedDuringFinalPersistence(t *testing.T) {
-	guardedArchiveResume(t, true)
+	guardedArchiveResume(t, true, false)
 }
 
-func guardedArchiveResume(t *testing.T, mutateBinding bool) {
+func TestArchiveResumePreservesPendingAcceptanceWithoutReplay(t *testing.T) {
+	guardedArchiveResume(t, false, true)
+}
+
+func guardedArchiveResume(t *testing.T, mutateBinding, pending bool) {
 	t.Helper()
 	ctx := context.Background()
 	dir := t.TempDir()
@@ -103,7 +107,7 @@ func guardedArchiveResume(t *testing.T, mutateBinding bool) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	terminal := false
+	terminal := !pending
 	history, err := recoverycomposition.NewReconciler(recoveryRead(func(_ context.Context, request sessionruntime.AcceptedTurnReadRequest) (sessionruntime.AcceptedTurnReconciliation, error) {
 		if request.Binding != binding {
 			t.Fatalf("recovery crossed retained binding: %+v", request)
@@ -127,11 +131,15 @@ func guardedArchiveResume(t *testing.T, mutateBinding bool) {
 			t.Fatal(err)
 		}
 		blocks, err := opened.LoadCardTranscript(ctx, id, true)
-		if err != nil || len(blocks) != 2 || blocks[1].Text != "Exact saved final" {
+		if err != nil || !pending && (len(blocks) != 2 || blocks[1].Text != "Exact saved final") || pending && len(blocks) != 1 {
 			t.Fatalf("resume before physical final: %+v %v", blocks, err)
 		}
 		inputs, err := journal.Inputs(ctx, "logical")
-		if err != nil || inputs[0].Phase != messagejournal.InputCompleted {
+		wantPhase := messagejournal.InputCompleted
+		if pending {
+			wantPhase = messagejournal.InputAccepted
+		}
+		if err != nil || inputs[0].Phase != wantPhase {
 			t.Fatalf("resume before journal commit: %+v %v", inputs, err)
 		}
 		resuming, err := archived.BeginResume(time.Unix(5, 0))
@@ -161,14 +169,6 @@ func guardedArchiveResume(t *testing.T, mutateBinding bool) {
 			return state.Replace(ctx, archived, replaced)
 		})
 	}
-	if _, err := guard.Resume(ctx, "logical"); !errors.Is(err, sessionsupervisor.ErrReconciliationRequired) || started {
-		t.Fatalf("pending archive resumed: %v", err)
-	}
-	inputs, err := journal.Inputs(ctx, "logical")
-	if err != nil || inputs[0].Phase != messagejournal.InputAccepted {
-		t.Fatalf("acceptance lost: %+v %v", inputs, err)
-	}
-	terminal = true
 	resumed, err := guard.Resume(ctx, "logical")
 	if mutateBinding {
 		if !errors.Is(err, sessionsupervisor.ErrReconciliationRequired) || started {
@@ -183,6 +183,16 @@ func guardedArchiveResume(t *testing.T, mutateBinding bool) {
 	}
 	if err != nil || !started || resumed.Status() != domain.SessionReady {
 		t.Fatalf("proven terminal did not resume: %+v %v", resumed, err)
+	}
+	if pending {
+		inputs, err := journal.Inputs(ctx, "logical")
+		if err != nil || len(inputs) != 1 || inputs[0].Phase != messagejournal.InputAccepted {
+			t.Fatalf("acceptance changed: %+v %v", inputs, err)
+		}
+		leased, err := journal.LeaseNextInput(ctx, "logical", "new-worker", time.Now(), time.Minute)
+		if !errors.Is(err, messagejournal.ErrNoAvailable) || leased.MessageID != "" {
+			t.Fatalf("old input replayable: %+v %v", leased, err)
+		}
 	}
 	if _, err := guard.Resume(ctx, "logical"); !errors.Is(err, sessionsupervisor.ErrReconciliationRequired) {
 		t.Fatalf("nonarchived resume repeated: %v", err)

@@ -70,6 +70,11 @@ func Blocks(card telegramstate.Card, showTechnical bool) []cardtranscript.Block 
 		if kind == "" && len(card.HistoryKeys) > index && card.HistoryKeys[index] != "" {
 			kind = "prompt"
 		}
+		// Old releases stored observation loss as an untyped synthetic history
+		// entry. Hide that notice without deleting history or filtering user/model text.
+		if kind == "" && text == "Связь с CLI прервалась. Исход запроса пока не подтверждён." {
+			continue
+		}
 		if kind == "tool" && !showTechnical {
 			continue
 		}

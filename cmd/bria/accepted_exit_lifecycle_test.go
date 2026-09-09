@@ -2,7 +2,6 @@ package main
 
 import (
 	"bria/internal/app"
-	"bria/internal/coordinator"
 	"bria/internal/domain"
 	"bria/internal/sessionruntime"
 	"bria/internal/storage"
@@ -12,6 +11,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -102,8 +102,13 @@ func TestAcceptedRealStarterTerminalProofControlsLifecycle(t *testing.T) {
 				if _, err := controller.HandleSemanticAction(ctx, telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticSelect, SessionID: id}); err != nil {
 					t.Fatal(err)
 				}
-				if _, err := controller.HandleSemanticMessage(ctx, coordinator.Update{ID: 802, Kind: coordinator.UpdateMessage, ActorID: 7, ConversationID: 42, ConversationKind: "private", Text: "synthetic terminal proof"}); err != nil {
-					t.Fatal(err)
+				done := make(chan telegramcontroller.DurableInputProcessReceipt, 1)
+				receipt, err := controller.ProcessDurableInput(ctx, telegramcontroller.DurableLeasedInput{SessionID: id, MessageID: "telegram-update:802", Sequence: 1, Payload: []byte("synthetic terminal proof")}, telegramcontroller.DurableInputCallbacks{
+					OnAccepted:  func(context.Context, telegramcontroller.DurableInputAcceptance) error { return nil },
+					OnCompleted: func(_ context.Context, r telegramcontroller.DurableInputProcessReceipt) error { done <- r; return nil },
+				})
+				if err != nil || !receipt.Accepted {
+					t.Fatalf("acceptance receipt=%+v err=%v", receipt, err)
 				}
 				select {
 				case <-runtime.accepted:
@@ -126,12 +131,28 @@ func TestAcceptedRealStarterTerminalProofControlsLifecycle(t *testing.T) {
 					_ = starter.StopCurrent(ctx, id)
 				}
 				select {
-				case notice := <-notices:
-					if (mode == "interrupted" || mode == "cancel") && notice.Text != "Запрос остановлен." {
-						t.Fatalf("confirmed interruption notice=%q, want stopped rather than CLI error", notice.Text)
+				case completion := <-done:
+					want := telegramcontroller.DurableInputTerminalFailed
+					if mode == "eof" {
+						want = telegramcontroller.DurableInputAwaitingRecovery
+					}
+					if !completion.Accepted || completion.Completion != want {
+						t.Fatalf("completion=%+v want accepted/%s", completion, want)
 					}
 				case <-ctx.Done():
-					t.Fatal("no worker terminal notification")
+					t.Fatal("worker did not complete processing")
+				}
+				if mode == "eof" {
+					assertAcceptedObservationSilence(t, ctx, store, id, notices)
+				} else {
+					select {
+					case notice := <-notices:
+						if (mode == "interrupted" || mode == "cancel") && notice.Text != "Запрос остановлен." {
+							t.Fatalf("confirmed interruption notice=%q, want stopped rather than CLI error", notice.Text)
+						}
+					case <-ctx.Done():
+						t.Fatal("no worker terminal notification")
+					}
 				}
 				current, err := store.Load(ctx, id)
 				want := domain.SessionReady
@@ -237,7 +258,8 @@ func (acceptedExitRuntime) SubmitWithCallbacks(_ context.Context, _ domain.Sessi
 }
 
 func TestAcceptedUncertainExitCannotFinishLifecycleBeforeSupervisor(t *testing.T) {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 	store, sessions := archiveFixture(t, "11111111-1111-4111-9111-111111111111")
 	lifecycle, err := app.NewSessionTurnLifecycle(store, time.Now)
 	if err != nil {
@@ -252,25 +274,44 @@ func TestAcceptedUncertainExitCannotFinishLifecycleBeforeSupervisor(t *testing.T
 	if _, err = c.HandleSemanticAction(ctx, telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticSelect, SessionID: sessions[0].ID()}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = c.HandleSemanticMessage(ctx, coordinator.Update{ID: 801, Kind: coordinator.UpdateMessage, ActorID: 7, ConversationID: 42, ConversationKind: "private", Text: "synthetic accepted request"}); err != nil {
+	done := make(chan telegramcontroller.DurableInputProcessReceipt, 1)
+	receipt, err := c.ProcessDurableInput(ctx, telegramcontroller.DurableLeasedInput{SessionID: sessions[0].ID(), MessageID: "telegram-update:801", Sequence: 1, Payload: []byte("synthetic accepted request")}, telegramcontroller.DurableInputCallbacks{
+		OnAccepted:  func(context.Context, telegramcontroller.DurableInputAcceptance) error { return nil },
+		OnCompleted: func(_ context.Context, r telegramcontroller.DurableInputProcessReceipt) error { done <- r; return nil },
+	})
+	if err != nil || !receipt.Accepted {
+		t.Fatalf("acceptance receipt=%+v err=%v", receipt, err)
+	}
+	select {
+	case completion := <-done:
+		if !completion.Accepted || completion.Completion != telegramcontroller.DurableInputAwaitingRecovery {
+			t.Fatalf("uncertain acceptance resolved: %+v", completion)
+		}
+	case <-ctx.Done():
+		t.Fatal("worker did not complete processing")
+	}
+	current, err := store.Load(ctx, sessions[0].ID())
+	if err != nil || current.Status() != domain.SessionRunning {
+		t.Fatalf("accepted uncertain exit must remain running: status=%s err=%v", current.Status(), err)
+	}
+	assertAcceptedObservationSilence(t, ctx, store, sessions[0].ID(), notices)
+}
+
+func assertAcceptedObservationSilence(t *testing.T, ctx context.Context, store *storage.SessionStore, id domain.SessionID, notices <-chan telegramcontroller.Notification) {
+	t.Helper()
+	for len(notices) != 0 {
+		n := <-notices
+		if n.Kind == telegramcontroller.NotificationError {
+			t.Errorf("observation loss published error notification: %q", n.Text)
+		}
+	}
+	history, err := store.LoadCardHistory(ctx, id)
+	if err != nil {
 		t.Fatal(err)
 	}
-	for {
-		select {
-		case n := <-notices:
-			if n.Kind != telegramcontroller.NotificationError {
-				continue
-			}
-			current, err := store.Load(ctx, sessions[0].ID())
-			if err != nil {
-				t.Fatal(err)
-			}
-			if current.Status() == domain.SessionReady {
-				t.Fatal("accepted uncertain exit became ready before accepted-turn reconciliation")
-			}
-			return
-		case <-time.After(5 * time.Second):
-			t.Fatal("missing terminal error notification")
+	for _, item := range history {
+		if strings.TrimSpace(item) == "" || strings.Contains(item, "Связь с CLI прервалась. Исход запроса пока не подтверждён.") {
+			t.Errorf("observation loss polluted physical history: %q", item)
 		}
 	}
 }

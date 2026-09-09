@@ -234,9 +234,13 @@ func TestTerminalQueueContinuationAfterActualProviderProof(t *testing.T) {
 				t.Fatal(err)
 			}
 			var terminalText string
+			errorNotices := 0
 			finals := 0
 			for len(notices) != 0 {
 				n := <-notices
+				if n.Kind == telegramcontroller.NotificationError {
+					errorNotices++
+				}
 				if n.OperationID == "queue-A:error" {
 					terminalText = n.Text
 				}
@@ -247,7 +251,12 @@ func TestTerminalQueueContinuationAfterActualProviderProof(t *testing.T) {
 					}
 				}
 			}
-			if terminalText == "" || !strings.Contains(strings.Join(history, "\n"), terminalText) {
+			if mode == "eof" {
+				if errorNotices != 0 {
+					t.Errorf("EOF published %d error notifications", errorNotices)
+				}
+				assertAcceptedObservationSilence(t, ctx, reopened, id, notices)
+			} else if terminalText == "" || !strings.Contains(strings.Join(history, "\n"), terminalText) {
 				t.Errorf("terminal UI not physically retained: notice=%q history=%v", terminalText, history)
 			}
 			if mode == "interrupted" && !strings.Contains(strings.ToLower(terminalText), "останов") {

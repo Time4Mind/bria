@@ -2,11 +2,12 @@ package turnfinalization
 
 import "bria/internal/sessionruntime"
 
-// FailureText preserves the existing terminal/observation distinction.
+// FailureText returns no user-facing text for observation loss alone.
+// Callers must skip history and notification writes when the text is empty.
 func FailureText(result sessionruntime.TurnResult, unknown, terminalFailure bool) string {
 	text := "Ошибка CLI: запрос не выполнен."
 	if unknown {
-		text = "Связь с CLI прервалась. Исход запроса пока не подтверждён."
+		text = ""
 	}
 	if result.ErrorCode == sessionruntime.ErrorAuthenticationFailed {
 		text = "Ошибка авторизации Claude: требуется выполнить вход (/login)."

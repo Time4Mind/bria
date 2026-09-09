@@ -2907,21 +2907,23 @@ func (worker *sessionWorker) runTurnWithAcceptance(
 		finishName(result.ProviderSessionName)
 	}
 	if err != nil || result.TerminalStatus != sessionruntime.StatusCompleted {
-		if unknown && worker.controller.canRecoverObservation(current.Provider()) {
-			return DurableInputAwaitingRecovery, accepted
-		}
 		errorText := turnfinalization.FailureText(result, unknown, terminalFailure)
-		worker.controller.mu.Lock()
-		worker.controller.history[worker.sessionID] = append(worker.controller.history[worker.sessionID], errorText)
-		worker.controller.mu.Unlock()
-		if historyStore, ok := worker.controller.uiState.(CardHistoryStore); ok {
-			if err := historyStore.AppendCardHistory(context.WithoutCancel(worker.controller.rootContext), worker.sessionID, errorText); err != nil {
-				worker.notifyTurnError(turn.messageID+":terminal-history-error", "Не удалось сохранить исход запроса. Очередь приостановлена.")
-				return DurableInputUnknown, accepted
+		if errorText != "" {
+			worker.controller.mu.Lock()
+			worker.controller.history[worker.sessionID] = append(worker.controller.history[worker.sessionID], errorText)
+			worker.controller.mu.Unlock()
+			if historyStore, ok := worker.controller.uiState.(CardHistoryStore); ok {
+				if err := historyStore.AppendCardHistory(context.WithoutCancel(worker.controller.rootContext), worker.sessionID, errorText); err != nil {
+					worker.notifyTurnError(turn.messageID+":terminal-history-error", "Не удалось сохранить исход запроса. Очередь приостановлена.")
+					return DurableInputUnknown, accepted
+				}
 			}
+			worker.notifyTurnError(turn.messageID+":error", errorText)
 		}
-		worker.notifyTurnError(turn.messageID+":error", errorText)
 		if unknown {
+			if worker.controller.canRecoverObservation(current.Provider()) {
+				return DurableInputAwaitingRecovery, accepted
+			}
 			return DurableInputUnknown, accepted
 		}
 		if terminalFailure && terminalStateValid {

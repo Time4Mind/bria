@@ -142,8 +142,13 @@ func assertAcceptedRestartArchiveLateFinal(t *testing.T, ctx context.Context, or
 		t.Fatal(err)
 	}
 	resumer := durablecomposition.GuardedArchivedResumer{Base: baseResumer, Sessions: state, Reconciler: reconciler}
-	if _, err := resumer.Resume(ctx, id); err == nil || runtime.starts.Load() != 0 {
-		t.Fatalf("unproven archived main+steer resumed: starts=%d err=%v", runtime.starts.Load(), err)
+	resumedEarly, resumeErr := resumer.Resume(ctx, id)
+	if pendingCommit {
+		if resumeErr == nil || runtime.starts.Load() != 0 {
+			t.Fatalf("unproven acceptance resumed: starts=%d err=%v", runtime.starts.Load(), resumeErr)
+		}
+	} else if resumeErr != nil || resumedEarly.Status() != domain.SessionReady || runtime.starts.Load() != 1 || len(runtime.submitted) != 0 {
+		t.Fatalf("explicit archive reopen failed or replayed: starts=%d err=%v", runtime.starts.Load(), resumeErr)
 	}
 	assertRetainedRecoveryQueue(t, ctx, journalPath, id, messages, queued.Sequence, messagejournal.InputAccepted, retained...)
 	if err := nativereceiptstore.Write(receipts, doc); err != nil {
@@ -155,7 +160,13 @@ func assertAcceptedRestartArchiveLateFinal(t *testing.T, ctx context.Context, or
 	if err := os.WriteFile(path, []byte(nativeText), 0600); err != nil {
 		t.Fatal(err)
 	}
-	recovered, err := resumer.Resume(ctx, id)
+	recovered := resumedEarly
+	if pendingCommit {
+		recovered, err = resumer.Resume(ctx, id)
+	} else {
+		binding, _ = recovered.Binding()
+		_, err = reconciler.ReconcileAcceptedTurns(ctx, id, binding)
+	}
 	if err != nil || recovered.Status() != domain.SessionReady || runtime.starts.Load() != 1 {
 		t.Fatalf("proven archived resume=%s starts=%d err=%v", recovered.Status(), runtime.starts.Load(), err)
 	}
