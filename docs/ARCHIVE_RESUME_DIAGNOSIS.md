@@ -14,7 +14,7 @@ read-only production checks, no replay or lifecycle mutation.
 - D3 complete: correlate user failures. Detailed log at 11:05:28 and 11:14:22 UTC
   shows resume_session failing in controller callback after 201/205 ms;
   raw cause is redacted. Generic callback effect fence produces effect_unknown.
-- D4 in progress: owner authorized implementation and removal of observation-loss
+- D4 implementation complete: owner authorized implementation and removal of observation-loss
   card text. Separate explicit
   archive reopen from prior-input replay eligibility; retain unknown prior outcome
   and prevent automatic input replay. Add a
@@ -49,7 +49,22 @@ EOF failure. Exit and scanner errors are preserved. RED/GREEN, repeated focused
 race and full nativeadapter race passed; independent review approved. Only tests
 changed in CI follow-up. Galileo owned test harness, Mencius reviewed read-only,
 parent owns integration. No runtime or release target expansion.
-Remaining: resolve CI failure, verify latest CI, deploy/postflight.
+CI fix is pushed as fd3a47b2f0e139b09d65b8ffdd7dbfdfc0ae0d86. Fresh full
+make check-full passed, including race and executable trio; runtime hashes unchanged.
+- R1 complete: implementation, regression tests, independent review, full local gate.
+- R2 complete: code and CI fixture fix committed/pushed; remote main reread exact SHA.
+- R3 pending external: as of 2026-09-09 11:51 UTC GitHub has created no Actions
+  runs or check suites for fd3a47b, despite enabled push workflows. Previous SHA
+  CI failure is not evidence against the fixed test. Do not call latest CI green.
+- R4 pending: install trio and restart gui/501/com.time4mind.bria.v2 after CI;
+  verify version/hashes, running process/sole lock holder and state retention.
+  Current service remains PID68226, release 20260909-persistent-terminal-final2.
+  Candidate 20260909-archive-resume-quiet passes check-config/check-state.
+- R5 unverified boundary: real owner archive-click/provider resume after release.
+  No live session has been reopened, no old accepted input has been replayed.
+Preflight at 11:42 UTC: 6 sessions, 6 cards, 300 history entries, 18 journal inputs;
+config/settings and identities unchanged. Prepared local release helper is
+`.tmp/archive-release.rb`; reread current service/paths/hashes before using it.
 
 Native app-server probe in previous turn did not obtain a resume response and
 does not establish provider health. Live restoration has not been verified.
