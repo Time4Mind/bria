@@ -5,7 +5,10 @@ package nativecontrolport
 import (
 	"bria/internal/domain"
 	"context"
+	"errors"
 )
+
+var ErrStale = errors.New("native screen changed")
 
 type Request struct {
 	Command, Key, ExpectedHash, ExpectedProviderSessionID string

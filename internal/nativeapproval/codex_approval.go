@@ -20,6 +20,9 @@ type Terminal interface {
 
 var terminalCSI = regexp.MustCompile("\x1b\\[[0-?]*[ -/]*[@-~]")
 
+// ErrStale means the authorized picker changed before any key was sent.
+var ErrStale = errors.New("command approval changed before input")
+
 // CodexCommandApproval is a display preview, never an executable shell command.
 type CodexCommandApproval struct {
 	Environment string `json:"environment"`
@@ -141,7 +144,7 @@ func AcceptCodexCommandOnce(ctx context.Context, terminal Terminal, fingerprint 
 		}
 		request, ok := ParseCodexCommandApproval(screen)
 		if !ok || request.Fingerprint != fingerprint {
-			return errors.New("no matching command approval")
+			return ErrStale
 		}
 		beforeReceipts = approvalReceiptCount(screen)
 	}

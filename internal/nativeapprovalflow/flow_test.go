@@ -25,6 +25,7 @@ type flowDriver struct {
 	mu       sync.Mutex
 	requests []sessionruntime.NativeRequest
 	result   error
+	results  []error
 	entered  chan struct{}
 	release  chan struct{}
 }
@@ -33,6 +34,10 @@ func (d *flowDriver) NativeControl(_ context.Context, _ domain.SessionID, reques
 	d.mu.Lock()
 	d.requests = append(d.requests, request)
 	entered, release, result := d.entered, d.release, d.result
+	if len(d.results) > 0 {
+		result = d.results[0]
+		d.results = d.results[1:]
+	}
 	d.mu.Unlock()
 	if entered != nil {
 		close(entered)
@@ -87,6 +92,33 @@ func TestObserveSendsOneApprovalForFullAndCollapsedScreens(t *testing.T) {
 			}
 			if got := driver.count(); got != 1 {
 				t.Fatalf("NativeControl calls=%d, want 1", got)
+			}
+		})
+	}
+}
+
+func TestObserveApprovesDistinctConsecutiveDialogsInSameGeneration(t *testing.T) {
+	for _, test := range []struct {
+		name, first, second string
+	}{
+		{name: "full then full", first: "codex-command-approval.txt", second: "codex-command-approval-wiki.txt"},
+		{name: "collapsed then full", first: "codex-command-approval-collapsed.txt", second: "codex-command-approval.txt"},
+		{name: "full then collapsed", first: "codex-command-approval.txt", second: "codex-command-approval-collapsed.txt"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			driver := &flowDriver{}
+			flow := &Flow{}
+			for index, screen := range []string{flowFixture(t, test.first), flowFixture(t, test.second)} {
+				source := flowScreenProvider{snapshot: sessionruntime.NativeSnapshot{
+					FullText: screen, Hash: strings.Repeat(string(rune('a'+index)), 64), Interactive: true,
+					ProviderSessionID: "provider-1", Generation: 7,
+				}}
+				if err := flow.Observe(context.Background(), "session-1", source, driver, enabledAlways); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if got := driver.count(); got != 2 {
+				t.Fatalf("NativeControl calls=%d, want one for each distinct consecutive dialog", got)
 			}
 		})
 	}

@@ -8,6 +8,7 @@ import (
 	"bria/internal/coordinator"
 	"bria/internal/domain"
 	"bria/internal/sessionruntime"
+	"bria/internal/telegramnativeview"
 	"bria/internal/telegramturnhelpers"
 )
 
@@ -104,6 +105,16 @@ func nativeSurface(id domain.SessionID, snapshot sessionruntime.NativeSnapshot) 
 	if text == "" {
 		text = "CLI: ожидание вывода."
 	}
+	richMarkdown := false
+	if snapshot.Interactive {
+		source := snapshot.FullText
+		if source == "" {
+			source = snapshot.Text
+		}
+		if formatted, ok := telegramnativeview.CommandApproval(source); ok {
+			text, richMarkdown = formatted, true
+		}
+	}
 	if !snapshot.Interactive {
 		return SemanticActionResult{Surface: &SemanticSurface{Text: text, Rows: [][]SemanticButton{{{Label: "Меню", Action: SemanticMenuBack}, {Label: "К сессии", Action: SemanticSelect, SessionID: id}}}}}
 	}
@@ -113,7 +124,7 @@ func nativeSurface(id domain.SessionID, snapshot sessionruntime.NativeSnapshot) 
 		{button("⎋ Esc", 6), button("⏎ Enter", 5)},
 		{{Label: "Меню", Action: SemanticMenuBack}, {Label: "К сессии", Action: SemanticSelect, SessionID: id}},
 	}
-	return SemanticActionResult{Surface: &SemanticSurface{Text: text, Rows: rows, NativeSessionID: id}}
+	return SemanticActionResult{Surface: &SemanticSurface{Text: text, RichMarkdown: richMarkdown, Rows: rows, NativeSessionID: id}}
 }
 
 // Projection observes the displayed overlay without reopening one behind a

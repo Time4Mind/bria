@@ -1121,6 +1121,7 @@ var telegramControllerAllowedImports = []string{
 	"internal/sessioncloseflow",
 	"internal/controllertelemetry",
 	"internal/telegramturnhelpers",
+	"internal/telegramnativeview",
 	"internal/nativeapprovalflow",
 	"internal/app", "internal/cardtranscript", "internal/coordinator", "internal/domain", "internal/promptpreprocess", "internal/runtimeprotocol", "internal/sessioncreation", "internal/sessionruntime", "internal/settingsport", "internal/telegramcreationview", "internal/telegramnodes", "internal/telegramsettings", "internal/telegramsettingsview", "internal/telegramsessions", "internal/telegramstatus", "internal/turnprocessing",
 }
@@ -1360,6 +1361,11 @@ var packagePolicies = map[string]packagePolicy{
 	"internal/nativeapproval": {
 		responsibility:     "extract native interactive menus, classify approvals and answer independently authorized one-shot decisions",
 		maxProductionLines: 380,
+	},
+	"internal/telegramnativeview": {
+		responsibility:     "render bounded native CLI interactions as transport-neutral Telegram Rich Markdown",
+		allowedImports:     []string{"internal/nativeapproval"},
+		maxProductionLines: 180,
 	},
 	"internal/nativeapprovalflow": {
 		responsibility:     "gate and deduplicate native one-shot approvals against current settings and exact provider generation",
@@ -1976,6 +1982,7 @@ var packagePolicies = map[string]packagePolicy{
 			"internal/sessioncloseflow",
 			"internal/controllertelemetry",
 			"internal/telegramturnhelpers",
+			"internal/telegramnativeview",
 			"internal/nativeapprovalflow",
 			"internal/app", "internal/cardtranscript", "internal/coordinator", "internal/domain", "internal/promptpreprocess", "internal/runtimeprotocol", "internal/sessioncreation", "internal/sessionruntime", "internal/settingsport", "internal/telegramcreationview", "internal/telegramnodes", "internal/telegramsettings", "internal/telegramsettingsview", "internal/telegramsessions", "internal/telegramstatus", "internal/turnprocessing",
 		},

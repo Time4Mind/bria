@@ -16,10 +16,12 @@ type Terminal interface {
 	Key(context.Context, string) error
 }
 
+var ErrApprovalStale = nativeapproval.ErrStale
+
 func ApproveCommand(ctx context.Context, terminal Terminal, screen string) error {
 	request, ok := nativeapproval.ParseCodexCommandApproval(screen)
 	if !ok {
-		return errors.New("not an active command approval")
+		return ErrApprovalStale
 	}
 	return nativeapproval.AcceptCodexCommandOnce(ctx, terminal, request.Fingerprint)
 }

@@ -37,7 +37,7 @@ func (starter *Starter) NativeModel(id domain.SessionID) (string, bool) {
 	return record.nativeModel, record.nativeModel != ""
 }
 
-var ErrNativeStale = errors.New("native screen changed")
+var ErrNativeStale = nativecontrolport.ErrStale
 var ErrNativeUnavailable = errors.New("native control unavailable")
 
 // NativeControl is independent of inference turns. It requires an exact

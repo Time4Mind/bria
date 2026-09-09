@@ -299,7 +299,11 @@ func (a *adapter) control(ctx context.Context, r runtimeprotocol.ParentMessage) 
 			if r.Key == "approve_once" {
 				err = nativecli.ApproveCommand(ctx, a.term, before)
 				if err != nil {
-					code, err = "unavailable", nil
+					code = "unavailable"
+					if errors.Is(err, nativecli.ErrApprovalStale) {
+						code = "stale"
+					}
+					err = nil
 				}
 			} else {
 				keys := map[string]string{"up": "Up", "down": "Down", "left": "Left", "right": "Right", "enter": "Enter", "escape": "Escape", "tab": "Tab", "space": "Space"}

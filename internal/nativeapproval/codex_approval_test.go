@@ -2,6 +2,7 @@ package nativeapproval
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -188,7 +189,7 @@ func TestCodexApprovalRereadsBeforeInput(t *testing.T) {
 	fixture := approvalFixture(t)
 	request, _ := ParseCodexCommandApproval(fixture)
 	terminal := &changingApprovalTerminal{approvalTerminal: approvalTerminal{screen: fixture}}
-	if err := AcceptCodexCommandOnce(context.Background(), terminal, request.Fingerprint); err == nil || len(terminal.keys) != 0 {
-		t.Fatal("disappeared request received Enter")
+	if err := AcceptCodexCommandOnce(context.Background(), terminal, request.Fingerprint); !errors.Is(err, ErrStale) || len(terminal.keys) != 0 {
+		t.Fatalf("disappeared request result=%v keys=%v, want typed stale without Enter", err, terminal.keys)
 	}
 }

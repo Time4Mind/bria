@@ -4,6 +4,7 @@ package nativeapprovalflow
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -17,8 +18,23 @@ import (
 type Flow struct {
 	once    sync.Once
 	gate    chan struct{}
-	claimed map[domain.SessionID]string
+	claimed map[domain.SessionID]approvalClaim
 }
+
+type approvalClaim struct {
+	generation  string
+	fingerprint string
+	hash        string
+	outcome     approvalOutcome
+}
+
+type approvalOutcome uint8
+
+const (
+	approvalConfirmed approvalOutcome = iota + 1
+	approvalStale
+	approvalUncertain
+)
 
 func (f *Flow) lock(ctx context.Context) error {
 	f.once.Do(func() { f.gate = make(chan struct{}, 1); f.gate <- struct{}{} })
@@ -70,18 +86,25 @@ func (f *Flow) Observe(ctx context.Context, id domain.SessionID, source nativeco
 	if screen == "" {
 		screen = snapshot.Text
 	}
-	_, ok = nativeapproval.ParseCodexCommandApproval(screen)
+	request, ok := nativeapproval.ParseCodexCommandApproval(screen)
 	if !ok {
 		if !snapshot.Interactive && strings.TrimSpace(screen) != "" {
-			delete(f.claimed, id)
+			if previous, exists := f.claimed[id]; !exists || previous.outcome != approvalUncertain {
+				delete(f.claimed, id)
+			}
 		}
 		return nil
 	}
-	// A resize changes the display fingerprint, not the pending decision.
-	// Require an observed nonempty, noninteractive screen between decisions.
-	key := fmt.Sprintf("%s:%d", snapshot.ProviderSessionID, snapshot.Generation)
-	if f.claimed[id] == key {
-		return nil
+	// Distinct command dialogs can replace each other without an observable
+	// noninteractive frame when Codex starts parallel tools. Bind the claim to
+	// the parsed dialog too, so the next command is not mistaken for a replay.
+	generation := fmt.Sprintf("%s:%d", snapshot.ProviderSessionID, snapshot.Generation)
+	if previous, exists := f.claimed[id]; exists && previous.generation == generation {
+		if previous.outcome == approvalUncertain ||
+			previous.outcome == approvalConfirmed && previous.fingerprint == request.Fingerprint ||
+			previous.outcome == approvalStale && previous.fingerprint == request.Fingerprint && previous.hash == snapshot.Hash {
+			return nil
+		}
 	}
 	// Reread the setting after parsing. No cached flag authorizes the key.
 	on, err = enabled(ctx)
@@ -89,9 +112,15 @@ func (f *Flow) Observe(ctx context.Context, id domain.SessionID, source nativeco
 		return err
 	}
 	if f.claimed == nil {
-		f.claimed = make(map[domain.SessionID]string)
+		f.claimed = make(map[domain.SessionID]approvalClaim)
 	}
-	f.claimed[id] = key // unknown outcomes cannot trigger automatic replay
 	_, err = driver.NativeControl(ctx, id, nativecontrolport.Request{Key: "approve_once", ExpectedHash: snapshot.Hash, ExpectedProviderSessionID: snapshot.ProviderSessionID, ExpectedGeneration: snapshot.Generation})
+	outcome := approvalConfirmed
+	if errors.Is(err, nativecontrolport.ErrStale) {
+		outcome = approvalStale
+	} else if err != nil {
+		outcome = approvalUncertain
+	}
+	f.claimed[id] = approvalClaim{generation: generation, fingerprint: request.Fingerprint, hash: snapshot.Hash, outcome: outcome}
 	return err
 }
