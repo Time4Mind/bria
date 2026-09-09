@@ -25,9 +25,27 @@ replayed.
   Bria `f78b48bd451d22ef18e8c7b776d6a7d15da729bd335452caed2e7bdc2506c699`,
   Codex adapter `f68d871a964fe2fe2701317543ff9543ff16d45d080e0bbc519f677f851052c5`,
   Claude adapter `7c8eb38b4d6489ff12c24fb624da2adc265ead8ded18dada2ab574fff7b6388c`.
-  No state or terminal input was edited manually. Commit/push/CI/deploy and live
-  successor acceptance remain in progress. The final full gate after fail-closed
-  protection for all retained unknown/failed custody also PASS.
+  No state or terminal input was edited manually. The final full gate after
+  fail-closed protection for all retained unknown/failed custody also PASS.
+
+## Follow-up release receipt
+
+- Source `0e78f266418948ff78d7c88931ddb581f5982ba2` was pushed to
+  `origin/main`; Stage 1 `34360617597` and Platform matrix `34360618129`
+  completed successfully for that exact SHA.
+- At 14:04 UTC release `20260909-archive-successor-unblock` replaced only the
+  Bria executable trio and restarted `gui/501/com.time4mind.bria.v2`. PID 16335
+  is stable and the sole state-lock holder; installed hashes match the checked
+  candidate. Config/state checks and Telegram identity pass.
+- Physical acceptance PASS: startup attached the same native session as
+  generation 4, `telegram-update:783531603` advanced pending -> accepted ->
+  completed and produced native turn `01a0867c-6239-7c11-8f31-5d1ab2c19994`
+  plus a normal final. Session returned Ready at 14:08:21 UTC. The exact tmux
+  panel showed the new `Продолжи.` execution; old `telegram-update:783531558`
+  remained accepted/unknown and was not submitted again.
+- Postflight retained 6 session identities, 6 cards, 337 total history records,
+  19 inputs, config/plist/settings hashes and the live terminal. There were no
+  critical/error events after the new `telegram.flow_ready`. R6 is complete.
 
 ## Reopened user acceptance defect: new input blocked
 

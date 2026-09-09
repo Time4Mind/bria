@@ -10,7 +10,12 @@
 > Код и изолированный policy-пакет готовы; RED/GREEN, focused race и
 > полный `make check-full` PASS 13:53 UTC. Candidate
 > `20260909-archive-successor-unblock`, Bria hash `f78b48bd...`. Выпуск
-> и физическая приёмка pending603 ещё не завершены.
+> и физическая приёмка завершены: source `0e78f26` в origin/main,
+> оба CI PASS, релиз установлен, PID16335 running/sole lock. Pending603
+> стал accepted, затем completed с нормальным final; сессия Ready.
+> Старый accepted558 не replay-ился. Сохранены 6 сессий, 6 карточек,
+> 337 history, 19 inputs, settings/config; Telegram identity OK, свежих
+> critical/error после flow_ready нет. R6 закрыт; repeat deploy не нужен.
 
 > Повторная приёмка: владелец восстановил workdir5, новый запрос был сохранён,
 > Проверено12:27UTC: ready/gen2; новый783531603 сохранён pending, старый558 accepted.
