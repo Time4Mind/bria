@@ -277,7 +277,7 @@ func (s *parseState) parse(line []byte, opts Options, offset int64) ([]Event, er
 			}
 			if p.Type == "function_call_output" || p.Type == "custom_tool_call_output" {
 				emitMetadata(KindTool, "tool", &runtimeprotocol.EventMetadata{
-					ItemID: toolItemID(p.CallID, p.ID), Result: tooltext.Retain(firstRawText(p.Output, p.Content)), Status: toolStatus(p.Status, "completed"),
+					ItemID: toolItemID(p.CallID, p.ID), Result: retainToolResult(firstRawText(p.Output, p.Content)), Status: toolStatus(p.Status, "completed"),
 				})
 			}
 			// Native versions can record assistant phase on response_item instead of
@@ -336,7 +336,7 @@ func (s *parseState) parse(line []byte, opts Options, offset int64) ([]Event, er
 						status = "failed"
 					}
 					emitMetadata(KindTool, "tool", &runtimeprotocol.EventMetadata{
-						ItemID: b.ToolUseID, Result: tooltext.Retain(rawText(b.Content)), Status: status,
+						ItemID: b.ToolUseID, Result: retainToolResult(rawText(b.Content)), Status: status,
 					})
 				}
 			}
@@ -410,6 +410,13 @@ func firstRawText(values ...json.RawMessage) string {
 		}
 	}
 	return ""
+}
+
+func retainToolResult(raw string) string {
+	if raw == "" {
+		return tooltext.RetainTruncatedNotice()
+	}
+	return tooltext.Retain(raw)
 }
 
 func rawText(raw json.RawMessage) string {

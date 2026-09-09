@@ -11,6 +11,7 @@ import (
 	"bria/internal/app"
 	"bria/internal/controllertelemetry"
 	"bria/internal/domain"
+	"bria/internal/sessionattachment"
 	"bria/internal/sessionrecoverycontrol"
 	"bria/internal/sessionsupervisor"
 )
@@ -23,25 +24,22 @@ type Store interface {
 }
 
 type Options struct {
-	LocalComputerID    domain.ComputerID
-	Store              Store
-	Waiter             sessionsupervisor.ProcessWaiter
-	Restarter          sessionsupervisor.Restarter
-	AcceptedTurns      sessionsupervisor.AcceptedTurnReconciler
-	MaxRestartAttempts int
-	SweepInterval      time.Duration
-	WaitBeforeRetry    sessionsupervisor.RetryWaiter
-	Now                func() time.Time
-	Report             func(error)
+	LocalComputerID       domain.ComputerID
+	Store                 Store
+	Waiter                sessionsupervisor.ProcessWaiter
+	Restarter             sessionsupervisor.Restarter
+	AcceptedTurns         sessionsupervisor.AcceptedTurnReconciler
+	ContinueAcceptedTurns func(context.Context, domain.Session, domain.ProviderBinding, sessionsupervisor.AcceptedTurnReconciliation) error
+	MaxRestartAttempts    int
+	SweepInterval         time.Duration
+	WaitBeforeRetry       sessionsupervisor.RetryWaiter
+	Now                   func() time.Time
+	Report                func(error)
 }
 
 type watchedBinding struct {
 	binding domain.ProviderBinding
 	cancel  context.CancelFunc
-}
-
-type persistedExitRecorder interface {
-	ConfirmPersistedExit(app.StartSessionRequest, domain.ProviderBinding) error
 }
 
 type Manager struct {
@@ -69,6 +67,7 @@ func New(options Options) (*Manager, error) {
 	supervisorOptions := sessionsupervisor.Options{
 		MaxRestartAttempts: options.MaxRestartAttempts, WaitBeforeRetry: options.WaitBeforeRetry,
 		Now: options.Now, AcceptedTurns: options.AcceptedTurns,
+		ContinueAcceptedTurns: options.ContinueAcceptedTurns,
 	}
 	control, err := sessionrecoverycontrol.New(options.Store, options.Waiter, options.Restarter, supervisorOptions)
 	if err != nil {
@@ -105,7 +104,7 @@ func (manager *Manager) RecoverStartup(ctx context.Context) (app.SessionRecovery
 	if err != nil {
 		return app.SessionRecoveryResult{}, err
 	}
-	if err := recordPersistedExits(manager.computer, sessions, manager.restarter); err != nil {
+	if err := sessionattachment.RecordPersistedExits(manager.computer, sessions, manager.restarter, sessionrecoverycontrol.StartupRecoverable); err != nil {
 		return app.SessionRecoveryResult{}, err
 	}
 	handled := make(map[domain.SessionID]struct{})
@@ -113,7 +112,10 @@ func (manager *Manager) RecoverStartup(ctx context.Context) (app.SessionRecovery
 	for _, session := range sessions {
 		target, _ := session.RecoveryTarget()
 		ready := session.Status() == domain.SessionReady || session.Status() == domain.SessionAwaitingRecovery && target == domain.SessionReady
-		if session.ComputerID() != manager.computer || !sessionrecoverycontrol.HazardousRecovery(session) && !ready {
+		attacher, canAttach := manager.restarter.(app.SessionAttacher)
+		_, bound := session.Binding()
+		attach := canAttach && attacher.SupportsAttach(session.Provider()) && bound && sessionrecoverycontrol.StartupRecoverable(session.Status())
+		if session.ComputerID() != manager.computer || !sessionrecoverycontrol.HazardousRecovery(session) && !ready && !attach {
 			continue
 		}
 		binding, bound := session.Binding()
@@ -205,7 +207,9 @@ func (manager *Manager) sweep(ctx context.Context) error {
 	}
 	desired := make(map[domain.SessionID]domain.ProviderBinding)
 	for _, session := range sessions {
-		if session.ComputerID() != manager.computer || !sessionrecoverycontrol.LiveSupervisable(session.Status()) {
+		attacher, canAttach := manager.restarter.(app.SessionAttacher)
+		retryAttach := canAttach && attacher.SupportsAttach(session.Provider()) && session.Status() == domain.SessionAwaitingRecovery
+		if session.ComputerID() != manager.computer || !sessionrecoverycontrol.LiveSupervisable(session.Status()) && !retryAttach {
 			continue
 		}
 		if binding, bound := session.Binding(); bound {

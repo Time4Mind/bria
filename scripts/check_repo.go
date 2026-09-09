@@ -1103,13 +1103,16 @@ var runtimeFactoryAllowedImports = []string{
 }
 
 var sessionRuntimeAllowedImports = []string{
-	"internal/app", "internal/domain", "internal/nativecontrolport", "internal/orphanresume", "internal/processgroup", "internal/runtimediagnostic", "internal/runtimeprotocol",
+	"internal/app", "internal/domain", "internal/nativecontrolport", "internal/orphanresume", "internal/processgroup", "internal/runtimecommand", "internal/runtimediagnostic", "internal/runtimeprotocol",
 }
 
 var telegramControllerAllowedImports = []string{
+	"internal/controllerhistory",
+	"internal/turncontinuation",
 	"internal/viewdeliverycontext",
 	"internal/cardpageselection",
 	"internal/finalpersist",
+	"internal/turnfinalization",
 	"internal/telegramsemantic",
 	"internal/telegramsessionview",
 	"internal/turnadmission",
@@ -1197,7 +1200,7 @@ var packagePolicies = map[string]packagePolicy{
 	},
 	"internal/sessionrecoverycontrol": {
 		responsibility:     "serialize exact-binding recovery decisions after independent process waits",
-		allowedImports:     []string{"internal/domain", "internal/sessionsupervisor"},
+		allowedImports:     []string{"internal/app", "internal/domain", "internal/sessionsupervisor"},
 		maxProductionLines: 250,
 	},
 	"internal/telegramcontrolport": {
@@ -1209,6 +1212,31 @@ var packagePolicies = map[string]packagePolicy{
 		responsibility:     "restore exact accepted finals and project typed histories without I/O",
 		allowedImports:     []string{"internal/cardtranscript", "internal/telegramhistory", "internal/telegramstate"},
 		maxProductionLines: 100,
+	},
+	"internal/cardeventhistory": {
+		responsibility:     "atomically commit typed provider history with exact replay identity through a card-update port",
+		allowedImports:     []string{"internal/domain", "internal/telegramhistory", "internal/telegramstate"},
+		maxProductionLines: 120,
+	},
+	"internal/controllerhistory": {
+		responsibility:     "persist typed runtime history and project display blocks through controller-owned ports",
+		allowedImports:     []string{"internal/cardtranscript", "internal/domain", "internal/sessionruntime", "internal/telegramcontrolport"},
+		maxProductionLines: 250,
+	},
+	"internal/turncontinuation": {
+		responsibility:     "coordinate accepted-turn observation and idempotent continuation without resubmission",
+		allowedImports:     []string{"internal/domain", "internal/sessionruntime", "internal/turnadmission", "internal/turnprocessing"},
+		maxProductionLines: 350,
+	},
+	"internal/turnfinalization": {
+		responsibility:     "retry local final and lifecycle settlement after an already proven terminal turn",
+		allowedImports:     []string{"internal/app", "internal/controllertelemetry", "internal/domain", "internal/finalpersist", "internal/sessioncloseflow", "internal/sessionruntime", "internal/telegramcontrolport"},
+		maxProductionLines: 180,
+	},
+	"internal/nativephotostaging": {
+		responsibility:     "retain verified native photo file custody across observer lifetimes",
+		allowedImports:     []string{"internal/nativeattachment"},
+		maxProductionLines: 150,
 	},
 	"internal/cardpageselection": {
 		responsibility:     "resolve persisted reading intent and shared page navigation without transport dependencies",
@@ -1313,7 +1341,7 @@ var packagePolicies = map[string]packagePolicy{
 	},
 	"internal/nativeadapter": {
 		responsibility:     "bridge exact native CLI terminal sessions, validated photo attachments, transcripts and throttled unsolicited screen observations",
-		allowedImports:     []string{"internal/domain", "internal/nativeacceptance", "internal/nativeattachment", "internal/nativecapture", "internal/nativecli", "internal/nativereceiptstore", "internal/nativeterminal", "internal/nativetranscript", "internal/runtimeprotocol"},
+		allowedImports:     []string{"internal/domain", "internal/nativeacceptance", "internal/nativeattachment", "internal/nativecapture", "internal/nativecli", "internal/nativephotostaging", "internal/nativereceiptstore", "internal/nativeterminal", "internal/nativetranscript", "internal/runtimediagnostic", "internal/runtimeprotocol"},
 		maxProductionLines: 850,
 	},
 	"internal/nativecapture": {
@@ -1351,20 +1379,21 @@ var packagePolicies = map[string]packagePolicy{
 	},
 	"internal/nativeterminal": {
 		responsibility:     "own isolated native terminal process lifecycle and bounded screen and input operations",
+		allowedImports:     []string{"internal/terminalbinding"},
 		maxProductionLines: 510,
 	},
 	"internal/nativetranscript": {
 		responsibility:     "read bounded exact-session native transcripts and correlate accepted prompts, questions and final output",
 		allowedImports:     []string{"internal/nativejsonline", "internal/runtimeprotocol", "internal/tooltext"},
-		maxProductionLines: 1000,
+		maxProductionLines: 1100,
 	},
 	"internal/nativejsonline": {
 		responsibility:     "frame bounded-memory native JSONL diagnostic candidates without interpreting provider events",
-		maxProductionLines: 180,
+		maxProductionLines: 200,
 	},
 	"internal/app": {
 		responsibility:     "implement provider-independent session use cases",
-		allowedImports:     []string{"internal/domain"},
+		allowedImports:     []string{"internal/domain", "internal/providerattachport"},
 		maxProductionLines: 1100,
 	},
 	"internal/artifactproduction": {
@@ -1468,6 +1497,7 @@ var packagePolicies = map[string]packagePolicy{
 	"internal/durablecomposition": {
 		responsibility: "compose durable message custody and accepted-turn reconciliation",
 		allowedImports: []string{
+			"internal/turncontinuation",
 			"internal/acceptedrecovery", "internal/domain", "internal/durableflow", "internal/durableinputbridge", "internal/messagejournal", "internal/sessionruntime", "internal/sessionsupervisor", "internal/telegramcontroller", "internal/telegramnotify", "internal/turnprocessing",
 		},
 		maxProductionLines: 500,
@@ -1516,7 +1546,7 @@ var packagePolicies = map[string]packagePolicy{
 	},
 	"internal/acceptedrecovery": {
 		responsibility:     "reconcile exact accepted history and fence archived session resume",
-		allowedImports:     []string{"internal/domain", "internal/durableflow", "internal/sessionruntime", "internal/sessionsupervisor"},
+		allowedImports:     []string{"internal/domain", "internal/durableflow", "internal/sessionruntime", "internal/sessionsupervisor", "internal/turncontinuation"},
 		maxProductionLines: 300,
 	},
 	"internal/executor": {
@@ -1698,6 +1728,25 @@ var packagePolicies = map[string]packagePolicy{
 		responsibility:     "define the bounded provider runtime wire protocol",
 		maxProductionLines: 1150,
 	},
+	"internal/runtimecommand": {
+		responsibility:     "validate immutable adapter executable identity and reserved startup environment",
+		maxProductionLines: 150,
+	},
+	"internal/providerattachport": {
+		responsibility:     "define exact provider launch identity and attach-only lifecycle capability",
+		allowedImports:     []string{"internal/domain"},
+		maxProductionLines: 100,
+	},
+	"internal/sessionattachment": {
+		responsibility:     "commit exact live-terminal attachment and resume observation of accepted turns",
+		allowedImports:     []string{"internal/domain", "internal/providerattachport"},
+		maxProductionLines: 300,
+	},
+	"internal/terminalbinding": {
+		responsibility:     "persist exact native terminal identity and exclusive observer ownership",
+		allowedImports:     []string{"internal/instancelock"},
+		maxProductionLines: 600,
+	},
 	"internal/providerinputcomposition": {
 		responsibility:     "resolve durable attachment custody at the provider boundary without flattening local paths into prompt text",
 		allowedImports:     []string{"internal/domain", "internal/nativeattachment", "internal/sessionruntime", "internal/turnprocessing"},
@@ -1806,7 +1855,7 @@ var packagePolicies = map[string]packagePolicy{
 	"internal/sessionruntime": {
 		responsibility: "supervise provider adapter sessions and exact native terminal key and screen requests",
 		allowedImports: []string{
-			"internal/app", "internal/domain", "internal/nativecontrolport", "internal/orphanresume", "internal/processgroup", "internal/runtimediagnostic", "internal/runtimeprotocol",
+			"internal/app", "internal/domain", "internal/nativecontrolport", "internal/orphanresume", "internal/processgroup", "internal/runtimecommand", "internal/runtimediagnostic", "internal/runtimeprotocol",
 		},
 		maxProductionLines: 1850,
 	},
@@ -1814,7 +1863,7 @@ var packagePolicies = map[string]packagePolicy{
 		// Startup recovery of persisted sessions is the same lifecycle
 		// responsibility; provider-specific reads stay behind its port.
 		responsibility:     "reconcile provider exits with recoverable session lifecycle",
-		allowedImports:     []string{"internal/app", "internal/domain"},
+		allowedImports:     []string{"internal/app", "internal/domain", "internal/sessionattachment"},
 		maxProductionLines: 450,
 	},
 	"internal/sessionexpiry": {
@@ -1849,6 +1898,7 @@ var packagePolicies = map[string]packagePolicy{
 	"internal/storage": {
 		responsibility: "persist coordinator and session state, typed technical history, model preferences, atomic proven-empty deletion and exact finalization receipts",
 		allowedImports: []string{
+			"internal/cardeventhistory",
 			"internal/statejson",
 			"internal/archiveimport", "internal/cardhistory", "internal/cardtranscript", "internal/coordinator", "internal/domain", "internal/telegramhistory", "internal/telegramstate",
 		},
@@ -1856,7 +1906,7 @@ var packagePolicies = map[string]packagePolicy{
 	},
 	"internal/supervisioncomposition": {
 		responsibility:     "compose startup and live supervision for exact local provider bindings",
-		allowedImports:     []string{"internal/app", "internal/controllertelemetry", "internal/domain", "internal/sessionrecoverycontrol", "internal/sessionsupervisor"},
+		allowedImports:     []string{"internal/app", "internal/controllertelemetry", "internal/domain", "internal/sessionattachment", "internal/sessionrecoverycontrol", "internal/sessionsupervisor"},
 		maxProductionLines: 400,
 	},
 	"internal/telegram": {
@@ -1907,6 +1957,9 @@ var packagePolicies = map[string]packagePolicy{
 	"internal/telegramcontroller": {
 		responsibility: "coordinate node-local session interactions, managed standby preparation, technical-history visibility, native-screen observation and paged archive",
 		allowedImports: []string{
+			"internal/controllerhistory",
+			"internal/turnfinalization",
+			"internal/turncontinuation",
 			"internal/viewdeliverycontext",
 			"internal/cardpageselection",
 			"internal/finalpersist",
@@ -1921,7 +1974,7 @@ var packagePolicies = map[string]packagePolicy{
 			"internal/nativeapprovalflow",
 			"internal/app", "internal/cardtranscript", "internal/coordinator", "internal/domain", "internal/promptpreprocess", "internal/runtimeprotocol", "internal/sessioncreation", "internal/sessionruntime", "internal/settingsport", "internal/telegramcreationview", "internal/telegramnodes", "internal/telegramsettings", "internal/telegramsettingsview", "internal/telegramsessions", "internal/telegramstatus", "internal/turnprocessing",
 		},
-		maxProductionLines: 5500,
+		maxProductionLines: 5600,
 	},
 	"internal/telegramflow": {
 		responsibility: "join Telegram callback, presentation, and durable card boundaries",
@@ -2263,6 +2316,7 @@ func checkGraph(packages []packageInfo) []string {
 			}
 			if beginsWith(source, "internal/app") &&
 				!beginsWith(target, "internal/app") &&
+				!beginsWith(target, "internal/providerattachport") &&
 				!beginsWith(target, "internal/domain") {
 				problems["app imports infrastructure: "+edge] = struct{}{}
 			}

@@ -34,6 +34,9 @@ type MessageType string
 
 const (
 	TypeSubmit                      MessageType = "submit"
+	TypeObserveAccepted             MessageType = "observe_accepted"
+	TypeDetach                      MessageType = "detach"
+	TypeClosed                      MessageType = "closed"
 	TypeNativeControl               MessageType = "native_control"
 	TypeNativeSnapshot              MessageType = "native_snapshot"
 	TypeNativeObservation           MessageType = "native_observation"
@@ -156,6 +159,7 @@ type ParentMessage struct {
 }
 
 type AdapterMessage struct {
+	EventID             string              `json:"event_id,omitempty"`
 	FullText            string              `json:"full_text,omitempty"`
 	Hash                string              `json:"hash,omitempty"`
 	Model               string              `json:"model,omitempty"`
@@ -346,14 +350,14 @@ func encodeParentLine(message ParentMessage, max int) ([]byte, error) {
 			Model       string            `json:"model,omitempty"`
 			Effort      string            `json:"effort,omitempty"`
 		}{message.Protocol, message.Type, message.RequestID, message.Text, message.MessageID, message.Attachments, message.Model, message.Effort}, max)
-	case TypeInterrupt:
+	case TypeInterrupt, TypeObserveAccepted:
 		return encodeLine(struct {
 			Protocol  int         `json:"protocol"`
 			Type      MessageType `json:"type"`
 			RequestID string      `json:"request_id"`
 			MessageID string      `json:"message_id,omitempty"`
 		}{message.Protocol, message.Type, message.RequestID, message.MessageID}, max)
-	case TypeClose:
+	case TypeClose, TypeDetach:
 		return encodeLine(struct {
 			Protocol int         `json:"protocol"`
 			Type     MessageType `json:"type"`
@@ -378,6 +382,12 @@ func encodeParentLine(message ParentMessage, max int) ([]byte, error) {
 
 func encodeAdapterLine(message AdapterMessage, max int) ([]byte, error) {
 	switch message.Type {
+	case TypeClosed:
+		return encodeLine(struct {
+			Protocol          int         `json:"protocol"`
+			Type              MessageType `json:"type"`
+			ProviderSessionID string      `json:"provider_session_id"`
+		}{message.Protocol, message.Type, message.ProviderSessionID}, max)
 	case TypeNativeObservation:
 		return encodeLine(struct {
 			FullText          string      `json:"full_text,omitempty"`
@@ -425,7 +435,8 @@ func encodeAdapterLine(message AdapterMessage, max int) ([]byte, error) {
 			Kind          string         `json:"kind"`
 			Text          string         `json:"text"`
 			EventMetadata *EventMetadata `json:"event_metadata,omitempty"`
-		}{message.Protocol, message.Type, message.RequestID, message.Kind, message.Text, message.EventMetadata}, max)
+			EventID       string         `json:"event_id,omitempty"`
+		}{message.Protocol, message.Type, message.RequestID, message.Kind, message.Text, message.EventMetadata, message.EventID}, max)
 	case TypeFinal:
 		return encodeLine(struct {
 			Protocol  int         `json:"protocol"`
@@ -496,6 +507,8 @@ func fields(required []string, optional ...string) fieldRequirement {
 
 func parentFields(messageType MessageType) fieldRequirement {
 	switch messageType {
+	case TypeObserveAccepted:
+		return fields([]string{"protocol", "type", "request_id", "message_id"})
 	case TypeNativeControl:
 		return fields([]string{"protocol", "type", "request_id"}, "command", "key", "expected_hash")
 	case TypeSubmit:
@@ -504,7 +517,7 @@ func parentFields(messageType MessageType) fieldRequirement {
 		return fields([]string{"protocol", "type", "request_id", "text"}, "message_id", "attachments")
 	case TypeInterrupt:
 		return fields([]string{"protocol", "type", "request_id"})
-	case TypeClose:
+	case TypeClose, TypeDetach:
 		return fields([]string{"protocol", "type"})
 	case TypeInteractionResponse:
 		return fields([]string{"protocol", "type", "request_id", "interaction_response"})
@@ -517,6 +530,8 @@ func parentFields(messageType MessageType) fieldRequirement {
 
 func adapterFields(messageType MessageType) fieldRequirement {
 	switch messageType {
+	case TypeClosed:
+		return fields([]string{"protocol", "type", "provider_session_id"})
 	case TypeNativeObservation:
 		return fields([]string{"protocol", "type", "provider_session_id", "text", "hash"}, "model", "interactive", "full_text")
 	case TypeNativeSnapshot:
@@ -526,7 +541,7 @@ func adapterFields(messageType MessageType) fieldRequirement {
 	case TypeAccepted:
 		return fields([]string{"protocol", "type", "request_id"}, "message_id")
 	case TypeEvent:
-		return fields([]string{"protocol", "type", "request_id", "kind", "text"}, "event_metadata")
+		return fields([]string{"protocol", "type", "request_id", "kind", "text"}, "event_metadata", "event_id")
 	case TypeFinal:
 		return fields([]string{"protocol", "type", "request_id", "text"})
 	case TypeCompleted:
@@ -640,6 +655,10 @@ func validateParent(message ParentMessage, limits Limits) error {
 		return ErrProtocol
 	}
 	switch message.Type {
+	case TypeObserveAccepted:
+		if !validRequestID(message.RequestID) || !validOpaqueID(message.MessageID) || message.Text != "" || len(message.Attachments) != 0 || message.InteractionResponse != nil {
+			return ErrProtocol
+		}
 	case TypeNativeControl:
 		if !validRequestID(message.RequestID) || message.Text != "" || message.MessageID != "" || len(message.Attachments) != 0 || message.InteractionResponse != nil || validateNativeControl(message, limits) != nil {
 			return ErrProtocol
@@ -653,7 +672,7 @@ func validateParent(message ParentMessage, limits Limits) error {
 		if !validRequestID(message.RequestID) || message.MessageID != "" || message.Text != "" || len(message.Attachments) != 0 || message.InteractionResponse != nil {
 			return ErrProtocol
 		}
-	case TypeClose:
+	case TypeClose, TypeDetach:
 		if message.RequestID != "" || message.MessageID != "" || message.Text != "" || len(message.Attachments) != 0 || message.InteractionResponse != nil {
 			return ErrProtocol
 		}
@@ -696,6 +715,9 @@ func validateAttachments(attachments []LocalAttachment, maxTextBytes int) error 
 }
 
 func validateAdapter(message AdapterMessage, limits Limits) error {
+	if !validOptionalOpaqueID(message.EventID) || (message.Type != TypeEvent && message.EventID != "") {
+		return ErrProtocol
+	}
 	if !validText(message.FullText, min(limits.MaxTextBytes, 24<<10)) || (message.Type != TypeNativeSnapshot && message.Type != TypeNativeObservation && message.FullText != "") {
 		return ErrProtocol
 	}
@@ -709,6 +731,10 @@ func validateAdapter(message AdapterMessage, limits Limits) error {
 		return ErrProtocol
 	}
 	switch message.Type {
+	case TypeClosed:
+		if !validRequiredText(message.ProviderSessionID, limits.MaxTextBytes) || message.Readiness != "" || message.Authentication != "" || message.RequestID != "" || message.Kind != "" || message.Text != "" || message.Status != "" || message.ErrorCode != "" || message.MessageID != "" || message.ProviderSessionName != "" || message.InteractionRequest != nil || message.InteractionID != "" {
+			return ErrProtocol
+		}
 	case TypeNativeObservation:
 		return validateNativeObservation(message, limits)
 	case TypeNativeSnapshot:

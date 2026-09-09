@@ -78,7 +78,7 @@ func (deliverer Deliverer) Deliver(ctx context.Context, notification telegramcon
 	}
 	if err == nil && result.Surface != nil && result.Surface.NativeSessionID == notification.SessionID {
 		if notification.Kind == telegramcontroller.NotificationNativeScreen {
-			return deliverer.deliverNativeSurface(ctx, operationID, notification.SessionID, stored.Carrier, *result.Surface)
+			return deliverer.deliverNativeSurface(ctx, operationID, notification.SessionID, stored.Carrier, stored.CarrierRevision, *result.Surface)
 		}
 		// Prompt state is already durable. Do not replace an explicitly shown
 		// CLI screen or invalidate its keys with an unrelated history refresh.
@@ -105,6 +105,8 @@ func (deliverer Deliverer) Deliver(ctx context.Context, notification telegramcon
 	if err != nil {
 		return receipt, err
 	}
+	revision := stored.CarrierRevision
+	prepared.Card.ExpectedCarrierRevision = &revision
 	if err := deliverer.Sender.Register(prepared); err != nil {
 		return receipt, err
 	}

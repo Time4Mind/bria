@@ -23,7 +23,7 @@ func TestReconcilerMapsNeutralRuntimeReceiptWithoutChangingIdentity(t *testing.T
 		}
 		return sessionruntime.AcceptedTurnReconciliation{Turns: []sessionruntime.ReconciledAcceptedTurn{
 			{MessageID: "m1", Outcome: sessionruntime.AcceptedTurnCompleted},
-			{MessageID: "m2", Outcome: sessionruntime.AcceptedTurnUnknown},
+			{MessageID: "m2", Outcome: sessionruntime.AcceptedTurnUnknown, TurnID: "exact-turn"},
 		}}, nil
 	})
 	reconciler, err := recoverycomposition.NewReconciler(reader, sessionLoaderFunc(func(context.Context, domain.SessionID) (domain.Session, error) {
@@ -38,7 +38,7 @@ func TestReconcilerMapsNeutralRuntimeReceiptWithoutChangingIdentity(t *testing.T
 	}
 	want := sessionsupervisor.AcceptedTurnReconciliation{Turns: []sessionsupervisor.ReconciledAcceptedTurn{
 		{MessageID: "m1", Outcome: sessionsupervisor.AcceptedTurnCompleted},
-		{MessageID: "m2", Outcome: sessionsupervisor.AcceptedTurnUnknown},
+		{MessageID: "m2", Outcome: sessionsupervisor.AcceptedTurnUnknown, TurnID: "exact-turn"},
 	}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("result = %#v, want %#v", got, want)

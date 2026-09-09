@@ -10,6 +10,7 @@
 make check-full
 bin/bria install-parakeet --config /absolute/path/to/config.json
 bin/bria check-config --config /absolute/path/to/config.json
+bin/bria check-state --config /absolute/path/to/config.json
 bin/bria check-telegram --config /absolute/path/to/config.json
 bin/bria run --config /absolute/path/to/config.json
 ```
@@ -19,6 +20,22 @@ bin/bria run --config /absolute/path/to/config.json
 Live postflight подтвердил `getMe`, fresh backlog fence со state revision `1`, `next_update_id=1` и без сессий, три 20-секундных периода стабильности одного процесса и контролируемый restart до PID `43188`, `runs=2`. Отдельная исходящая проба получила Bot API receipt `message_id=5298` в ожидаемом чате. Реальный Codex marker прошёл; Claude start прошёл, но submit завершился `provider_error`, после чего процесс был чисто остановлен.
 
 Рабочий text flow пока не равен готовому выпуску. Входящие команды, кнопки и callbacks через Telegram Desktop не проверены: экран был заблокирован и frontmost process оставался `loginwindow`. Telegram callbacks и карточки не подключены, очередь запросов не сохраняется, provider-процессы после перезапуска не восстанавливаются, а вопросы, permission requests и авторизация исполнителей не управляются через Telegram. После наблюдавшегося live cutoff около `30.111` секунды long poll установлен в `20` секунд; повторяются только transient bootstrap, poll и постоянная readiness-проверка, но не неопределённые исходящие отправки.
+
+## Проверка совместимости перед откатом
+
+`check-state` проверяет существующий файл сессий строгим декодером именно
+запускаемой версии. Проверка offline/read-only: не запускает исполнителей,
+не захватывает lock рабочего сервиса, не создаёт и не переписывает state.
+Ошибка выводится без содержимого файла. Успешный `check-config` её не заменяет.
+
+`rollback-install.sh` требует от проверенного целевого бинарника точный receipt
+`Bria state compatibility: OK` до переключения pointers и замены bundle.
+Несовместимый бинарник, в том числе старая версия без команды `check-state`,
+не допускается к откату. Запрещено обходить отказ удалением новых полей или
+возвратом старой копии state с потерей принятых запросов. Такой отказ требует
+совместимой исправленной версии; он не доказывает возможность старого отката.
+Проверка файла также не подтверждает совместимость жизненного цикла терминалов:
+при переходе на persistent terminal нельзя возвращать их под старый shutdown.
 
 ## Принятые решения
 

@@ -20,6 +20,9 @@ type ArchivedSessionStore interface {
 // ArchivedSessionResumer continues the provider identity retained by an
 // archived logical session. It never creates a replacement session as a
 // fallback and leaves the archive unchanged when exact continuation fails.
+// Explicit resume uses Start: native runtimes attach managed terminals or
+// resume the same provider session only when it is not managed. Automatic
+// recovery uses the separate Attach-only boundary.
 type ArchivedSessionResumer struct {
 	store    ArchivedSessionStore
 	starter  SessionStarter
@@ -80,31 +83,44 @@ func (resumer *ArchivedSessionResumer) Resume(ctx context.Context, id domain.Ses
 	if err := request.Validate(); err != nil {
 		return domain.Session{}, fmt.Errorf("validate exact archive resume: %w", err)
 	}
+	cleanup := resumer.starter.Abort
+	cleanupAction := "abort"
+	if attacher, ok := resumer.starter.(SessionAttacher); ok && attacher.SupportsAttach(archived.Provider()) {
+		cleanupAction = "detach"
+		cleanup = func(ctx context.Context, request StartSessionRequest, binding domain.ProviderBinding) error {
+			bounded, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			defer cancel()
+			return attacher.Detach(bounded, request, binding)
+		}
+	}
 	binding, err := resumer.starter.Start(ctx, request)
 	if err != nil {
 		return domain.Session{}, fmt.Errorf("resume original provider session: %w", err)
 	}
+	if err := ctx.Err(); err != nil && cleanupAction == "detach" {
+		return domain.Session{}, errors.Join(err, wrapResumeCleanupError(cleanup(ctx, request, binding), cleanupAction))
+	}
 	ready, err := resuming.ResumeReady(binding, at, resumer.lifetime)
 	if err != nil {
-		abortErr := resumer.starter.Abort(ctx, request, binding)
+		cleanupErr := cleanup(ctx, request, binding)
 		return domain.Session{}, errors.Join(
 			fmt.Errorf("reject replacement provider session: %w", err),
-			wrapAbortError(abortErr),
+			wrapResumeCleanupError(cleanupErr, cleanupAction),
 		)
 	}
 	if err := resumer.store.Replace(ctx, archived, ready); err != nil {
-		abortErr := resumer.starter.Abort(ctx, request, binding)
+		cleanupErr := cleanup(ctx, request, binding)
 		return domain.Session{}, errors.Join(
 			fmt.Errorf("persist exact archive resume: %w", err),
-			wrapAbortError(abortErr),
+			wrapResumeCleanupError(cleanupErr, cleanupAction),
 		)
 	}
 	return ready, nil
 }
 
-func wrapAbortError(err error) error {
+func wrapResumeCleanupError(err error, action string) error {
 	if err == nil {
 		return nil
 	}
-	return fmt.Errorf("abort unpersisted resumed process: %w", err)
+	return fmt.Errorf("%s unpersisted resumed process: %w", action, err)
 }

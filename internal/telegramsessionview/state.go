@@ -3,9 +3,10 @@ package telegramsessionview
 
 import "bria/internal/domain"
 
-// RecoveryNotice describes a committed recovery state without implying input readiness.
+// RecoveryNotice leaves automatic recovery to the lifecycle worker. The state
+// badge remains truthful; the card must not demand an owner's repair action.
 func RecoveryNotice(session domain.Session, busy, available bool) string {
-	if session.Status() != domain.SessionAwaitingRecovery {
+	if session.Status() != domain.SessionAwaitingRecovery || available || busy {
 		return ""
 	}
 	text := "Требуется восстановление. История сохранена; ввод отключён.  \n"

@@ -68,8 +68,10 @@ func TestNestedRuntimeFactoryAdapterCleanupKillsRawGrandchild(t *testing.T) {
 	if err := syscall.Kill(adapterPID, syscall.SIGSTOP); err != nil {
 		t.Fatalf("SIGSTOP adapter: %v", err)
 	}
-	if err := starter.Abort(context.Background(), request, binding); err != nil {
-		t.Fatalf("Abort() error = %v", err)
+	// A killed native observer cannot acknowledge physical terminal closure.
+	// Still require the complete legacy fixture tree to be reaped below.
+	if err := starter.Abort(context.Background(), request, binding); !errors.Is(err, sessionruntime.ErrTerminalCloseUnconfirmed) {
+		t.Fatalf("Abort() must retain missing terminal proof, error = %v", err)
 	}
 	deadline := time.Now().Add(2 * time.Second)
 	for (nestedProcessExists(rawPID) || nestedProcessExists(grandchildPID)) && time.Now().Before(deadline) {

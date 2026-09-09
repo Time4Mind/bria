@@ -1,9 +1,7 @@
 package telegramflow
 
 import (
-	"context"
 	"errors"
-	"fmt"
 
 	"bria/internal/callbacktoken"
 	"bria/internal/domain"
@@ -41,29 +39,15 @@ func validateNativeSurface(surface SurfaceOutput) error {
 	return nil
 }
 
-func commitNativeCarrier(ctx context.Context, store telegramstate.Store, id domain.SessionID, carrier telegramstate.Carrier) error {
+func commitNativeCarrier(state *telegramstate.State, id domain.SessionID, carrier telegramstate.Carrier) error {
 	if carrier.ChatID <= 0 || carrier.MessageID <= 0 {
 		return errors.New("native carrier receipt must be confirmed")
 	}
-	if err := store.Update(ctx, func(state *telegramstate.State) error {
-		card, ok := state.Card(id)
-		if !ok {
-			return errors.New("native carrier session no longer exists")
-		}
-		// Do not reconstruct a card from terminal screen text: prompts, history
-		// keys, pagination, empty-session evidence and active selection survive.
-		card.Carrier = carrier
-		return state.SetCard(card)
-	}); err != nil {
-		return fmt.Errorf("commit confirmed native carrier: %w", err)
-	}
-	state, err := store.Load(ctx)
-	if err != nil {
-		return err
-	}
 	card, ok := state.Card(id)
-	if !ok || card.Carrier != carrier {
-		return errors.New("confirmed native carrier reread mismatch")
+	if !ok {
+		return errors.New("native carrier session no longer exists")
 	}
-	return nil
+	// Preserve history, pagination and active selection; only rebind the carrier.
+	card.Carrier = carrier
+	return state.SetCard(card)
 }

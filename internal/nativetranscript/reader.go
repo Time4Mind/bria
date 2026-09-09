@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -377,7 +378,9 @@ func (r *Reader) pollLocked(ctx context.Context, limit int64) ([]Event, error) {
 			if decodeErr != nil {
 				return nil, decodeErr
 			}
-			if r.opts.Provider != "codex" || rec.Type != "event_msg" || rec.Payload.Type != "item_completed" {
+			// Compaction histories are snapshots, not new turn events. Only a
+			// validated top-level discriminator permits the diagnostic projection.
+			if !largeRecordMayBeToolProjection(rec) {
 				return nil, &RecordLimitError{pendingStart, pending.Size, int64(r.opts.MaxLineBytes)}
 			}
 		}
@@ -394,4 +397,31 @@ func (r *Reader) pollLocked(ctx context.Context, limit int64) ([]Event, error) {
 	r.offset, r.state = offset, state
 	r.pending, r.pendingStart = pending, pendingStart
 	return events, nil
+}
+
+// largeRecordMayBeToolProjection is deliberately a closed allow-list. The
+// framer has already validated the complete JSON record and only discarded
+// oversized string values; identity, turn and terminal records never enter
+// this path unless their native discriminator proves a tool result.
+func largeRecordMayBeToolProjection(rec record) bool {
+	if rec.Type == "compacted" {
+		return true
+	}
+	if rec.Type == "event_msg" && rec.Payload.Type == "item_completed" {
+		return true
+	}
+	if rec.Type == "response_item" && (rec.Payload.Type == "function_call_output" || rec.Payload.Type == "custom_tool_call_output") {
+		return true
+	}
+	if rec.Type == "user" {
+		var blocks []block
+		if json.Unmarshal(rec.Message.Content, &blocks) == nil {
+			for _, b := range blocks {
+				if b.Type == "tool_result" {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }

@@ -109,6 +109,15 @@ func (starter *Starter) NativeControl(ctx context.Context, id domain.SessionID, 
 }
 
 func (record *processRecord) dispatchNative(message wireMessage) bool {
+	if message.Type == string(runtimeprotocol.TypeClosed) {
+		record.nativeMu.Lock()
+		defer record.nativeMu.Unlock()
+		if !record.persistentTerminal || !record.closeRequested.Load() || message.ProviderSessionID != record.nativeIdentity || record.terminalClosed.Load() {
+			return false
+		}
+		record.terminalClosed.Store(true)
+		return true
+	}
 	if message.Type == string(runtimeprotocol.TypeReady) || message.Type == string(runtimeprotocol.TypeNativeObservation) {
 		return record.observeNative(message)
 	}

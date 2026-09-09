@@ -46,12 +46,21 @@ type Card struct {
 	EmptyCloseEligible bool             `json:"empty_close_eligible,omitempty"`
 	SessionID          domain.SessionID `json:"session_id"`
 	Carrier            Carrier          `json:"carrier"`
-	Page               Page             `json:"page"`
-	OptionsExpanded    bool             `json:"options_expanded"`
-	History            []string         `json:"history,omitempty"`
+
+	// CarrierRevision fences delayed edits even when navigation returns to an
+	// earlier carrier. Legacy cards start at zero; SetCard owns increments.
+	CarrierRevision uint64 `json:"carrier_revision,omitempty"`
+
+	// LastPresentationOperation is assigned by receipt finalization, not by
+	// semantic history or pagination updates.
+	LastPresentationOperation string `json:"last_presentation_operation,omitempty"`
+
+	Page            Page     `json:"page"`
+	OptionsExpanded bool     `json:"options_expanded"`
+	History         []string `json:"history,omitempty"`
 	// HistoryKeys is positionally aligned with History. Empty keys identify
-	// append-only provider output; a prompt message ID lets its visible status
-	// be replaced without duplicating the user's text.
+	// legacy append-only output; a prompt message ID updates its visible status.
+	// Typed provider events use runtime-event keys to deduplicate native replay.
 	HistoryKeys []string `json:"history_keys,omitempty"`
 	// HistoryTurnKeys associates provider output with its originating prompt so
 	// projections can keep each answer directly after its request.
@@ -176,6 +185,11 @@ func (s State) Validate() error {
 		if err := card.Carrier.validate(); err != nil {
 			return fmt.Errorf("card %q carrier: %w", id, err)
 		}
+		if operation := card.LastPresentationOperation; strings.TrimSpace(operation) != operation ||
+			len(operation) > maxAnchor+6 || !utf8.ValidString(operation) ||
+			strings.ContainsAny(operation, "\x00\r\n") {
+			return errors.New("last presentation operation is invalid")
+		}
 		if len(card.History) > 512 {
 			return fmt.Errorf("card %q history is too long", id)
 		}
@@ -267,6 +281,14 @@ func (s *State) SetCard(card Card) error {
 	}
 	if strings.TrimSpace(string(card.SessionID)) == "" {
 		return errors.New("card session id is required")
+	}
+	previous := s.Cards[card.SessionID]
+	card.CarrierRevision = previous.CarrierRevision
+	if previous.Carrier != card.Carrier {
+		if card.CarrierRevision == ^uint64(0) {
+			return errors.New("card carrier revision exhausted")
+		}
+		card.CarrierRevision++
 	}
 	if err := (State{Version: s.Version, Cards: map[domain.SessionID]Card{card.SessionID: card}}).Validate(); err != nil {
 		return err

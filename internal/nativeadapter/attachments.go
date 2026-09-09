@@ -2,17 +2,13 @@ package nativeadapter
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
-	"io"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 
 	"bria/internal/domain"
-	"bria/internal/nativeattachment"
+	"bria/internal/nativephotostaging"
 	"bria/internal/runtimeprotocol"
 )
 
@@ -29,20 +25,8 @@ func (a *adapter) inputText(ctx context.Context, r runtimeprotocol.ParentMessage
 			parts = append(parts, "Attached image: "+strconv.Quote(path))
 			continue
 		}
-		file, err := os.Open(attachment.Path)
-		if err != nil {
-			return "", errors.New("native attachment unavailable")
-		}
-		info, err := file.Stat()
-		if err != nil || !info.Mode().IsRegular() || info.Size() != attachment.Size {
-			file.Close()
-			return "", errors.New("native attachment changed")
-		}
-		hash := sha256.New()
-		n, err := io.Copy(hash, io.LimitReader(file, attachment.Size+1))
-		file.Close()
-		if err != nil || n != attachment.Size || hex.EncodeToString(hash.Sum(nil)) != attachment.SHA256 {
-			return "", errors.New("native attachment changed")
+		if err := nativephotostaging.VerifyReference(attachment.Path, attachment.Size, attachment.SHA256); err != nil {
+			return "", err
 		}
 		path := attachment.Path
 		if rel, err := filepath.Rel(a.config.Workdir, path); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
@@ -58,46 +42,22 @@ func (a *adapter) inputText(ctx context.Context, r runtimeprotocol.ParentMessage
 }
 
 func (a *adapter) claudePhoto(ctx context.Context, attachment runtimeprotocol.LocalAttachment) (string, error) {
-	data, ext, err := nativeattachment.ReadPhoto(ctx, attachment.Path, attachment.Size, attachment.SHA256)
-	if err != nil {
-		return "", err
+	a.restoreMediaDirectory()
+	store := nativephotostaging.Store{Directory: a.mediaDir}
+	path, err := store.Stage(ctx, attachment.Path, attachment.Size, attachment.SHA256)
+	a.mediaDir = store.Directory
+	return path, err
+}
+
+func (a *adapter) restoreMediaDirectory() {
+	if a.config.Persistent && a.config.Provider == domain.ProviderClaude {
+		a.mediaDir = nativephotostaging.PersistentDirectory(a.config.StateDir, a.id)
 	}
-	if a.mediaDir == "" {
-		a.mediaDir, err = os.MkdirTemp("", "bria-native-media-")
-		if err != nil {
-			return "", errors.New("native photo staging unavailable")
-		}
-	}
-	path := filepath.Join(a.mediaDir, attachment.SHA256+ext)
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
-	if os.IsExist(err) {
-		if _, _, verifyErr := nativeattachment.ReadPhoto(ctx, path, attachment.Size, attachment.SHA256); verifyErr != nil {
-			return "", verifyErr
-		}
-		return path, nil
-	}
-	if err != nil {
-		return "", errors.New("native photo staging unavailable")
-	}
-	_, writeErr := file.Write(data)
-	syncErr := file.Sync()
-	closeErr := file.Close()
-	if writeErr != nil || syncErr != nil || closeErr != nil {
-		return "", errors.New("native photo staging failed")
-	}
-	if err := os.Chmod(path, 0400); err != nil {
-		return "", errors.New("native photo staging permissions failed")
-	}
-	return path, nil
 }
 
 func (a *adapter) cleanupAttachments() error {
-	if a.mediaDir == "" {
-		return nil
-	}
-	if err := os.RemoveAll(a.mediaDir); err != nil {
-		return errors.New("native photo cleanup failed")
-	}
-	a.mediaDir = ""
-	return nil
+	store := nativephotostaging.Store{Directory: a.mediaDir}
+	err := store.Cleanup()
+	a.mediaDir = store.Directory
+	return err
 }

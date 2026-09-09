@@ -6,18 +6,18 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"sync"
 	"time"
 
 	"bria/internal/app"
 	"bria/internal/domain"
+	"bria/internal/sessionattachment"
 )
 
 var (
 	ErrRecoveryExhausted      = errors.New("session recovery attempts exhausted")
-	ErrReconciliationRequired = errors.New("accepted turn reconciliation required")
-	ErrInvalidReconciliation  = errors.New("invalid accepted turn reconciliation")
+	ErrReconciliationRequired = sessionattachment.ErrReconciliationRequired
+	ErrInvalidReconciliation  = sessionattachment.ErrInvalidReconciliation
 )
 
 type Store interface {
@@ -36,62 +36,38 @@ type Restarter interface {
 
 type RetryWaiter func(context.Context, int) error
 
-// AcceptedTurnOutcome is the durable terminal disposition of one input that
-// the provider had accepted before its exact process generation exited.
-type AcceptedTurnOutcome string
+type AcceptedTurnOutcome = sessionattachment.AcceptedTurnOutcome
 
 const (
-	AcceptedTurnCompleted AcceptedTurnOutcome = "completed"
-	AcceptedTurnFailed    AcceptedTurnOutcome = "failed"
-	AcceptedTurnUnknown   AcceptedTurnOutcome = "unknown"
+	AcceptedTurnCompleted = sessionattachment.AcceptedTurnCompleted
+	AcceptedTurnFailed    = sessionattachment.AcceptedTurnFailed
+	AcceptedTurnUnknown   = sessionattachment.AcceptedTurnUnknown
 )
 
-// ReconciledAcceptedTurn is an observation, not a journal phase. Unknown means
-// terminal proof is pending; a durable acceptance must remain accepted.
-type ReconciledAcceptedTurn struct {
-	MessageID string
-	Outcome   AcceptedTurnOutcome
-}
-
-type AcceptedTurnReconciliation struct {
-	Turns []ReconciledAcceptedTurn
-}
-
-// AcceptedTurnReconciler inspects provider-native history for the exact prior
-// binding and returns only after every accepted input it found has been
-// durably moved to completed, failed, or blocking unknown state. An empty
-// receipt proves there were no accepted inputs for this logical session.
-type AcceptedTurnReconciler interface {
-	ReconcileAcceptedTurns(context.Context, domain.SessionID, domain.ProviderBinding) (AcceptedTurnReconciliation, error)
-}
+type ReconciledAcceptedTurn = sessionattachment.ReconciledAcceptedTurn
+type AcceptedTurnReconciliation = sessionattachment.AcceptedTurnReconciliation
+type AcceptedTurnReconciler = sessionattachment.AcceptedTurnReconciler
 
 type Options struct {
-	MaxRestartAttempts int
-	WaitBeforeRetry    RetryWaiter
-	Now                func() time.Time
-	AcceptedTurns      AcceptedTurnReconciler
+	MaxRestartAttempts    int
+	WaitBeforeRetry       RetryWaiter
+	Now                   func() time.Time
+	AcceptedTurns         AcceptedTurnReconciler
+	ContinueAcceptedTurns func(context.Context, domain.Session, domain.ProviderBinding, AcceptedTurnReconciliation) error
 }
 
-type Result struct {
-	Stale            bool
-	AwaitingRecovery bool
-	Recovered        bool
-	Archived         bool
-	Deleted          bool
-	RestartAttempts  int
-	Session          domain.Session
-	Reconciliation   AcceptedTurnReconciliation
-}
+type Result = sessionattachment.Result
 
 type Supervisor struct {
-	store       Store
-	waiter      ProcessWaiter
-	restarter   Restarter
-	maxAttempts int
-	retry       RetryWaiter
-	now         func() time.Time
-	reconciler  AcceptedTurnReconciler
-	recoveryMu  sync.Mutex
+	store        Store
+	waiter       ProcessWaiter
+	restarter    Restarter
+	maxAttempts  int
+	retry        RetryWaiter
+	now          func() time.Time
+	reconciler   AcceptedTurnReconciler
+	continuation func(context.Context, domain.Session, domain.ProviderBinding, AcceptedTurnReconciliation) error
+	recoveryMu   sync.Mutex
 }
 
 func New(store Store, waiter ProcessWaiter, restarter Restarter, options Options) (*Supervisor, error) {
@@ -104,7 +80,8 @@ func New(store Store, waiter ProcessWaiter, restarter Restarter, options Options
 	return &Supervisor{
 		store: store, waiter: waiter, restarter: restarter,
 		maxAttempts: options.MaxRestartAttempts, retry: options.WaitBeforeRetry, now: options.Now,
-		reconciler: options.AcceptedTurns,
+		reconciler:   options.AcceptedTurns,
+		continuation: options.ContinueAcceptedTurns,
 	}, nil
 }
 
@@ -134,7 +111,9 @@ func (supervisor *Supervisor) Watch(ctx context.Context, sessionID domain.Sessio
 			}
 			return Result{}, errors.Join(fmt.Errorf("wait for provider process: %w", err), fmt.Errorf("reread session after wait failure: %w", loadErr))
 		}
-		return Result{Session: current}, fmt.Errorf("wait for provider process: %w", err)
+		if attacher, ok := supervisor.restarter.(app.SessionAttacher); !ok || !attacher.SupportsAttach(current.Provider()) {
+			return Result{Session: current}, fmt.Errorf("wait for provider process: %w", err)
+		}
 	}
 
 	current, err := supervisor.store.Load(ctx, sessionID)
@@ -158,7 +137,9 @@ func (supervisor *Supervisor) Watch(ctx context.Context, sessionID domain.Sessio
 	if current.Status() == domain.SessionAwaitingRecovery {
 		return Result{Stale: true, AwaitingRecovery: true, Session: current}, nil
 	}
-	if current.Status() == domain.SessionClosing {
+	attacher, canAttach := supervisor.restarter.(app.SessionAttacher)
+	canAttach = canAttach && attacher.SupportsAttach(current.Provider())
+	if current.Status() == domain.SessionClosing && !canAttach {
 		if store, ok := supervisor.store.(interface {
 			DeleteEmptyClosing(context.Context, domain.Session) (bool, error)
 		}); ok {
@@ -188,6 +169,9 @@ func (supervisor *Supervisor) Watch(ctx context.Context, sessionID domain.Sessio
 		return supervisor.staleAfterConflict(ctx, current, err)
 	}
 	result := Result{AwaitingRecovery: true, Session: awaiting}
+	if canAttach {
+		return supervisor.attach(ctx, awaiting, observed, attacher)
+	}
 	if needsAcceptedTurnReconciliation(current.Status()) || supervisor.reconciler != nil && current.Status() == domain.SessionReady {
 		if supervisor.reconciler == nil {
 			return result, ErrReconciliationRequired
@@ -311,21 +295,4 @@ func archiveExited(session domain.Session, at time.Time) (domain.Session, error)
 	return session.Archive(at)
 }
 
-func validateReconciliation(reconciliation AcceptedTurnReconciliation) error {
-	seen := make(map[string]struct{}, len(reconciliation.Turns))
-	for _, turn := range reconciliation.Turns {
-		if strings.TrimSpace(turn.MessageID) == "" || strings.TrimSpace(turn.MessageID) != turn.MessageID {
-			return fmt.Errorf("%w: message id is invalid", ErrInvalidReconciliation)
-		}
-		if _, exists := seen[turn.MessageID]; exists {
-			return fmt.Errorf("%w: duplicate message id %q", ErrInvalidReconciliation, turn.MessageID)
-		}
-		seen[turn.MessageID] = struct{}{}
-		switch turn.Outcome {
-		case AcceptedTurnCompleted, AcceptedTurnFailed, AcceptedTurnUnknown:
-		default:
-			return fmt.Errorf("%w: unsupported outcome %q", ErrInvalidReconciliation, turn.Outcome)
-		}
-	}
-	return nil
-}
+var validateReconciliation = sessionattachment.ValidateReconciliation

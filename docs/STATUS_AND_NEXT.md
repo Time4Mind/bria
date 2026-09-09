@@ -1,13 +1,27 @@
 # Handoff: статус и следующий план
 
-> Текущая задача A31: скрывать dot-directories в браузере по умолчанию,
-> добавить сохраняемый переключатель настроек. Договор, coverage и все пункты:
-> [HIDDEN_DIRECTORIES_TODO.md](HIDDEN_DIRECTORIES_TODO.md). Реализация готова;
-> полный gate PASS, 7ce5ab0 в main; обязательный CI выявил readiness race теста.
-> Test-only C1 исправлен и прошёл повторный full gate; далее новый CI и restart.
-> Параллельная диагностика A31.5 завершена: после голосового поздний edit старой
-> карточки перезаписал carrier новой; следующие обновления шли в старое сообщение.
-> Evidence в todo, исправление этой гонки пока не запрошено и не включено в выпуск.
+> Текущий запрос A31+A32: скрытые каталоги с настройкой плюс автоматическая
+> привязка к живому терминалу/восстановление без действий владельца и исправление
+> carrier race после голосового. Единый договор/todo/coverage:
+> [HIDDEN_DIRECTORIES_TODO.md](HIDDEN_DIRECTORIES_TODO.md), раздел A32.
+> A31/C1 код в origin/main4c918a3, full gate и оба CI PASS; ещё не установлен.
+> A32 exact compaction root и carrier/callback race исправлены локально;
+> RED/GREEN, независимое review, full make check-full и физический candidate PASS.
+> A32.2 full разрешён ответом Артёма «Да»: сохранение того же терминала и
+> attach-only после restart реализуются параллельно по карте в едином todo.
+> Предыдущие fixes проверены; новый full lifecycle ещё проходит реализацию.
+> Scope estimate превышен: текущий Go net6455, две третиtests; уточнённый полный
+> объём7000–8000 ожидает подтверждения. До ответа parser/finalization paused,
+> текущие проверки/extraction продолжаются. Первый handoff также требует
+> отдельного безопасного плана/разрешения; обычный restart старого binary опасен.
+> Final current partial candidate прошёл make check-full2026-09-09~09:21UTC,
+> actual check-state/check-config read-only PASS; hashes и незакрытые пункты вtodo.
+> Writers frozen. Реализация всего A31+A32 не завершена; выпуск не выполнялся.
+> A32 diff не committed/pushed/installed.
+> Общий oversized scope, legacy Prepared fence, первый handoff и rollback старого
+> strict-state binary остаются открытыми; все границы и hashes в едином todo.
+> Старый сервис PID18322, source dcb09d8; в07:08:52UTC после oversized native
+> transcript record одна сессия awaiting_recovery, accepted input не повторять.
 
 > A30 и CI-fix C1/C2 выпущены: базовый промпт дословно заменён на текст Артёма;
 > исправлены ошибочный timing-test и ложная критическая ошибка штатной отмены
@@ -636,3 +650,18 @@ canonical `Time4Mind/bria-legacy`; это не текущий checkout, не и�
 Следующий владелец должен сначала создать первый согласованный Git handoff
 commit после проверки содержимого и секретного скана; публикация remote в этот
 документ не предполагается.
+
+## Current release checkpoint 2026-09-09
+
+После одобрения полного объёма A31+A32 реализованы persistent terminal attach/
+detach, accepted-turn recovery без повторной отправки, strict binding fence,
+canonical final для root/steer, локальный retry финализации и bounded projection
+для oversized tool records. Полный `make check-full` пройден: policy, links,
+secret scan, format, architecture, unit tests, vet, operational packaging,
+race tests и executable-trio acceptance. Отдельный flaky processgroup race
+тест дополнительно прошёл 3/3 раза.
+
+Рабочее дерево готово к согласованному Git release. Live service пока не
+перезапущен: перед switch нужно сохранить текущий snapshot и закрыть
+проверку первого handoff старого процесса с общей PGID. Runtime state,
+credentials, user sessions и внешний input не менялись.

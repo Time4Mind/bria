@@ -1,21 +1,24 @@
 //go:build !linux && !darwin
 
-package nativeterminal
+package terminalbinding
 
 import (
 	"errors"
 	"os/exec"
 )
 
-func pauseServer(*exec.Cmd) (func(), error) {
+func PauseServer(*exec.Cmd) (func(), error) {
 	return nil, errors.New("native terminal exact process cleanup unsupported")
 }
 
-type ownedProcess struct{}
+type Process struct{}
 
-func ownProcess(int) (*ownedProcess, error) {
+func IsolateServer(*exec.Cmd) {}
+func (*Process) Release()     {}
+
+func OwnProcess(int) (*Process, error) {
 	return nil, errors.New("native terminal exact process cleanup unsupported")
 }
-func (*ownedProcess) killTree() error {
+func (*Process) KillTree() error {
 	return errors.New("native terminal exact process cleanup unsupported")
 }

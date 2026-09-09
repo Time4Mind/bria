@@ -47,7 +47,9 @@ type MessageResult struct {
 	Surface  *SurfaceOutput
 }
 type SurfaceOutput struct {
-	Text string
+	Text                    string
+	ExpectedCarrierRevision *uint64
+	ExpectedCarrierAbsent   bool
 	// NativeSessionID rebinds only an existing session's carrier on receipt;
 	// the keyboard remains a global surface with signed selectable targets.
 	NativeSessionID      domain.SessionID
@@ -67,15 +69,17 @@ type TerminalOutput struct {
 	Text string
 }
 type CardOutput struct {
-	FinalOperationID     string `json:",omitempty"`
-	ScreenEligible       bool
-	SessionID            domain.SessionID
-	Header               string
-	Footer               string
-	Projection           telegramui.CarrierProjection
-	OptionsExpanded      bool
-	SelectableSessionIDs []domain.SessionID
-	MakeActive           bool
+	ExpectedCarrierRevision *uint64 `json:",omitempty"`
+	ExpectedCarrierAbsent   bool    `json:",omitempty"`
+	FinalOperationID        string  `json:",omitempty"`
+	ScreenEligible          bool
+	SessionID               domain.SessionID
+	Header                  string
+	Footer                  string
+	Projection              telegramui.CarrierProjection
+	OptionsExpanded         bool
+	SelectableSessionIDs    []domain.SessionID
+	MakeActive              bool
 }
 type TransportSender interface {
 	coordinator.Sender
@@ -356,6 +360,10 @@ func (handler *Handler) Handle(ctx context.Context, update coordinator.Update) (
 	return handler.executeClaimed(ctx, update, operation)
 }
 func (handler *Handler) executeClaimed(ctx context.Context, update coordinator.Update, operation CallbackOperation) (coordinator.Decision, error) {
+	snapshot, err := handler.uiState.Load(ctx)
+	if err != nil {
+		return coordinator.Decision{}, fmt.Errorf("load callback target fence: %w", err)
+	}
 	effectUnknown := operation
 	effectUnknown.Phase = CallbackEffectUnknown
 	stageStarted := time.Now()
@@ -389,6 +397,18 @@ func (handler *Handler) executeClaimed(ctx context.Context, update coordinator.U
 	if err != nil {
 		return coordinator.Decision{}, fmt.Errorf("%w: callback effect output: %v", telegrampipeline.ErrUnknownOperation, err)
 	}
+	id, revision, absent := prepared.Card.SessionID, &prepared.Card.ExpectedCarrierRevision, &prepared.Card.ExpectedCarrierAbsent
+	if prepared.Surface != nil {
+		id, revision, absent = prepared.Surface.NativeSessionID, &prepared.Surface.ExpectedCarrierRevision, &prepared.Surface.ExpectedCarrierAbsent
+	}
+	if id != "" {
+		target, exists := snapshot.Card(id)
+		*absent = !exists
+		*revision = nil
+		if exists {
+			*revision = &target.CarrierRevision
+		}
+	}
 	preparedOperation := effectUnknown
 	preparedOperation.Phase = CallbackPrepared
 	preparedOperation.Prepared = &prepared
@@ -411,9 +431,6 @@ func (handler *Handler) executeClaimed(ctx context.Context, update coordinator.U
 	}, nil
 }
 func (handler *Handler) prepareCallbackResult(operation CallbackOperation, result CallbackResult) (Prepared, error) {
-	if result.OperationID != operation.ID || callbackResultCount(result) != 1 {
-		return Prepared{}, errors.New("callback result acknowledgement or output is invalid")
-	}
 	if result.Card != nil {
 		return prepareCard(operation.ID, operation.Plan.Carrier.ChatID, operation.CallbackQueryID, operation.Plan.Carrier.MessageID, *result.Card, handler.presenter)
 	}
@@ -424,14 +441,10 @@ func (handler *Handler) prepareCallbackResult(operation CallbackOperation, resul
 }
 func callbackResultCount(result CallbackResult) int {
 	count := 0
-	if result.Card != nil {
-		count++
-	}
-	if result.Surface != nil {
-		count++
-	}
-	if result.Terminal != nil {
-		count++
+	for _, present := range []bool{result.Card != nil, result.Surface != nil, result.Terminal != nil} {
+		if present {
+			count++
+		}
 	}
 	return count
 }
@@ -1344,70 +1357,86 @@ func finalizePrepared(
 		}
 		return nil
 	}
-	if prepared.Card.SessionID != "" {
-		if err := commitCard(ctx, uiState, prepared.Card, carrier); err != nil {
-			return callbackdiagnostic.Wrap(err, "card_commit_failed")
-		}
-	}
+	id, expected, absent := prepared.Card.SessionID, prepared.Card.ExpectedCarrierRevision, prepared.Card.ExpectedCarrierAbsent
 	if prepared.Surface != nil && prepared.Surface.NativeSessionID != "" {
 		if err := validateNativeSurface(*prepared.Surface); err != nil {
 			return err
 		}
-		if err := commitNativeCarrier(ctx, uiState, prepared.Surface.NativeSessionID, carrier); err != nil {
-			return err
-		}
+		id, expected, absent = prepared.Surface.NativeSessionID, prepared.Surface.ExpectedCarrierRevision, prepared.Surface.ExpectedCarrierAbsent
 	}
-	if err := telegrampipeline.BindPresentation(ctx, registry, carrier, prepared.Presentation); err != nil {
-		return callbackdiagnostic.Wrap(fmt.Errorf("bind confirmed Telegram presentation: %w", err), "presentation_bind_failed")
+	var want telegramstate.Card
+	var verify bool
+	// Hold the state transaction across carrier comparison and presentation bind.
+	// Registry Claim releases its lock before loading state (no reverse lock order).
+	err := uiState.Update(ctx, func(state *telegramstate.State) error {
+		current, exists := state.Card(id)
+		replay := exists && current.LastPresentationOperation == prepared.OperationID && current.Carrier == carrier
+		callback := prepared.Status.CallbackQueryID != ""
+		stale := absent && exists && (current.Carrier != (telegramstate.Carrier{}) || current.CarrierRevision != 0) && !(replay && current.CarrierRevision == 1)
+		if expected != nil {
+			ownNavigation := callback && replay && current.CarrierRevision > *expected && current.CarrierRevision-*expected == 1
+			stale = !exists || (current.CarrierRevision != *expected && !ownNavigation) || (!callback && current.Carrier != (telegramstate.Carrier{ChatID: prepared.Status.ConversationID, MessageID: prepared.Status.SourceMessageID}))
+		}
+		if stale {
+			// The receipt is real, but its old projection must not replace a new
+			// carrier. Settle only the exact final, never other pending finals.
+			if exists && prepared.Card.FinalOperationID != "" {
+				current.PendingFinalOperations = current.PendingFinalsAfter(prepared.Card.FinalOperationID)
+				return state.SetCard(current)
+			}
+			return nil
+		}
+		if !replay && prepared.Card.SessionID != "" {
+			if err := commitCard(state, prepared.Card, carrier); err != nil {
+				return err
+			}
+		} else if !replay && id != "" {
+			if err := commitNativeCarrier(state, id, carrier); err != nil {
+				return err
+			}
+		}
+		want, verify = state.Card(id)
+		if verify {
+			want.LastPresentationOperation = prepared.OperationID
+			if err := state.SetCard(want); err != nil {
+				return err
+			}
+		}
+		return callbackdiagnostic.Wrap(telegrampipeline.BindPresentation(ctx, registry, carrier, prepared.Presentation), "presentation_bind_failed")
+	})
+	if err != nil {
+		return callbackdiagnostic.Annotate(fmt.Errorf("commit confirmed Telegram presentation: %w", err), callbackdiagnostic.Details{Code: "card_commit_failed"})
+	}
+	if verify {
+		reread, err := uiState.Load(ctx)
+		if err != nil {
+			return fmt.Errorf("reread confirmed Telegram card: %w", err)
+		}
+		got, ok := reread.Card(id)
+		if !ok || got.CarrierRevision < want.CarrierRevision || (got.CarrierRevision == want.CarrierRevision && got.Carrier != want.Carrier) {
+			return errors.New("confirmed Telegram card reread mismatch")
+		}
 	}
 	return nil
 }
-func commitCard(ctx context.Context, uiState telegramstate.Store, output CardOutput, carrier telegramstate.Carrier) error {
+func commitCard(state *telegramstate.State, output CardOutput, carrier telegramstate.Carrier) error {
 	projected := output.Projection.Card
-	want := telegramstate.Card{
-		SessionID: output.SessionID,
-		Carrier:   carrier,
-		Page: telegramstate.Page{
-			Current:      projected.View.Page,
-			Total:        projected.View.Pages,
-			Anchor:       projected.View.Anchor,
-			FollowLatest: projected.View.FollowLatest,
-		},
-		OptionsExpanded: output.OptionsExpanded,
-	}
-	if err := uiState.Update(ctx, func(state *telegramstate.State) error {
-		// Projection pages are transport output, not semantic conversation
-		// history. Preserve the independently maintained timeline and its prompt
-		// keys while updating only carrier and view state.
-		if current, ok := state.Card(output.SessionID); ok {
-			want.PendingFinalOperations = current.PendingFinalsAfter(output.FinalOperationID)
-			want.EmptyCloseEligible = current.EmptyCloseEligible
-			want.History = append([]string(nil), current.History...)
-			want.HistoryKeys = append([]string(nil), current.HistoryKeys...)
-			want.HistoryTurnKeys = append([]string(nil), current.HistoryTurnKeys...)
-			want.HistoryKinds = append([]string(nil), current.HistoryKinds...)
-		} else {
-			want.History = make([]string, len(projected.Pages))
-			for index, page := range projected.Pages {
-				want.History[index] = page.Content
-			}
+	// Preserve semantic history; replace only transport projection fields.
+	want, exists := state.Card(output.SessionID)
+	if !exists {
+		want.SessionID = output.SessionID
+		want.History = make([]string, len(projected.Pages))
+		for index, page := range projected.Pages {
+			want.History[index] = page.Content
 		}
-		if output.MakeActive && output.FinalOperationID == "" {
-			state.ActiveSession = output.SessionID
-		}
-		return state.SetCard(want)
-	}); err != nil {
-		return fmt.Errorf("commit confirmed Telegram card: %w", err)
 	}
-	reread, err := uiState.Load(ctx)
-	if err != nil {
-		return fmt.Errorf("reread confirmed Telegram card: %w", err)
+	want.PendingFinalOperations = want.PendingFinalsAfter(output.FinalOperationID)
+	want.Carrier, want.OptionsExpanded = carrier, output.OptionsExpanded
+	want.Page = telegramstate.Page{Current: projected.View.Page, Total: projected.View.Pages, Anchor: projected.View.Anchor, FollowLatest: projected.View.FollowLatest}
+	if output.MakeActive && output.FinalOperationID == "" {
+		state.ActiveSession = output.SessionID
 	}
-	got, ok := reread.Card(output.SessionID)
-	if !ok || !reflect.DeepEqual(got, want) || (output.MakeActive && output.FinalOperationID == "" && reread.ActiveSession != output.SessionID) {
-		return errors.New("confirmed Telegram card reread mismatch")
-	}
-	return nil
+	return state.SetCard(want)
 }
 func (store *pendingStore) register(prepared Prepared) error {
 	if prepared.OperationID == "" || prepared.Keyboard == nil {
@@ -1535,13 +1564,7 @@ func coordinatorKeyboard(markup telegram.InlineKeyboardMarkup) *coordinator.Keyb
 }
 func clonePrepared(prepared Prepared) Prepared {
 	clone := prepared
-	if prepared.Keyboard != nil {
-		keyboard := make(coordinator.KeyboardMarkup, len(*prepared.Keyboard))
-		for rowIndex, row := range *prepared.Keyboard {
-			keyboard[rowIndex] = append([]coordinator.KeyboardButton(nil), row...)
-		}
-		clone.Keyboard = &keyboard
-	}
+	clone.Keyboard = cloneCoordinatorKeyboard(prepared.Keyboard)
 	clone.Presentation.Markup = cloneTelegramMarkup(prepared.Presentation.Markup)
 	clone.Presentation.TokenIDs = append([]string(nil), prepared.Presentation.TokenIDs...)
 	clone.Presentation.Recovery = clonePointer(prepared.Presentation.Recovery)
@@ -1557,15 +1580,13 @@ func clonePrepared(prepared Prepared) Prepared {
 }
 func cloneSurfaceOutput(output SurfaceOutput) SurfaceOutput {
 	clone := output
+	clone.ExpectedCarrierRevision = clonePointer(output.ExpectedCarrierRevision)
 	clone.Recovery = clonePointer(output.Recovery)
 	clone.AcceptedTurnRecovery = clonePointer(output.AcceptedTurnRecovery)
 	clone.StatusRecovery = clonePointer(output.StatusRecovery)
 	clone.ArtifactRetry = clonePointer(output.ArtifactRetry)
 	clone.SelectableSessionIDs = append([]domain.SessionID(nil), output.SelectableSessionIDs...)
-	clone.Keyboard.Rows = make([]telegramui.ButtonRow, len(output.Keyboard.Rows))
-	for index, row := range output.Keyboard.Rows {
-		clone.Keyboard.Rows[index] = append(telegramui.ButtonRow(nil), row...)
-	}
+	clone.Keyboard = telegramui.CloneCardKeyboard(output.Keyboard)
 	return clone
 }
 func clonePointer[T any](value *T) *T {
@@ -1577,22 +1598,9 @@ func clonePointer[T any](value *T) *T {
 }
 func cloneCardOutput(output CardOutput) CardOutput {
 	clone := output
+	clone.ExpectedCarrierRevision = clonePointer(output.ExpectedCarrierRevision)
 	clone.SelectableSessionIDs = append([]domain.SessionID(nil), output.SelectableSessionIDs...)
-	projection := output.Projection
-	projection.Card.Pages = make([]telegramui.ContentPage, len(output.Projection.Card.Pages))
-	for index, page := range output.Projection.Card.Pages {
-		projection.Card.Pages[index] = page
-		projection.Card.Pages[index].Anchors = append([]string(nil), page.Anchors...)
-	}
-	projection.Card.Keyboard.Rows = make([]telegramui.ButtonRow, len(output.Projection.Card.Keyboard.Rows))
-	for index, row := range output.Projection.Card.Keyboard.Rows {
-		projection.Card.Keyboard.Rows[index] = append(telegramui.ButtonRow(nil), row...)
-	}
-	if output.Projection.Notification != nil {
-		notification := *output.Projection.Notification
-		projection.Notification = &notification
-	}
-	clone.Projection = projection
+	clone.Projection = telegramui.CloneCarrierProjection(output.Projection)
 	return clone
 }
 func cloneTelegramMarkup(markup telegram.InlineKeyboardMarkup) telegram.InlineKeyboardMarkup {

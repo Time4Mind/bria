@@ -15,6 +15,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"bria/internal/terminalbinding"
 )
 
 const operationTimeout = 5 * time.Second
@@ -25,6 +27,8 @@ const operationTimeout = 5 * time.Second
 const pasteSettle = 500 * time.Millisecond
 
 type Config struct {
+	// Persistent isolates the server from adapter shutdown and enables exact attach.
+	Persistent  bool
 	Command     []string
 	Workdir     string
 	Environment []string
@@ -36,13 +40,17 @@ type Config struct {
 }
 
 type Terminal struct {
+	persistent          bool
+	workdir             string
+	binding             terminalbinding.Record
+	lease               *terminalbinding.Lease
 	mu                  sync.Mutex
 	path, dir, socket   string
 	server              *exec.Cmd
 	done                chan struct{}
 	closed              bool
 	closeErr            error
-	process             *ownedProcess
+	process             *terminalbinding.Process
 	literalInputBarrier bool
 }
 
@@ -77,13 +85,16 @@ func Open(ctx context.Context, config Config) (terminal *Terminal, err error) {
 	if err != nil {
 		return nil, err
 	}
-	t := &Terminal{path: path, dir: dir, socket: filepath.Join(dir, "socket"), done: make(chan struct{}), literalInputBarrier: config.LiteralInputBarrier}
+	t := &Terminal{path: path, dir: dir, socket: filepath.Join(dir, "socket"), done: make(chan struct{}), literalInputBarrier: config.LiteralInputBarrier, persistent: config.Persistent, workdir: config.Workdir}
 	defer func() {
 		if err != nil {
 			err = errors.Join(err, t.Close(context.Background()))
 		}
 	}()
 	t.server = exec.Command(path, "-u", "-D", "-f", os.DevNull, "-S", t.socket)
+	if config.Persistent {
+		terminalbinding.IsolateServer(t.server)
+	}
 	t.server.Env = append([]string{}, config.Environment...)
 	// Nested tmux environment must not redirect or constrain this private server.
 	t.server.Env = append(t.server.Env, "TMUX=", "TERM=xterm-256color")
@@ -126,7 +137,7 @@ func Open(ctx context.Context, config Config) (terminal *Terminal, err error) {
 	if parseErr != nil {
 		return nil, errors.New("native terminal invalid pane identity")
 	}
-	t.process, err = ownProcess(pid)
+	t.process, err = terminalbinding.OwnProcess(pid)
 	if err != nil {
 		return nil, err
 	}
@@ -136,7 +147,11 @@ func Open(ctx context.Context, config Config) (terminal *Terminal, err error) {
 func (t *Terminal) run(ctx context.Context, input []byte, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, operationTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, t.path, append([]string{"-u", "-S", t.socket}, args...)...)
+	flags := []string{"-u", "-S", t.socket}
+	if t.persistent {
+		flags = append(flags, "-N")
+	}
+	cmd := exec.CommandContext(ctx, t.path, append(flags, args...)...)
 	cmd.Stdin = bytes.NewReader(input)
 	var output limitedOutput
 	cmd.Stdout = &output
@@ -153,8 +168,8 @@ func (t *Terminal) run(ctx context.Context, input []byte, args ...string) (strin
 func (t *Terminal) Capture(ctx context.Context) (string, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if t.closed {
-		return "", errors.New("native terminal closed")
+	if err := t.usable(ctx); err != nil {
+		return "", err
 	}
 	// Current screen only: no stale scrollback mixed into an interactive menu.
 	return t.run(ctx, nil, "capture-pane", "-p", "-t", "cli:0.0")
@@ -168,8 +183,8 @@ func (t *Terminal) Expand(ctx context.Context, rows int) error {
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if t.closed {
-		return errors.New("native terminal closed")
+	if err := t.usable(ctx); err != nil {
+		return err
 	}
 	value, err := t.run(ctx, nil, "display-message", "-p", "-t", "cli:0.0", "#{window_height}")
 	if err != nil {
@@ -189,8 +204,8 @@ func (t *Terminal) Expand(ctx context.Context, rows int) error {
 func (t *Terminal) Input(ctx context.Context, text string) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if t.closed {
-		return errors.New("native terminal closed")
+	if err := t.usable(ctx); err != nil {
+		return err
 	}
 	if strings.IndexByte(text, 0) >= 0 {
 		return errors.New("native terminal input contains NUL")
@@ -225,8 +240,8 @@ func (t *Terminal) Key(ctx context.Context, key string) error {
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if t.closed {
-		return errors.New("native terminal closed")
+	if err := t.usable(ctx); err != nil {
+		return err
 	}
 	_, err := t.run(ctx, nil, "send-keys", "-t", "cli:0.0", value)
 	return err
@@ -237,6 +252,11 @@ func (t *Terminal) Alive(ctx context.Context) (bool, error) {
 	defer t.mu.Unlock()
 	if t.closed {
 		return false, nil
+	}
+	if t.lease != nil {
+		if err := t.prove(ctx); err != nil {
+			return false, err
+		}
 	}
 	select {
 	case <-t.done:
@@ -258,12 +278,15 @@ func (t *Terminal) Close(_ context.Context) error {
 	if t.closed {
 		return t.closeErr
 	}
+	if t.lease != nil {
+		return t.closePersistent()
+	}
 	var treeErr error
 	if t.process != nil {
 		// tmux resumes a stopped pane as part of job control. Freeze only our
 		// owned server while stopping its pane tree, then allow it to reap.
-		resume, pauseErr := pauseServer(t.server)
-		treeErr = errors.Join(pauseErr, t.process.killTree())
+		resume, pauseErr := terminalbinding.PauseServer(t.server)
+		treeErr = errors.Join(pauseErr, t.process.KillTree())
 		if resume != nil {
 			resume()
 		}

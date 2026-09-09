@@ -1,6 +1,6 @@
 //go:build linux
 
-package nativeterminal
+package terminalbinding
 
 import (
 	"errors"
@@ -15,9 +15,12 @@ import (
 
 // A pidfd pins a process identity even if its numeric PID is later reused.
 // No signal in this file addresses a bare PID or an ambient process group.
-type ownedProcess struct{ pid, fd int }
+type Process struct{ pid, fd int }
 
-func pauseServer(server *exec.Cmd) (func(), error) {
+func IsolateServer(cmd *exec.Cmd) { cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true} }
+func (p *Process) Release()       { _ = syscall.Close(p.fd) }
+
+func PauseServer(server *exec.Cmd) (func(), error) {
 	if server == nil || server.Process == nil {
 		return nil, errors.New("owned tmux server missing")
 	}
@@ -49,7 +52,7 @@ func pauseServer(server *exec.Cmd) (func(), error) {
 	}
 }
 
-func ownProcess(pid int) (*ownedProcess, error) {
+func OwnProcess(pid int) (*Process, error) {
 	if pid < 2 {
 		return nil, errors.New("invalid owned pane PID")
 	}
@@ -57,10 +60,10 @@ func ownProcess(pid int) (*ownedProcess, error) {
 	if errno != 0 {
 		return nil, fmt.Errorf("open owned pane pidfd: %w", errno)
 	}
-	return &ownedProcess{pid: pid, fd: int(fd)}, nil
+	return &Process{pid: pid, fd: int(fd)}, nil
 }
 
-func (p *ownedProcess) signal(signal syscall.Signal) error {
+func (p *Process) signal(signal syscall.Signal) error {
 	_, _, errno := syscall.Syscall6(424, uintptr(p.fd), uintptr(signal), 0, 0, 0, 0) // pidfd_send_signal
 	if errno == syscall.ESRCH {
 		return nil
@@ -71,7 +74,7 @@ func (p *ownedProcess) signal(signal syscall.Signal) error {
 	return nil
 }
 
-func (p *ownedProcess) exited() bool {
+func (p *Process) Exited() bool {
 	// A ready pidfd is kernel proof of process exit, independent of PID reuse.
 	var set syscall.FdSet
 	if p.fd >= len(set.Bits)*64 {
@@ -83,16 +86,16 @@ func (p *ownedProcess) exited() bool {
 	return err == nil && n > 0
 }
 
-func (p *ownedProcess) killTree() error {
+func (p *Process) KillTree() error {
 	defer syscall.Close(p.fd)
-	if p.exited() {
+	if p.Exited() {
 		if err := syscall.Kill(-p.pid, 0); errors.Is(err, syscall.ESRCH) {
 			return nil
 		}
 		return errors.New("pane exited before owned process group cleanup could be proven")
 	}
 	deadline := time.Now().Add(3 * time.Second)
-	owned := []*ownedProcess{p}
+	owned := []*Process{p}
 	// Even a discovery error must not strand processes we already stopped.
 	defer func() {
 		for _, process := range owned {
@@ -113,7 +116,7 @@ func (p *ownedProcess) killTree() error {
 		if err := current.signal(syscall.SIGSTOP); err != nil {
 			return fmt.Errorf("stop owned CLI: %w", err)
 		}
-		for !current.exited() {
+		for !current.Exited() {
 			stat, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", current.pid))
 			if err != nil {
 				return errors.New("owned process stop unconfirmed")
@@ -132,7 +135,7 @@ func (p *ownedProcess) killTree() error {
 			}
 			time.Sleep(time.Millisecond)
 		}
-		if current.exited() {
+		if current.Exited() {
 			continue
 		}
 		entries, err := os.ReadDir("/proc")
@@ -157,7 +160,7 @@ func (p *ownedProcess) killTree() error {
 			if end < 0 || len(fields) < 2 || fields[1] != strconv.Itoa(current.pid) {
 				continue
 			}
-			child, err := ownProcess(pid)
+			child, err := OwnProcess(pid)
 			if errors.Is(err, syscall.ESRCH) {
 				continue
 			}
@@ -170,7 +173,7 @@ func (p *ownedProcess) killTree() error {
 			stat, statErr := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
 			end = strings.LastIndexByte(string(stat), ')')
 			fields = strings.Fields(string(stat)[end+1:])
-			if statErr != nil || end < 0 || len(fields) < 2 || fields[1] != strconv.Itoa(current.pid) || child.exited() {
+			if statErr != nil || end < 0 || len(fields) < 2 || fields[1] != strconv.Itoa(current.pid) || child.Exited() {
 				_ = syscall.Close(child.fd)
 				continue
 			}
@@ -189,7 +192,7 @@ func (p *ownedProcess) killTree() error {
 	for {
 		allExited := true
 		for _, process := range owned {
-			allExited = allExited && process.exited()
+			allExited = allExited && process.Exited()
 		}
 		if allExited {
 			return result

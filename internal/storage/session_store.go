@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"bria/internal/archiveimport"
+	"bria/internal/cardeventhistory"
 	"bria/internal/domain"
 	"bria/internal/statejson"
 	"bria/internal/telegramhistory"
@@ -61,7 +62,7 @@ func OpenSessionStore(path string) (*SessionStore, error) {
 	mu := mutexForPath(canonicalPath)
 	mu.Lock()
 	defer mu.Unlock()
-	byIntent, byID, checkpoint, ui, err := readSessionFile(canonicalPath)
+	byIntent, byID, checkpoint, ui, err := readSessionFile(canonicalPath, true)
 	if err != nil {
 		return nil, err
 	}
@@ -430,7 +431,7 @@ func (store *SessionStore) ImportArchived(ctx context.Context, candidates []doma
 	if err := writeSessionFile(store.path, next, store.checkpoint, store.telegramUI); err != nil {
 		return fmt.Errorf("persist archived import: %w", err)
 	}
-	verifiedByIntent, verifiedByID, checkpoint, ui, err := readSessionFile(store.path)
+	verifiedByIntent, verifiedByID, checkpoint, ui, err := readSessionFile(store.path, true)
 	if err != nil {
 		return fmt.Errorf("verify archived import: %w", err)
 	}
@@ -445,7 +446,7 @@ func (store *SessionStore) ImportArchived(ctx context.Context, candidates []doma
 }
 
 func (store *SessionStore) reload() error {
-	byIntent, byID, checkpoint, ui, err := readSessionFile(store.path)
+	byIntent, byID, checkpoint, ui, err := readSessionFile(store.path, true)
 	if err != nil {
 		return fmt.Errorf("reload session store: %w", err)
 	}
@@ -689,46 +690,13 @@ func (store *SessionStore) SetCardPage(ctx context.Context, sessionID domain.Ses
 }
 
 func (store *SessionStore) AppendCardHistory(ctx context.Context, sessionID domain.SessionID, item string) error {
-	return store.appendCardHistory(ctx, sessionID, item, "")
+	return cardeventhistory.Append(ctx, store, sessionID, item, "")
 }
 
 // AppendCardTechnicalHistory retains one exact provider tool event. Technical
 // identity is explicit metadata and is never inferred from visible text.
 func (store *SessionStore) AppendCardTechnicalHistory(ctx context.Context, sessionID domain.SessionID, item string) error {
-	return store.appendCardHistory(ctx, sessionID, item, "tool")
-}
-
-func (store *SessionStore) appendCardHistory(ctx context.Context, sessionID domain.SessionID, item, kind string) error {
-	if sessionID == "" || item == "" {
-		return errors.New("session and history item are required")
-	}
-	return store.UpdateTelegramUI(ctx, func(state *telegramstate.State) error {
-		card, ok := state.Cards[sessionID]
-		if !ok {
-			card = telegramstate.Card{SessionID: sessionID, Page: telegramstate.Page{Current: 1, Total: 1, FollowLatest: true}}
-		}
-		card.EmptyCloseEligible = false
-		telegramhistory.Append(&card, item, kind)
-		return state.SetCard(card)
-	})
-}
-
-// InsertCardTypedHistoryAfterPrompt keeps a provider event beside the prompt
-// that produced it, rather than after later queued prompts.
-func (store *SessionStore) InsertCardTypedHistoryAfterPrompt(ctx context.Context, sessionID domain.SessionID, promptID, item, kind string) error {
-	if sessionID == "" || promptID == "" || item == "" {
-		return errors.New("session, prompt, and history item are required")
-	}
-	return store.UpdateTelegramUI(ctx, func(state *telegramstate.State) error {
-		card, ok := state.Cards[sessionID]
-		if !ok {
-			return ErrSessionNotFound
-		}
-		if err := telegramhistory.InsertAfterPrompt(&card, promptID, item, kind); err != nil {
-			return err
-		}
-		return state.SetCard(card)
-	})
+	return cardeventhistory.Append(ctx, store, sessionID, item, "tool")
 }
 
 // SetCardPrompt inserts or replaces one user prompt at its stable message ID.
@@ -965,8 +933,19 @@ func cloneSessionStatus(value *domain.SessionStatus) *domain.SessionStatus {
 	return &clone
 }
 
+// ValidateSessionFile uses the exact decoder without repairing permissions or
+// writing state. A rollback probe must be safe against a running store.
+func ValidateSessionFile(path string) error {
+	canonical, err := canonicalStorePath(path)
+	if err != nil {
+		return err
+	}
+	_, _, _, _, err = readSessionFile(canonical, false)
+	return err
+}
+
 func readSessionFile(
-	path string,
+	path string, repairPermissions bool,
 ) (map[domain.IntentID]domain.Session, map[domain.SessionID]domain.IntentID, *coordinatorRecord, *telegramstate.State, error) {
 	byIntent := make(map[domain.IntentID]domain.Session)
 	byID := make(map[domain.SessionID]domain.IntentID)
@@ -980,8 +959,10 @@ func readSessionFile(
 	if !info.Mode().IsRegular() {
 		return nil, nil, nil, nil, fmt.Errorf("session store %q is not a regular file", path)
 	}
-	if err := os.Chmod(path, 0o600); err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("secure session store permissions: %w", err)
+	if repairPermissions {
+		if err := os.Chmod(path, 0o600); err != nil {
+			return nil, nil, nil, nil, fmt.Errorf("secure session store permissions: %w", err)
+		}
 	}
 
 	file, err := os.Open(path)

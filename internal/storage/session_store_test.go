@@ -208,6 +208,7 @@ func TestSessionStoreMigratesLegacyDocumentAndRoundTripsTelegramUI(t *testing.T)
 	if err != nil {
 		t.Fatalf("reload UI: %v", err)
 	}
+	want.CarrierRevision = 1 // First confirmed carrier must survive the physical reopen.
 	if got.ActiveSession != id || !reflect.DeepEqual(got.Cards[id], want) {
 		t.Fatalf("reloaded UI = %#v, want active card", got)
 	}

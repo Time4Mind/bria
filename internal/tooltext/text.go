@@ -24,6 +24,14 @@ func Retain(raw string) string {
 	return string(encoded)
 }
 
+// RetainTruncatedNotice is used when the source value was validated but its
+// contents exceeded the native projection budget and were intentionally not
+// retained in memory.
+func RetainTruncatedNotice() string {
+	encoded, _ := json.Marshal(retained{1, Notice, true})
+	return string(encoded)
+}
+
 // Read decodes native content arrays exactly once, preserving literal escapes.
 func Read(raw string) (string, bool) {
 	var value retained

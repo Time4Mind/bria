@@ -24,7 +24,6 @@ import (
 	"bria/internal/providermodels"
 	"bria/internal/providerquota"
 	"bria/internal/recoverycomposition"
-	"bria/internal/recoveryruntime"
 	"bria/internal/runtimefactory"
 	"bria/internal/safelog"
 	"bria/internal/screenproduction"
@@ -141,18 +140,6 @@ func (starter liveConfigStarter) Abort(ctx context.Context, request app.StartSes
 		return errors.New("live provider starter is not configured")
 	}
 	return starter.base.Abort(ctx, request, binding)
-}
-
-type recoveredProviderRuntime struct {
-	*sessionruntime.Starter
-	reader sessionruntime.AcceptedTurnReader
-}
-
-func (runtime recoveredProviderRuntime) ReadAcceptedTurns(ctx context.Context, request sessionruntime.AcceptedTurnReadRequest) (sessionruntime.AcceptedTurnReconciliation, error) {
-	if runtime.reader == nil {
-		return sessionruntime.AcceptedTurnReconciliation{}, recoveryruntime.ErrUnavailable
-	}
-	return runtime.reader.ReadAcceptedTurns(ctx, request)
 }
 
 // Dependencies supply the local process and Telegram boundaries to Run.
@@ -386,6 +373,14 @@ func runTelegramController(
 	var processSupervision contextRunner = idleRunner{}
 	var sessionRecoverer telegramcontroller.SessionRecoverer
 	var resumeReconciler *durablecomposition.AcceptedTurnReconciler
+	acceptedObserver, _ := starter.(telegramcontroller.AcceptedTurnObserver)
+	continuation := durablecomposition.AcceptedContinuation{Journal: journal, Wake: inputCustody.WakeSession}
+	var continueAccepted func(context.Context, domain.Session, domain.ProviderBinding, sessionsupervisor.AcceptedTurnReconciliation) error
+	if acceptedObserver != nil {
+		continueAccepted = func(ctx context.Context, session domain.Session, prior domain.ProviderBinding, result sessionsupervisor.AcceptedTurnReconciliation) error {
+			return continuation.ContinueAcceptedTurns(ctx, session, prior, result)
+		}
+	}
 	waiter, canWait := starter.(sessionruntime.ProcessSupervisor)
 	reader, canReconcile := starter.(sessionruntime.AcceptedTurnReader)
 	if canWait && canReconcile {
@@ -403,14 +398,14 @@ func runTelegramController(
 		supervision, err := supervisioncomposition.New(supervisioncomposition.Options{
 			LocalComputerID: computerID, Store: state, Waiter: waiter, Restarter: starter,
 			AcceptedTurns: durableRecovery, MaxRestartAttempts: 3, SweepInterval: supervisionSweepInterval,
-			Now: clock, WaitBeforeRetry: waitRecoveryRetry, Report: reportRecovery,
+			ContinueAcceptedTurns: continueAccepted,
+			Now:                   clock, WaitBeforeRetry: waitRecoveryRetry, Report: reportRecovery,
 		})
 		if err != nil {
 			return fmt.Errorf("compose session supervision: %w", err)
 		}
 		supervision.SetObserver(flowTrace)
 		sessionRecoverer = supervision
-		recovery, err = supervision.RecoverStartup(ctx)
 		processSupervision = supervision
 	} else {
 		recovery, err = supervisioncomposition.RecoverSafeFallback(ctx, computerID, state, starter)
@@ -536,13 +531,15 @@ func runTelegramController(
 			Stopper: turnStopper, ArchivedResumer: archivedResumer, Recoverer: sessionRecoverer, SessionCloser: sessionCloser,
 			TurnLifecycle: turnLifecycle, DurableInput: inputCustody, DurableOutput: outputCustody,
 			InputPreparer: inputPreparer, Attachments: attachments, RuntimeEvents: runtimeEvents, Finals: finals,
-			Interactions: interactions.Flow(), Authorization: authorization,
+			AcceptedObserver: acceptedObserver,
+			Interactions:     interactions.Flow(), Authorization: authorization,
 			Recovered: recovery.Sessions,
 		},
 	)
 	if err != nil {
 		return fmt.Errorf("create Telegram controller: %w", err)
 	}
+	continuation.Controller = handler
 	if supervision, ok := sessionRecoverer.(*supervisioncomposition.Manager); ok {
 		supervision.SetRecoveryNotifier(handler.RefreshRecoveryCard)
 	}
@@ -637,6 +634,17 @@ func runTelegramController(
 		Controller: handler, Cards: telegramruntimecomposition.SessionTelegramUIStore{State: state}, Presenter: presenter, Sender: flowSender,
 	}); err != nil {
 		return fmt.Errorf("bind Telegram prompt status delivery: %w", err)
+	}
+	// Attach only after history, final custody and card consumers are bound.
+	// An accepted turn may already have a final waiting in its native transcript.
+	if supervision, ok := sessionRecoverer.(*supervisioncomposition.Manager); ok {
+		recovery, err = supervision.RecoverStartup(ctx)
+		if err != nil {
+			return fmt.Errorf("recover persisted sessions: %w", err)
+		}
+		for _, session := range recovery.Sessions {
+			handler.RefreshRecoveryCard(ctx, session.ID())
+		}
 	}
 	handler.StartNativeObserver()
 	handler.ScheduleStandby()
@@ -747,7 +755,7 @@ func ComposeProviderRuntime(configuration config.Config, environment []string, e
 	if reader == nil {
 		return starter, nil
 	}
-	return recoveredProviderRuntime{Starter: starter, reader: reader}, nil
+	return nativerecoverycomposition.Runtime{Starter: starter, Reader: reader}, nil
 }
 
 func composeAcceptedTurnReader(configuration config.Config, commands *runtimefactory.CommandSet) (sessionruntime.AcceptedTurnReader, error) {

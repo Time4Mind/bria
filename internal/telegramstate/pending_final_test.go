@@ -216,6 +216,7 @@ func TestPendingFinalsAfterLastReceiptMatchesPhysicalCardReread(t *testing.T) {
 	}
 	want := pendingWireCard(t, []string{"a:final"})
 	want.PendingFinalOperations = want.PendingFinalsAfter("a:final")
+	want.CarrierRevision = 1 // First confirmed carrier replaces the empty carrier.
 	if err := store.Update(ctx, func(s *telegramstate.State) error { return s.SetCard(want) }); err != nil {
 		t.Fatal(err)
 	}

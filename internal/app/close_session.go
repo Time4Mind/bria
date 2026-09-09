@@ -173,11 +173,11 @@ func (closer *SessionCloser) closeNow(ctx context.Context, current domain.Sessio
 		Workdir: closing.Workdir(), Mode: SessionStartResume, PriorBinding: &binding,
 	}
 	if err := closer.starter.Abort(ctx, request, binding); err != nil {
-		// Awaiting-recovery means the prior process crossed the durable exit
-		// boundary. After a restart the adapter is normally not tracked locally;
-		// treat that exact missing-process result as a confirmed exit so the UI
-		// can always close the stale session.
-		if current.Status() == domain.SessionAwaitingRecovery && strings.Contains(err.Error(), "not tracked") {
+		// Preserve the legacy stdio missing-process convention. For persistent
+		// native terminals a missing observer does not prove that the CLI exited.
+		attacher, native := closer.starter.(SessionAttacher)
+		native = native && attacher.SupportsAttach(current.Provider())
+		if !native && current.Status() == domain.SessionAwaitingRecovery && strings.Contains(err.Error(), "not tracked") {
 			return closer.finishClose(ctx, closing, at)
 		}
 		if receipt, ok := closer.store.(interface {

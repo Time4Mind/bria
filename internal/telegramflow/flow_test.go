@@ -193,8 +193,9 @@ func (rawKeyboardHandler) Handle(context.Context, coordinator.Update) (coordinat
 }
 
 type callbackExecutor struct {
-	plan  telegrampipeline.CallbackPlan
-	calls int
+	plan   telegrampipeline.CallbackPlan
+	calls  int
+	target domain.SessionID
 }
 
 type interactionTerminalExecutor struct {
@@ -607,8 +608,12 @@ func (executor *callbackExecutor) HandleCallback(_ context.Context, plan telegra
 	if err != nil {
 		return telegramflow.CallbackResult{}, err
 	}
+	id := executor.target
+	if id == "" {
+		id = flowSessionID
+	}
 	return telegramflow.CallbackResult{OperationID: plan.OperationID, Card: &telegramflow.CardOutput{
-		SessionID:       flowSessionID,
+		SessionID:       id,
 		Projection:      projection,
 		OptionsExpanded: false,
 	}}, nil
@@ -905,17 +910,31 @@ func TestConcurrentDurableDeliveryClaimsOneTelegramMutation(t *testing.T) {
 }
 
 type failNextUpdateStore struct {
-	inner    telegramstate.Store
-	failNext bool
+	inner       telegramstate.Store
+	failNext    bool
+	afterChange bool
+	failRead    bool
 }
 
 func (store *failNextUpdateStore) Load(ctx context.Context) (telegramstate.State, error) {
+	if store.failRead {
+		store.failRead = false
+		return telegramstate.State{}, errors.New("target snapshot unavailable")
+	}
 	return store.inner.Load(ctx)
 }
 
 func (store *failNextUpdateStore) Update(ctx context.Context, change func(*telegramstate.State) error) error {
 	if store.failNext {
 		store.failNext = false
+		if store.afterChange {
+			return store.inner.Update(ctx, func(state *telegramstate.State) error {
+				if err := change(state); err != nil {
+					return err
+				}
+				return errors.New("UI save failed after registry bind")
+			})
+		}
 		return errors.New("local UI persistence unavailable")
 	}
 	return store.inner.Update(ctx, change)
@@ -938,6 +957,13 @@ func (sender *sender) AcknowledgeCallback(context.Context, string, string) {
 }
 
 func TestFlowAuthenticatesPlansAndBindsReplacementOnlyAfterConfirmedEdit(t *testing.T) {
+	for _, target := range []string{"same", "different-carrier", "absent"} {
+		t.Run(target, func(t *testing.T) { testCallbackTargetNavigation(t, target) })
+	}
+}
+
+func testCallbackTargetNavigation(t *testing.T, target string) {
+	t.Helper()
 	now := time.Unix(1_800_000_000, 0).UTC()
 	presenter := newPresenter(t, now)
 	registry := telegrampipeline.NewMemoryCallbackRegistry(func() time.Time { return now })
@@ -965,6 +991,20 @@ func TestFlowAuthenticatesPlansAndBindsReplacementOnlyAfterConfirmedEdit(t *test
 	}
 	base := &sender{receipt: coordinator.Receipt{MessageID: 99}}
 	executor := &callbackExecutor{}
+	targetID := flowSessionID
+	if target != "same" {
+		targetID = domain.SessionID("223e4567-e89b-12d3-a456-426614174000")
+		executor.target = targetID
+		if target == "different-carrier" {
+			if err := uiStore.Update(context.Background(), func(state *telegramstate.State) error {
+				card := oldCard
+				card.SessionID, card.Carrier.MessageID = targetID, 88
+				return state.SetCard(card)
+			}); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
 	handler, outbound, err := telegramflow.New(telegramflow.Config{
 		OwnerUserID:        7,
 		OwnerPrivateChatID: 42,
@@ -1010,7 +1050,7 @@ func TestFlowAuthenticatesPlansAndBindsReplacementOnlyAfterConfirmedEdit(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	card, ok := stored.Card(flowSessionID)
+	card, ok := stored.Card(targetID)
 	if !ok || card.Page.Current != 1 || card.Carrier.MessageID != 99 || card.History[0] != "old" {
 		t.Fatalf("committed card = %#v", card)
 	}
@@ -1184,6 +1224,57 @@ func TestHandlerSilentlyAcknowledgesOwnerInvalidButton(t *testing.T) {
 }
 
 func TestConfirmedCallbackReceiptFinishesLocalCommitAfterRestartWithoutResend(t *testing.T) {
+	testConfirmedReceiptRetry(t, false)
+}
+
+func TestCallbackSnapshotReadFailureRetainsClaimBeforeEffect(t *testing.T) {
+	ctx := context.Background()
+	now := time.Unix(1_800_000_000, 0).UTC()
+	store := &failNextUpdateStore{inner: telegramstate.NewMemoryStore(), failRead: true}
+	operations := telegramflow.NewMemoryCallbackOperationStore()
+	digest := sha256.Sum256([]byte("original-token"))
+	operation := telegramflow.CallbackOperation{
+		ID: "status:701", UpdateID: 701, CallbackQueryID: "query-701", CallbackDigest: fmt.Sprintf("%x", digest),
+		Plan: telegrampipeline.CallbackPlan{
+			OperationID: "status:701", UpdateID: 701, SessionID: flowSessionID,
+			Carrier: telegramstate.Carrier{ChatID: 42, MessageID: 99},
+			Action:  telegramui.ActionPagePrevious, Effect: telegrampipeline.EffectProjectPage,
+			Target: telegramui.ButtonTarget{Page: 1},
+		},
+		Phase: telegramflow.CallbackClaimed,
+	}
+	if err := operations.Create(ctx, operation); err != nil {
+		t.Fatal(err)
+	}
+	executor, transport := &callbackExecutor{}, &sender{}
+	handler, _, err := telegramflow.New(telegramflow.Config{
+		OwnerUserID: 7, OwnerPrivateChatID: 42, Presenter: newPresenter(t, now),
+		CallbackRegistry: telegrampipeline.NewMemoryCallbackRegistry(func() time.Time { return now }),
+		UIState:          store, Operations: operations, Callbacks: executor, Messages: &messageHandler{}, Sender: transport,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	update := coordinator.Update{ID: 701, Kind: coordinator.UpdateCallback, ActorID: 7, ConversationID: 42,
+		ConversationKind: "private", CallbackQueryID: "query-701", SourceMessageID: 99, Text: "original-token"}
+	if _, err := handler.Handle(ctx, update); err == nil {
+		t.Fatal("missing snapshot did not reject execution")
+	}
+	got, found, err := operations.Load(ctx, operation.ID)
+	if err != nil || !found || got.Phase != telegramflow.CallbackClaimed || executor.calls != 0 || transport.edits != 0 {
+		t.Fatalf("snapshot failure lost safe retry: phase=%s calls=%d edits=%d found=%t err=%v", got.Phase, executor.calls, transport.edits, found, err)
+	}
+	if decision, err := handler.Handle(ctx, update); err != nil || decision.Kind != coordinator.DecisionStatus || executor.calls != 1 {
+		t.Fatalf("claimed retry did not execute once: %+v calls=%d err=%v", decision, executor.calls, err)
+	}
+}
+
+func TestConfirmedReceiptRetryAfterRegistryBindPreservesClaimsWithoutResend(t *testing.T) {
+	testConfirmedReceiptRetry(t, true)
+}
+
+func testConfirmedReceiptRetry(t *testing.T, afterBind bool) {
+	t.Helper()
 	now := time.Unix(1_800_000_000, 0).UTC()
 	presenter := newPresenter(t, now)
 	root := t.TempDir()
@@ -1197,7 +1288,7 @@ func TestConfirmedCallbackReceiptFinishesLocalCommitAfterRestartWithoutResend(t 
 		t.Fatal(err)
 	}
 	baseUI := telegramstate.NewMemoryStore()
-	uiStore := &failNextUpdateStore{inner: baseUI}
+	uiStore := &failNextUpdateStore{inner: baseUI, afterChange: afterBind}
 	oldCard := telegramstate.Card{SessionID: flowSessionID, Carrier: telegramstate.Carrier{ChatID: 42, MessageID: 99}, Page: telegramstate.Page{Current: 2, Total: 2, Anchor: "new", FollowLatest: true}, History: []string{"old", "new"}}
 	if err := uiStore.Update(context.Background(), func(state *telegramstate.State) error {
 		state.ActiveSession = flowSessionID
@@ -1234,6 +1325,28 @@ func TestConfirmedCallbackReceiptFinishesLocalCommitAfterRestartWithoutResend(t 
 	if err != nil || !ok || confirmed.Phase != telegramflow.CallbackReceiptConfirmed || confirmed.Receipt != 99 {
 		t.Fatalf("post-receipt state = %#v, %t, %v", confirmed, ok, err)
 	}
+	var claim telegrampipeline.CallbackClaim
+	if afterBind {
+		state, err := baseUI.Load(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if card, _ := state.Card(flowSessionID); card.Page.Current != 2 || card.LastPresentationOperation != "" {
+			t.Fatalf("failed save changed state: %+v", card)
+		}
+		decoded, err := presenter.DecodeCallbackWithMetadata((*decision.Keyboard)[0][0].CallbackData)
+		if err != nil {
+			t.Fatal(err)
+		}
+		claim = telegrampipeline.CallbackClaim{SessionID: flowSessionID, Carrier: oldCard.Carrier, TokenID: decoded.TokenID, ExpiresAt: decoded.ExpiresAt, UpdateID: 702, CallbackQueryID: "query-702"}
+		if result, err := registry.Claim(context.Background(), claim); err != nil || result.Outcome != telegrampipeline.ClaimAccepted {
+			t.Fatalf("post-bind claim=%+v %v", result, err)
+		}
+		registry, err = telegrampipeline.OpenFileCallbackRegistry(filepath.Join(root, "registry.json"), func() time.Time { return now })
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 
 	reopenedOperations, err := telegramflow.OpenFileCallbackOperationStore(operationsPath)
 	if err != nil {
@@ -1259,6 +1372,19 @@ func TestConfirmedCallbackReceiptFinishesLocalCommitAfterRestartWithoutResend(t 
 	if err != nil || !ok || committed.Phase != telegramflow.CallbackCommitted {
 		t.Fatalf("recovered committed state = %#v, %t, %v", committed, ok, err)
 	}
+	if afterBind {
+		claim.UpdateID, claim.CallbackQueryID = 703, "query-703"
+		if result, err := registry.Claim(context.Background(), claim); err != nil || result.Outcome != telegrampipeline.ClaimReplayed {
+			t.Fatalf("receipt replay reset claim=%+v %v", result, err)
+		}
+		state, err := baseUI.Load(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if card, _ := state.Card(flowSessionID); card.Page.Current != 1 || card.LastPresentationOperation != "status:701" {
+			t.Fatalf("receipt not applied: %+v", card)
+		}
+	}
 }
 
 func newPresenter(t *testing.T, now time.Time) *telegrambridge.Presenter {
@@ -1267,7 +1393,12 @@ func newPresenter(t *testing.T, now time.Time) *telegrambridge.Presenter {
 
 func newPresenterWithClock(t *testing.T, now func() time.Time) *telegrambridge.Presenter {
 	t.Helper()
-	codec, err := callbacktoken.New(bytes.Repeat([]byte{0x42}, 32), bytes.NewReader(bytes.Repeat([]byte{0x24}, 4096)), now)
+	var random []byte
+	for i := 0; i < 128; i++ {
+		chunk := sha256.Sum256([]byte(strconv.Itoa(i)))
+		random = append(random, chunk[:]...)
+	}
+	codec, err := callbacktoken.New(bytes.Repeat([]byte{0x42}, 32), bytes.NewReader(random), now)
 	if err != nil {
 		t.Fatal(err)
 	}

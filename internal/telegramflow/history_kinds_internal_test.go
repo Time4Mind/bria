@@ -33,7 +33,7 @@ func TestCommitCardPreservesTypedHistoryMetadata(t *testing.T) {
 		View: telegramui.PageView{Page: 1, Pages: 1, FollowLatest: true},
 	}}}
 	carrier := telegramstate.Carrier{ChatID: 42, MessageID: 8}
-	if err := commitCard(ctx, store, output, carrier); err != nil {
+	if err := store.Update(ctx, func(state *telegramstate.State) error { return commitCard(state, output, carrier) }); err != nil {
 		t.Fatal(err)
 	}
 	state, err := store.Load(ctx)

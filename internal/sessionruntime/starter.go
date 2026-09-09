@@ -9,10 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"os/exec"
-	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -24,6 +21,7 @@ import (
 	"bria/internal/domain"
 	"bria/internal/orphanresume"
 	"bria/internal/processgroup"
+	"bria/internal/runtimecommand"
 	"bria/internal/runtimeprotocol"
 )
 
@@ -37,11 +35,12 @@ const (
 )
 
 var (
-	ErrSessionAlreadyTracked = errors.New("session process is already tracked")
-	ErrSessionNotTracked     = errors.New("session process is not tracked")
-	ErrBindingMismatch       = errors.New("provider binding does not match tracked process")
-	ErrNoTurnInFlight        = errors.New("session has no turn in flight")
-	ErrInterruptUnconfirmed  = errors.New("provider did not confirm turn interruption")
+	ErrSessionAlreadyTracked    = errors.New("session process is already tracked")
+	ErrSessionNotTracked        = errors.New("session process is not tracked")
+	ErrBindingMismatch          = errors.New("provider binding does not match tracked process")
+	ErrNoTurnInFlight           = errors.New("session has no turn in flight")
+	ErrInterruptUnconfirmed     = errors.New("provider did not confirm turn interruption")
+	ErrTerminalCloseUnconfirmed = errors.New("native terminal close was not confirmed")
 )
 
 var (
@@ -55,12 +54,7 @@ var (
 
 // CommandSpec configures one provider-neutral adapter executable. Path is
 // executed directly; Args are never interpreted by a shell.
-type CommandSpec struct {
-	Path                   string
-	Args                   []string
-	Env                    []string
-	ProviderCredentialFile string
-}
+type CommandSpec = runtimecommand.Spec
 
 // Options bounds process readiness, shutdown, and every protocol payload.
 // MaxHandshakeBytes is a compatibility alias for MaxLineBytes.
@@ -94,26 +88,27 @@ type Starter struct {
 	nativeUpdates chan domain.SessionID
 }
 
-type verifiedCommand struct {
-	spec     CommandSpec
-	identity os.FileInfo
-}
+type verifiedCommand = runtimecommand.Verified
 
 type processTombstone struct {
-	request app.StartSessionRequest
-	binding domain.ProviderBinding
+	terminalClosed bool
+	request        app.StartSessionRequest
+	binding        domain.ProviderBinding
 }
 
 type processRecord struct {
-	startupDiagnostic startupDiagnostic
-	stderrDone        chan struct{}
-	request           app.StartSessionRequest
-	command           *exec.Cmd
-	stdin             io.WriteCloser
-	output            chan wireResult
-	outputEOF         chan struct{}
-	readerStop        chan struct{}
-	done              chan struct{}
+	closeRequested     atomic.Bool
+	terminalClosed     atomic.Bool
+	persistentTerminal bool
+	startupDiagnostic  startupDiagnostic
+	stderrDone         chan struct{}
+	request            app.StartSessionRequest
+	command            *exec.Cmd
+	stdin              io.WriteCloser
+	output             chan wireResult
+	outputEOF          chan struct{}
+	readerStop         chan struct{}
+	done               chan struct{}
 
 	writeMu         sync.Mutex
 	nativeMu        sync.Mutex
@@ -135,6 +130,7 @@ type processRecord struct {
 
 type activeTurn struct {
 	requestID          string
+	sent               bool // turnMu: root wire write completed before any control/steer.
 	done               chan struct{}
 	interruptSent      bool
 	interruptConfirmed bool
@@ -148,6 +144,7 @@ type steerWaiter struct {
 }
 
 type wireMessage struct {
+	EventID             string
 	FullText            string
 	Hash                string
 	Model               string
@@ -234,7 +231,7 @@ func NewStarter(commands map[domain.Provider]CommandSpec, options Options) (*Sta
 		if provider != domain.ProviderCodex && provider != domain.ProviderClaude {
 			return nil, fmt.Errorf("unsupported provider %q", provider)
 		}
-		verified, err := verifyCommand(command)
+		verified, err := runtimecommand.Verify(command)
 		if err != nil {
 			return nil, fmt.Errorf("provider %q command: %w", provider, err)
 		}
@@ -292,6 +289,10 @@ func NewStarter(commands map[domain.Provider]CommandSpec, options Options) (*Sta
 // Start directly executes one adapter in the exact requested directory and
 // binds only after protocol-level readiness. This never implies authentication.
 func (starter *Starter) Start(ctx context.Context, request app.StartSessionRequest) (domain.ProviderBinding, error) {
+	return starter.start(ctx, request, false)
+}
+
+func (starter *Starter) start(ctx context.Context, request app.StartSessionRequest, attachOnly bool) (domain.ProviderBinding, error) {
 	starter.launchMu.RLock()
 	defer starter.launchMu.RUnlock()
 	if starter.shuttingDown {
@@ -305,10 +306,10 @@ func (starter *Starter) Start(ctx context.Context, request app.StartSessionReque
 	if !ok {
 		return domain.ProviderBinding{}, fmt.Errorf("provider %q has no configured command", request.Provider)
 	}
-	if err := verifyExecutableIdentity(verified.spec.Path, verified.identity); err != nil {
+	if err := runtimecommand.VerifyIdentity(verified.Spec.Path, verified.Identity); err != nil {
 		return domain.ProviderBinding{}, fmt.Errorf("provider %q command changed after configuration: %w", request.Provider, err)
 	}
-	commandSpec := verified.spec
+	commandSpec := verified.Spec
 	if err := ctx.Err(); err != nil {
 		return domain.ProviderBinding{}, err
 	}
@@ -319,7 +320,7 @@ func (starter *Starter) Start(ctx context.Context, request app.StartSessionReque
 	// the exact provider session id and whose working directory matches exactly.
 	// The platform helper is fail-closed and is a no-op where process inspection
 	// is unavailable.
-	if request.Mode == app.SessionStartResume {
+	if request.Mode == app.SessionStartResume && !attachOnly && !commandSpec.PersistentTerminal {
 		if err := orphanresume.Cleanup(request.PriorBinding.SessionID, request.Workdir); err != nil {
 			return domain.ProviderBinding{}, fmt.Errorf("clean stale provider runtime: %w", err)
 		}
@@ -340,8 +341,13 @@ func (starter *Starter) Start(ctx context.Context, request app.StartSessionReque
 		"BRIA_SESSION_ID="+string(request.SessionID),
 		"BRIA_PROVIDER="+string(request.Provider),
 		EnvironmentStartMode+"="+string(request.Mode),
-		EnvironmentGeneration+"="+strconv.FormatUint(generation, 10),
 	)
+	if commandSpec.PersistentTerminal {
+		command.Env = append(command.Env, "BRIA_PERSISTENT_TERMINAL=1")
+	}
+	if attachOnly {
+		command.Env = append(command.Env, "BRIA_ATTACH_ONLY=1")
+	}
 	if commandSpec.ProviderCredentialFile != "" {
 		command.Env = append(command.Env, EnvironmentProviderCredentialFile+"="+commandSpec.ProviderCredentialFile)
 	}
@@ -374,14 +380,22 @@ func (starter *Starter) Start(ctx context.Context, request app.StartSessionReque
 			starter.mu.Unlock()
 			return domain.ProviderBinding{}, fmt.Errorf("%w with different immutable request: %q", ErrSessionAlreadyTracked, request.SessionID)
 		}
-		if request.Mode != app.SessionStartResume || *request.PriorBinding != previous.binding {
+		retry := commandSpec.PersistentTerminal && !previous.terminalClosed && previous.request.PriorBinding != nil && request.PriorBinding != nil && *request.PriorBinding == *previous.request.PriorBinding
+		if request.Mode != app.SessionStartResume || *request.PriorBinding != previous.binding && !retry {
 			starter.mu.Unlock()
 			return domain.ProviderBinding{}, fmt.Errorf("%w: resume does not match prior generation for %q", ErrBindingMismatch, request.SessionID)
 		}
+		if previous.binding.Generation == ^uint64(0) {
+			starter.mu.Unlock()
+			return domain.ProviderBinding{}, errors.New("provider launch generation exhausted")
+		}
+		generation = previous.binding.Generation + 1
 	}
+	command.Env = append(command.Env, EnvironmentGeneration+"="+strconv.FormatUint(generation, 10))
 	record := &processRecord{
-		stderrDone: make(chan struct{}),
-		request:    request, command: command, stdin: stdin,
+		persistentTerminal: commandSpec.PersistentTerminal,
+		stderrDone:         make(chan struct{}),
+		request:            request, command: command, stdin: stdin,
 		output: make(chan wireResult, 32), outputEOF: make(chan struct{}),
 		readerStop: make(chan struct{}), done: make(chan struct{}),
 		generation:   generation,
@@ -470,6 +484,10 @@ func (starter *Starter) SubmitStructuredWithCallbacks(ctx context.Context, sessi
 }
 
 func (starter *Starter) submitWithCallbacks(ctx context.Context, sessionID domain.SessionID, input StructuredInput, callbacks TurnCallbacks) (TurnResult, error) {
+	return starter.consumeTurn(ctx, sessionID, input, callbacks, nil)
+}
+
+func (starter *Starter) consumeTurn(ctx context.Context, sessionID domain.SessionID, input StructuredInput, callbacks TurnCallbacks, expected *domain.ProviderBinding) (TurnResult, error) {
 	if err := runtimeprotocol.ValidateModelSelection(input.Model, input.Effort); err != nil {
 		return TurnResult{}, err
 	}
@@ -489,9 +507,13 @@ func (starter *Starter) submitWithCallbacks(ctx context.Context, sessionID domai
 	starter.mu.Lock()
 	record, ok := starter.processes[sessionID]
 	bound := ok && record.binding.SessionID != ""
+	matches := bound && (expected == nil || record.binding == *expected && record.persistentTerminal)
 	starter.mu.Unlock()
 	if !bound {
 		return TurnResult{}, fmt.Errorf("%w: %q", ErrSessionNotTracked, sessionID)
+	}
+	if !matches {
+		return TurnResult{}, ErrBindingMismatch
 	}
 	select {
 	case <-record.done:
@@ -512,13 +534,20 @@ func (starter *Starter) submitWithCallbacks(ctx context.Context, sessionID domai
 	// Reaping the process must not discard its already-buffered terminal proof.
 	defer starter.finishTurn(record, turn, false, errors.New("provider turn ended without a confirmed terminal"))
 
-	if err := starter.writeContext(ctx, record, submitEnvelope{Protocol: ProtocolVersion, Type: "submit", RequestID: requestID, Text: input.Text, Model: input.Model, Effort: input.Effort, MessageID: callbacks.MessageID, Attachments: input.Attachments}); err != nil {
+	var envelope any = submitEnvelope{Protocol: ProtocolVersion, Type: "submit", RequestID: requestID, Text: input.Text, Model: input.Model, Effort: input.Effort, MessageID: callbacks.MessageID, Attachments: input.Attachments}
+	if expected != nil {
+		envelope = runtimeprotocol.ParentMessage{Protocol: ProtocolVersion, Type: runtimeprotocol.TypeObserveAccepted, RequestID: requestID, MessageID: callbacks.MessageID}
+	}
+	if err := starter.writeContext(ctx, record, envelope); err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return TurnResult{}, err
 		}
 		starter.killAndWait(record)
 		return TurnResult{}, errors.New("send turn to provider adapter")
 	}
+	record.turnMu.Lock()
+	turn.sent = true
+	record.turnMu.Unlock()
 
 	result := TurnResult{Events: make([]TurnEvent, 0)}
 	accepted := false
@@ -559,17 +588,19 @@ func (starter *Starter) submitWithCallbacks(ctx context.Context, sessionID domai
 				}
 				accepted = true
 			case "event":
-				if !accepted || finalSeen || len(result.Events) >= starter.maxTurnEvents || validateEvent(message, starter.maxTextBytes) != nil {
+				if !accepted || finalSeen || (callbacks.OnEvent == nil && len(result.Events) >= starter.maxTurnEvents) || validateEvent(message, starter.maxTextBytes) != nil {
 					return starter.protocolTurnFailure(record, requestID)
 				}
-				event := TurnEvent{Kind: message.Kind, Text: message.Text, Metadata: message.EventMetadata}
+				event := TurnEvent{ID: message.EventID, Kind: message.Kind, Text: message.Text, Metadata: message.EventMetadata}
 				if callbacks.OnEvent != nil {
 					if err := callbacks.OnEvent(event); err != nil {
 						starter.killAndWait(record)
 						return TurnResult{}, ErrEventHandler
 					}
 				}
-				result.Events = append(result.Events, event)
+				if len(result.Events) < starter.maxTurnEvents {
+					result.Events = append(result.Events, event)
+				}
 			case "interaction_request":
 				if !accepted || finalSeen || callbacks.OnInteraction == nil || message.InteractionRequest == nil ||
 					interactionCount >= starter.maxTurnEvents {
@@ -649,6 +680,10 @@ func (starter *Starter) submitWithCallbacks(ctx context.Context, sessionID domai
 				return starter.protocolTurnFailure(record, requestID)
 			}
 		case <-ctx.Done():
+			if record.persistentTerminal {
+				starter.killAndWait(record)
+				return TurnResult{}, ctx.Err()
+			}
 			interruptContext, cancel := context.WithTimeout(context.Background(), starter.closeTimeout)
 			if err := starter.sendInterrupt(interruptContext, record, turn); err != nil {
 				starter.killAndWait(record)
@@ -681,7 +716,7 @@ func (starter *Starter) SubmitCurrentWithCallbacks(ctx context.Context, sessionI
 	waiter := &steerWaiter{messageID: callbacks.MessageID, result: make(chan error, 1)}
 	record.turnMu.Lock()
 	turn := record.turn
-	if turn == nil {
+	if turn == nil || !turn.sent {
 		record.turnMu.Unlock()
 		return fmt.Errorf("%w: %q", ErrNoTurnInFlight, sessionID)
 	}
@@ -813,12 +848,19 @@ func (starter *Starter) Wait(ctx context.Context, sessionID domain.SessionID, bi
 // Abort requests graceful close, then confirms direct process exit. A child
 // that ignores the grace period is killed and still waited for.
 func (starter *Starter) Abort(ctx context.Context, request app.StartSessionRequest, binding domain.ProviderBinding) error {
+	return starter.release(ctx, request, binding, "close")
+}
+
+func (starter *Starter) release(ctx context.Context, request app.StartSessionRequest, binding domain.ProviderBinding, mode string) error {
 	starter.mu.Lock()
 	record, ok := starter.processes[request.SessionID]
 	if !ok {
 		if tombstone, exists := starter.tombstones[request.SessionID]; exists {
 			if sameLogicalRequest(tombstone.request, request) && tombstone.binding == binding {
 				starter.mu.Unlock()
+				if mode == "close" && starter.SupportsAttach(request.Provider) && !tombstone.terminalClosed {
+					return ErrSessionNotTracked
+				}
 				return nil
 			}
 			starter.mu.Unlock()
@@ -834,27 +876,30 @@ func (starter *Starter) Abort(ctx context.Context, request app.StartSessionReque
 	select {
 	case <-record.done:
 		starter.mu.Unlock()
-		return nil
+		return record.releaseReceipt(mode)
 	default:
 	}
 	starter.mu.Unlock()
 
+	if mode == "close" {
+		record.closeRequested.Store(true)
+	}
 	closeContext, cancelClose := context.WithTimeout(ctx, starter.closeTimeout)
-	closeErr := starter.writeContext(closeContext, record, closeEnvelope{Protocol: ProtocolVersion, Type: "close"})
+	closeErr := starter.writeContext(closeContext, record, closeEnvelope{Protocol: ProtocolVersion, Type: mode})
 	cancelClose()
 	if closeErr != nil {
 		starter.killAndWait(record)
 		if ctx.Err() != nil {
 			return fmt.Errorf("abort provider process: %w", ctx.Err())
 		}
-		return nil
+		return record.releaseReceipt(mode)
 	}
 	timer := time.NewTimer(starter.closeTimeout)
 	defer timer.Stop()
 	var contextErr error
 	select {
 	case <-record.done:
-		return nil
+		return record.releaseReceipt(mode)
 	case <-timer.C:
 	case <-ctx.Done():
 		contextErr = ctx.Err()
@@ -862,6 +907,13 @@ func (starter *Starter) Abort(ctx context.Context, request app.StartSessionReque
 	starter.killAndWait(record)
 	if contextErr != nil {
 		return fmt.Errorf("abort provider process: %w", contextErr)
+	}
+	return record.releaseReceipt(mode)
+}
+
+func (record *processRecord) releaseReceipt(mode string) error {
+	if mode == "close" && record.persistentTerminal && !record.terminalClosed.Load() {
+		return ErrTerminalCloseUnconfirmed
 	}
 	return nil
 }
@@ -877,7 +929,7 @@ func readOutput(stdout io.ReadCloser, maxLineBytes int, output chan<- wireResult
 		if err == nil && message.Type == string(runtimeprotocol.TypeReady) {
 			dispatchNative(message)
 		}
-		if err == nil && (message.Type == string(runtimeprotocol.TypeNativeSnapshot) || message.Type == string(runtimeprotocol.TypeNativeObservation)) {
+		if err == nil && (message.Type == string(runtimeprotocol.TypeNativeSnapshot) || message.Type == string(runtimeprotocol.TypeNativeObservation) || message.Type == string(runtimeprotocol.TypeClosed)) {
 			if dispatchNative(message) {
 				continue
 			}
@@ -906,7 +958,8 @@ func decodeWire(line []byte) (wireMessage, error) {
 		return wireMessage{}, ErrProtocol
 	}
 	return wireMessage{
-		Hash: decoded.Hash, FullText: decoded.FullText, Model: decoded.Model, Interactive: decoded.Interactive,
+		EventID: decoded.EventID,
+		Hash:    decoded.Hash, FullText: decoded.FullText, Model: decoded.Model, Interactive: decoded.Interactive,
 		Protocol: decoded.Protocol, Type: string(decoded.Type), ProviderSessionID: decoded.ProviderSessionID,
 		ProviderSessionName: decoded.ProviderSessionName,
 		Readiness:           decoded.Readiness, Authentication: AuthenticationState(decoded.Authentication),
@@ -1032,7 +1085,7 @@ func (starter *Starter) finishTurn(record *processRecord, turn *activeTurn, inte
 
 func (starter *Starter) sendInterrupt(ctx context.Context, record *processRecord, turn *activeTurn) error {
 	record.turnMu.Lock()
-	if record.turn != turn {
+	if record.turn != turn || !turn.sent {
 		record.turnMu.Unlock()
 		return ErrNoTurnInFlight
 	}
@@ -1103,107 +1156,6 @@ func (starter *Starter) drainInterrupted(record *processRecord, turn *activeTurn
 	}
 }
 
-func verifyCommand(command CommandSpec) (verifiedCommand, error) {
-	if strings.TrimSpace(command.Path) == "" || !filepath.IsAbs(command.Path) {
-		return verifiedCommand{}, errors.New("executable path must be absolute")
-	}
-	if strings.ContainsRune(command.Path, '\x00') {
-		return verifiedCommand{}, errors.New("executable path contains NUL")
-	}
-	if isShellExecutable(command.Path) {
-		return verifiedCommand{}, errors.New("executable must not be a shell or command-discovery launcher")
-	}
-	resolved, err := filepath.EvalSymlinks(command.Path)
-	if err != nil {
-		return verifiedCommand{}, errors.New("executable target must exist")
-	}
-	if isShellExecutable(resolved) {
-		return verifiedCommand{}, errors.New("resolved executable must not be a shell or command-discovery launcher")
-	}
-	info, err := os.Stat(resolved)
-	if err != nil || !info.Mode().IsRegular() {
-		return verifiedCommand{}, errors.New("executable target must be a regular file")
-	}
-	if runtime.GOOS != "windows" && info.Mode().Perm()&0o111 == 0 {
-		return verifiedCommand{}, errors.New("executable target must be executable")
-	}
-	for _, argument := range command.Args {
-		if strings.ContainsRune(argument, '\x00') {
-			return verifiedCommand{}, errors.New("command argument contains NUL")
-		}
-	}
-	if command.ProviderCredentialFile != "" {
-		if !filepath.IsAbs(command.ProviderCredentialFile) || strings.ContainsRune(command.ProviderCredentialFile, '\x00') {
-			return verifiedCommand{}, errors.New("provider credential file reference must be an absolute path")
-		}
-		command.ProviderCredentialFile = filepath.Clean(command.ProviderCredentialFile)
-	}
-	seen := make(map[string]bool, len(command.Env))
-	for _, entry := range command.Env {
-		name, value, ok := strings.Cut(entry, "=")
-		if !ok || !validEnvironmentName(name) || strings.ContainsRune(value, '\x00') {
-			return verifiedCommand{}, errors.New("environment entry has invalid KEY=VALUE syntax")
-		}
-		if name == "BRIA_SESSION_ID" || name == "BRIA_PROVIDER" ||
-			name == EnvironmentStartMode || name == EnvironmentProviderSession || name == EnvironmentGeneration ||
-			name == EnvironmentProviderCredentialFile {
-			return verifiedCommand{}, errors.New("environment must not override reserved Bria variables")
-		}
-		if seen[name] {
-			return verifiedCommand{}, errors.New("environment contains duplicate keys")
-		}
-		seen[name] = true
-	}
-	return verifiedCommand{
-		spec: CommandSpec{
-			Path:                   resolved,
-			Args:                   append([]string(nil), command.Args...),
-			Env:                    append([]string(nil), command.Env...),
-			ProviderCredentialFile: command.ProviderCredentialFile,
-		},
-		identity: info,
-	}, nil
-}
-
-func verifyExecutableIdentity(path string, identity os.FileInfo) error {
-	current, err := os.Stat(path)
-	if err != nil || !current.Mode().IsRegular() {
-		return errors.New("verified executable is unavailable")
-	}
-	if runtime.GOOS != "windows" && current.Mode().Perm()&0o111 == 0 {
-		return errors.New("verified executable is no longer executable")
-	}
-	if !os.SameFile(identity, current) {
-		return errors.New("verified executable identity changed")
-	}
-	return nil
-}
-
-func validEnvironmentName(name string) bool {
-	if name == "" {
-		return false
-	}
-	for index := range len(name) {
-		character := name[index]
-		if (character >= 'A' && character <= 'Z') || (character >= 'a' && character <= 'z') || character == '_' || (index > 0 && character >= '0' && character <= '9') {
-			continue
-		}
-		return false
-	}
-	return true
-}
-
-func isShellExecutable(path string) bool {
-	switch strings.ToLower(filepath.Base(path)) {
-	case "sh", "bash", "zsh", "dash", "ksh", "fish", "csh", "tcsh",
-		"cmd", "cmd.exe", "powershell", "powershell.exe", "pwsh", "pwsh.exe",
-		"env", "env.exe":
-		return true
-	default:
-		return false
-	}
-}
-
 func validateRequest(request app.StartSessionRequest) error {
 	if err := request.Validate(); err != nil {
 		return err
@@ -1255,7 +1207,7 @@ func (starter *Starter) finalizeReap(record *processRecord) {
 	if starter.processes[record.request.SessionID] == record {
 		delete(starter.processes, record.request.SessionID)
 		if record.binding.SessionID != "" {
-			starter.tombstones[record.request.SessionID] = processTombstone{request: record.request, binding: record.binding}
+			starter.tombstones[record.request.SessionID] = processTombstone{request: record.request, binding: record.binding, terminalClosed: record.terminalClosed.Load()}
 		}
 	}
 	starter.mu.Unlock()

@@ -7,6 +7,7 @@ import (
 	"bria/internal/domain"
 	"bria/internal/durableflow"
 	"bria/internal/sessionruntime"
+	"bria/internal/turncontinuation"
 )
 
 // AcceptedFinalRestorer persists an exact accepted request's final idempotently
@@ -37,7 +38,24 @@ func (resolver *acceptedInputHistoryResolver) restoreFinal(ctx context.Context, 
 	if !proven || resolver.finals == nil {
 		return nil
 	}
-	return resolver.finals.RestoreAcceptedFinal(ctx, resolver.sessionID, messageID, turn.Final)
+	if prior := resolver.turnIDs[messageID]; prior != "" && prior != turn.TurnID {
+		return errAcceptedTurnHistoryUnverifiable
+	}
+	resolver.turnIDs[messageID] = turn.TurnID
+	root := turncontinuation.CanonicalMessage(messageID, turn.TurnID, resolver.turnIDs, resolver.sequences)
+	if root == "" {
+		return errAcceptedTurnHistoryUnverifiable
+	}
+	if root != messageID {
+		canonical, proven, err := lookup.LookupFinal(ctx, resolver.sessionID, resolver.binding, root)
+		if err != nil {
+			return err
+		}
+		if !proven || canonical.MessageID != root || canonical.TurnID != turn.TurnID || canonical.Outcome != sessionruntime.AcceptedTurnCompleted || canonical.Final != turn.Final {
+			return errAcceptedTurnHistoryUnverifiable
+		}
+	}
+	return resolver.finals.RestoreAcceptedFinal(ctx, resolver.sessionID, root, turn.Final)
 }
 
 func (resolver *acceptedInputHistoryResolver) resolveFailure(ctx context.Context, messageID string, wasUnknown bool) (durableflow.AcceptedResolution, error) {

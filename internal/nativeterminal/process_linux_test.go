@@ -8,9 +8,10 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
+
+	"bria/internal/terminalbinding"
 )
 
 func TestCloseKillsHUPIgnoringChildAndDoesNotInheritHostEnvironment(t *testing.T) {
@@ -38,16 +39,15 @@ func TestCloseKillsHUPIgnoringChildAndDoesNotInheritHostEnvironment(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	child, err := ownProcess(pid)
+	child, err := terminalbinding.OwnProcess(pid)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer syscall.Close(child.fd)
-	defer child.signal(syscall.SIGKILL)
+	defer child.KillTree()
 	if err := term.Close(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if !child.exited() {
+	if !child.Exited() {
 		t.Fatal("HUP ignoring child survived close")
 	}
 	if _, err := os.Stat(term.dir); !os.IsNotExist(err) {

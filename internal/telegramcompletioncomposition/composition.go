@@ -92,9 +92,7 @@ type PreparedSender interface {
 	EditStatusWithKeyboard(context.Context, string, coordinator.Status, *coordinator.KeyboardMarkup) (coordinator.Receipt, error)
 }
 
-type CardStore interface {
-	Load(context.Context) (telegramstate.State, error)
-}
+type CardStore = carddeliveryguard.Store
 
 type CompletionDeliverer struct {
 	Controller     Controller
@@ -204,6 +202,8 @@ func (deliverer CompletionDeliverer) Deliver(ctx context.Context, notification t
 		}
 		prepared, err = telegramflow.PrepareCardRefresh(operationID, card.SessionID, stored.Carrier.ChatID, stored.Carrier.MessageID,
 			input, card.Header, card.OptionsExpanded, card.SelectableSessionIDs, deliverer.Presenter)
+		revision := stored.CarrierRevision
+		prepared.Card.ExpectedCarrierRevision = &revision
 	} else {
 		prepared, err = telegramflow.PrepareCompletion(operationID, card.SessionID, deliverer.ConversationID, active,
 			input, card.OptionsExpanded, card.SelectableSessionIDs, deliverer.Presenter)

@@ -64,19 +64,26 @@ func (w *sessionWorker) waitFinalization(ctx context.Context) error {
 	return nil
 }
 
-func (c *Controller) completeInput(callbacks DurableInputCallbacks, input DurableLeasedInput, outcome DurableInputCompletion) error {
+func (c *Controller) completeInput(callbacks DurableInputCallbacks, input DurableLeasedInput, outcome DurableInputCompletion, bindings ...domain.ProviderBinding) error {
 	if callbacks.OnCompleted == nil {
 		return nil
 	}
 	receipt := DurableInputProcessReceipt{SessionID: input.SessionID, MessageID: input.MessageID, Sequence: input.Sequence, Accepted: true, Completion: outcome}
-	if err := callbacks.OnCompleted(context.WithoutCancel(c.rootContext), receipt); err != nil {
+	save := func(ctx context.Context) error { return callbacks.OnCompleted(ctx, receipt) }
+	var err error
+	if len(bindings) == 1 && c.canRecoverObservation(bindings[0].Provider) && (outcome == DurableInputSucceeded || outcome == DurableInputTerminalFailed) {
+		err = c.retryFinalization(c.rootContext, input.SessionID, bindings[0], input.MessageID, save)
+	} else {
+		err = save(context.WithoutCancel(c.rootContext))
+	}
+	if err != nil {
 		c.notify(context.WithoutCancel(c.rootContext), Notification{OperationID: input.MessageID + ":completion-journal-error", ConversationID: c.ownerPrivateChatID, SessionID: input.SessionID, Kind: NotificationError, Text: "Не удалось подтвердить сохранение исхода запроса. Повторная отправка не выполнялась."})
 		return err
 	}
 	return nil
 }
 
-func (c *Controller) awaitInputCompletion(input DurableLeasedInput, callbacks DurableInputCallbacks, terminal *turncompletion.Signal, ticket *turnadmission.Ticket) {
+func (c *Controller) awaitInputCompletion(input DurableLeasedInput, callbacks DurableInputCallbacks, terminal *turncompletion.Signal, ticket *turnadmission.Ticket, binding domain.ProviderBinding) {
 	// ProcessDurableInput already holds durableWork while adding this child.
 	c.durableWork.Add(1)
 	go func() {
@@ -88,6 +95,6 @@ func (c *Controller) awaitInputCompletion(input DurableLeasedInput, callbacks Du
 		if err != nil || state == "" {
 			outcome = DurableInputAwaitingRecovery
 		}
-		ticket.Finish(c.completeInput(callbacks, input, outcome))
+		ticket.Finish(c.completeInput(callbacks, input, outcome, binding))
 	}()
 }

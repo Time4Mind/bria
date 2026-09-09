@@ -6,7 +6,7 @@ import (
 	"bria/internal/telegramui"
 )
 
-func TestRecoveryKeyboardPreservesHistoryAndRecoveryActions(t *testing.T) {
+func TestRecoveryKeyboardPreservesHistoryWithoutManualRepair(t *testing.T) {
 	for _, expanded := range []bool{false, true} {
 		keyboard, err := telegramui.ProjectCardKeyboard(telegramui.CardKeyboardInput{View: telegramui.PageView{Page: 1, Pages: 3}, Recovery: true, OptionsExpanded: expanded, SessionRowSizes: []int{2}, SessionLabels: []string{"recovering", "ready"}})
 		if err != nil {
@@ -16,17 +16,14 @@ func TestRecoveryKeyboardPreservesHistoryAndRecoveryActions(t *testing.T) {
 		for _, row := range keyboard.Rows {
 			for _, button := range row {
 				counts[button.Action]++
-				if button.Action == telegramui.ActionResume && button.Label != "Восстановить" {
-					t.Fatalf("recovery label=%q", button.Label)
-				}
 			}
 		}
-		for _, action := range []telegramui.Action{telegramui.ActionResume, telegramui.ActionClose, telegramui.ActionPagePrevious, telegramui.ActionPageLatest, telegramui.ActionPageNext, telegramui.ActionMenuBack} {
+		for _, action := range []telegramui.Action{telegramui.ActionClose, telegramui.ActionPagePrevious, telegramui.ActionPageLatest, telegramui.ActionPageNext, telegramui.ActionMenuBack} {
 			if counts[action] != 1 {
 				t.Errorf("recovery action %s count=%d", action, counts[action])
 			}
 		}
-		for _, action := range []telegramui.Action{telegramui.ActionScreen, telegramui.ActionOptions, telegramui.ActionStop} {
+		for _, action := range []telegramui.Action{telegramui.ActionResume, telegramui.ActionScreen, telegramui.ActionOptions, telegramui.ActionStop} {
 			if counts[action] != 0 {
 				t.Errorf("unsafe recovery control %s visible", action)
 			}

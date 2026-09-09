@@ -64,6 +64,7 @@ const (
 
 // TurnEvent is one ordered, safe-to-display non-final provider event.
 type TurnEvent struct {
+	ID       string
 	Kind     EventKind
 	Text     string
 	Metadata *runtimeprotocol.EventMetadata
@@ -73,6 +74,8 @@ type TurnEvent struct {
 // failed or interrupted turn Final is empty even if an adapter sent a final
 // candidate before its terminal failure.
 type TurnResult struct {
+	// With OnEvent, Events retains a bounded prefix; the callback receives the
+	// entire ordered stream. Without a consumer, excess events fail closed.
 	Events              []TurnEvent
 	Final               string
 	TerminalStatus      string

@@ -269,7 +269,7 @@ func TestSignedArchiveCannotInstallSymlink(t *testing.T) {
 	}
 }
 
-func signedReleaseFixture(t *testing.T, root, version, binaryVersion, trustPath, privatePath string, linkNativeAdapter bool) string {
+func signedReleaseFixture(t *testing.T, root, version, binaryVersion, trustPath, privatePath string, linkNativeAdapter bool, compatibleState ...bool) string {
 	t.Helper()
 	releaseDir := filepath.Join(root, version)
 	if err := os.Mkdir(releaseDir, 0o700); err != nil {
@@ -284,7 +284,11 @@ func signedReleaseFixture(t *testing.T, root, version, binaryVersion, trustPath,
 		if err := os.MkdirAll(bundle, 0o700); err != nil {
 			t.Fatal(err)
 		}
-		bria := []byte("#!/bin/sh\ncase \"${1:-}\" in --version) printf 'bria " + binaryVersion + "\\n' ;; install-parakeet|check-config) exit 0 ;; *) exit 0 ;; esac\n")
+		stateCheck := "printf 'Bria state compatibility: OK\\n'"
+		if len(compatibleState) != 0 && !compatibleState[0] {
+			stateCheck = "exit 2"
+		}
+		bria := []byte("#!/bin/sh\ncase \"${1:-}\" in --version) printf 'bria " + binaryVersion + "\\n' ;; check-state) " + stateCheck + " ;; install-parakeet|check-config) exit 0 ;; *) exit 0 ;; esac\n")
 		writeExecutable(t, filepath.Join(bundle, "bria"), bria)
 		writeExecutable(t, filepath.Join(bundle, "bria-codex-adapter"), []byte("#!/bin/sh\nexit 0\n"))
 		writeExecutable(t, filepath.Join(bundle, "bria-claude-adapter"), []byte("#!/bin/sh\nexit 0\n"))

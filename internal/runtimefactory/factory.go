@@ -70,9 +70,10 @@ func newCommandSet(configuration config.Config, parentEnvironment []string, bria
 			return nil, ErrExecutable
 		}
 		spec := sessionruntime.CommandSpec{
-			Path: adapterPath,
-			Args: append([]string{"--native", "--", rawCommand.Exec}, rawCommand.Argv...),
-			Env:  append(append([]string(nil), safeEnvironment...), "BRIA_NATIVE_STATE_DIR="+configuration.StatePath+".native"),
+			PersistentTerminal: true,
+			Path:               adapterPath,
+			Args:               append([]string{"--native", "--", rawCommand.Exec}, rawCommand.Argv...),
+			Env:                append(append([]string(nil), safeEnvironment...), "BRIA_NATIVE_STATE_DIR="+configuration.StatePath+".native"),
 		}
 		if provider == domain.ProviderClaude {
 			spec.ProviderCredentialFile = configuration.StatePath + ".claude-api-key.json"

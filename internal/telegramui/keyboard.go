@@ -289,7 +289,7 @@ func ProjectCardKeyboard(input CardKeyboardInput) (CardKeyboard, error) {
 		lifecycle = ActionStop
 	}
 	if input.Recovery {
-		rows = append(rows, ButtonRow{{Action: ActionResume, Label: "Восстановить"}, {Action: ActionClose}})
+		rows = append(rows, ButtonRow{{Action: ActionClose}})
 	} else {
 		rows = append(rows, ButtonRow{{Action: lifecycle}, {Action: ActionOptions}})
 	}

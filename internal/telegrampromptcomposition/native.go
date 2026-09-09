@@ -13,7 +13,7 @@ import (
 	"bria/internal/telegramui"
 )
 
-func (d Deliverer) deliverNativeSurface(ctx context.Context, operation string, id domain.SessionID, carrier telegramstate.Carrier, surface telegramcontroller.SemanticSurface) (telegramnotify.DeliveryReceipt, error) {
+func (d Deliverer) deliverNativeSurface(ctx context.Context, operation string, id domain.SessionID, carrier telegramstate.Carrier, revision uint64, surface telegramcontroller.SemanticSurface) (telegramnotify.DeliveryReceipt, error) {
 	receipt := telegramnotify.DeliveryReceipt{OperationID: operation, State: telegramnotify.DeliveryUnknown}
 	keyboard := telegramui.CardKeyboard{}
 	var selectable []domain.SessionID
@@ -49,7 +49,10 @@ func (d Deliverer) deliverNativeSurface(ctx context.Context, operation string, i
 		}
 		keyboard.Rows = append(keyboard.Rows, buttons)
 	}
-	prepared, err := telegramflow.PrepareSurface(operation, carrier.ChatID, "", carrier.MessageID, true, telegramflow.SurfaceOutput{Text: surface.Text, Keyboard: keyboard, SelectableSessionIDs: selectable, NativeSessionID: id}, d.Presenter)
+	prepared, err := telegramflow.PrepareSurface(operation, carrier.ChatID, "", carrier.MessageID, true, telegramflow.SurfaceOutput{
+		Text: surface.Text, Keyboard: keyboard, SelectableSessionIDs: selectable,
+		NativeSessionID: id, ExpectedCarrierRevision: &revision,
+	}, d.Presenter)
 	if err != nil {
 		return receipt, err
 	}

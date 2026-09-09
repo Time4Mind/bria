@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -150,6 +151,14 @@ func (registry *FileCallbackRegistry) Replace(ctx context.Context, presentation 
 		AcceptedTurnRecovery: cloneAcceptedTurnRecoveryBinding(presentation.AcceptedTurnRecovery),
 		StatusRecovery:       cloneStatusRecoveryBinding(presentation.StatusRecovery),
 		ArtifactRetry:        cloneArtifactRetryBinding(presentation.ArtifactRetry),
+	}
+	previous := cloneFileCallbackPresentation(registry.state.Presentations[presentation.SessionID])
+	previous.Claims = next.Presentations[presentation.SessionID].Claims
+	for token := range previous.Tokens {
+		previous.Tokens[token] = false
+	}
+	if reflect.DeepEqual(previous, next.Presentations[presentation.SessionID]) {
+		return nil // Exact receipt replay must not reset persisted claims.
 	}
 	if err := writeCallbackRegistryAtomic(registry.path, next, registry.syncDirectory); err != nil {
 		return fmt.Errorf("persist callback presentation: %w", err)
@@ -395,20 +404,7 @@ func cloneFileCallbackRegistryState(state fileCallbackRegistryState) fileCallbac
 		Retired:       make(map[string]fileCallbackPresentation, len(state.Retired)),
 	}
 	for sessionID, presentation := range state.Presentations {
-		copyPresentation := presentation
-		copyPresentation.Tokens = make(map[string]bool, len(presentation.Tokens))
-		for tokenID, claimed := range presentation.Tokens {
-			copyPresentation.Tokens[tokenID] = claimed
-		}
-		copyPresentation.Claims = make(map[string]fileCallbackClaimIdentity, len(presentation.Claims))
-		for tokenID, identity := range presentation.Claims {
-			copyPresentation.Claims[tokenID] = identity
-		}
-		copyPresentation.Recovery = cloneCallbackRecoveryBinding(presentation.Recovery)
-		copyPresentation.AcceptedTurnRecovery = cloneAcceptedTurnRecoveryBinding(presentation.AcceptedTurnRecovery)
-		copyPresentation.StatusRecovery = cloneStatusRecoveryBinding(presentation.StatusRecovery)
-		copyPresentation.ArtifactRetry = cloneArtifactRetryBinding(presentation.ArtifactRetry)
-		clone.Presentations[sessionID] = copyPresentation
+		clone.Presentations[sessionID] = cloneFileCallbackPresentation(presentation)
 	}
 	for tokenID, presentation := range state.Retired {
 		clone.Retired[tokenID] = cloneFileCallbackPresentation(presentation)

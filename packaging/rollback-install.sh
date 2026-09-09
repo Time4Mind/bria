@@ -7,6 +7,18 @@ usage() {
 	exit 2
 }
 
+check_state_compatibility() {
+	test -f "$1" && test -x "$1" && test ! -L "$1" || return 1
+	state_receipt=$("$1" check-state --config "$config" 2>/dev/null) || {
+		printf '%s\n' 'rollback-install: target cannot validate current state; keep current version' >&2
+		return 1
+	}
+	test "$state_receipt" = 'Bria state compatibility: OK' || {
+		printf '%s\n' 'rollback-install: target state compatibility receipt is missing' >&2
+		return 1
+	}
+}
+
 test "$#" -eq 3 || test "$#" -eq 9 || usage
 selected_mode=false
 install_root=$1
@@ -74,6 +86,7 @@ if test "$selected_mode" = true; then
 		"$verifier" verify-installed -manifest "$noop_receipt/release-manifest.json" -artifact "$noop_archive" \
 			-installed "$install_root/releases/$target_version" -version "$target_version" \
 			-platform "$noop_os" -arch "$noop_arch" -trust-file "$trust_file" >/dev/null
+		check_state_compatibility "$install_root/releases/$target_version/bria"
 		test ! -e "$operation_receipt" && test ! -L "$operation_receipt" || { printf '%s\n' 'rollback-install: operation receipt appeared concurrently' >&2; exit 1; }
 		mv -- "$operation_pending" "$operation_receipt"
 		sync
@@ -112,6 +125,24 @@ if test -e "$transaction" || test -L "$transaction"; then
 	case "$current_target" in "$old_current"|"$old_previous") ;; *) printf '%s\n' 'rollback-install: current conflicts with recovery marker' >&2; exit 1 ;; esac
 	case "$previous_target" in "$old_current"|"$old_previous") ;; *) printf '%s\n' 'rollback-install: previous conflicts with recovery marker' >&2; exit 1 ;; esac
 	test -d "$install_root/$old_previous" || { printf '%s\n' 'rollback-install: recovered bundle is unavailable' >&2; exit 1; }
+	recovery_version=${old_previous#releases/}
+	case "$(uname -s)" in Darwin) recovery_os=darwin ;; Linux) recovery_os=linux ;; *) exit 1 ;; esac
+	case "$(uname -m)" in x86_64|amd64) recovery_arch=amd64 ;; arm64|aarch64) recovery_arch=arm64 ;; *) exit 1 ;; esac
+	recovery_receipt=$install_root/release-receipts/$recovery_version
+	recovery_bundle=bria_${recovery_version}_${recovery_os}_${recovery_arch}
+	recovery_archive=$recovery_receipt/$recovery_bundle.tar.gz
+	if test "$selected_mode" = true; then
+		test "$recovery_version" = "$target_version" && test "$old_current" = "releases/$from_version" || { printf '%s\n' 'rollback-install: recovery operation identity mismatch' >&2; exit 1; }
+		"$verifier" verify-installed -manifest "$recovery_receipt/release-manifest.json" -artifact "$recovery_archive" \
+			-installed "$install_root/$old_previous" -version "$recovery_version" \
+			-platform "$recovery_os" -arch "$recovery_arch" -trust-file "$trust_file" >/dev/null
+	else
+		script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+		RELEASE_TRUST_FILE=$trust_file "$script_dir/verify-release.sh" "$recovery_receipt" >/dev/null
+		# Never execute a modified installed decoder during transaction recovery.
+		tar -xOf "$recovery_archive" "$recovery_bundle/bria" | cmp - "$install_root/$old_previous/bria"
+	fi
+	check_state_compatibility "$install_root/$old_previous/bria"
 	recovery_current=$install_root/.current.recover.$$
 	recovery_previous=$install_root/.previous.recover.$$
 	recovery_cleanup() { rm -f -- "$recovery_current" "$recovery_previous"; }
@@ -123,15 +154,6 @@ if test -e "$transaction" || test -L "$transaction"; then
 	replace_link "$recovery_previous" "$install_root/previous"
 	sync
 	if test "$selected_mode" = true; then
-		recovery_version=${old_previous#releases/}
-		test "$recovery_version" = "$target_version" && test "$old_current" = "releases/$from_version" || { printf '%s\n' 'rollback-install: recovery operation identity mismatch' >&2; exit 1; }
-		case "$(uname -s)" in Darwin) recovery_os=darwin ;; Linux) recovery_os=linux ;; *) exit 1 ;; esac
-		case "$(uname -m)" in x86_64|amd64) recovery_arch=amd64 ;; arm64|aarch64) recovery_arch=arm64 ;; *) exit 1 ;; esac
-		recovery_receipt=$install_root/release-receipts/$recovery_version
-		recovery_archive=$recovery_receipt/bria_${recovery_version}_${recovery_os}_${recovery_arch}.tar.gz
-		"$verifier" verify-installed -manifest "$recovery_receipt/release-manifest.json" -artifact "$recovery_archive" \
-			-installed "$install_root/releases/$recovery_version" -version "$recovery_version" \
-			-platform "$recovery_os" -arch "$recovery_arch" -trust-file "$trust_file" >/dev/null
 		test ! -e "$operation_receipt" && test ! -L "$operation_receipt" || { printf '%s\n' 'rollback-install: operation receipt appeared concurrently' >&2; exit 1; }
 		mv -- "$operation_pending" "$operation_receipt"
 	fi
@@ -212,6 +234,11 @@ else
 	RELEASE_TRUST_FILE=$trust_file "$script_dir/verify-release.sh" "$receipt" >/dev/null
 fi
 "$staging/$bundle/validate-install.sh" "$staging/$bundle" "$version" "$config" >/dev/null
+
+# A successful configuration check does not prove that this older decoder can
+# read the current durable state. Require an explicit receipt before pointers
+# or installed bundles change; old binaries without this command fail closed.
+check_state_compatibility "$staging/$bundle/bria"
 
 test ! -e "$quarantine" || { printf '%s\n' 'rollback-install: stale rollback quarantine exists' >&2; exit 1; }
 mv -- "$previous_dir" "$quarantine"

@@ -3,6 +3,7 @@
 package nativejsonline
 
 import (
+	"bytes"
 	"errors"
 	"unicode/utf8"
 )
@@ -10,13 +11,14 @@ import (
 var ErrLimit = errors.New("native JSON projection limit exceeded")
 var ErrMalformed = errors.New("native JSON string malformed")
 
-// Line retains at most two Max-byte buffers regardless of the input line size.
+// Line retains two Max-byte buffers and a bounded index of discarded strings.
 // Full JSON syntax and duplicate keys must be validated by the caller. Long
 // string values are replaced with empty strings only in the diagnostic candidate.
 // Keys are never shortened; excessive key/structure size fails with ErrLimit.
 type Line struct {
 	Max                      int
 	raw, compact             []byte
+	Discarded                []int // Opening-quote offsets in the compact candidate.
 	Size                     int64
 	Large                    bool
 	quoted, escaped, dropped bool
@@ -38,10 +40,8 @@ func (l *Line) Clone() *Line {
 		return nil
 	}
 	cloned := *l
-	cloned.raw = make([]byte, len(l.raw))
-	cloned.compact = make([]byte, len(l.compact))
-	copy(cloned.raw, l.raw)
-	copy(cloned.compact, l.compact)
+	cloned.raw, cloned.compact = bytes.Clone(l.raw), bytes.Clone(l.compact)
+	cloned.Discarded = append([]int(nil), l.Discarded...)
 	return &cloned
 }
 
@@ -109,6 +109,7 @@ func (l *Line) Push(b byte) (done bool, err error) {
 			keep = closing
 		} else if !l.key && !closing && len(l.compact)-l.start >= min(8192, l.Max/2, l.Max-l.start-1) {
 			l.compact = l.compact[:l.start+1]
+			l.Discarded = append(l.Discarded, l.start)
 			l.dropped = true
 			keep = false
 		}

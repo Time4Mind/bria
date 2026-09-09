@@ -53,6 +53,7 @@ func TestNativeReceiptRebindsCarrierWithoutChangingTimelineOrActiveSession(t *te
 	if prepared.Surface.NativeSessionID != id {
 		t.Fatal("durable prepared lost native session identity")
 	}
+	card.CarrierRevision = 1 // Initial empty-to-confirmed carrier transition.
 	before, _ := store.Load(ctx)
 	if got, _ := before.Card(id); !reflect.DeepEqual(got, card) {
 		t.Fatal("preparation mutated carrier before receipt")
@@ -69,6 +70,8 @@ func TestNativeReceiptRebindsCarrierWithoutChangingTimelineOrActiveSession(t *te
 		t.Fatal(err)
 	}
 	card.Carrier.MessageID = 99
+	card.CarrierRevision = 2
+	card.LastPresentationOperation = prepared.OperationID
 	if got, _ := state.Card(id); !reflect.DeepEqual(got, card) || state.ActiveSession != active {
 		t.Fatalf("carrier commit changed semantic state: %#v active=%q", got, state.ActiveSession)
 	}
@@ -92,7 +95,8 @@ func TestNativeSurfaceRejectsMalformedAndCrossSessionBindings(t *testing.T) {
 	if _, err := PrepareSurface("mixed", 42, "", 0, false, surface, nativeCarrierPresenter(t)); err == nil {
 		t.Fatal("mixed native+interaction binding accepted")
 	}
-	if err := commitNativeCarrier(context.Background(), telegramstate.NewMemoryStore(), id, telegramstate.Carrier{ChatID: 42, MessageID: 99}); err == nil {
+	state := telegramstate.New()
+	if err := commitNativeCarrier(&state, id, telegramstate.Carrier{ChatID: 42, MessageID: 99}); err == nil {
 		t.Fatal("receipt invented a deleted session")
 	}
 }

@@ -25,6 +25,14 @@ func (reconciler AcceptedTurnReconciler) ReconcileAcceptedTurns(ctx context.Cont
 		return sessionsupervisor.AcceptedTurnReconciliation{}, errAcceptedTurnHistoryUnverifiable
 	}
 	resolver := &acceptedInputHistoryResolver{history: reconciler.Histories[binding.Provider], sessionID: sessionID, binding: binding, finals: reconciler.FinalRestorer}
+	inputs, err := reconciler.Flow.Inputs(ctx, string(sessionID))
+	if err != nil {
+		return sessionsupervisor.AcceptedTurnReconciliation{}, err
+	}
+	resolver.sequences = make(map[string]uint64, len(inputs))
+	for _, input := range inputs {
+		resolver.sequences[input.MessageID] = input.Sequence
+	}
 	results, err := reconciler.Flow.ReconcileAcceptedInputs(ctx, string(sessionID), resolver)
 	receipt := sessionsupervisor.AcceptedTurnReconciliation{Turns: make([]sessionsupervisor.ReconciledAcceptedTurn, 0, len(results))}
 	for _, result := range results {
@@ -38,7 +46,7 @@ func (reconciler AcceptedTurnReconciler) ReconcileAcceptedTurns(ctx context.Cont
 		default:
 			err = errors.Join(err, errAcceptedTurnHistoryUnverifiable)
 		}
-		receipt.Turns = append(receipt.Turns, sessionsupervisor.ReconciledAcceptedTurn{MessageID: result.MessageID, Outcome: outcome})
+		receipt.Turns = append(receipt.Turns, sessionsupervisor.ReconciledAcceptedTurn{MessageID: result.MessageID, Outcome: outcome, TurnID: resolver.turnIDs[result.MessageID]})
 	}
 	return receipt, err
 }
@@ -49,6 +57,8 @@ type acceptedInputHistoryResolver struct {
 	binding   domain.ProviderBinding
 	loaded    bool
 	outcomes  map[string]sessionsupervisor.AcceptedTurnOutcome
+	turnIDs   map[string]string
+	sequences map[string]uint64
 	err       error
 	finals    AcceptedFinalRestorer
 }
@@ -107,6 +117,7 @@ func (resolver *acceptedInputHistoryResolver) load(ctx context.Context) {
 		return
 	}
 	resolver.outcomes = make(map[string]sessionsupervisor.AcceptedTurnOutcome, len(receipt.Turns))
+	resolver.turnIDs = make(map[string]string, len(receipt.Turns))
 	for _, turn := range receipt.Turns {
 		if strings.TrimSpace(turn.MessageID) == "" || strings.TrimSpace(turn.MessageID) != turn.MessageID || resolver.outcomes[turn.MessageID] != "" {
 			resolver.err = errAcceptedTurnHistoryUnverifiable
@@ -115,6 +126,7 @@ func (resolver *acceptedInputHistoryResolver) load(ctx context.Context) {
 		switch turn.Outcome {
 		case sessionsupervisor.AcceptedTurnCompleted, sessionsupervisor.AcceptedTurnFailed, sessionsupervisor.AcceptedTurnUnknown:
 			resolver.outcomes[turn.MessageID] = turn.Outcome
+			resolver.turnIDs[turn.MessageID] = turn.TurnID
 		default:
 			resolver.err = errAcceptedTurnHistoryUnverifiable
 			return

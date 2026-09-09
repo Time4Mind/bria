@@ -12,6 +12,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"strconv"
 	"sync"
 	"time"
@@ -880,6 +881,12 @@ func (registry *MemoryCallbackRegistry) Replace(ctx context.Context, presentatio
 	copyPresentation.StatusRecovery = cloneStatusRecoveryBinding(presentation.StatusRecovery)
 	registry.mu.Lock()
 	defer registry.mu.Unlock()
+	if previous, exists := registry.presentations[presentation.SessionID]; exists && reflect.DeepEqual(previous.available, available) {
+		previous.presentation.TokenIDs = copyPresentation.TokenIDs
+		if reflect.DeepEqual(previous.presentation, copyPresentation) {
+			return nil // Exact receipt replay must not reset claimed tokens.
+		}
+	}
 	for sessionID, candidate := range registry.presentations {
 		if sessionID != presentation.SessionID && candidate.presentation.Carrier == presentation.Carrier {
 			delete(registry.presentations, sessionID)

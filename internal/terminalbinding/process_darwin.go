@@ -1,6 +1,6 @@
 //go:build darwin
 
-package nativeterminal
+package terminalbinding
 
 import (
 	"errors"
@@ -12,18 +12,21 @@ import (
 // macOS has no Linux pidfd equivalent in the supported deployment baseline.
 // tmux creates the pane in its own process group, so group-scoped termination
 // still avoids touching unrelated processes while preserving native startup.
-type ownedProcess struct{ pid int }
+type Process struct{ pid int }
 
-func pauseServer(*exec.Cmd) (func(), error) { return func() {}, nil }
+func IsolateServer(cmd *exec.Cmd) { cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true} }
+func (p *Process) Release()       {}
 
-func ownProcess(pid int) (*ownedProcess, error) {
+func PauseServer(*exec.Cmd) (func(), error) { return func() {}, nil }
+
+func OwnProcess(pid int) (*Process, error) {
 	if pid < 2 {
 		return nil, errors.New("invalid owned pane PID")
 	}
-	return &ownedProcess{pid: pid}, nil
+	return &Process{pid: pid}, nil
 }
 
-func (p *ownedProcess) killTree() error {
+func (p *Process) KillTree() error {
 	if p == nil || p.pid < 2 {
 		return errors.New("owned process missing")
 	}

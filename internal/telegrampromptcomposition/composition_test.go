@@ -116,6 +116,21 @@ func TestDelivererEditsActiveCardWithInCardMarker(t *testing.T) {
 	if sender.prepared.Keyboard == nil {
 		t.Fatal("prompt keyboard missing")
 	}
+	if revision := sender.prepared.Card.ExpectedCarrierRevision; revision == nil || *revision != 1 {
+		t.Fatalf("prompt refresh lost captured carrier revision: %v", revision)
+	}
+	for _, message := range []int64{78, 77} {
+		if err := state.Update(context.Background(), func(current *telegramstate.State) error {
+			card, _ := current.Card(sessionID)
+			card.Carrier.MessageID = message
+			return current.SetCard(card)
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if *sender.prepared.Card.ExpectedCarrierRevision != 1 {
+		t.Fatal("prepared revision changed with later carrier state")
+	}
 	foundName := false
 	for _, row := range *sender.prepared.Keyboard {
 		for _, button := range row {
@@ -175,6 +190,9 @@ func TestDelivererEditsActiveCardWithInCardMarker(t *testing.T) {
 		}
 		if sender.status.Text != native.Text || sender.status.SourceMessageID != 77 || sender.prepared.Keyboard == nil {
 			t.Fatalf("native picker not delivered to exact card: %+v", sender.status)
+		}
+		if revision := sender.prepared.Surface.ExpectedCarrierRevision; revision == nil || *revision != 3 {
+			t.Fatalf("native refresh lost captured carrier revision: %v", revision)
 		}
 		for _, row := range *sender.prepared.Keyboard {
 			for _, b := range row {

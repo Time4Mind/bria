@@ -21,14 +21,14 @@ func TestNativeMigrationKeepsExactPackageBoundaries(t *testing.T) {
 		path    string
 		imports []string
 	}{
-		{"internal/nativeadapter", []string{"internal/domain", "internal/nativeacceptance", "internal/nativeattachment", "internal/nativecapture", "internal/nativecli", "internal/nativereceiptstore", "internal/nativeterminal", "internal/nativetranscript", "internal/runtimeprotocol"}},
+		{"internal/nativeadapter", []string{"internal/domain", "internal/nativeacceptance", "internal/nativeattachment", "internal/nativecapture", "internal/nativecli", "internal/nativephotostaging", "internal/nativereceiptstore", "internal/nativeterminal", "internal/nativetranscript", "internal/runtimediagnostic", "internal/runtimeprotocol"}},
 		{"internal/nativecapture", nil},
 		{"internal/nativeattachment", nil},
 		{"internal/nativecli", []string{"internal/domain", "internal/nativeapproval"}},
 		{"internal/nativeapproval", nil},
 		{"internal/nativecontrolport", []string{"internal/domain"}},
 		{"internal/nativeapprovalflow", []string{"internal/domain", "internal/nativeapproval", "internal/nativecontrolport"}},
-		{"internal/nativeterminal", nil},
+		{"internal/nativeterminal", []string{"internal/terminalbinding"}},
 		{"internal/nativetranscript", []string{"internal/nativejsonline", "internal/runtimeprotocol", "internal/tooltext"}},
 	} {
 		policy, ok := packagePolicies[test.path]
@@ -50,13 +50,14 @@ func TestNativeMigrationKeepsExactPackageBoundaries(t *testing.T) {
 	}
 }
 
-func TestNativeAttachmentKeepsStdlibBoundaryAndTwoExactConsumers(t *testing.T) {
+func TestNativeAttachmentKeepsStdlibBoundaryAndThreeExactConsumers(t *testing.T) {
 	policy := packagePolicies["internal/nativeattachment"]
 	if policy.responsibility != "validate bounded native photo custody from content bytes" || len(policy.allowedImports) != 0 || policy.maxProductionLines != 100 {
 		t.Fatalf("native attachment policy = %#v", policy)
 	}
 	wantConsumers := map[string]bool{
 		"internal/nativeadapter":            true,
+		"internal/nativephotostaging":       true,
 		"internal/providerinputcomposition": true,
 	}
 	for source, registered := range packagePolicies {
@@ -593,7 +594,7 @@ func TestArchitectureCheckerRegistersCurrentCompositionBoundaries(t *testing.T) 
 		{
 			path:           "internal/durablecomposition",
 			responsibility: "compose durable message custody and accepted-turn reconciliation",
-			imports:        []string{"internal/acceptedrecovery", "internal/domain", "internal/durableflow", "internal/durableinputbridge", "internal/messagejournal", "internal/sessionruntime", "internal/sessionsupervisor", "internal/telegramcontroller", "internal/telegramnotify", "internal/turnprocessing"},
+			imports:        []string{"internal/turncontinuation", "internal/acceptedrecovery", "internal/domain", "internal/durableflow", "internal/durableinputbridge", "internal/messagejournal", "internal/sessionruntime", "internal/sessionsupervisor", "internal/telegramcontroller", "internal/telegramnotify", "internal/turnprocessing"},
 			limit:          500,
 		},
 		{
@@ -605,7 +606,7 @@ func TestArchitectureCheckerRegistersCurrentCompositionBoundaries(t *testing.T) 
 		{
 			path:           "internal/acceptedrecovery",
 			responsibility: "reconcile exact accepted history and fence archived session resume",
-			imports:        []string{"internal/domain", "internal/durableflow", "internal/sessionruntime", "internal/sessionsupervisor"},
+			imports:        []string{"internal/domain", "internal/durableflow", "internal/sessionruntime", "internal/sessionsupervisor", "internal/turncontinuation"},
 			limit:          300,
 		},
 		{
@@ -914,13 +915,13 @@ func TestArchitectureCheckerCapsCoherentCustodyResponsibilities(t *testing.T) {
 		{path: "internal/telegrampromptcomposition", limit: 225},
 		{path: "internal/telegramsettingsview", limit: 280},
 		{path: "internal/nativeterminal", limit: 510},
-		{path: "internal/nativetranscript", limit: 1000},
+		{path: "internal/nativetranscript", limit: 1100},
 		{path: "internal/providerquota", limit: 350},
 		{path: "internal/storage", limit: 1900},
 		{path: "internal/statejson", limit: 100},
 		{path: "internal/telegram", limit: 1750},
 		{path: "internal/telegramcompletioncomposition", limit: 275},
-		{path: "internal/telegramcontroller", limit: 5500},
+		{path: "internal/telegramcontroller", limit: 5600},
 		{path: "internal/finalpersist", limit: 200},
 		{path: "internal/turnadmission", limit: 120},
 		{path: "internal/telegramsemantic", limit: 200},
@@ -1778,7 +1779,7 @@ func TestArchitectureCheckerExtendsStorageAndRecoveryRuntimeEdges(t *testing.T) 
 	}{
 		{
 			path:    "internal/storage",
-			imports: []string{"internal/statejson", "internal/archiveimport", "internal/cardhistory", "internal/cardtranscript", "internal/coordinator", "internal/domain", "internal/telegramhistory", "internal/telegramstate"},
+			imports: []string{"internal/cardeventhistory", "internal/statejson", "internal/archiveimport", "internal/cardhistory", "internal/cardtranscript", "internal/coordinator", "internal/domain", "internal/telegramhistory", "internal/telegramstate"},
 		},
 		{
 			path:    "internal/recoveryruntime",

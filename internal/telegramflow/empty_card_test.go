@@ -22,7 +22,9 @@ func TestFirstCardDeliveryPreservesEmptyEvidenceAndDoesNotStorePlaceholder(t *te
 		Pages: []telegramui.ContentPage{{Content: "Пока нет сообщений CLI."}},
 		View:  telegramui.PageView{Page: 1, Pages: 1},
 	}}}
-	if err := commitCard(ctx, store, output, telegramstate.Carrier{ChatID: 42, MessageID: 10}); err != nil {
+	if err := store.Update(ctx, func(state *telegramstate.State) error {
+		return commitCard(state, output, telegramstate.Carrier{ChatID: 42, MessageID: 10})
+	}); err != nil {
 		t.Fatal(err)
 	}
 	state, _ := store.Load(ctx)

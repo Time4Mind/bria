@@ -25,7 +25,11 @@ func (starter *Starter) Shutdown(ctx context.Context) error {
 		wait.Add(1)
 		go func(record *processRecord) {
 			defer wait.Done()
-			errorsOut <- starter.Abort(ctx, record.request, record.binding)
+			mode := "close"
+			if record.persistentTerminal {
+				mode = "detach"
+			}
+			errorsOut <- starter.release(ctx, record.request, record.binding, mode)
 		}(record)
 	}
 	wait.Wait()

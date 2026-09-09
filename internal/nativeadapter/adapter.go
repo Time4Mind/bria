@@ -24,6 +24,8 @@ import (
 )
 
 type Config struct {
+	Persistent, AttachOnly      bool
+	LogicalSessionID            string
 	Provider                    domain.Provider
 	Command                     []string
 	Workdir, ResumeID, StateDir string
@@ -62,31 +64,70 @@ func Run(ctx context.Context, input io.ReadCloser, output io.Writer, config Conf
 		return inputErr
 	}
 	defer input.Close()
+	if config.AttachOnly && (!config.Persistent || config.ResumeID == "") ||
+		config.Persistent && (config.LogicalSessionID == "" || !filepath.IsAbs(config.StateDir)) {
+		return nativeterminal.ErrBindingMismatch
+	}
 	environment := childEnvironment(config.Environment)
-	plan, err := nativecli.BuildWithPolicy(config.Provider, config.Command, config.Workdir, config.ResumeID, nativeLaunchPolicy(os.Geteuid(), environment))
+	binding := nativeterminal.Binding{LogicalSessionID: config.LogicalSessionID, NativeSessionID: config.ResumeID, Provider: string(config.Provider), Workdir: config.Workdir}
+	var term *nativeterminal.Terminal
+	var plan nativecli.Plan
+	var err error
+	if config.Persistent && config.ResumeID != "" {
+		term, err = nativeterminal.AttachExisting(ctx, config.StateDir, binding)
+		if err != nil && (config.AttachOnly || !errors.Is(err, nativeterminal.ErrNotManaged)) {
+			return err
+		}
+	}
+	attached := term != nil
+	if !attached {
+		plan, err = nativecli.BuildWithPolicy(config.Provider, config.Command, config.Workdir, config.ResumeID, nativeLaunchPolicy(os.Geteuid(), environment))
+		if err == nil {
+			term, err = nativeterminal.Open(ctx, nativeterminal.Config{Persistent: config.Persistent, Command: plan.Command, Workdir: config.Workdir, Environment: environment, LiteralInputBarrier: config.Provider == domain.ProviderCodex})
+		}
+	}
 	if err != nil {
 		return err
 	}
-	term, err := nativeterminal.Open(ctx, nativeterminal.Config{Command: plan.Command, Workdir: config.Workdir, Environment: environment, LiteralInputBarrier: config.Provider == domain.ProviderCodex})
-	if err != nil {
-		return err
-	}
+	bound, physicallyClosed := attached, false
 	defer func() {
 		closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		returnErr = errors.Join(returnErr, term.Close(closeCtx))
+		if bound && !physicallyClosed {
+			returnErr = errors.Join(returnErr, term.Detach(closeCtx))
+		} else {
+			returnErr = errors.Join(returnErr, term.Close(closeCtx))
+		}
 	}()
-	startup, cancel := context.WithTimeout(ctx, 25*time.Second)
-	state, err := nativecli.Ready(startup, term, plan)
-	cancel()
-	if err != nil {
-		return err
+	state := nativecli.State{SessionID: config.ResumeID}
+	if !attached {
+		startup, cancel := context.WithTimeout(ctx, 25*time.Second)
+		state, err = nativecli.Ready(startup, term, plan)
+		cancel()
+		if err != nil {
+			return err
+		}
+		if config.Persistent {
+			if err := os.MkdirAll(config.StateDir, 0700); err != nil {
+				return err
+			}
+			binding.NativeSessionID = state.SessionID
+			if err := term.PersistBinding(ctx, config.StateDir, binding); err != nil {
+				return err
+			}
+			bound = true
+		}
 	}
 	a := &adapter{config: config, term: term, output: output, id: state.SessionID, model: state.Model, receipts: map[string]string{}}
+	a.restoreMediaDirectory()
 	if a.config.ScreenCaptureLimitKiB == 0 {
 		a.config.ScreenCaptureLimitKiB = nativecapture.DefaultLimitKiB
 	}
-	defer func() { returnErr = errors.Join(returnErr, a.cleanupAttachments()) }()
+	defer func() {
+		if !bound || physicallyClosed {
+			returnErr = errors.Join(returnErr, a.cleanupAttachments())
+		}
+	}()
 	if err = a.loadReceipts(); err != nil {
 		return err
 	}
@@ -96,8 +137,10 @@ func Run(ctx context.Context, input io.ReadCloser, output io.Writer, config Conf
 		}
 	}()
 	// Baseline already existing history, never replay it as a new accepted input.
-	if err = a.baseline(ctx); err != nil && !(errors.Is(err, nativetranscript.ErrNotFound) && a.reader == nil) {
-		return err
+	if !attached {
+		if err = a.baseline(ctx); err != nil && !(errors.Is(err, nativetranscript.ErrNotFound) && a.reader == nil) {
+			return err
+		}
 	}
 	if err = a.emit(runtimeprotocol.AdapterMessage{Type: runtimeprotocol.TypeReady, ProviderSessionID: a.id, Readiness: "protocol", Authentication: "unknown", Model: a.model}); err != nil {
 		return err
@@ -137,7 +180,17 @@ func Run(ctx context.Context, input io.ReadCloser, output io.Writer, config Conf
 		case err := <-readErr:
 			return err
 		case r := <-requests:
+			if r.Type == runtimeprotocol.TypeDetach && bound {
+				return nil
+			}
 			if r.Type == runtimeprotocol.TypeClose {
+				if bound {
+					if err := term.Close(ctx); err != nil {
+						return err
+					}
+					physicallyClosed = true
+					return a.emit(runtimeprotocol.AdapterMessage{Type: runtimeprotocol.TypeClosed, ProviderSessionID: a.id})
+				}
 				return nil
 			}
 			if err = a.handle(ctx, r); err != nil {
@@ -174,6 +227,8 @@ func (a *adapter) emit(m runtimeprotocol.AdapterMessage) error {
 }
 func (a *adapter) handle(ctx context.Context, r runtimeprotocol.ParentMessage) error {
 	switch r.Type {
+	case runtimeprotocol.TypeObserveAccepted:
+		return a.observeAccepted(ctx, r)
 	case runtimeprotocol.TypeNativeControl:
 		return a.control(ctx, r)
 	case runtimeprotocol.TypeReconcileAcceptedTurns:
@@ -398,7 +453,7 @@ func (a *adapter) consumeEvents(events []nativetranscript.Event) error {
 				if event.Kind == nativetranscript.KindThinking {
 					kind = "thinking"
 				}
-				if err = a.emit(runtimeprotocol.AdapterMessage{Type: runtimeprotocol.TypeEvent, RequestID: a.active.request.RequestID, Kind: kind, Text: text, EventMetadata: event.Metadata}); err != nil {
+				if err = a.emit(runtimeprotocol.AdapterMessage{Type: runtimeprotocol.TypeEvent, RequestID: a.active.request.RequestID, Kind: kind, Text: text, EventMetadata: event.Metadata, EventID: event.ID}); err != nil {
 					return err
 				}
 			}
@@ -500,5 +555,7 @@ func Main(ctx context.Context, provider domain.Provider, args []string, input io
 			limit = parsed
 		}
 	}
-	return Run(ctx, input, output, Config{Provider: provider, Command: args[1:], Workdir: workdir, ResumeID: resume, StateDir: os.Getenv("BRIA_NATIVE_STATE_DIR"), Environment: os.Environ(), ScreenCaptureLimitKiB: limit})
+	return Run(ctx, input, output, Config{Provider: provider, Command: args[1:], Workdir: workdir, ResumeID: resume,
+		StateDir: os.Getenv("BRIA_NATIVE_STATE_DIR"), Environment: os.Environ(), ScreenCaptureLimitKiB: limit,
+		Persistent: os.Getenv("BRIA_PERSISTENT_TERMINAL") == "1", AttachOnly: os.Getenv("BRIA_ATTACH_ONLY") == "1", LogicalSessionID: os.Getenv("BRIA_SESSION_ID")})
 }

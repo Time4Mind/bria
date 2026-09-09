@@ -115,7 +115,7 @@ func (store *CoordinatorCheckpointStore) Save(
 		return coordinator.StoredCheckpoint{}, fmt.Errorf("persist coordinator checkpoint: %w", err)
 	}
 
-	byIntent, byID, persistedRecord, persistedUI, err := readSessionFile(store.state.path)
+	byIntent, byID, persistedRecord, persistedUI, err := readSessionFile(store.state.path, true)
 	if err != nil {
 		return coordinator.StoredCheckpoint{}, fmt.Errorf("reread coordinator checkpoint: %w", err)
 	}

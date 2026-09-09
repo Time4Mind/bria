@@ -82,6 +82,8 @@ func runContextWithDependencies(ctx context.Context, args []string, stdout, stde
 			err = singlemachinecomposition.Run(ctx, args[2], toDependencies(deps))
 		case "check-config":
 			err = checkConfig(args[2], deps)
+		case "check-state":
+			err = checkState(args[2])
 		case "check-telegram":
 			err = checkTelegram(ctx, args[2], deps)
 		case "install-parakeet":
@@ -99,6 +101,9 @@ func runContextWithDependencies(ctx context.Context, args []string, stdout, stde
 		}
 		if args[0] == "check-config" {
 			fmt.Fprintln(stdout, "Bria configuration: OK")
+		}
+		if args[0] == "check-state" {
+			fmt.Fprintln(stdout, "Bria state compatibility: OK")
 		}
 		if args[0] == "check-telegram" {
 			fmt.Fprintln(stdout, "Telegram identity: OK")
@@ -237,6 +242,7 @@ Usage:
   bria version|--version
   bria run --config /absolute/path/to/config.json
   bria check-config --config /absolute/path/to/config.json
+  bria check-state --config /absolute/path/to/config.json
   bria check-telegram --config /absolute/path/to/config.json
   bria install-parakeet --config /absolute/path/to/config.json
 `)

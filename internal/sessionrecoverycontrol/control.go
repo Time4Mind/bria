@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 
+	"bria/internal/app"
 	"bria/internal/domain"
 	"bria/internal/sessionsupervisor"
 )
@@ -56,6 +57,14 @@ func (c *Control) lock(ctx context.Context) error {
 func (c *Control) Watch(ctx context.Context, id domain.SessionID, binding domain.ProviderBinding) (sessionsupervisor.Result, error) {
 	if ctx == nil {
 		return sessionsupervisor.Result{}, ErrInvalidRequest
+	}
+	current, loadErr := c.store.Load(ctx, id)
+	if attacher, ok := c.restarter.(app.SessionAttacher); loadErr == nil && ok && attacher.SupportsAttach(current.Provider()) && current.Status() == domain.SessionAwaitingRecovery {
+		if err := c.lock(ctx); err != nil {
+			return sessionsupervisor.Result{}, err
+		}
+		defer c.Unlock()
+		return c.manual.RecoverPersisted(ctx, id, binding)
 	}
 	// Retain the actual wait outcome, including uncertain exits. Never substitute
 	// a successful exit for a timeout or an unavailable process handle.

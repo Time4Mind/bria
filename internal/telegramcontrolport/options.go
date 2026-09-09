@@ -17,6 +17,10 @@ type ModelCatalog interface {
 	Models(context.Context, domain.ComputerID, domain.Provider) ([]settingsport.Model, error)
 }
 
+type AcceptedTurnObserver interface {
+	ObserveAcceptedWithCallbacks(context.Context, domain.SessionID, domain.ProviderBinding, sessionruntime.TurnCallbacks) (sessionruntime.TurnResult, error)
+}
+
 type Options struct {
 	QueueLimit int
 	Lifecycle  Lifecycle
@@ -36,6 +40,7 @@ type Options struct {
 	Authorization         AuthorizationFlow
 	Attachments           turnprocessing.AttachmentCustody
 	RuntimeEvents         turnprocessing.RuntimeEventObserver
+	AcceptedObserver      AcceptedTurnObserver
 	Finals                turnprocessing.FinalProcessor
 	AsyncCreator          AsyncSessionCreator
 	ArchivedResumer       ArchivedResumer

@@ -86,6 +86,9 @@ func TestCompletionDelivererEditsActiveCommentaryAndSuppressesBackgroundCommenta
 	}
 
 	backgroundSender := &completionSenderStub{}
+	if revision := activeSender.prepared.Card.ExpectedCarrierRevision; revision == nil || *revision != 1 {
+		t.Fatalf("commentary refresh lost captured carrier revision: %v", revision)
+	}
 	background := CompletionDeliverer{Controller: completionControllerStub{card: card, active: false}, Presenter: presenter, Sender: backgroundSender, Cards: store, ConversationID: 42}
 	receipt, err = background.Deliver(context.Background(), telegramcontroller.Notification{OperationID: "event:3", ConversationID: 42, SessionID: sessionID, Kind: telegramcontroller.NotificationCommentary, Text: "hidden"}, "event:3")
 	if err != nil || receipt.State != "confirmed" || !receipt.Suppressed || len(receipt.Parts) != 0 || backgroundSender.status.Text != "" {

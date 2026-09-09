@@ -35,7 +35,7 @@ func (reconciler *Reconciler) ReconcileAcceptedTurns(ctx context.Context, sessio
 	}
 	result := sessionsupervisor.AcceptedTurnReconciliation{Turns: make([]sessionsupervisor.ReconciledAcceptedTurn, len(read.Turns))}
 	for index, turn := range read.Turns {
-		result.Turns[index] = sessionsupervisor.ReconciledAcceptedTurn{MessageID: turn.MessageID, Outcome: sessionsupervisor.AcceptedTurnOutcome(turn.Outcome)}
+		result.Turns[index] = sessionsupervisor.ReconciledAcceptedTurn{MessageID: turn.MessageID, Outcome: sessionsupervisor.AcceptedTurnOutcome(turn.Outcome), TurnID: turn.TurnID}
 	}
 	return result, nil
 }

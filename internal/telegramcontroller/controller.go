@@ -4,6 +4,7 @@ import (
 	"bria/internal/app"
 	"bria/internal/cardpageselection"
 	"bria/internal/cardtranscript"
+	"bria/internal/controllerhistory"
 	"bria/internal/controllertelemetry"
 	"bria/internal/coordinator"
 	"bria/internal/domain"
@@ -25,6 +26,8 @@ import (
 	"bria/internal/telegramturnhelpers"
 	"bria/internal/turnadmission"
 	"bria/internal/turncompletion"
+	"bria/internal/turncontinuation"
+	"bria/internal/turnfinalization"
 	"bria/internal/turnprocessing"
 	"context"
 	"errors"
@@ -878,6 +881,7 @@ type Controller struct {
 	creator                         SessionCreator
 	sessions                        SessionStore
 	submitter                       sessionruntime.Submitter
+	acceptedObserver                AcceptedTurnObserver
 	notifier                        Notifier
 	lifecycle                       Lifecycle
 	uiState                         ActiveSessionStore
@@ -961,12 +965,14 @@ type createdProcess struct {
 	binding domain.ProviderBinding
 }
 type queuedTurn struct {
-	text        string
-	messageID   string
-	attachments []AttachmentRef
-	admission   *turnadmission.Admission
+	observedBinding *domain.ProviderBinding
+	text            string
+	messageID       string
+	attachments     []AttachmentRef
+	admission       *turnadmission.Admission
 }
 type sessionWorker struct {
+	continuation      *turncontinuation.Run
 	controller        *Controller
 	sessionID         domain.SessionID
 	queue             chan queuedTurn
@@ -1042,6 +1048,7 @@ func New(
 		turnLifecycle:       options.TurnLifecycle,
 		attachments:         options.Attachments,
 		runtimeEvents:       options.RuntimeEvents,
+		acceptedObserver:    options.AcceptedObserver,
 		finals:              options.Finals,
 		outputFailures:      options.OutputFailures,
 		closeDone:           make(chan struct{}),
@@ -1200,6 +1207,9 @@ func (controller *Controller) Handle(
 	activeSession := controller.active
 	controller.mu.Unlock()
 	if current, loadErr := controller.sessions.Load(ctx, activeSession); loadErr == nil && current.Status() == domain.SessionAwaitingRecovery {
+		if controller.recoverer != nil && controller.durableInput != nil {
+			return controller.queueRecoveryInput(ctx, update, current.ID())
+		}
 		return controller.cardDecision(ctx, activeSession, "Исход предыдущего запроса не подтверждён. Доступна история; новый запрос не отправлен. Выбери восстановление или другую сессию.")
 	}
 	messageID := "telegram-update:" + strconv.FormatInt(update.ID, 10)
@@ -2607,6 +2617,12 @@ func (controller *Controller) ProcessDurableInput(
 		controller.publishPromptState(ctx, input.SessionID, input.MessageID, promptText, "🙅‍♂")
 		return receipt, errors.New("durable input session is not live")
 	}
+	worker.mu.Lock()
+	observingBatch := worker.continuation != nil && !worker.continuation.Done
+	worker.mu.Unlock()
+	if observingBatch {
+		return receipt, turnprocessing.ErrInputDeferred
+	}
 	promptText, preprocessingFailed, preparedPayload := controller.preparation.Process(ctx, session, input.MessageID, input.Payload)
 	if err := telegramturnhelpers.PersistPrepared(ctx, input, preparedPayload, callbacks); err != nil {
 		controller.publishProcessedPromptState(ctx, input.SessionID, input.MessageID, promptText, "🙅‍♂", preprocessingFailed)
@@ -2621,48 +2637,15 @@ func (controller *Controller) ProcessDurableInput(
 		return receipt, errors.New("attachment session has no exact provider binding")
 	}
 	if terminal, ticket := worker.currentCompletion(); terminal != nil {
-		steerer, ok := controller.submitter.(sessionruntime.CurrentTurnSubmitter)
-		if !ok {
-			ticket.Finish(nil)
-			controller.publishProcessedPromptState(ctx, input.SessionID, input.MessageID, promptText, "🙅‍♂", preprocessingFailed)
-			return receipt, errors.New("provider does not support current-turn input")
-		}
-		if len(input.Attachments) != 0 {
-			ticket.Finish(nil)
-			controller.publishProcessedPromptState(ctx, input.SessionID, input.MessageID, promptText, "🙅‍♂", preprocessingFailed)
-			return receipt, errors.New("current-turn attachments require turn-scoped custody")
-		}
-		accepted := false
-		err := steerer.SubmitCurrentWithCallbacks(ctx, input.SessionID, sessionruntime.StructuredInput{Text: promptText}, sessionruntime.TurnCallbacks{
-			MessageID: input.MessageID,
-			OnAccepted: func(messageID string) error {
-				if !worker.sameCompletion(terminal) {
-					return errors.New("current-turn acceptance crossed a turn boundary")
+		return turncontinuation.Steer(ctx, controller.submitter, input, promptText, callbacks, ticket,
+			func() bool { return worker.sameCompletion(terminal) },
+			func(publishContext context.Context, accepted bool) {
+				indicator := "🙅‍♂"
+				if accepted {
+					indicator = "👨‍💻"
 				}
-				if accepted || messageID != input.MessageID {
-					return errors.New("provider returned invalid current-turn acceptance")
-				}
-				accepted = true
-				acceptanceErr := callbacks.OnAccepted(ctx, DurableInputAcceptance{SessionID: input.SessionID, MessageID: input.MessageID, Sequence: input.Sequence})
-				controller.publishProcessedPromptState(context.WithoutCancel(ctx), input.SessionID, input.MessageID, promptText, "👨‍💻", preprocessingFailed)
-				return acceptanceErr
-			},
-		})
-		receipt.Accepted = accepted
-		if accepted && err != nil {
-			receipt.Completion = DurableInputAwaitingRecovery
-			ticket.Finish(err)
-			return receipt, err
-		}
-		if err != nil || !accepted {
-			controller.publishProcessedPromptState(context.WithoutCancel(ctx), input.SessionID, input.MessageID, promptText, "🙅‍♂", preprocessingFailed)
-			err = errors.Join(err, errors.New("provider did not accept current-turn input"))
-			ticket.Finish(err)
-			return receipt, err
-		}
-		receipt.Completion = DurableInputPending
-		controller.awaitInputCompletion(input, callbacks, terminal, ticket)
-		return receipt, nil
+				controller.publishProcessedPromptState(publishContext, input.SessionID, input.MessageID, promptText, indicator, preprocessingFailed)
+			}, func() { controller.awaitInputCompletion(input, callbacks, terminal, ticket, binding) })
 	}
 	// A provider may be idle while its prior final is still being persisted.
 	// Do not overwrite that turn's completion signal or start from Running.
@@ -2683,59 +2666,18 @@ func (controller *Controller) ProcessDurableInput(
 	if closed || !usable || controller.turnLifecycle != nil && session.Status() != domain.SessionReady {
 		return receipt, errors.New("durable input session is not ready for a new turn")
 	}
-	acceptedSignal := make(chan struct{}, 1)
-	resultSignal := make(chan DurableInputProcessReceipt, 1)
-	var acceptanceErr error // Published by resultSignal; never read on early ACK.
-	admission := turnadmission.NewAdmission()
-	turnContext, cancelTurn := context.WithCancel(context.WithoutCancel(ctx))
-	stopTurnOnRootCancellation := context.AfterFunc(controller.rootContext, cancelTurn)
-	controller.durableWork.Add(1)
-	go func() {
-		defer controller.durableWork.Done()
-		defer stopTurnOnRootCancellation()
-		defer cancelTurn()
-		acceptedOnce := false
-		completion, accepted := worker.runTurnWithAcceptance(turnContext, queuedTurn{
-			text: promptText, messageID: input.MessageID, attachments: append([]AttachmentRef(nil), input.Attachments...), admission: admission,
-		}, func(callbackCtx context.Context) error {
-			if acceptedOnce {
-				return errors.New("provider repeated durable acceptance")
+	return turncontinuation.Root(ctx, controller.rootContext, input, callbacks, &controller.durableWork,
+		func(turnContext context.Context, admission *turnadmission.Admission, accepted func(context.Context) error) (DurableInputCompletion, bool) {
+			return worker.runTurnWithAcceptance(turnContext, queuedTurn{text: promptText, messageID: input.MessageID, attachments: append([]AttachmentRef(nil), input.Attachments...), admission: admission}, accepted)
+		}, func(publishContext context.Context, accepted bool) {
+			indicator := "🙅‍♂"
+			if accepted {
+				indicator = "👨‍💻"
 			}
-			acceptedOnce = true
-			acceptanceErr = callbacks.OnAccepted(callbackCtx, DurableInputAcceptance{
-				SessionID: input.SessionID, MessageID: input.MessageID, Sequence: input.Sequence,
-			})
-			controller.publishProcessedPromptState(context.WithoutCancel(callbackCtx), input.SessionID, input.MessageID, promptText, "👨‍💻", preprocessingFailed)
-			if acceptanceErr != nil {
-				return acceptanceErr
-			}
-			acceptedSignal <- struct{}{}
-			return nil
+			controller.publishProcessedPromptState(publishContext, input.SessionID, input.MessageID, promptText, indicator, preprocessingFailed)
+		}, func(outcome DurableInputCompletion) error {
+			return controller.completeInput(callbacks, input, outcome, binding)
 		})
-		var commitErr error
-		if accepted {
-			commitErr = controller.completeInput(callbacks, input, completion)
-		}
-		admission.FinishRoot(commitErr)
-		resultSignal <- DurableInputProcessReceipt{SessionID: input.SessionID, MessageID: input.MessageID, Sequence: input.Sequence, Completion: completion, Accepted: accepted}
-	}()
-	select {
-	case <-acceptedSignal:
-		receipt.Accepted = true
-		receipt.Completion = DurableInputPending
-		return receipt, nil
-	case result := <-resultSignal:
-		receipt = result
-		if !receipt.Accepted {
-			controller.publishProcessedPromptState(context.WithoutCancel(ctx), input.SessionID, input.MessageID, promptText, "🙅‍♂", preprocessingFailed)
-			return receipt, errors.New("provider did not durably accept input")
-		}
-		return receipt, acceptanceErr
-	case <-ctx.Done():
-		cancelTurn()
-		controller.publishProcessedPromptState(context.WithoutCancel(ctx), input.SessionID, input.MessageID, promptText, "🙅‍♂", preprocessingFailed)
-		return receipt, ctx.Err()
-	}
 }
 func (controller *Controller) stopCurrent(ctx context.Context) coordinator.Decision {
 	controller.mu.Lock()
@@ -2865,11 +2807,23 @@ func (worker *sessionWorker) runTurnWithAcceptance(
 	worker.completionBinding, _ = current.Binding()
 	worker.mu.Unlock()
 	var request turnprocessing.Request
+	var terminalProven bool
+	localRetry := turn.observedBinding != nil || worker.controller.canRecoverObservation(current.Provider())
 	defer func() {
 		// Only the durable path previously owned attachment completion. Finish
 		// custody once before publishing the same outcome to main and steers.
-		if onAccepted != nil && wasAccepted {
-			if err := turnprocessing.CompleteAttachments(context.WithoutCancel(ctx), worker.controller.attachments, request); err != nil {
+		if onAccepted != nil && wasAccepted && terminalProven {
+			binding, _ := current.Binding()
+			save := func(attempt context.Context) error {
+				return turnprocessing.CompleteAttachments(attempt, worker.controller.attachments, request)
+			}
+			var err error
+			if localRetry {
+				err = worker.controller.retryFinalization(ctx, worker.sessionID, binding, turn.messageID, save)
+			} else {
+				err = save(context.WithoutCancel(ctx))
+			}
+			if err != nil {
 				completion = DurableInputUnknown
 				worker.notifyTurnError(turn.messageID+":custody-error", "Не удалось сохранить исход вложений. Очередь приостановлена.")
 			}
@@ -2883,7 +2837,7 @@ func (worker *sessionWorker) runTurnWithAcceptance(
 			admission.FinishRoot(nil)
 		}
 	}()
-	if worker.controller.turnLifecycle != nil {
+	if worker.controller.turnLifecycle != nil && turn.observedBinding == nil {
 		running, err := worker.controller.turnLifecycle.Start(turnContext, worker.sessionID)
 		if err != nil {
 			cancelTurn()
@@ -2904,19 +2858,18 @@ func (worker *sessionWorker) runTurnWithAcceptance(
 		Input: PreparedInput{Text: turn.text, Attachments: append([]AttachmentRef(nil), turn.attachments...)},
 	}
 	var finishName func(string)
-	if worker.controller.sessionNamer != nil {
+	if worker.controller.sessionNamer != nil && turn.observedBinding == nil {
 		finishName = worker.controller.sessionNamer.Begin(worker.controller.rootContext, current, turn.messageID, turn.text)
 	}
-	execution, err := turnprocessing.Execute(turnContext, worker.controller.submitter, worker.controller.interactions, worker.controller.attachments,
-		request, turnprocessing.Callbacks{
-			MarkInputAccepted: onAccepted,
-			OnEvent: func(event sessionruntime.TurnEvent) error {
-				eventIndex++
-				worker.emitTurnEvent(turn.messageID, eventIndex, event)
-				return nil
-			},
-		})
+	execution, err := worker.executeRequest(turnContext, turn, request, turnprocessing.Callbacks{
+		MarkInputAccepted: onAccepted,
+		OnEvent: func(event sessionruntime.TurnEvent) error {
+			eventIndex++
+			return worker.emitTurnEvent(turn.messageID, eventIndex, event)
+		},
+	})
 	result, accepted, streamedEvents := execution.Result, execution.Accepted, execution.StreamedEvents
+	terminalProven = result.TerminalStatus == sessionruntime.StatusCompleted || result.TerminalStatus == sessionruntime.StatusFailed || result.TerminalStatus == sessionruntime.StatusInterrupted
 	if err != nil {
 		worker.controller.closeFlow.Observe(controllertelemetry.WithOperation(context.WithoutCancel(ctx), turn.messageID), controllertelemetry.Event{Stage: controllertelemetry.ProviderFailure, Reason: controllertelemetry.RuntimeFailureReason(sessionruntime.RuntimeFailureClass(err)), Outcome: controllertelemetry.Failed, SessionID: string(worker.sessionID), NodeID: string(current.ComputerID())})
 	}
@@ -2926,7 +2879,7 @@ func (worker *sessionWorker) runTurnWithAcceptance(
 	// running/closing recovery target intact for exact supervisor reconciliation.
 	unknown := accepted && err != nil && result.TerminalStatus != sessionruntime.StatusCompleted && result.TerminalStatus != sessionruntime.StatusFailed && result.TerminalStatus != sessionruntime.StatusInterrupted
 	terminalFailure := accepted && (result.TerminalStatus == sessionruntime.StatusFailed || result.TerminalStatus == sessionruntime.StatusInterrupted)
-	terminalStateValid := worker.controller.turnLifecycle == nil && current.Status() == domain.SessionReady
+	terminalStateValid := turn.observedBinding != nil || worker.controller.turnLifecycle == nil && current.Status() == domain.SessionReady
 	if err == nil && result.TerminalStatus == sessionruntime.StatusCompleted {
 		if !streamedEvents {
 			for eventIndex, event := range result.Events {
@@ -2939,48 +2892,25 @@ func (worker *sessionWorker) runTurnWithAcceptance(
 			}
 		}
 	}
-	if worker.controller.turnLifecycle != nil && !unknown {
-		finishContext := context.WithoutCancel(worker.controller.rootContext)
-		finished, closeAfter, finishErr := worker.controller.turnLifecycle.Finish(finishContext, worker.sessionID)
-		if finishErr != nil {
-			worker.notifyTurnError(turn.messageID+":lifecycle-finish", "Не удалось сохранить завершение запроса.")
-			return DurableInputFailed, accepted
+	if worker.controller.turnLifecycle != nil && !unknown && turn.observedBinding == nil {
+		var finishErr error
+		if localRetry && accepted && terminalProven {
+			terminalStateValid, finishErr = worker.finishLifecycle(ctx, turn.messageID, binding)
+		} else {
+			terminalStateValid, finishErr = worker.finishLifecycle(ctx, turn.messageID)
 		}
-		worker.controller.replaceLive(finished)
-		terminalStateValid = finished.Status() == domain.SessionReady
-		if closeAfter {
-			finishContext = worker.controller.closeFlow.CompletionContext(finishContext, worker.sessionID)
-			if worker.controller.sessionCloser == nil {
-				worker.notifyTurnError(turn.messageID+":close-missing", "Сессия ожидает закрытия, но обработчик закрытия не настроен.")
-				return DurableInputFailed, accepted
-			}
-			closed, closeErr := worker.controller.sessionCloser.Close(finishContext, worker.sessionID)
-			worker.controller.closeFlow.Outcome(finishContext, worker.sessionID, closed, closeErr, controllertelemetry.ScheduledClose)
-			if closeErr != nil {
-				worker.notifyTurnError(turn.messageID+":close-error", "Не удалось подтвердить закрытие сессии.")
-				return DurableInputFailed, accepted
-			}
-			if err := worker.controller.applyClosedSession(finishContext, closed.Session); err != nil {
-				worker.notifyTurnError(turn.messageID+":close-ui-state", "Не удалось сохранить закрытие сессии.")
-				return DurableInputFailed, accepted
-			}
-			terminalStateValid = closed.Deleted || closed.Session.Status() == domain.SessionArchived
+		if finishErr != nil {
+			return DurableInputFailed, accepted
 		}
 	}
 	if finishName != nil {
 		finishName(result.ProviderSessionName)
 	}
 	if err != nil || result.TerminalStatus != sessionruntime.StatusCompleted {
-		errorText := "Ошибка CLI: запрос не выполнен."
-		if unknown {
-			errorText = "Связь с CLI прервалась. Исход запроса пока не подтверждён."
+		if unknown && worker.controller.canRecoverObservation(current.Provider()) {
+			return DurableInputAwaitingRecovery, accepted
 		}
-		if result.ErrorCode == sessionruntime.ErrorAuthenticationFailed {
-			errorText = "Ошибка авторизации Claude: требуется выполнить вход (/login)."
-		}
-		if terminalFailure && result.TerminalStatus == sessionruntime.StatusInterrupted {
-			errorText = "Запрос остановлен."
-		}
+		errorText := turnfinalization.FailureText(result, unknown, terminalFailure)
 		worker.controller.mu.Lock()
 		worker.controller.history[worker.sessionID] = append(worker.controller.history[worker.sessionID], errorText)
 		worker.controller.mu.Unlock()
@@ -3006,19 +2936,32 @@ func (worker *sessionWorker) runTurnWithAcceptance(
 			worker.notifyTurnError(turn.messageID+":final-processor-error", "Не удалось обработать итоговые артефакты.")
 		}
 	}
-	if !worker.controller.notify(worker.controller.rootContext, Notification{
-		OperationID:    turn.messageID + ":final",
-		ConversationID: worker.controller.ownerPrivateChatID,
-		SessionID:      worker.sessionID,
-		Kind:           NotificationFinal,
-		Text:           result.Final,
-	}) && worker.controller.durableOutput != nil {
+	publish := func(attempt context.Context) error {
+		if !worker.controller.notify(attempt, Notification{
+			OperationID:    turn.messageID + ":final",
+			ConversationID: worker.controller.ownerPrivateChatID,
+			SessionID:      worker.sessionID,
+			Kind:           NotificationFinal,
+			Text:           result.Final,
+		}) && worker.controller.durableOutput != nil {
+			return errors.New("final output custody was not saved")
+		}
+		return nil
+	}
+	if accepted && localRetry {
+		err = worker.controller.retryFinalization(ctx, worker.sessionID, binding, turn.messageID, publish)
+	} else {
+		err = publish(ctx)
+	}
+	if err != nil {
 		return DurableInputAwaitingRecovery, accepted
 	}
 	return DurableInputSucceeded, accepted
 }
-func (worker *sessionWorker) emitTurnEvent(messageID string, eventIndex int, event sessionruntime.TurnEvent) {
-	worker.controller.appendRuntimeHistoryForMessage(worker.controller.rootContext, worker.sessionID, messageID, event)
+func (worker *sessionWorker) emitTurnEvent(messageID string, eventIndex int, event sessionruntime.TurnEvent) error {
+	if err := worker.controller.persistRuntimeEvent(worker.controller.rootContext, worker.sessionID, messageID, event); err != nil {
+		return err
+	}
 	kind := NotificationKind("")
 	switch event.Kind {
 	case sessionruntime.EventCommentary, sessionruntime.EventTool:
@@ -3026,9 +2969,9 @@ func (worker *sessionWorker) emitTurnEvent(messageID string, eventIndex int, eve
 	case sessionruntime.EventQuestion:
 		kind = NotificationQuestion
 	default:
-		return
+		return nil
 	}
-	operationID := messageID + ":event:" + strconv.Itoa(eventIndex)
+	operationID := controllerhistory.Operation(messageID, eventIndex, event.ID)
 	if worker.controller.runtimeEvents != nil {
 		if err := worker.controller.runtimeEvents.ObserveRuntimeEvent(context.WithoutCancel(worker.controller.rootContext), RuntimeEventObservation{
 			OperationID: operationID, SessionID: worker.sessionID, MessageID: messageID, EventIndex: eventIndex, Event: event,
@@ -3047,6 +2990,7 @@ func (worker *sessionWorker) emitTurnEvent(messageID string, eventIndex int, eve
 		Kind:           kind,
 		Text:           text,
 	})
+	return nil
 }
 func (worker *sessionWorker) cancelClaimedTurn(turn uint64) bool {
 	worker.mu.Lock()
@@ -3162,7 +3106,7 @@ func (controller *Controller) closeWithin(ctx context.Context) error {
 			go func() {
 				abortResults <- abortResult{
 					index: index,
-					err:   controller.lifecycle.Abort(ctx, process.request, process.binding),
+					err:   controller.releaseOnShutdown(ctx, process),
 				}
 			}()
 		}

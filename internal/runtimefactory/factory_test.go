@@ -61,6 +61,7 @@ func runRealCodexFixture() {
 		if err != nil {
 			os.Exit(91)
 		}
+		_ = json.NewEncoder(os.Stdout).Encode(map[string]any{"protocol": 1, "type": "closed", "provider_session_id": "nested-thread"})
 		return
 	}
 	if len(os.Args) != 2 || os.Args[1] != "app-server" {
@@ -192,6 +193,9 @@ func TestCommandSetExposesExactImmutableAdapterSpecsForRuntimeAndRecovery(t *tes
 		t.Fatalf("Codex command contract mismatch, ok=%v", ok)
 	}
 	claudeSpec, ok := commands.CommandSpec(domain.ProviderClaude)
+	if !codexSpec.PersistentTerminal || !claudeSpec.PersistentTerminal {
+		t.Fatal("native adapters must preserve terminal lifetime")
+	}
 	wantCredential := configuration.StatePath + ".claude-api-key.json"
 	if !ok || claudeSpec.Path != claudeAdapter || !reflect.DeepEqual(claudeSpec.Args, []string{"--native", "--", rawClaude, "--safe-claude"}) || claudeSpec.ProviderCredentialFile != wantCredential {
 		t.Fatalf("Claude command contract mismatch, ok=%v", ok)
@@ -500,6 +504,7 @@ func runAdapterHelper() {
 	if json.Unmarshal(scanner.Bytes(), &request) != nil || request["type"] != "close" {
 		os.Exit(75)
 	}
+	_ = json.NewEncoder(os.Stdout).Encode(map[string]any{"protocol": 1, "type": "closed", "provider_session_id": "factory-provider-session"})
 }
 
 func validConfig(t *testing.T, dir string) config.Config {

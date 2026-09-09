@@ -26,7 +26,7 @@ func testInheritedStdin(t *testing.T, cancelOnly bool) {
 	}
 	// Unix-domain sockets have a short path limit; keep the owned fixture root
 	// independent of the descriptive Go test name.
-	dir, err := os.MkdirTemp("", "native-input-")
+	dir, err := os.MkdirTemp("/tmp", "native-input-")
 	if err != nil {
 		t.Fatal(err)
 	}

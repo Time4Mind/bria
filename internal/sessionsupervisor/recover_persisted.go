@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"bria/internal/app"
 	"bria/internal/domain"
 )
 
@@ -34,6 +35,9 @@ func (supervisor *Supervisor) RecoverPersisted(ctx context.Context, sessionID do
 	target, ok := current.RecoveryTarget()
 	if !ok || target == domain.SessionStarting {
 		return result, errors.New("persisted recovery target is unavailable")
+	}
+	if attacher, ok := supervisor.restarter.(app.SessionAttacher); ok && attacher.SupportsAttach(current.Provider()) {
+		return supervisor.attach(ctx, current, prior, attacher)
 	}
 	if needsAcceptedTurnReconciliation(target) || supervisor.reconciler != nil && target == domain.SessionReady {
 		if supervisor.reconciler == nil {
