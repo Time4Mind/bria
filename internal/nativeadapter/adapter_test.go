@@ -111,10 +111,12 @@ func runNativeFixture() {
 }
 
 type adapterHarness struct {
-	ctx   context.Context
-	input *io.PipeWriter
-	lines chan []byte
-	done  chan error
+	ctx        context.Context
+	input      *io.PipeWriter
+	lines      chan []byte
+	done       chan error
+	readerDone chan struct{}
+	readerErr  error
 }
 
 func startNativeFixture(t *testing.T) *adapterHarness {
@@ -128,20 +130,8 @@ func startNativeFixture(t *testing.T) *adapterHarness {
 	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
 	inReader, inWriter := io.Pipe()
 	outReader, outWriter := io.Pipe()
-	h := &adapterHarness{ctx: ctx, input: inWriter, lines: make(chan []byte, 32), done: make(chan error, 1)}
-	readerDone := make(chan struct{})
-	go func() {
-		defer close(readerDone)
-		scanner := bufio.NewScanner(outReader)
-		for scanner.Scan() {
-			line := append([]byte(nil), scanner.Bytes()...)
-			select {
-			case h.lines <- line:
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
+	h := &adapterHarness{ctx: ctx, input: inWriter, lines: make(chan []byte, 32), done: make(chan error, 1), readerDone: make(chan struct{})}
+	go h.scanOutput(outReader)
 	go func() {
 		err := Run(ctx, inReader, outWriter, Config{Provider: domain.ProviderCodex, Command: []string{os.Args[0]}, Workdir: private, ResumeID: fixtureSession, StateDir: filepath.Join(private, "state"), Environment: os.Environ()})
 		_ = outWriter.Close()
@@ -156,9 +146,22 @@ func startNativeFixture(t *testing.T) *adapterHarness {
 		case <-time.After(6 * time.Second):
 			t.Error("native fixture cleanup did not finish")
 		}
-		<-readerDone
+		<-h.readerDone
 	})
 	return h
+}
+
+func (h *adapterHarness) scanOutput(reader io.Reader) {
+	defer close(h.readerDone)
+	scanner := bufio.NewScanner(reader)
+	for scanner.Scan() {
+		select {
+		case h.lines <- append([]byte(nil), scanner.Bytes()...):
+		case <-h.ctx.Done():
+			return
+		}
+	}
+	h.readerErr = scanner.Err()
 }
 
 func (h *adapterHarness) send(t *testing.T, m runtimeprotocol.ParentMessage) {
@@ -190,16 +193,35 @@ func (h *adapterHarness) receive(t *testing.T) runtimeprotocol.AdapterMessage {
 }
 func (h *adapterHarness) receiveRaw(t *testing.T) runtimeprotocol.AdapterMessage {
 	t.Helper()
-	select {
-	case line := <-h.lines:
+	decode := func(line []byte) runtimeprotocol.AdapterMessage {
 		message, err := runtimeprotocol.DecodeAdapterLine(line, runtimeprotocol.Limits{})
 		if err != nil {
 			t.Fatalf("invalid adapter frame (%d bytes): %v", len(line), err)
 		}
 		return message
+	}
+	select {
+	case line := <-h.lines:
+		return decode(line)
 	case err := <-h.done:
 		h.done <- err
-		t.Fatalf("adapter exited before expected frame: %v", err)
+		// Run can exit after writing a frame but before the scanner publishes
+		// it. Drain output through scanner completion before declaring EOF.
+		for {
+			select {
+			case line := <-h.lines:
+				return decode(line)
+			case <-h.readerDone:
+				select {
+				case line := <-h.lines:
+					return decode(line)
+				default:
+					t.Fatalf("adapter exited before expected frame: %v (scanner: %v)", err, h.readerErr)
+				}
+			case <-h.ctx.Done():
+				t.Fatal("adapter output drain timeout")
+			}
+		}
 	case <-h.ctx.Done():
 		t.Fatal("adapter frame timeout")
 	}

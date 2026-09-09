@@ -40,7 +40,16 @@ Legacy untyped observation notice is hidden by card projection; user/model text
 and stored history are retained. Independent archive review approved.
 Full make check-full passed 2026-09-09, including race, architecture, packaging
 and executable trio, version 20260909-archive-resume-quiet.
-Remaining: commit/push/CI, deploy/postflight.
+Source 99e27792c2f7ce22cb7f2ec1ee836cbc3feea6d2 pushed to origin/main.
+Platform CI 34346577290 passed. Stage1 34346577291 failed in existing
+nativeadapter fixture: TestAttachOnlyReadyDoesNotReadOversizedExistingTranscript
+received adapter completion before consuming Close frame. Deterministic handshake
+reproduced this harness race; scanner completion and frame draining now precede
+EOF failure. Exit and scanner errors are preserved. RED/GREEN, repeated focused
+race and full nativeadapter race passed; independent review approved. Only tests
+changed in CI follow-up. Galileo owned test harness, Mencius reviewed read-only,
+parent owns integration. No runtime or release target expansion.
+Remaining: resolve CI failure, verify latest CI, deploy/postflight.
 
 Native app-server probe in previous turn did not obtain a resume response and
 does not establish provider health. Live restoration has not been verified.

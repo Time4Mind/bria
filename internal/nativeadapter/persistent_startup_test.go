@@ -1,7 +1,6 @@
 package nativeadapter
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -27,17 +26,8 @@ func startPersistentAdapterFixture(t *testing.T, config Config, parents ...conte
 	ctx, cancel := context.WithTimeout(parent, 15*time.Second)
 	input, writer := io.Pipe()
 	output, sink := io.Pipe()
-	h := &adapterHarness{ctx: ctx, input: writer, lines: make(chan []byte, 64), done: make(chan error, 1)}
-	go func() {
-		scanner := bufio.NewScanner(output)
-		for scanner.Scan() {
-			select {
-			case h.lines <- append([]byte(nil), scanner.Bytes()...):
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
+	h := &adapterHarness{ctx: ctx, input: writer, lines: make(chan []byte, 64), done: make(chan error, 1), readerDone: make(chan struct{})}
+	go h.scanOutput(output)
 	go func() { err := Run(ctx, input, sink, config); _ = sink.Close(); h.done <- err }()
 	t.Cleanup(func() {
 		cancel()
@@ -49,6 +39,7 @@ func startPersistentAdapterFixture(t *testing.T, config Config, parents ...conte
 			t.Error("persistent adapter cleanup timed out")
 			return // Never compete with an observer that has not joined.
 		}
+		<-h.readerDone
 		if !config.Persistent {
 			return
 		}
