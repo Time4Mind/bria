@@ -7,6 +7,12 @@
 > gate и финальный versioned `make check-full` PASS; safe `quota.refresh` timing
 > не содержит значений лимитов. Далее push/CI, установка, restart и live
 > one-click проверка.
+> Первая CI-итерация: Stage 1 `34402279412` PASS; Platform `34402279296`
+> выявил независимую readiness/abort race в sessionruntime на macOS. `Start`
+> мог вернуть binding в коротком окне после удаления process record, но до
+> закрытия `done`. Добавлена проверка exact tracked record под тем же lock;
+> 10 000 stress и 2 500 race interleavings, затем полный versioned gate PASS.
+> Далее follow-up SHA и повтор обоих CI.
 > Договор/todo: [STATUS_REFRESH_DIAGNOSIS_TODO.md](STATUS_REFRESH_DIAGNOSIS_TODO.md).
 
 > A34 закрыт: generation хранит набор command-derived uncertain DecisionID,

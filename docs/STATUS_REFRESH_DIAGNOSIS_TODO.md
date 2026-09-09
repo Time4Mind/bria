@@ -34,6 +34,7 @@ single-flight is retained, safe timing is observable, and full/live gates pass.
 | A35.4 | Implement completion-driven refresh with stale-navigation fencing | verified locally | Cached edit commits before one background poll; completion conditionally edits the exact current signed global presentation, and repeated taps retarget the same poll |
 | A35.5 | Add safe refresh lifecycle timing | verified locally | `quota.refresh` emits start and completed/skipped/failed timing through the payload-free Telegram trace; no quota values or provider payload are present |
 | A35.6 | Full verification and automatic release | in progress | Public RED failed on missing auto-edit seam; GREEN, focused 10x race and final versioned `make check-full` pass; Git/CI/install/restart/live acceptance remain |
+| A35.7 | Fix mandatory macOS CI readiness/abort race | verified locally | Exact-record readiness fence added; 10,000 stress interleavings, 2,500 race-detector interleavings and a fresh full `make check-full` pass |
 
 Ranked hypotheses: (1) the callback renders before an asynchronous quota refresh
 updates the cache; (2) the first transport edit completes late and is mistaken for
@@ -83,3 +84,14 @@ The exact final source passed `VERSION=20260909-status-refresh make check-full`,
 including all tests, all-package race detection, vet, policy, architecture,
 packaging contracts and the executable-trio acceptance. The checked candidate
 reports `bria 20260909-status-refresh`; release writes remain pending.
+
+The first exact-SHA CI iteration passed Stage 1 run `34402279412` but macOS job
+`102636797653` in platform run `34402279296` exposed an independent existing
+readiness/abort race. `finalizeReap` can remove a just-exited process under
+`Starter.mu`, unlock, and only then close `record.done`; in that gap `Start` saw
+`done` open, returned a binding for the already-untracked record, and immediate
+`Abort` returned `ErrSessionNotTracked`. The bounded CI-fix makes readiness commit
+verify under the same lock that the exact process record is still tracked.
+The existing public regression test then passed 10,000 interleavings normally
+and 2,500 under the race detector; the complete versioned gate also passed with
+the CI-fix. A follow-up commit and exact-SHA CI rerun remain before installation.

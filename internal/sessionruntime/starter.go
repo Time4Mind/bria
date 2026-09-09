@@ -448,12 +448,17 @@ func (starter *Starter) start(ctx context.Context, request app.StartSessionReque
 		Generation: record.generation,
 	}
 	starter.mu.Lock()
+	current := starter.processes[request.SessionID]
 	select {
 	case <-record.done:
 		starter.mu.Unlock()
 		starter.removeFailedRecord(request.SessionID, record)
 		return domain.ProviderBinding{}, errors.New("provider process exited during readiness")
 	default:
+		if current != record {
+			starter.mu.Unlock()
+			return domain.ProviderBinding{}, errors.New("provider process exited during readiness")
+		}
 		record.binding = binding
 		record.nativeMu.Lock()
 		if record.nativeModel == "" {
