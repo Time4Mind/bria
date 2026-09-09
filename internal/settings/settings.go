@@ -54,6 +54,7 @@ type Settings struct {
 	VoiceRecognition          VoiceRecognition  `json:"voice_recognition"`
 	RetryUndeliveredFiles     bool              `json:"retry_undelivered_files"`
 	ArchiveRecommendations    bool              `json:"archive_recommendations"`
+	ShowHiddenDirectories     bool              `json:"show_hidden_directories"`
 	DefaultProviders          map[string]string `json:"default_providers"`
 	DefaultWorkdirs           map[string]string `json:"default_workdirs"`
 	PreprocessingEnabled      bool              `json:"preprocessing_enabled"`
@@ -80,6 +81,7 @@ type Effective struct {
 	VoiceRecognition           VoiceRecognition
 	RetryUndeliveredFiles      bool
 	ArchiveRecommendations     bool
+	ShowHiddenDirectories      bool
 	DefaultProviders           map[string]string
 	DefaultWorkdirs            map[string]string
 	PreprocessingEnabled       bool
@@ -111,6 +113,7 @@ func (s Settings) Effective() Effective {
 		VoiceRecognition:           s.VoiceRecognition,
 		RetryUndeliveredFiles:      s.RetryUndeliveredFiles,
 		ArchiveRecommendations:     s.ArchiveRecommendations,
+		ShowHiddenDirectories:      s.ShowHiddenDirectories,
 		DefaultProviders:           cloneStringMap(s.DefaultProviders),
 		DefaultWorkdirs:            cloneStringMap(s.DefaultWorkdirs),
 		PreprocessingEnabled:       s.PreprocessingEnabled,

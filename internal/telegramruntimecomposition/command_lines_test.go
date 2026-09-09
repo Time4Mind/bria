@@ -15,7 +15,8 @@ import (
 )
 
 type commandController struct {
-	got telegramcontroller.SemanticAction
+	got    telegramcontroller.SemanticAction
+	action string
 }
 
 func (*commandController) HandleSemanticMessage(context.Context, coordinator.Update) (telegramcontroller.SemanticActionResult, error) {
@@ -23,16 +24,25 @@ func (*commandController) HandleSemanticMessage(context.Context, coordinator.Upd
 }
 func (c *commandController) HandleSemanticAction(_ context.Context, action telegramcontroller.SemanticAction) (telegramcontroller.SemanticActionResult, error) {
 	c.got = action
-	return telegramcontroller.SemanticActionResult{Surface: &telegramcontroller.SemanticSurface{Text: "Настройки", RichMarkdown: true, Rows: [][]telegramcontroller.SemanticButton{{{Label: "Строки команды", Action: telegramcontroller.SemanticActionKind("settings_technical_command_lines")}}}}}, nil
+	return telegramcontroller.SemanticActionResult{Surface: &telegramcontroller.SemanticSurface{Text: "Настройки", RichMarkdown: true, Rows: [][]telegramcontroller.SemanticButton{{{Label: "Настройка", Action: telegramcontroller.SemanticActionKind(c.action)}}}}}, nil
 }
 
 func TestCommandLinesPublicAdapterPreservesSemanticAndSettingsSurface(t *testing.T) {
-	action := telegramui.Action("settings_technical_command_lines")
+	testPublicSettingsAdapter(t, "settings_technical_command_lines")
+}
+
+func TestHiddenDirectoriesPublicAdapterPreservesSemanticAndSettingsSurface(t *testing.T) {
+	testPublicSettingsAdapter(t, "settings_hidden_directories")
+}
+
+func testPublicSettingsAdapter(t *testing.T, name string) {
+	t.Helper()
+	action := telegramui.Action(name)
 	plan, err := telegrampipeline.PlanAcceptedCallback(telegrampipeline.AcceptedCallback{UpdateID: 1, SessionID: domain.SessionID(telegramui.GlobalSurfaceID), Carrier: telegramstate.Carrier{ChatID: 42, MessageID: 99}, Action: action})
 	if err != nil {
 		t.Fatal(err)
 	}
-	c := &commandController{}
+	c := &commandController{action: name}
 	result, err := (telegramruntimecomposition.ControllerFlowAdapter{Controller: c}).HandleCallback(context.Background(), plan)
 	if err != nil {
 		t.Fatalf("command settings did not reach semantic surface: %v", err)

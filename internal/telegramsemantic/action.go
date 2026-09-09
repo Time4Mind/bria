@@ -12,6 +12,7 @@ type SemanticActionKind = telegramcontrolport.SemanticActionKind
 type SemanticAction = telegramcontrolport.SemanticAction
 
 const (
+	SemanticSettingsHiddenDirectories        SemanticActionKind = "settings_hidden_directories"
 	SemanticPagePrevious                     SemanticActionKind = "page_previous"
 	SemanticPageLatest                       SemanticActionKind = "page_latest"
 	SemanticPageNext                         SemanticActionKind = "page_next"
@@ -92,7 +93,7 @@ func IsGlobal(kind SemanticActionKind) bool {
 		SemanticCreateUp, SemanticCreatePick, SemanticCreateDirectoryNew, SemanticCreateBack, SemanticCreateFresh,
 		SemanticSettingsCategory, SemanticSettingsScreen, SemanticSettingsScreenCaptureLimit, SemanticSettingsAutoApproveCommands, SemanticSettingsDetail, SemanticSettingsPageLimit, SemanticSettingsContinueExisting,
 		SemanticSettingsTechnicalActions, SemanticSettingsTechnicalOutputLines, SemanticSettingsTechnicalCommandLines, SemanticSettingsBackgroundQuestions, SemanticSettingsBackgroundErrors,
-		SemanticSettingsArchiveRecommendations,
+		SemanticSettingsArchiveRecommendations, SemanticSettingsHiddenDirectories,
 		SemanticSettingsDefaultProvider, SemanticSettingsDefaultWorkdir, SemanticSettingsClearCreationDefaults,
 		SemanticSettingsLifetimeNever, SemanticSettingsLifetime6Hours, SemanticSettingsLifetime12Hours,
 		SemanticSettingsLifetime24Hours, SemanticSettingsLifetime48Hours,

@@ -24,6 +24,7 @@ type Snapshot struct {
 	QueueLimit                int
 	VoiceRecognition          string
 	ArchiveRecommendations    bool
+	ShowHiddenDirectories     bool
 	DefaultProviders          map[domain.ComputerID]domain.Provider
 	DefaultWorkdirs           map[domain.ComputerID]string
 	PreprocessingEnabled      bool
@@ -70,6 +71,7 @@ type AutoApprovalPreferences = settingscapability.AutoApprovalPreferences
 type ScreenCapturePreferences = settingscapability.ScreenCapturePreferences
 type TechnicalOutputPreferences = settingscapability.TechnicalOutputPreferences
 type TechnicalCommandPreferences = settingscapability.TechnicalCommandPreferences
+type HiddenDirectoryPreferences = settingscapability.HiddenDirectoryPreferences
 
 // NodeRenamer optionally persists the display name of a computer node.
 type NodeRenamer interface {

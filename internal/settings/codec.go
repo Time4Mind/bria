@@ -13,6 +13,8 @@ import (
 
 const MaxDocumentBytes = 64 << 10
 
+// ShowHiddenDirectories is additive v5: absence means OFF; older strict binaries
+// reject the new field.
 type settingsDocument struct {
 	Version                   int               `json:"version"`
 	Revision                  uint64            `json:"revision"`
@@ -31,6 +33,7 @@ type settingsDocument struct {
 	VoiceRecognition          VoiceRecognition  `json:"voice_recognition"`
 	RetryUndeliveredFiles     bool              `json:"retry_undelivered_files"`
 	ArchiveRecommendations    bool              `json:"archive_recommendations"`
+	ShowHiddenDirectories     bool              `json:"show_hidden_directories"`
 	DefaultProviders          map[string]string `json:"default_providers"`
 	DefaultWorkdirs           map[string]string `json:"default_workdirs"`
 	PreprocessingEnabled      bool              `json:"preprocessing_enabled"`
@@ -134,6 +137,7 @@ func documentFromSnapshot(snapshot Snapshot) settingsDocument {
 		VoiceRecognition:         s.VoiceRecognition,
 		RetryUndeliveredFiles:    s.RetryUndeliveredFiles,
 		ArchiveRecommendations:   s.ArchiveRecommendations,
+		ShowHiddenDirectories:    s.ShowHiddenDirectories,
 		DefaultProviders:         cloneStringMap(s.DefaultProviders),
 		DefaultWorkdirs:          cloneStringMap(s.DefaultWorkdirs),
 		PreprocessingEnabled:     s.PreprocessingEnabled,
@@ -162,6 +166,7 @@ func (document settingsDocument) snapshot() Snapshot {
 		VoiceRecognition:          document.VoiceRecognition,
 		RetryUndeliveredFiles:     document.RetryUndeliveredFiles,
 		ArchiveRecommendations:    document.ArchiveRecommendations,
+		ShowHiddenDirectories:     document.ShowHiddenDirectories,
 		DefaultProviders:          cloneStringMap(document.DefaultProviders),
 		DefaultWorkdirs:           cloneStringMap(document.DefaultWorkdirs),
 		PreprocessingEnabled:      document.PreprocessingEnabled,

@@ -13,12 +13,24 @@ func TestCommandLinesWirePreservesOutputIDAndRejectsForgedOrExpiredToken(t *test
 	if callbacktoken.ActionSettingsTechnicalOutputLines != 87 || callbacktoken.ActionSettingsTechnicalCommandLines != 88 {
 		t.Fatal("incompatible wire IDs")
 	}
+	testSettingsWire(t, callbacktoken.ActionSettingsTechnicalCommandLines)
+}
+
+func TestHiddenDirectoriesWireRejectsForgedOrExpiredToken(t *testing.T) {
+	if callbacktoken.ActionSettingsHiddenDirectories != 89 {
+		t.Fatal("incompatible hidden-directory wire ID")
+	}
+	testSettingsWire(t, callbacktoken.ActionSettingsHiddenDirectories)
+}
+
+func testSettingsWire(t *testing.T, action callbacktoken.Action) {
+	t.Helper()
 	now := time.Unix(1_800_000_000, 0).UTC()
 	codec, err := callbacktoken.New(bytes.Repeat([]byte{0x42}, 32), bytes.NewReader(bytes.Repeat([]byte{0x24}, 128)), func() time.Time { return now })
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := callbacktoken.Fields{Action: callbacktoken.ActionSettingsTechnicalCommandLines, SessionID: "00000000-0000-0000-0000-000000000001", ExpiresAt: now.Add(time.Minute)}
+	want := callbacktoken.Fields{Action: action, SessionID: "00000000-0000-0000-0000-000000000001", ExpiresAt: now.Add(time.Minute)}
 	token, err := codec.Encode(want)
 	if err != nil {
 		t.Fatal(err)

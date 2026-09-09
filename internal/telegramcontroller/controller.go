@@ -160,6 +160,7 @@ const (
 	SemanticSettingsPreprocessingInstruction = telegramsemantic.SemanticSettingsPreprocessingInstruction
 	SemanticSettingsPreprocessingReset       = telegramsemantic.SemanticSettingsPreprocessingReset
 	SemanticSettingsSessionNaming            = telegramsemantic.SemanticSettingsSessionNaming
+	SemanticSettingsHiddenDirectories        = telegramsemantic.SemanticSettingsHiddenDirectories
 	SemanticSettingsStandby                  = telegramsemantic.SemanticSettingsStandby
 	SemanticSettingsRenameNode               = telegramsemantic.SemanticSettingsRenameNode
 	SemanticAuthorizeCodex                   = telegramsemantic.SemanticAuthorizeCodex
@@ -513,7 +514,7 @@ func (controller *Controller) handleGlobalSemanticAction(ctx context.Context, ac
 	case SemanticSettingsScreen, SemanticSettingsScreenCaptureLimit, SemanticSettingsDetail, SemanticSettingsPageLimit, SemanticSettingsContinueExisting, SemanticSettingsTechnicalActions,
 		SemanticSettingsTechnicalOutputLines, SemanticSettingsTechnicalCommandLines,
 		SemanticSettingsBackgroundQuestions, SemanticSettingsBackgroundErrors,
-		SemanticSettingsArchiveRecommendations, SemanticSettingsSessionNaming, SemanticSettingsStandby,
+		SemanticSettingsArchiveRecommendations, SemanticSettingsSessionNaming, SemanticSettingsStandby, SemanticSettingsHiddenDirectories,
 		SemanticSettingsLifetimeNever, SemanticSettingsLifetime6Hours, SemanticSettingsLifetime12Hours,
 		SemanticSettingsLifetime24Hours, SemanticSettingsLifetime48Hours, SemanticSettingsProviderCodex, SemanticSettingsProviderClaude:
 		if err := telegramsettings.Apply(ctx, controller.settings, controller.scopedProviderPreferences(), string(action.Kind)); err != nil {

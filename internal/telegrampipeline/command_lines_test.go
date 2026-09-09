@@ -15,6 +15,15 @@ import (
 )
 
 func TestCommandLinesSignedCallbackRoutesAndRejectsUnauthorizedOrStale(t *testing.T) {
+	testSignedSettingsCallback(t, "settings_technical_command_lines", "Строки команды", 88)
+}
+
+func TestHiddenDirectoriesSignedCallbackRoutesAndRejectsUnauthorizedOrStale(t *testing.T) {
+	testSignedSettingsCallback(t, "settings_hidden_directories", "Скрытые каталоги", 89)
+}
+
+func testSignedSettingsCallback(t *testing.T, name, label string, wireID callbacktoken.Action) {
+	t.Helper()
 	ctx := context.Background()
 	now := time.Unix(1_800_000_000, 0).UTC()
 	codec, err := callbacktoken.New(bytes.Repeat([]byte{0x42}, 32), bytes.NewReader(bytes.Repeat([]byte{0x24}, 128)), func() time.Time { return now })
@@ -25,17 +34,17 @@ func TestCommandLinesSignedCallbackRoutesAndRejectsUnauthorizedOrStale(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	action := telegramui.Action("settings_technical_command_lines")
+	action := telegramui.Action(name)
 	presented, err := presenter.PresentKeyboardWithManifest(telegramui.GlobalSurfaceID, nil, telegramui.CardKeyboard{Rows: []telegramui.ButtonRow{{{Action: action}}}})
 	if err != nil {
 		t.Fatalf("command control cannot be presented: %v", err)
 	}
 	button := presented.Markup.InlineKeyboard[0][0]
-	if button.Text != "Строки команды" {
+	if button.Text != label {
 		t.Fatalf("label=%q", button.Text)
 	}
 	wire, err := codec.Decode(button.CallbackData)
-	if err != nil || wire.Action != callbacktoken.Action(88) || callbacktoken.ActionSettingsTechnicalOutputLines != 87 || wire.Target != 0 {
+	if err != nil || wire.Action != wireID || callbacktoken.ActionSettingsTechnicalOutputLines != 87 || wire.Target != 0 {
 		t.Fatalf("wire=%+v err=%v", wire, err)
 	}
 	global := card()

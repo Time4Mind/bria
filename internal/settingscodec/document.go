@@ -54,6 +54,7 @@ func Inspect(document []byte) (map[string]struct{}, error) {
 	allowed["card_page_limit"] = struct{}{}
 	// Additive optional field: pre-feature documents keep the default OFF.
 	allowed["standby_enabled"] = struct{}{}
+	allowed["show_hidden_directories"] = struct{}{}
 	allowed["auto_approve_commands"] = struct{}{}
 	allowed["screen_capture_limit_kib"] = struct{}{}
 	allowed["technical_output_lines"] = struct{}{}

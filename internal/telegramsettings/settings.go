@@ -24,6 +24,12 @@ func Apply(ctx context.Context, preferences settingsport.Preferences, providers 
 		return errors.New("settings are not configured")
 	}
 	switch action {
+	case "settings_hidden_directories":
+		hidden, ok := preferences.(settingsport.HiddenDirectoryPreferences)
+		if !ok {
+			return errors.New("hidden directory settings are not configured")
+		}
+		return hidden.ToggleHiddenDirectories(ctx)
 	case "settings_standby":
 		standby, ok := preferences.(settingsport.StandbyPreferences)
 		if !ok {

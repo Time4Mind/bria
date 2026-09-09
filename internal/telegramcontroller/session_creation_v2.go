@@ -242,7 +242,7 @@ func (controller *Controller) creationRootsV2(ctx context.Context, computerID do
 	if err != nil {
 		return nil, err
 	}
-	return controller.limitCreationChoicesV2(ctx, directories), nil
+	return controller.limitCreationChoicesV2(ctx, directories, false), nil
 }
 
 func (controller *Controller) browseCreationDirectoryV2(ctx context.Context, computerID domain.ComputerID, path string) ([]sessioncreation.Directory, error) {
@@ -260,16 +260,21 @@ func (controller *Controller) browseCreationDirectoryV2(ctx context.Context, com
 	if err != nil {
 		return nil, err
 	}
-	return controller.limitCreationChoicesV2(ctx, directories), nil
+	return controller.limitCreationChoicesV2(ctx, directories, true), nil
 }
 
-func (controller *Controller) limitCreationChoicesV2(ctx context.Context, items []sessioncreation.Directory) []sessioncreation.Directory {
+func (controller *Controller) limitCreationChoicesV2(ctx context.Context, items []sessioncreation.Directory, filterHidden bool) []sessioncreation.Directory {
 	pages := 64
+	showHidden := false
 	if controller.settings != nil {
-		if current, err := controller.settings.Snapshot(ctx); err == nil && current.CardPageLimit > 0 {
-			pages = current.CardPageLimit
+		if current, err := controller.settings.Snapshot(ctx); err == nil {
+			showHidden = current.ShowHiddenDirectories
+			if current.CardPageLimit > 0 {
+				pages = current.CardPageLimit
+			}
 		}
 	}
+	items = sessioncreation.DirectoryChoices(items, filterHidden && !showHidden)
 	limit := pages * sessioncreation.ChoicesPerPage
 	if len(items) > limit {
 		return append([]sessioncreation.Directory(nil), items[:limit]...)

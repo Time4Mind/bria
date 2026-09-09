@@ -20,6 +20,7 @@ var _ settingsport.Preferences = Preferences{}
 var _ settingsport.AutoApprovalPreferences = Preferences{}
 var _ settingsport.TechnicalOutputPreferences = Preferences{}
 var _ settingsport.TechnicalCommandPreferences = Preferences{}
+var _ settingsport.HiddenDirectoryPreferences = Preferences{}
 
 func (p Preferences) Snapshot(ctx context.Context) (settingsport.Snapshot, error) {
 	if p.Store == nil {
@@ -39,6 +40,7 @@ func (p Preferences) Snapshot(ctx context.Context) (settingsport.Snapshot, error
 		SessionLifetime:           string(current.SessionLifetime), QueueLimit: current.QueueLimit,
 		VoiceRecognition:         string(current.VoiceRecognition),
 		ArchiveRecommendations:   current.ArchiveRecommendations,
+		ShowHiddenDirectories:    current.ShowHiddenDirectories,
 		DefaultProviders:         providerDefaults(current.DefaultProviders),
 		DefaultWorkdirs:          workdirDefaults(current.DefaultWorkdirs),
 		PreprocessingEnabled:     current.PreprocessingEnabled,
@@ -55,6 +57,9 @@ func (p Preferences) ToggleContinueExisting(ctx context.Context) error {
 
 func (p Preferences) ToggleStandby(ctx context.Context) error {
 	return p.update(ctx, func(current *settings.Settings) { current.StandbyEnabled = !current.StandbyEnabled })
+}
+func (p Preferences) ToggleHiddenDirectories(ctx context.Context) error {
+	return p.update(ctx, func(current *settings.Settings) { current.ShowHiddenDirectories = !current.ShowHiddenDirectories })
 }
 func (p Preferences) ToggleAutoApproveCommands(ctx context.Context) error {
 	return p.update(ctx, func(current *settings.Settings) { current.AutoApproveCommands = !current.AutoApproveCommands })

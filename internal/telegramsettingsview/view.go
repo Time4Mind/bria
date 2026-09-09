@@ -126,6 +126,14 @@ func RenderCategory(ctx context.Context, preferences settingsport.Preferences, p
 		if _, ok := preferences.(settingsport.StandbyPreferences); ok {
 			rows = append(rows, []Button{{Label: "Ожидающая сессия", Action: "settings_standby"}})
 		}
+		hidden := "скрывать"
+		if current.ShowHiddenDirectories {
+			hidden = "показывать"
+		}
+		fields = append(fields, Field{"Скрытые каталоги", hidden})
+		if _, ok := preferences.(settingsport.HiddenDirectoryPreferences); ok {
+			rows = append(rows, []Button{{Label: "Скрытые каталоги", Action: "settings_hidden_directories"}})
+		}
 		if _, ok := preferences.(settingsport.CreationPreferences); ok {
 			rows = append(rows, []Button{{Label: "Папка по умолчанию", Action: "settings_default_workdir"}})
 		}
@@ -156,9 +164,6 @@ func RenderCategory(ctx context.Context, preferences settingsport.Preferences, p
 }
 
 func defaultProviderValue(values map[domain.ComputerID]domain.Provider) string {
-	if len(values) == 0 {
-		return "не задан"
-	}
 	for _, provider := range values {
 		return string(provider)
 	}
@@ -166,9 +171,6 @@ func defaultProviderValue(values map[domain.ComputerID]domain.Provider) string {
 }
 
 func defaultWorkdirValue(values map[domain.ComputerID]string) string {
-	if len(values) == 0 {
-		return "не задана"
-	}
 	for _, workdir := range values {
 		if workdir != "" {
 			return workdir
@@ -189,7 +191,7 @@ func CategoryForAction(action string) (Category, bool) {
 		return CategoryArchive, true
 	case "settings_background_questions", "settings_background_errors":
 		return CategoryNotifications, true
-	case "settings_standby", "settings_session_naming", "settings_default_provider", "settings_default_workdir", "settings_clear_creation_defaults", "settings_rename_node":
+	case "settings_hidden_directories", "settings_standby", "settings_session_naming", "settings_default_provider", "settings_default_workdir", "settings_clear_creation_defaults", "settings_rename_node":
 		return CategoryCreation, true
 	case "settings_provider_codex", "settings_provider_claude", "authorize_codex", "authorize_claude", "settings_auto_approve_commands":
 		return CategoryProviders, true

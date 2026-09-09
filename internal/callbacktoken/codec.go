@@ -131,6 +131,7 @@ const (
 	ActionSettingsScreenCaptureLimit           Action = 86
 	ActionSettingsTechnicalOutputLines         Action = 87
 	ActionSettingsTechnicalCommandLines        Action = 88
+	ActionSettingsHiddenDirectories            Action = 89
 )
 
 // Fields is the semantic callback payload. SessionID identifies the selected
@@ -262,7 +263,7 @@ func validAction(action Action) bool {
 		ActionSettingsCategory, ActionMenuNodes, ActionSelectNode,
 		ActionSettingsScreen, ActionSettingsScreenCaptureLimit, ActionSettingsDetail, ActionSettingsPageLimit, ActionSettingsContinueExisting,
 		ActionSettingsTechnicalActions, ActionSettingsTechnicalOutputLines, ActionSettingsTechnicalCommandLines, ActionSettingsBackgroundQuestions, ActionSettingsBackgroundErrors,
-		ActionSettingsArchiveRecommendations,
+		ActionSettingsArchiveRecommendations, ActionSettingsHiddenDirectories,
 		ActionSettingsDefaultProvider, ActionSettingsDefaultWorkdir, ActionSettingsClearCreationDefaults,
 		ActionSettingsLifetimeNever, ActionSettingsLifetime6Hours, ActionSettingsLifetime12Hours,
 		ActionSettingsLifetime24Hours, ActionSettingsLifetime48Hours,
@@ -314,7 +315,7 @@ func validTarget(action Action, target int) bool {
 		ActionCreateWorkdir, ActionCreateConfirm, ActionCreateCodex, ActionCreateClaude,
 		ActionSettingsScreen, ActionSettingsScreenCaptureLimit, ActionSettingsDetail, ActionSettingsPageLimit, ActionSettingsContinueExisting,
 		ActionSettingsTechnicalActions, ActionSettingsTechnicalOutputLines, ActionSettingsTechnicalCommandLines, ActionSettingsBackgroundQuestions, ActionSettingsBackgroundErrors,
-		ActionSettingsArchiveRecommendations,
+		ActionSettingsArchiveRecommendations, ActionSettingsHiddenDirectories,
 		ActionSettingsDefaultProvider, ActionSettingsDefaultWorkdir, ActionSettingsClearCreationDefaults,
 		ActionSettingsLifetimeNever, ActionSettingsLifetime6Hours, ActionSettingsLifetime12Hours,
 		ActionSettingsLifetime24Hours, ActionSettingsLifetime48Hours,

@@ -23,3 +23,8 @@ type TechnicalOutputPreferences interface {
 type TechnicalCommandPreferences interface {
 	CycleTechnicalCommandLines(context.Context) error
 }
+
+// HiddenDirectoryPreferences controls dot-directory visibility in the browser.
+type HiddenDirectoryPreferences interface {
+	ToggleHiddenDirectories(context.Context) error
+}

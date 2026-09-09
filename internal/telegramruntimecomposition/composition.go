@@ -191,7 +191,7 @@ func semanticActionFromPlan(plan telegrampipeline.CallbackPlan) (telegramcontrol
 		kind = telegramcontroller.SemanticSettingsPageLimit
 	case telegramui.ActionSettingsContinueExisting:
 		kind = telegramcontroller.SemanticSettingsContinueExisting
-	case telegramui.ActionSettingsTechnicalActions, telegramui.ActionSettingsTechnicalOutputLines, telegramui.ActionSettingsTechnicalCommandLines:
+	case telegramui.ActionSettingsTechnicalActions, telegramui.ActionSettingsTechnicalOutputLines, telegramui.ActionSettingsTechnicalCommandLines, telegramui.ActionSettingsHiddenDirectories:
 		kind = telegramcontroller.SemanticActionKind(plan.Action)
 	case telegramui.ActionSettingsBackgroundQuestions:
 		kind = telegramcontroller.SemanticSettingsBackgroundQuestions
@@ -314,7 +314,7 @@ func callbackEffectForAction(action telegramui.Action) telegrampipeline.Callback
 	case telegramui.ActionSettingsPageLimit, telegramui.ActionSettingsAutoApproveCommands, telegramui.ActionSettingsContinueExisting,
 		telegramui.ActionSettingsTechnicalActions, telegramui.ActionSettingsTechnicalOutputLines, telegramui.ActionSettingsTechnicalCommandLines, telegramui.ActionSettingsBackgroundQuestions,
 		telegramui.ActionSettingsBackgroundErrors, telegramui.ActionSettingsLifetimeNever,
-		telegramui.ActionSettingsArchiveRecommendations,
+		telegramui.ActionSettingsArchiveRecommendations, telegramui.ActionSettingsHiddenDirectories,
 		telegramui.ActionSettingsDefaultProvider, telegramui.ActionSettingsDefaultWorkdir, telegramui.ActionSettingsClearCreationDefaults,
 		telegramui.ActionSettingsLifetime6Hours, telegramui.ActionSettingsLifetime12Hours,
 		telegramui.ActionSettingsLifetime24Hours, telegramui.ActionSettingsLifetime48Hours,
@@ -496,7 +496,7 @@ func telegramUIAction(action telegramcontroller.SemanticActionKind) (telegramui.
 		return telegramui.ActionSettingsPageLimit, nil
 	case telegramcontroller.SemanticSettingsContinueExisting:
 		return telegramui.ActionSettingsContinueExisting, nil
-	case telegramcontroller.SemanticSettingsTechnicalActions, telegramcontroller.SemanticSettingsTechnicalOutputLines, telegramcontroller.SemanticSettingsTechnicalCommandLines:
+	case telegramcontroller.SemanticSettingsTechnicalActions, telegramcontroller.SemanticSettingsTechnicalOutputLines, telegramcontroller.SemanticSettingsTechnicalCommandLines, telegramcontroller.SemanticSettingsHiddenDirectories:
 		return telegramui.Action(action), nil
 	case telegramcontroller.SemanticSettingsBackgroundQuestions:
 		return telegramui.ActionSettingsBackgroundQuestions, nil
