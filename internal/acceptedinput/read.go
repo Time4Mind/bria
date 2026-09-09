@@ -33,6 +33,9 @@ func Lookup(ctx context.Context, journal JournalReader, sessionID, messageID str
 }
 
 // RootReady is for fresh-root admission only, not the live steering path.
+// An earlier accepted input is already fenced from replay and must not block a
+// later input after an archive reopen. Unknown or failed delivery remains a
+// barrier because its provider hand-off was never durably classified.
 func RootReady(ctx context.Context, journal JournalReader, sessionID, messageID string, sequence uint64) (bool, error) {
 	input, inputs, err := Lookup(ctx, journal, sessionID, messageID, sequence)
 	if err != nil {
@@ -42,6 +45,9 @@ func RootReady(ctx context.Context, journal JournalReader, sessionID, messageID 
 		return false, ErrInvalidReceipt
 	}
 	for _, prior := range inputs {
+		if prior.Sequence < sequence && prior.Phase == messagejournal.InputAccepted {
+			continue
+		}
 		if prior.Sequence < sequence && prior.Phase != messagejournal.InputCompleted && prior.Phase != messagejournal.InputTerminalFailed {
 			return false, nil
 		}

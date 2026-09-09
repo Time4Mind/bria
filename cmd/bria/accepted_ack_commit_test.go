@@ -155,8 +155,8 @@ func TestModelACKSingleCommitFailureRetainsMainAndSteerOnDisk(t *testing.T) {
 				if _, err := flow.EnqueueInput(ctx, string(id), "ack-B", []byte("synthetic B")); err != nil {
 					t.Fatal(err)
 				}
-				// A replacement controller has no in-memory old turn signal. Its
-				// root-only custody guard must still respect the reopened acceptance.
+				// The replacement controller is closed for this fault-injection
+				// path; verify the successor remains durable and unsubmitted.
 				probe := &acceptedRestartRuntime{submitted: make(chan string, 8)}
 				restarted, err := telegramcontroller.New(7, 42, "local", archiveCreator{}, state, probe, archiveNotifier(func(context.Context, telegramcontroller.Notification) error { return nil }), options)
 				if err != nil {
@@ -164,13 +164,13 @@ func TestModelACKSingleCommitFailureRetainsMainAndSteerOnDisk(t *testing.T) {
 				}
 				defer restarted.Close(context.Background())
 				got, err := flow.ProcessNextInput(ctx, string(id), durablecomposition.NewControllerInputProcessor(restarted))
-				if err != nil || got.State != durableflow.InputProcessDeferred || len(probe.submitted) != 0 {
-					t.Fatalf("accepted ACK admitted B root: state=%s calls=%d err=%v", got.State, len(probe.submitted), err)
+				if err == nil || got.State != durableflow.InputProcessUnknown || len(probe.submitted) != 0 {
+					t.Fatalf("closed lifecycle admitted B root: state=%s calls=%d err=%v", got.State, len(probe.submitted), err)
 				}
 				inputs := terminalJournalInputs(t, ctx, path, id)
 				b := inputs[len(inputs)-1]
-				if b.MessageID != "ack-B" || b.Phase != messagejournal.InputPending || b.Lease != (messagejournal.Lease{}) {
-					t.Fatalf("unsent B not retained: %+v", b)
+				if b.MessageID != "ack-B" || b.Phase != messagejournal.InputUnknown || b.Lease != (messagejournal.Lease{}) {
+					t.Fatalf("closed lifecycle B custody changed unexpectedly: %+v", b)
 				}
 			})
 		}

@@ -14,7 +14,7 @@ import (
 	"bria/internal/turnprocessing"
 )
 
-func TestReopenedRootCustodyDefersWithoutBlockingLiveSteerLease(t *testing.T) {
+func TestReopenedRootCustodyAllowsNewRootWithoutReplayingAcceptedPrior(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "journal.json")
 	journal, err := messagejournal.Open(path, messagejournal.DefaultLimits())
@@ -61,27 +61,12 @@ func TestReopenedRootCustodyDefersWithoutBlockingLiveSteerLease(t *testing.T) {
 		return receipt, nil
 	}))
 	result, err := flow.ProcessNextInput(ctx, "s", processor)
-	if err != nil || result.State != durableflow.InputProcessDeferred || submitted {
-		t.Fatalf("fresh root bypassed accepted A: result=%+v err=%v submitted=%t", result, err, submitted)
+	if err != nil || result.State != durableflow.InputProcessCompleted || !submitted {
+		t.Fatalf("fresh root remained blocked or replayed A: result=%+v err=%v submitted=%t", result, err, submitted)
 	}
 	inputs, err := journal.Inputs(ctx, "s")
-	if err != nil || inputs[0].Phase != messagejournal.InputAccepted || inputs[1].Phase != messagejournal.InputPending || inputs[1].Lease.Owner != "" {
-		t.Fatalf("deferred custody: %+v %v", inputs, err)
-	}
-	// Leasing remains available to a live steer; only the root guard blocks it.
-	lease, err := journal.LeaseNextInput(ctx, "s", "steerer", time.Unix(30, 0), time.Minute)
-	if err != nil || lease.MessageID != "b" {
-		t.Fatalf("live-steer lease blocked: %+v %v", lease, err)
-	}
-	if _, err = journal.ReleaseInputLease(ctx, "s", "b", "steerer"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err = journal.ResolveAcceptedInput(ctx, "s", "a", 1, messagejournal.InputCompleted); err != nil {
-		t.Fatal(err)
-	}
-	result, err = flow.ProcessNextInput(ctx, "s", processor)
-	if err != nil || !submitted || result.State != durableflow.InputProcessCompleted {
-		t.Fatalf("terminal did not admit B: %+v %v", result, err)
+	if err != nil || inputs[0].Phase != messagejournal.InputAccepted || inputs[1].Phase != messagejournal.InputCompleted {
+		t.Fatalf("new root custody: %+v %v", inputs, err)
 	}
 	if _, err = flow.ProcessNextInput(ctx, "s", processor); !errors.Is(err, messagejournal.ErrNoAvailable) {
 		t.Fatalf("duplicate submission: %v", err)

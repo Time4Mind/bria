@@ -16,7 +16,7 @@ func rootInputReady(flow *durableflow.Flow, ctx context.Context, session, messag
 	return flow.RootInputReady(ctx, session, message, sequence)
 }
 
-func TestRootInputAdmissionRequiresEarlierTerminalAfterReopen(t *testing.T) {
+func TestRootInputAdmissionAllowsNewInputAfterReopenWithAcceptedPrior(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "journal.json")
 	j := openJournal(t, path)
@@ -34,8 +34,8 @@ func TestRootInputAdmissionRequiresEarlierTerminalAfterReopen(t *testing.T) {
 	}
 	j = openJournal(t, path)
 	f = newFlow(t, j, nil, nil, time.Unix(20, 0))
-	if ready, err := rootInputReady(f, ctx, "s", "b", 2); ready || err != nil {
-		t.Fatalf("accepted prior admitted root: %v %v", ready, err)
+	if ready, err := rootInputReady(f, ctx, "s", "b", 2); !ready || err != nil {
+		t.Fatalf("accepted prior blocked new root: %v %v", ready, err)
 	}
 	for _, seq := range []uint64{0, 1, 3} {
 		if _, err := rootInputReady(f, ctx, "s", "b", seq); !errors.Is(err, durableflow.ErrInvalidHandoff) {
@@ -49,7 +49,7 @@ func TestRootInputAdmissionRequiresEarlierTerminalAfterReopen(t *testing.T) {
 		t.Fatal(err)
 	}
 	if ready, err := rootInputReady(f, ctx, "s", "b", 2); !ready || err != nil {
-		t.Fatalf("terminal did not release root: %v %v", ready, err)
+		t.Fatalf("new root became unavailable after terminal transition: %v %v", ready, err)
 	}
 }
 
@@ -156,8 +156,8 @@ func TestRecoveryUncertainAcceptedAndPreacceptanceRemainDistinct(t *testing.T) {
 				if err != nil || len(inputs) != 2 || inputs[0].Phase != wantPhase || inputs[1].Phase != messagejournal.InputPending {
 					t.Fatalf("recovery changed custody: %#v %v", inputs, err)
 				}
-				if ready, err := f.RootInputReady(ctx, "s", "b", 2); ready || err != nil {
-					t.Fatalf("pending recovery released root: %v %v", ready, err)
+				if ready, err := f.RootInputReady(ctx, "s", "b", 2); ready != accepted || err != nil {
+					t.Fatalf("recovery admission mismatch: %v %v", ready, err)
 				}
 				resolver = acceptedResolverFunc(func(_ context.Context, in durableflow.AcceptedInput) (durableflow.AcceptedResolutionResult, error) {
 					return durableflow.AcceptedResolutionResult{SessionID: in.SessionID, MessageID: in.MessageID, Sequence: in.Sequence, Resolution: durableflow.AcceptedCompleted}, nil
@@ -243,7 +243,7 @@ func TestMixedMalformedRecoveryRetainsUnresolvedAcceptances(t *testing.T) {
 	if err != nil || len(inputs) != 4 || inputs[0].Phase != messagejournal.InputCompleted || inputs[1].Phase != messagejournal.InputAccepted || inputs[2].Phase != messagejournal.InputAccepted || inputs[3].Phase != messagejournal.InputPending {
 		t.Fatalf("mixed recovery lost custody: %#v %v", inputs, err)
 	}
-	if ready, err := f.RootInputReady(ctx, "s", "d", 4); ready || err != nil {
-		t.Fatalf("malformed proof released successor: %v %v", ready, err)
+	if ready, err := f.RootInputReady(ctx, "s", "d", 4); !ready || err != nil {
+		t.Fatalf("accepted prior blocked successor: %v %v", ready, err)
 	}
 }

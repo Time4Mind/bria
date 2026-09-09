@@ -11,7 +11,7 @@ import (
 	"bria/internal/messagejournal"
 )
 
-func TestExactCustodySnapshotDoesNotAdmitRootUntilTerminal(t *testing.T) {
+func TestExactCustodySnapshotAllowsNewRootBehindAcceptedPrior(t *testing.T) {
 	ctx := context.Background()
 	j, err := messagejournal.Open(filepath.Join(t.TempDir(), "journal.json"), messagejournal.DefaultLimits())
 	if err != nil {
@@ -37,8 +37,8 @@ func TestExactCustodySnapshotDoesNotAdmitRootUntilTerminal(t *testing.T) {
 	if _, _, err := acceptedinput.Lookup(ctx, j, "s", "a", 2); !errors.Is(err, acceptedinput.ErrInvalidReceipt) {
 		t.Fatal("stale tuple matched")
 	}
-	if ready, err := acceptedinput.RootReady(ctx, j, "s", "b", 2); ready || err != nil {
-		t.Fatalf("accepted admitted root: %v %v", ready, err)
+	if ready, err := acceptedinput.RootReady(ctx, j, "s", "b", 2); !ready || err != nil {
+		t.Fatalf("accepted prior blocked new root: %v %v", ready, err)
 	}
 	if _, err := j.ResolveAcceptedInput(ctx, "s", "a", 1, messagejournal.InputTerminalFailed); err != nil {
 		t.Fatal(err)

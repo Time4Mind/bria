@@ -2,7 +2,6 @@ package durablecomposition_test
 
 import (
 	"context"
-	"errors"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -13,7 +12,6 @@ import (
 	"bria/internal/durableflow"
 	"bria/internal/messagejournal"
 	"bria/internal/telegramcontroller"
-	"bria/internal/turnprocessing"
 )
 
 type asyncProcessor func(context.Context, telegramcontroller.DurableLeasedInput, telegramcontroller.DurableInputCallbacks) (telegramcontroller.DurableInputProcessReceipt, error)
@@ -89,15 +87,15 @@ func TestPendingAcceptanceRetainsJournalUntilExactAsyncCompletion(t *testing.T) 
 				}
 				assertPhase(messagejournal.InputAccepted)
 			}
-			// An uncertain observation cannot erase acceptance. Only root
-			// admission blocks later work; the lease seam still permits steers.
+			// An uncertain observation cannot erase acceptance. A later root may
+			// proceed because the accepted input is already fenced from replay.
 			if _, err = journal.MarkInputUnknown(ctx, "s", "first"); err != nil {
 				t.Fatal(err)
 			}
 			assertPhase(messagejournal.InputAccepted)
 			custody := durablecomposition.InputCustody{Flow: flow}
-			if err = custody.CheckRootInput(ctx, telegramcontroller.DurableLeasedInput{SessionID: "s", MessageID: "later", Sequence: 3}); !errors.Is(err, turnprocessing.ErrInputDeferred) {
-				t.Fatalf("accepted pending root admitted: %v", err)
+			if err = custody.CheckRootInput(ctx, telegramcontroller.DurableLeasedInput{SessionID: "s", MessageID: "later", Sequence: 3}); err != nil {
+				t.Fatalf("accepted pending root blocked: %v", err)
 			}
 			cancelled, cancel := context.WithCancel(ctx)
 			cancel()

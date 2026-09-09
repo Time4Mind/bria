@@ -1,5 +1,14 @@
 # Handoff: статус и следующий план
 
+> Повторная приёмка: владелец восстановил workdir5, новый запрос был сохранён,
+> Проверено12:27UTC: ready/gen2; новый783531603 сохранён pending, старый558 accepted.
+> Public RootReady на live-snapshot возвращал false: отдельный admission guard
+> блокировал новый root после успешного archive reopen. Фикс F5: accepted не
+> блокирует следующий root, старый accepted не leaseable; unknown/failed
+> сохраняют защитный барьер. Полный gate PASS, выпуск в процессе. Диагноз:
+> [ARCHIVE_RESUME_DIAGNOSIS.md](ARCHIVE_RESUME_DIAGNOSIS.md). В этом ходе только
+> state не менялся вручную; pending-запрос проверю после выпуска.
+
 > Текущий запрос: исправить явное восстановление из архива при accepted-запросе
 > без terminal receipt и убрать техническое сообщение о потере связи из карточки.
 > Договор, проверенная причина и текущий todo:

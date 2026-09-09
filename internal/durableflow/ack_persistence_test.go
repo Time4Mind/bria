@@ -77,8 +77,8 @@ func TestExactObservedAcceptanceRetriesOnlyJournalCommit(t *testing.T) {
 				t.Fatalf("ACK not durable: %#v %v", inputs, err)
 			}
 			ready, err := newFlow(t, reopened, nil, nil, time.Unix(100, 0)).RootInputReady(ctx, "s", "b", 2)
-			if ready || err != nil {
-				t.Fatalf("root bypassed acceptance: %v %v", ready, err)
+			if !ready || err != nil {
+				t.Fatalf("accepted prior blocked root: %v %v", ready, err)
 			}
 		})
 	}
@@ -225,7 +225,7 @@ func TestLeasedPendingRecoveryRequiresExactNativeProof(t *testing.T) {
 				t.Fatal("unproved lease released")
 			}
 			ready, err := f.RootInputReady(ctx, "s", "b", 2)
-			if err != nil || ready != (mode == "completed" || mode == "terminal_failed") {
+			if err != nil || ready != (mode == "accepted" || mode == "completed" || mode == "terminal_failed") {
 				t.Fatalf("wrong successor admission: %v %v", ready, err)
 			}
 		})

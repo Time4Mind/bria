@@ -46,8 +46,8 @@ func TestKnownUnsentDeferredInputRemainsPendingBehindAcceptedUntilRecovery(t *te
 	if err != nil || len(inputs) != 3 || inputs[0].Phase != messagejournal.InputAccepted || inputs[1].Phase != messagejournal.InputPending || inputs[1].Lease.Owner != "" || inputs[2].Phase != messagejournal.InputPending {
 		t.Fatalf("unsent B lost custody: %#v %v", inputs, err)
 	}
-	if ready, err := rootInputReady(flow, ctx, "s", "b", 2); err != nil || ready {
-		t.Fatalf("accepted A admitted new root: %v %v", ready, err)
+	if ready, err := rootInputReady(flow, ctx, "s", "b", 2); err != nil || !ready {
+		t.Fatalf("accepted A blocked new root: %v %v", ready, err)
 	}
 	if _, err := journal.ResolveAcceptedInput(ctx, "s", "a", first.Sequence, messagejournal.InputTerminalFailed); err != nil {
 		t.Fatal(err)

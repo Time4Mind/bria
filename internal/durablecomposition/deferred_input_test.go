@@ -2,7 +2,6 @@ package durablecomposition_test
 
 import (
 	"context"
-	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -104,7 +103,7 @@ func TestControllerDeferredReceiptPreservesPendingJournalBehindFailedPrior(t *te
 		t.Fatalf("known-unsent B not pending: %#v %v", inputs, err)
 	}
 	custody := durablecomposition.InputCustody{Flow: flow}
-	if err := custody.CheckRootInput(ctx, telegramcontroller.DurableLeasedInput{SessionID: "s", MessageID: "b", Sequence: 2}); !errors.Is(err, turnprocessing.ErrInputDeferred) {
-		t.Fatalf("accepted A bypassed: %v", err)
+	if err := custody.CheckRootInput(ctx, telegramcontroller.DurableLeasedInput{SessionID: "s", MessageID: "b", Sequence: 2}); err != nil {
+		t.Fatalf("accepted A blocked: %v", err)
 	}
 }

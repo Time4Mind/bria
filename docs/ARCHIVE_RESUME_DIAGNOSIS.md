@@ -1,5 +1,34 @@
 # Archive resume diagnosis 2026-09-09
 
+## Reopened user acceptance defect: new input blocked
+
+2026-09-09 owner reports archive reopen succeeded but next request is not accepted.
+Task contract: diagnose exact workdir5/session d61b7c05-923e-43e1-a369-a8571e619075
+using current local code, logs and state from12:27UTC (15:27 Moscow). Read-only
+production, no replay/restart/state edit. Acceptance is trace from owner ingress
+through admission and native terminal; local diagnostic receipt only.
+- F1 verified: archive resume completed12:27:40UTC; saved session ready with native
+  01a084e6-518f-7e21-a292-958bb019269d generation2 since12:27:38UTC.
+- F2 verified: new input783531603 sequence284 persisted pending; preprocessing
+  completed12:27:51UTC. Prior783531558 sequence142 remains accepted, earlier551
+  completed. No need for owner to send the same request again.
+- F3 verified: acceptedinput.RootReady on read-only actual journal snapshot returns
+  false,nil for input603 (public seam probe .tmp/archive-root-probe.go).
+  It demands all earlier inputs completed/terminal_failed. Controller
+  ProcessDurableInput calls this guard; bridge maps deferred to pending lease
+  release. Archive guard fix did not address fresh-input admission after reopen.
+- F4 verified: exact managed tmux binding matches session/native ID; pane%0 PID40192
+  alive(node), displays interrupted previous conversation and idle input prompt.
+  Bria PID44368 running/sole lock holder. No keys sent. Native header shows Sol,
+  while preprocessing receipt reports Luna; model mismatch not investigated here.
+- F5 complete: RootReady now ignores earlier InputAccepted records, which are
+  already fenced from replay; InputUnknown/InputFailed/InputPending still block.
+  Regression coverage updated through acceptedinput, durableflow and
+  durablecomposition seams, including archive reopen successor admission.
+  Full local gate passes; release follows the standing Bria authorization.
+Separate log issue: one duplicate resume callback12:27:41 failed presentation_missing;
+successful resume precedes it. This does not explain root_ready=false for new input.
+
 ## Final release receipt
 
 R1-R4 complete at 2026-09-09 12:09 UTC (15:09 Moscow). Runtime source

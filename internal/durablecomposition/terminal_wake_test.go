@@ -166,10 +166,14 @@ func TestTerminalWakeDrainsStoppingQueueWithoutNewIncomingWake(t *testing.T) {
 					t.Fatal("committed terminal did not wake queued input")
 				}
 			} else {
+				// A retained accepted parent is already fenced from replay, so
+				// an unresolved terminal observation must not block the next
+				// input after the session is reopened.
 				wantLater = messagejournal.InputPending
 				wantParent = messagejournal.InputPhase(outcome)
 				if outcome == telegramcontroller.DurableInputUnknown {
 					wantParent = messagejournal.InputAccepted
+					wantLater = messagejournal.InputCompleted
 				}
 				if err := dispatcher.ProcessReadySession(ctx, "s"); err != nil {
 					t.Fatal(err)
@@ -190,10 +194,12 @@ func TestTerminalWakeDrainsStoppingQueueWithoutNewIncomingWake(t *testing.T) {
 			if err != nil || len(inputs) != 2 || inputs[0].Phase != wantParent || inputs[1].Phase != wantLater {
 				t.Fatalf("terminal wake phases: %#v %v", inputs, err)
 			}
-			select {
-			case id := <-processed:
-				t.Fatalf("duplicate/unblocked provider input %q", id)
-			default:
+			if outcome != telegramcontroller.DurableInputUnknown {
+				select {
+				case id := <-processed:
+					t.Fatalf("duplicate/unblocked provider input %q", id)
+				default:
+				}
 			}
 		})
 	}
