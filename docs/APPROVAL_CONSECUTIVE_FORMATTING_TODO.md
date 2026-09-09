@@ -27,8 +27,8 @@ the task.
 
 | ID | Required outcome | Status | Evidence / open boundary |
 | --- | --- | --- | --- |
-| A33.1 | Distinct consecutive approvals in one generation are each accepted once | verified | Regression covers full -> full, incomplete -> full and full -> incomplete with distinct transport hashes |
+| A33.1 | Distinct consecutive approvals in one generation are each accepted once | verified | Live YT -> YQL transition exposed missing receipt handoff; RED/GREEN now requires receipt plus a different active fingerprint to confirm the first Enter |
 | A33.2 | Stale/unknown outcomes cannot duplicate an Enter | verified | Typed pre-Enter stale retries only on changed hash; unknown post-Enter outcome blocks the generation |
 | A33.3 | Auto-approve OFF and foreign pickers remain untouched | verified | Focused OFF, duplicate and generic-picker regressions pass |
 | A33.4 | Approval text is literal and structurally readable in Rich Telegram wire | verified | Dedicated view bounds every literal block and the whole Rich card; transport test requires `sendRichMessage` |
-| A33.5 | Full verification and standing-authorized release | in progress | `make check-full` passed with tests, vet, race, packaging and executable trio; remote CI and service postflight remain |
+| A33.5 | Full verification and standing-authorized release | in progress | Fresh `make check-full` passes after the live receipt-handoff fix; exact follow-up CI and redeploy remain |

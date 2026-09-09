@@ -163,8 +163,8 @@ func AcceptCodexCommandOnce(ctx context.Context, terminal Terminal, fingerprint 
 		if err != nil {
 			return err
 		}
-		_, interactive := InteractiveContent(screen)
-		if !interactive && !strings.Contains(screen, "Would you like to run the following command?") && approvalReceiptCount(screen) > beforeReceipts {
+		active, pending := ParseCodexCommandApproval(screen)
+		if approvalReceiptCount(screen) > beforeReceipts && (!pending || active.Fingerprint != fingerprint) {
 			return nil
 		}
 	}

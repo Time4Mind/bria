@@ -185,6 +185,34 @@ func (f *changingApprovalTerminal) Capture(context.Context) (string, error) {
 	}
 	return f.screen, nil
 }
+
+type chainedApprovalTerminal struct {
+	approvalTerminal
+	next string
+}
+
+func (f *chainedApprovalTerminal) Key(_ context.Context, key string) error {
+	f.keys = append(f.keys, key)
+	f.screen = "✔ You approved codex to run the first command this time\n" + f.next
+	return nil
+}
+
+func TestCodexApprovalAcceptsReceiptFollowedImmediatelyByDifferentApproval(t *testing.T) {
+	first := approvalFixture(t)
+	secondBody, err := os.ReadFile("testdata/codex-command-approval-wiki.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	request, _ := ParseCodexCommandApproval(first)
+	terminal := &chainedApprovalTerminal{approvalTerminal: approvalTerminal{screen: first}, next: string(secondBody)}
+	if err := AcceptCodexCommandOnce(context.Background(), terminal, request.Fingerprint); err != nil {
+		t.Fatalf("direct approval-to-approval receipt was not confirmed: %v", err)
+	}
+	if strings.Join(terminal.keys, ",") != "Enter" {
+		t.Fatalf("approval keys=%v, want one Enter", terminal.keys)
+	}
+}
+
 func TestCodexApprovalRereadsBeforeInput(t *testing.T) {
 	fixture := approvalFixture(t)
 	request, _ := ParseCodexCommandApproval(fixture)
