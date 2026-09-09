@@ -936,7 +936,6 @@ type Controller struct {
 	createFlow                      *sessioncreation.Flow
 	creationEnvironment             sessioncreation.Environment
 	quotas                          telegramstatus.Reader
-	quotaRefreshInFlight            bool
 	models                          ModelCatalog
 	native                          sessionruntime.NativeController
 	nativeApprovals                 nativeapprovalflow.Flow

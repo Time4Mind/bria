@@ -2,6 +2,7 @@ package telegramcontroller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -65,6 +66,8 @@ func (controller *Controller) statusSemanticResult(ctx context.Context) (Semanti
 }
 
 func (controller *Controller) statusSemanticResultRefresh(ctx context.Context) (SemanticActionResult, error) {
+	// The callback must publish this cached projection first. The runtime starts
+	// the provider collection only after that Telegram edit is committed.
 	return controller.statusSemanticResultWithRefresh(ctx, true)
 }
 
@@ -75,14 +78,6 @@ func (controller *Controller) statusSemanticResultWithRefresh(ctx context.Contex
 	}
 	var quotas []telegramstatus.Snapshot
 	if controller.quotas != nil {
-		if refresh {
-			// Quota collection starts provider CLIs and may take tens of seconds.
-			// It is auxiliary work and must never hold the callback path hostage:
-			// render the cached snapshot now, then refresh it in the controller's
-			// lifetime context. A single-flight guard prevents repeated taps from
-			// spawning an unbounded set of provider processes.
-			controller.startQuotaRefresh()
-		}
 		quotas, err = controller.quotas.Snapshots(ctx)
 		if err != nil {
 			if refresh {
@@ -107,27 +102,25 @@ func (controller *Controller) statusSemanticResultWithRefresh(ctx context.Contex
 	return SemanticActionResult{Surface: &SemanticSurface{Text: telegramstatus.Render(time.Now(), items, quotas), RichMarkdown: true, Rows: rows}}, nil
 }
 
-func (controller *Controller) startQuotaRefresh() {
-	refresher, ok := controller.quotas.(interface{ Refresh(context.Context) error })
-	if !ok {
-		return
+// RefreshStatus synchronously collects provider quotas and projects the fresh
+// Status surface. The runtime invokes it outside the Telegram callback path.
+func (controller *Controller) RefreshStatus(ctx context.Context) (SemanticActionResult, error) {
+	if ctx == nil {
+		return SemanticActionResult{}, errors.New("status refresh context is required")
 	}
-	controller.mu.Lock()
-	if controller.quotaRefreshInFlight || controller.closed {
-		controller.mu.Unlock()
-		return
-	}
-	controller.quotaRefreshInFlight = true
-	root := controller.rootContext
-	controller.mu.Unlock()
-	go func() {
-		defer func() {
-			controller.mu.Lock()
-			controller.quotaRefreshInFlight = false
-			controller.mu.Unlock()
-		}()
-		_ = refresher.Refresh(root)
+	refreshContext, cancel := context.WithCancel(ctx)
+	stop := context.AfterFunc(controller.rootContext, cancel)
+	defer func() {
+		stop()
+		cancel()
 	}()
+	refresher, ok := controller.quotas.(interface{ Refresh(context.Context) error })
+	if ok {
+		if err := refresher.Refresh(refreshContext); err != nil {
+			return SemanticActionResult{}, err
+		}
+	}
+	return controller.statusSemanticResult(refreshContext)
 }
 
 func (controller *Controller) openSessionsSemanticResult(ctx context.Context) (SemanticActionResult, error) {

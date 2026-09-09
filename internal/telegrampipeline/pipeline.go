@@ -85,6 +85,7 @@ const (
 
 type CallbackRegistry interface {
 	Replace(context.Context, CallbackPresentation) error
+	Current(context.Context, domain.SessionID) (CallbackPresentation, bool, error)
 	Claim(context.Context, CallbackClaim) (CallbackClaimResult, error)
 	InvalidateCarrier(context.Context, telegramstate.Carrier) error
 }
@@ -898,6 +899,27 @@ func (registry *MemoryCallbackRegistry) Replace(ctx context.Context, presentatio
 		claimed:      make(map[string]callbackClaimIdentity),
 	}
 	return nil
+}
+func (registry *MemoryCallbackRegistry) Current(ctx context.Context, sessionID domain.SessionID) (CallbackPresentation, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return CallbackPresentation{}, false, err
+	}
+	if registry == nil || registry.now == nil || sessionID == "" {
+		return CallbackPresentation{}, false, errors.New("callback registry and presentation identity are required")
+	}
+	registry.mu.Lock()
+	defer registry.mu.Unlock()
+	current, found := registry.presentations[sessionID]
+	if !found || !current.presentation.ExpiresAt.After(registry.now()) {
+		return CallbackPresentation{}, false, nil
+	}
+	result := current.presentation
+	result.TokenIDs = append([]string(nil), current.presentation.TokenIDs...)
+	result.Recovery = cloneCallbackRecoveryBinding(current.presentation.Recovery)
+	result.AcceptedTurnRecovery = cloneAcceptedTurnRecoveryBinding(current.presentation.AcceptedTurnRecovery)
+	result.StatusRecovery = cloneStatusRecoveryBinding(current.presentation.StatusRecovery)
+	result.ArtifactRetry = cloneArtifactRetryBinding(current.presentation.ArtifactRetry)
+	return result, true, nil
 }
 func (registry *MemoryCallbackRegistry) Claim(ctx context.Context, claim CallbackClaim) (CallbackClaimResult, error) {
 	if err := ctx.Err(); err != nil {

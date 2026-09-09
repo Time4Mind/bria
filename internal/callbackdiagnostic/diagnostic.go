@@ -50,7 +50,7 @@ func SafeCode(code string) string {
 	case "token_invalid", "token_expired", "token_fields_invalid", "token_version_unsupported", "token_action_unknown",
 		"presentation_missing", "presentation_replayed", "card_missing", "card_carrier_mismatch", "callback_origin_invalid",
 		"callback_binding_mismatch", "registry_failed", "card_load_failed", "operation_failed", "cancelled", "deadline_exceeded",
-		"card_commit_failed", "presentation_bind_failed":
+		"card_commit_failed", "presentation_bind_failed", "provider_failure", "invalid_projection", "stale_presentation":
 		return code
 	default:
 		return "operation_failed"

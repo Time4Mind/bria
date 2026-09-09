@@ -1,5 +1,14 @@
 # Handoff: статус и следующий план
 
+> A35 исправлен локально: кешированная карточка сначала подтверждается Telegram,
+> затем один background poll автоматически редактирует только ту же всё ещё
+> текущую signed Status-проекцию. Повторные клики используют один poll, а уход в
+> меню/сессию блокирует поздний edit. Public RED/GREEN, 10x race и architecture
+> gate и финальный versioned `make check-full` PASS; safe `quota.refresh` timing
+> не содержит значений лимитов. Далее push/CI, установка, restart и live
+> one-click проверка.
+> Договор/todo: [STATUS_REFRESH_DIAGNOSIS_TODO.md](STATUS_REFRESH_DIAGNOSIS_TODO.md).
+
 > A34 закрыт: generation хранит набор command-derived uncertain DecisionID,
 > поэтому старый запрос не replay-ится, а distinct approval проходит. Runtime
 > `d4d5430` в origin/main, полный versioned gate и оба exact-SHA CI PASS.

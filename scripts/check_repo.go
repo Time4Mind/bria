@@ -1697,12 +1697,12 @@ var packagePolicies = map[string]packagePolicy{
 		maxProductionLines: 400,
 	},
 	"internal/telegramruntimecomposition": {
-		responsibility: "project typed Telegram controller actions, signed model selectors and durable delivery receipts",
+		responsibility: "project typed Telegram controller actions, coordinate current-surface status refreshes, signed model selectors and durable delivery receipts",
 		allowedImports: []string{
-			"internal/controllertelemetry",
+			"internal/controllertelemetry", "internal/telegrambridge", "internal/telegramtrace",
 			"internal/coordinator", "internal/domain", "internal/telegramcontroller", "internal/telegramflow", "internal/telegrampipeline", "internal/telegramrecoverycomposition", "internal/telegramstate", "internal/telegramui",
 		},
-		maxProductionLines: 650,
+		maxProductionLines: 900,
 	},
 	"internal/telegramcompletioncomposition": {
 		responsibility: "route durable session output into active cards or policy-controlled background notifications",
@@ -1820,12 +1820,12 @@ var packagePolicies = map[string]packagePolicy{
 		maxProductionLines: 700,
 	},
 	"internal/singlemachinecomposition": {
-		responsibility: "compose the single-computer Bria process",
+		responsibility: "compose the single-computer Bria process and bind post-commit status refresh delivery",
 		allowedImports: []string{
 			"internal/providermodels",
 			"internal/acceptedcontinuation", "internal/app", "internal/authcomposition", "internal/callbacktoken", "internal/claudestore", "internal/config", "internal/coordinator", "internal/domain", "internal/durablecomposition", "internal/durableflow", "internal/interactioncomposition", "internal/messagejournal", "internal/nativerecoverycomposition", "internal/observability", "internal/processenv", "internal/promptpreprocess", "internal/promptpreprocesscommand", "internal/providerquota", "internal/recoverycomposition", "internal/recoveryruntime", "internal/runtimefactory", "internal/safelog", "internal/screenproduction", "internal/sessioncreation", "internal/sessionexpiry", "internal/sessionid", "internal/sessionnaming", "internal/sessionruntime", "internal/sessionsupervisor", "internal/settings", "internal/settingscomposition", "internal/storage", "internal/supervisioncomposition", "internal/telegram", "internal/telegrambridge", "internal/telegramcompletioncomposition", "internal/telegramcontroller", "internal/telegramflow", "internal/telegramnotify", "internal/telegrampipeline", "internal/telegrampromptcomposition", "internal/telegramrecoverycomposition", "internal/telegramruntimecomposition", "internal/turnruntimecomposition", "internal/workdir",
 		},
-		maxProductionLines: 950,
+		maxProductionLines: 1000,
 	},
 	"internal/secretfile": {
 		responsibility:     "pass a bounded secret file to a callback with guaranteed transient zeroization",
@@ -1989,12 +1989,12 @@ var packagePolicies = map[string]packagePolicy{
 		maxProductionLines: 5600,
 	},
 	"internal/telegramflow": {
-		responsibility: "join Telegram callback, presentation, and durable card boundaries",
+		responsibility: "join Telegram callback, presentation, current-global-surface fencing, and durable card boundaries",
 		allowedImports: []string{
 			"internal/callbackdiagnostic", "internal/callbacktoken", "internal/coordinator", "internal/domain", "internal/telegram", "internal/telegrambridge", "internal/telegramtrace",
 			"internal/telegramops", "internal/telegrampipeline", "internal/telegramrecovery", "internal/telegramrecovery/statusrecovery", "internal/telegramstate", "internal/telegramui",
 		},
-		maxProductionLines: 2500,
+		maxProductionLines: 2650,
 	},
 	"internal/telegramnotify": {
 		responsibility: "deliver final and background Telegram notifications",
@@ -2028,12 +2028,12 @@ var packagePolicies = map[string]packagePolicy{
 		maxProductionLines: 100,
 	},
 	"internal/telegrampipeline": {
-		responsibility: "persist and execute Telegram callback/update pipeline including signed archive pages and session-bound native keys",
+		responsibility: "persist, inspect, and execute Telegram callback/update pipeline including signed archive pages and session-bound native keys",
 		allowedImports: []string{
 			"internal/callbackdiagnostic", "internal/coordinator", "internal/domain", "internal/telegrambridge",
 			"internal/telegramrecovery", "internal/telegramrecovery/statusrecovery", "internal/telegramstate", "internal/telegramui",
 		},
-		maxProductionLines: 1700,
+		maxProductionLines: 1800,
 	},
 	"internal/callbackdiagnostic": {
 		responsibility:     "carry typed callback rejection metadata without changing error semantics",

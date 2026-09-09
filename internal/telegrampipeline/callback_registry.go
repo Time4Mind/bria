@@ -166,6 +166,34 @@ func (registry *FileCallbackRegistry) Replace(ctx context.Context, presentation 
 	registry.state = next
 	return nil
 }
+func (registry *FileCallbackRegistry) Current(ctx context.Context, sessionID domain.SessionID) (CallbackPresentation, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return CallbackPresentation{}, false, err
+	}
+	if registry == nil || registry.now == nil || sessionID == "" {
+		return CallbackPresentation{}, false, errors.New("callback registry and presentation identity are required")
+	}
+	registry.mu.Lock()
+	defer registry.mu.Unlock()
+	current, found := registry.state.Presentations[sessionID]
+	if !found || !current.ExpiresAt.After(registry.now()) {
+		return CallbackPresentation{}, false, nil
+	}
+	result := CallbackPresentation{
+		SessionID: current.SessionID, Carrier: current.Carrier, ExpiresAt: current.ExpiresAt,
+		InteractionRequestID: current.InteractionRequestID,
+		OutboundOperationID:  current.OutboundOperationID, OutboundUpdateID: current.OutboundUpdateID,
+		Recovery:             cloneCallbackRecoveryBinding(current.Recovery),
+		AcceptedTurnRecovery: cloneAcceptedTurnRecoveryBinding(current.AcceptedTurnRecovery),
+		StatusRecovery:       cloneStatusRecoveryBinding(current.StatusRecovery),
+		ArtifactRetry:        cloneArtifactRetryBinding(current.ArtifactRetry),
+	}
+	result.TokenIDs = make([]string, 0, len(current.Tokens))
+	for tokenID := range current.Tokens {
+		result.TokenIDs = append(result.TokenIDs, tokenID)
+	}
+	return result, true, nil
+}
 func (registry *FileCallbackRegistry) Claim(ctx context.Context, claim CallbackClaim) (CallbackClaimResult, error) {
 	if err := ctx.Err(); err != nil {
 		return CallbackClaimResult{}, err

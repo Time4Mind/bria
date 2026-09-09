@@ -595,6 +595,7 @@ func runTelegramController(
 		return fmt.Errorf("bind callback acknowledgement store: %w", err)
 	}
 	controllerAdapter := telegramruntimecomposition.ControllerFlowAdapter{Controller: handler}
+	statusRefreshRelay := &telegramruntimecomposition.StatusRefreshCommitRelay{}
 	callbackRouter, err := interactioncomposition.NewCallbackRouter(controllerAdapter, interactions.Flow())
 	if err != nil {
 		return fmt.Errorf("compose Telegram callback router: %w", err)
@@ -612,10 +613,23 @@ func runTelegramController(
 		Presenter: presenter, CallbackRegistry: callbackRegistry,
 		UIState: telegramruntimecomposition.SessionTelegramUIStore{State: state}, MessageUI: controllerAdapter,
 		Callbacks: callbackExecutor, Operations: callbackOperations, Sender: transportSender, Observer: flowTrace,
+		OnCallbackCommitted: statusRefreshRelay.OnCallbackCommitted,
 	})
 	if err != nil {
 		return fmt.Errorf("create signed Telegram flow: %w", err)
 	}
+	statusRefresh, err := telegramruntimecomposition.NewStatusRefreshCoordinator(ctx, handler, flowSender, flowTrace)
+	if err != nil {
+		return fmt.Errorf("compose status refresh: %w", err)
+	}
+	if err := statusRefreshRelay.Bind(statusRefresh); err != nil {
+		return fmt.Errorf("bind status refresh: %w", err)
+	}
+	defer func() {
+		closeContext, cancel := context.WithTimeout(context.Background(), controllerCloseTimeout)
+		defer cancel()
+		returnErr = errors.Join(returnErr, statusRefresh.Close(closeContext))
+	}()
 	if err := turnRuntime.BindPublisher(presenter, flowSender); err != nil {
 		return fmt.Errorf("bind artifact retry publisher: %w", err)
 	}

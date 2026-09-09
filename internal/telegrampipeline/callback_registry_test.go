@@ -13,6 +13,30 @@ import (
 	"bria/internal/telegramstate"
 )
 
+func TestFileCallbackRegistryReadsCurrentPresentationWithoutExposingMutableState(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0).UTC()
+	registry, err := telegrampipeline.OpenFileCallbackRegistry(filepath.Join(t.TempDir(), "callback-registry.json"), func() time.Time { return now })
+	if err != nil {
+		t.Fatal(err)
+	}
+	presentation := telegrampipeline.CallbackPresentation{
+		SessionID: "123e4567-e89b-12d3-a456-426614174000",
+		Carrier:   telegramstate.Carrier{ChatID: 42, MessageID: 99}, TokenIDs: []string{"token-a", "token-b"}, ExpiresAt: now.Add(time.Minute),
+	}
+	if err := registry.Replace(context.Background(), presentation); err != nil {
+		t.Fatal(err)
+	}
+	current, found, err := registry.Current(context.Background(), presentation.SessionID)
+	if err != nil || !found || current.Carrier != presentation.Carrier || current.ExpiresAt != presentation.ExpiresAt || len(current.TokenIDs) != 2 {
+		t.Fatalf("Current()=%+v found=%t err=%v", current, found, err)
+	}
+	current.TokenIDs[0] = "mutated"
+	again, found, err := registry.Current(context.Background(), presentation.SessionID)
+	if err != nil || !found || (again.TokenIDs[0] == "mutated" || again.TokenIDs[1] == "mutated") {
+		t.Fatalf("mutable Current() escaped registry: %+v found=%t err=%v", again, found, err)
+	}
+}
+
 func TestFileCallbackRegistryPersistsClaimsAndLatestPresentation(t *testing.T) {
 	now := time.Unix(1_800_000_000, 0).UTC()
 	path := filepath.Join(t.TempDir(), "callback-registry.json")

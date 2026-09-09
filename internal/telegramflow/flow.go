@@ -38,6 +38,16 @@ type CallbackResult struct {
 	Surface     *SurfaceOutput
 	Terminal    *TerminalOutput
 }
+
+// CallbackCommit is emitted only after the callback's physical Telegram
+// receipt, callback registry binding, and durable operation commit succeed.
+type CallbackCommit struct {
+	OperationID  string
+	UpdateID     int64
+	Action       telegramui.Action
+	Carrier      telegramstate.Carrier
+	Presentation telegrambridge.KeyboardPresentation
+}
 type MessageExecutor interface {
 	HandleMessage(context.Context, coordinator.Update) (MessageResult, error)
 }
@@ -90,17 +100,18 @@ type CallbackAcknowledger interface {
 	AcknowledgeCallback(context.Context, string, string)
 }
 type Config struct {
-	OwnerUserID        int64
-	OwnerPrivateChatID int64
-	Presenter          *telegrambridge.Presenter
-	CallbackRegistry   telegrampipeline.CallbackRegistry
-	UIState            telegramstate.Store
-	Messages           coordinator.Handler
-	MessageUI          MessageExecutor
-	Callbacks          CallbackExecutor
-	Operations         CallbackOperationStore
-	Sender             TransportSender
-	Observer           TraceObserver
+	OwnerUserID         int64
+	OwnerPrivateChatID  int64
+	Presenter           *telegrambridge.Presenter
+	CallbackRegistry    telegrampipeline.CallbackRegistry
+	UIState             telegramstate.Store
+	Messages            coordinator.Handler
+	MessageUI           MessageExecutor
+	Callbacks           CallbackExecutor
+	Operations          CallbackOperationStore
+	Sender              TransportSender
+	Observer            TraceObserver
+	OnCallbackCommitted func(CallbackCommit)
 	// OnUserAction records authenticated ingress only; the scheduler owns deduplication.
 	OnUserAction func(coordinator.Update)
 }
@@ -125,13 +136,15 @@ type Handler struct {
 	onUserAction       func(coordinator.Update)
 }
 type Sender struct {
-	base       TransportSender
-	registry   telegrampipeline.CallbackRegistry
-	uiState    telegramstate.Store
-	operations CallbackOperationStore
-	pending    *pendingStore
-	observer   TraceObserver
-	delivery   sync.Mutex
+	base                TransportSender
+	presenter           *telegrambridge.Presenter
+	registry            telegrampipeline.CallbackRegistry
+	uiState             telegramstate.Store
+	operations          CallbackOperationStore
+	pending             *pendingStore
+	observer            TraceObserver
+	onCallbackCommitted func(CallbackCommit)
+	delivery            sync.Mutex
 }
 type UnknownCallbackOperation struct {
 	OwnerUserID        int64
@@ -183,12 +196,14 @@ func New(config Config) (*Handler, *Sender, error) {
 			observer:           config.Observer,
 			onUserAction:       config.OnUserAction,
 		}, &Sender{
-			base:       config.Sender,
-			registry:   config.CallbackRegistry,
-			uiState:    config.UIState,
-			operations: config.Operations,
-			pending:    pending,
-			observer:   config.Observer,
+			base:                config.Sender,
+			presenter:           config.Presenter,
+			registry:            config.CallbackRegistry,
+			uiState:             config.UIState,
+			operations:          config.Operations,
+			pending:             pending,
+			observer:            config.Observer,
+			onCallbackCommitted: config.OnCallbackCommitted,
 		}, nil
 }
 func (handler *Handler) ListUnknown(ctx context.Context, limit int) ([]UnknownCallbackOperation, error) {
@@ -1153,10 +1168,81 @@ func (sender *Sender) SendStatus(ctx context.Context, operationID string, status
 	return sender.base.SendStatus(ctx, operationID, status)
 }
 func (sender *Sender) SendStatusWithKeyboard(ctx context.Context, operationID string, status coordinator.Status, keyboard *coordinator.KeyboardMarkup) (coordinator.Receipt, error) {
+	if sender.pendingGlobalSurface(operationID) {
+		sender.delivery.Lock()
+		defer sender.delivery.Unlock()
+	}
 	return sender.sendPrepared(ctx, operationID, status, keyboard, false)
 }
 func (sender *Sender) EditStatusWithKeyboard(ctx context.Context, operationID string, status coordinator.Status, keyboard *coordinator.KeyboardMarkup) (coordinator.Receipt, error) {
+	if sender.pendingGlobalSurface(operationID) {
+		sender.delivery.Lock()
+		defer sender.delivery.Unlock()
+	}
 	return sender.sendPrepared(ctx, operationID, status, keyboard, true)
+}
+
+func (sender *Sender) pendingGlobalSurface(operationID string) bool {
+	prepared, found := sender.pending.peek(operationID)
+	return found && prepared.Presentation.SessionID == telegramui.GlobalSurfaceID
+}
+
+// EditCurrentGlobalSurface replaces one global surface only while the exact
+// signed presentation that requested the refresh still owns its carrier.
+// The delivery lock makes the presentation check and physical edit atomic
+// with respect to every ordinary Telegram send through this sender.
+func (sender *Sender) EditCurrentGlobalSurface(
+	ctx context.Context,
+	operationID string,
+	carrier telegramstate.Carrier,
+	expected telegrambridge.KeyboardPresentation,
+	surface SurfaceOutput,
+) (bool, error) {
+	if sender == nil || sender.presenter == nil || sender.registry == nil || operationID == "" ||
+		carrier.ChatID <= 0 || carrier.MessageID <= 0 || expected.SessionID != telegramui.GlobalSurfaceID {
+		return false, errors.New("current global surface edit identity is invalid")
+	}
+	sender.delivery.Lock()
+	defer sender.delivery.Unlock()
+	current, found, err := sender.registry.Current(ctx, domain.SessionID(telegramui.GlobalSurfaceID))
+	if err != nil || !found {
+		return false, err
+	}
+	if !sameGlobalPresentation(current, carrier, expected) {
+		return false, nil
+	}
+	prepared, err := PrepareSurface(operationID, carrier.ChatID, "", carrier.MessageID, true, surface, sender.presenter)
+	if err != nil {
+		return false, err
+	}
+	if err := sender.pending.register(prepared); err != nil {
+		return false, err
+	}
+	if _, err := sender.sendPrepared(ctx, operationID, prepared.Status, prepared.Keyboard, true); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func sameGlobalPresentation(current telegrampipeline.CallbackPresentation, carrier telegramstate.Carrier, expected telegrambridge.KeyboardPresentation) bool {
+	if current.SessionID != domain.SessionID(telegramui.GlobalSurfaceID) || current.Carrier != carrier ||
+		expected.ExpiresAt != current.ExpiresAt || len(expected.TokenIDs) != len(current.TokenIDs) ||
+		expected.InteractionRequestID != current.InteractionRequestID || expected.OutboundOperationID != current.OutboundOperationID ||
+		expected.OutboundUpdateID != current.OutboundUpdateID {
+		return false
+	}
+	tokens := make(map[string]int, len(current.TokenIDs))
+	for _, tokenID := range current.TokenIDs {
+		tokens[tokenID]++
+	}
+	for _, tokenID := range expected.TokenIDs {
+		if tokens[tokenID] == 0 {
+			return false
+		}
+		tokens[tokenID]--
+	}
+	return expected.Recovery == nil && expected.AcceptedTurnRecovery == nil && expected.StatusRecovery == nil && expected.ArtifactRetry == nil &&
+		current.Recovery == nil && current.AcceptedTurnRecovery == nil && current.StatusRecovery == nil && current.ArtifactRetry == nil
 }
 func (sender *Sender) sendPrepared(
 	ctx context.Context,
@@ -1281,6 +1367,13 @@ func (sender *Sender) sendPrepared(
 		}
 		if !changed {
 			return coordinator.Receipt{}, errors.New("callback operation receipt commit phase changed")
+		}
+		if sender.onCallbackCommitted != nil {
+			sender.onCallbackCommitted(CallbackCommit{
+				OperationID: operation.ID, UpdateID: operation.UpdateID, Action: operation.Plan.Action,
+				Carrier:      telegramstate.Carrier{ChatID: status.ConversationID, MessageID: receipt.MessageID},
+				Presentation: clonePrepared(prepared).Presentation,
+			})
 		}
 	}
 	return receipt, nil

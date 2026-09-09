@@ -140,7 +140,7 @@ func TestStatusKeepsAgreedNodeButtonsAndAddsLegacyQuotaTable(t *testing.T) {
 	}
 }
 
-func TestStatusRefreshDoesNotBlockNavigationOnSlowProvider(t *testing.T) {
+func TestStatusRefreshCallbackDefersSlowProviderUntilPostCommitRunner(t *testing.T) {
 	reader := &blockingQuotaReader{started: make(chan struct{})}
 	controller := newController(t, nil, &memorySessions{}, nil, nil, telegramcontroller.Options{
 		CreationEnvironment: &creationEnvironmentStub{computers: []sessioncreation.Computer{{ID: "local", Name: "Coordinator"}}},
@@ -150,6 +150,16 @@ func TestStatusRefreshDoesNotBlockNavigationOnSlowProvider(t *testing.T) {
 	if err != nil || result.Surface == nil {
 		t.Fatalf("refresh result = %#v, err=%v", result, err)
 	}
+	select {
+	case <-reader.started:
+		t.Fatal("quota refresh started before cached callback projection was committed")
+	default:
+	}
+	refreshDone := make(chan error, 1)
+	go func() {
+		_, refreshErr := controller.RefreshStatus(context.Background())
+		refreshDone <- refreshErr
+	}()
 	select {
 	case <-reader.started:
 	case <-time.After(time.Second):
@@ -164,6 +174,14 @@ func TestStatusRefreshDoesNotBlockNavigationOnSlowProvider(t *testing.T) {
 	}
 	if err := controller.Close(context.Background()); err != nil {
 		t.Fatal(err)
+	}
+	select {
+	case err := <-refreshDone:
+		if err == nil {
+			t.Fatal("cancelled quota refresh returned no error")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("quota refresh did not stop with controller")
 	}
 }
 

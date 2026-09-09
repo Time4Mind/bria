@@ -617,9 +617,9 @@ func TestArchitectureCheckerRegistersCurrentCompositionBoundaries(t *testing.T) 
 		},
 		{
 			path:           "internal/telegramruntimecomposition",
-			responsibility: "project typed Telegram controller actions, signed model selectors and durable delivery receipts",
-			imports:        []string{"internal/controllertelemetry", "internal/coordinator", "internal/domain", "internal/telegramcontroller", "internal/telegramflow", "internal/telegrampipeline", "internal/telegramrecoverycomposition", "internal/telegramstate", "internal/telegramui"},
-			limit:          650,
+			responsibility: "project typed Telegram controller actions, coordinate current-surface status refreshes, signed model selectors and durable delivery receipts",
+			imports:        []string{"internal/controllertelemetry", "internal/telegrambridge", "internal/telegramtrace", "internal/coordinator", "internal/domain", "internal/telegramcontroller", "internal/telegramflow", "internal/telegrampipeline", "internal/telegramrecoverycomposition", "internal/telegramstate", "internal/telegramui"},
+			limit:          900,
 		},
 		{
 			path:           "internal/telegrampromptcomposition",
@@ -635,12 +635,12 @@ func TestArchitectureCheckerRegistersCurrentCompositionBoundaries(t *testing.T) 
 		},
 		{
 			path:           "internal/singlemachinecomposition",
-			responsibility: "compose the single-computer Bria process",
+			responsibility: "compose the single-computer Bria process and bind post-commit status refresh delivery",
 			imports: []string{
 				"internal/providermodels",
 				"internal/acceptedcontinuation", "internal/app", "internal/authcomposition", "internal/callbacktoken", "internal/claudestore", "internal/config", "internal/coordinator", "internal/domain", "internal/durablecomposition", "internal/durableflow", "internal/interactioncomposition", "internal/messagejournal", "internal/nativerecoverycomposition", "internal/observability", "internal/processenv", "internal/promptpreprocess", "internal/promptpreprocesscommand", "internal/providerquota", "internal/recoverycomposition", "internal/recoveryruntime", "internal/runtimefactory", "internal/safelog", "internal/screenproduction", "internal/sessioncreation", "internal/sessionexpiry", "internal/sessionid", "internal/sessionnaming", "internal/sessionruntime", "internal/sessionsupervisor", "internal/settings", "internal/settingscomposition", "internal/storage", "internal/supervisioncomposition", "internal/telegram", "internal/telegrambridge", "internal/telegramcompletioncomposition", "internal/telegramcontroller", "internal/telegramflow", "internal/telegramnotify", "internal/telegrampipeline", "internal/telegrampromptcomposition", "internal/telegramrecoverycomposition", "internal/telegramruntimecomposition", "internal/turnruntimecomposition", "internal/workdir",
 			},
-			limit: 950,
+			limit: 1000,
 		},
 		{
 			path:           "internal/p4runtimecomposition",
@@ -891,8 +891,8 @@ func TestArchitectureCheckerCapsCoherentCustodyResponsibilities(t *testing.T) {
 		{path: "internal/mediaflow", limit: 350},
 		{path: "internal/messagejournal", limit: 1400},
 		{path: "internal/sessionsupervisor", limit: 450},
-		{path: "internal/telegramflow", limit: 2500},
-		{path: "internal/telegrampipeline", limit: 1700},
+		{path: "internal/telegramflow", limit: 2650},
+		{path: "internal/telegrampipeline", limit: 1800},
 		{path: "internal/sessionruntime", limit: 1850},
 		{path: "internal/orphanresume", limit: 150},
 		{path: "internal/coordinator", limit: 825},
