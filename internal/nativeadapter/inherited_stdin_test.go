@@ -36,8 +36,16 @@ func testInheritedStdin(t *testing.T, cancelOnly bool) {
 	cmd := exec.CommandContext(ctx, os.Args[0])
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "NATIVE_ADAPTER_BRIDGE=1", "CODEX_HOME="+filepath.Join(dir, "codex"), "TMPDIR="+dir)
+	var cancelReader, cancelWriter *os.File
 	if cancelOnly {
-		cmd.Env = append(cmd.Env, "NATIVE_ADAPTER_TIMEOUT=1")
+		cancelReader, cancelWriter, err = os.Pipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		cmd.ExtraFiles = []*os.File{cancelReader}
+		cmd.Env = append(cmd.Env, "NATIVE_ADAPTER_CANCEL_FD=3")
+		defer cancelReader.Close()
+		defer cancelWriter.Close()
 	}
 	input, err := cmd.StdinPipe()
 	if err != nil {
@@ -49,6 +57,12 @@ func testInheritedStdin(t *testing.T, cancelOnly bool) {
 	}
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
+	}
+	if cancelReader != nil {
+		if err := cancelReader.Close(); err != nil {
+			t.Fatal(err)
+		}
+		cancelReader = nil
 	}
 	defer input.Close()
 	defer output.Close()
@@ -65,7 +79,11 @@ func testInheritedStdin(t *testing.T, cancelOnly bool) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !cancelOnly {
+	if cancelOnly {
+		if _, err := cancelWriter.Write([]byte{1}); err != nil {
+			t.Fatal(err)
+		}
+	} else {
 		if _, err := input.Write(line); err != nil {
 			t.Fatal(err)
 		}

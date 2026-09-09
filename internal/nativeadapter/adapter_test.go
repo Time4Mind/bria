@@ -21,12 +21,17 @@ const fixtureSession = "11111111-2222-4333-8444-555555555555"
 
 func TestMain(m *testing.M) {
 	if os.Getenv("NATIVE_ADAPTER_BRIDGE") == "1" {
-		duration := 10 * time.Second
-		if os.Getenv("NATIVE_ADAPTER_TIMEOUT") == "1" {
-			duration = 1200 * time.Millisecond
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), duration)
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
+		if os.Getenv("NATIVE_ADAPTER_CANCEL_FD") == "3" {
+			cancelFile := os.NewFile(3, "native-adapter-cancel")
+			defer cancelFile.Close()
+			go func() {
+				var signal [1]byte
+				_, _ = cancelFile.Read(signal[:])
+				cancel()
+			}()
+		}
 		workdir, _ := os.Getwd()
 		env := append(os.Environ(), "NATIVE_ADAPTER_FIXTURE=1", "NATIVE_ADAPTER_BRIDGE=0")
 		err := Run(ctx, os.Stdin, os.Stdout, Config{Provider: domain.ProviderCodex, Command: []string{os.Args[0]}, Workdir: workdir, ResumeID: fixtureSession, StateDir: filepath.Join(workdir, "receipts"), Environment: env})
