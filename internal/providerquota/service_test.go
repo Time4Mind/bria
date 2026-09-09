@@ -14,15 +14,25 @@ import (
 )
 
 func TestCollectCodexCLIContract(t *testing.T) {
-	for _, arguments := range [][]string{nil, {"app-server"}, {"app-server", "--stdio"}} {
+	for _, arguments := range [][]string{
+		nil,
+		{"app-server"},
+		{"app-server", "--stdio"},
+		{"app-server", "--dangerously-bypass-approvals-and-sandbox"},
+	} {
 		t.Run(fmt.Sprint(arguments), func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()
+			configured := append([]string{"-test.run=TestQuotaCLIHelper", "--"}, arguments...)
+			original := append([]string(nil), configured...)
 			snapshot, err := collectCodex(ctx, "local", Command{Executable: os.Args[0],
-				Arguments:   append([]string{"-test.run=TestQuotaCLIHelper", "--"}, arguments...),
+				Arguments:   configured,
 				Environment: append(os.Environ(), "BRIA_QUOTA_HELPER=1")})
 			if err != nil || snapshot.FiveHour == nil || snapshot.FiveHour.UsedPercent != 23 {
 				t.Fatalf("quota unavailable: %v snapshot=%#v", err, snapshot)
+			}
+			if !slices.Equal(configured, original) {
+				t.Fatalf("configured work-session argv mutated: got %q want %q", configured, original)
 			}
 		})
 	}

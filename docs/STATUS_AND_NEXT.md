@@ -1,5 +1,11 @@
 # Handoff: статус и следующий план
 
+> Текущий запрос: исправить GitHub Issue #1 - Codex quota collector не должен
+> наследовать session-only bypass, при этом рабочая конфигурация не меняется.
+> Экраны Ноды/Статус исключены. Договор, coverage и durable todo:
+> [GITHUB_ISSUE_1_QUOTA_BYPASS_TODO.md](GITHUB_ISSUE_1_QUOTA_BYPASS_TODO.md).
+> После RED/GREEN и полного gate действует автоматический push/CI/deploy.
+
 > Follow-up R6: после выпуска RootReady live-проверка выявила второй блокер.
 > Startup attach зарегистрировал observer старого accepted558, сохранил gen3
 > Running и отложил новый pending603. Исправляется eligibility: accepted history

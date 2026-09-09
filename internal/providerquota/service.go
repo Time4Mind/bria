@@ -156,6 +156,12 @@ func (service *Service) closeClaude() {
 
 func collectCodex(ctx context.Context, nodeID domain.ComputerID, specification Command) (telegramstatus.Snapshot, error) {
 	arguments := append([]string(nil), specification.Arguments...)
+	// The interactive CLI may intentionally bypass approvals and sandboxing,
+	// but app-server does not accept that session-only flag. Filter the quota
+	// process copy without changing the configured work-session command.
+	arguments = slices.DeleteFunc(arguments, func(argument string) bool {
+		return argument == "--dangerously-bypass-approvals-and-sandbox"
+	})
 	if !slices.Contains(arguments, "app-server") {
 		arguments = append(arguments, "app-server")
 	}
