@@ -33,9 +33,9 @@ history or unrelated feature work. Existing A29 obligations remain closed.
 
 | ID | Acceptance | Status | Evidence |
 |---|---|---|---|
-| A30.1 | Exact requested default, custom instruction unchanged | locally verified | Default/blank literal RED->GREEN; custom preserved; no settings changes |
+| A30.1 | Exact requested default, custom instruction unchanged | released | Default/blank literal RED->GREEN; exact prompt in installed/running binary; custom/settings unchanged |
 | A30.2 | Targeted/full tests and independent review | complete | Independent review approve; targeted race/full make check-full and physical binary PASS |
-| A30.R | Push/CI/install/restart and preservation postflight | pending | Automatic standing authorization; exact live targets reread before write |
+| A30.R | Push/CI/install/restart and preservation postflight | complete | 1cbe166 both CI success; new version running PID83890/sole lock; artifact/getMe/logs/preservation PASS |
 
 ## Evidence and release manifest
 
@@ -73,3 +73,34 @@ present in compiled bria binary, check-config succeeds. SHA256:
 - bria: 0298c9a885f0cfdfd7aefffa53b5cd0adf7f51cfc3112b7998d0c03341376458
 - bria-codex-adapter: 792059a14d750aae8367d7b23d77434e0bc3cd604d01e7040e1f9800d4f41911
 - bria-claude-adapter: 88d612486c8c3171489dd369673a2e93e05f6b84aa97092bc2403af850648263
+
+## Installed release receipt
+
+Source1cbe166a6294677e18684ead91e2413d657c46c7 pushed/read back in origin/main.
+Both exact-SHA CI completed successfully:34317609232 Platform build matrix,
+34317609160 Stage 1 checks. Direct main, no separate merge required. Independent
+default-consumer and one-shot install-helper reviews approve within scope.
+
+At06:10:44UTC 2026-09-09 guarded stop began; service absence/process exit/lock
+release confirmed06:10:49UTC before pointer switch/bootstrap. At06:11:09UTC
+(09:11:09 Europe/Moscow), speech-cleanup-prompt is running PID83890/runs1/never
+exited, sole lock holder83890. All installed hashes match above; getMe OK.
+Main lsof confirms this process maps the new release's actual executable; the
+exact requested literal is present in the installed binary.
+
+Before/stopped/after snapshots have identical six preservation hashes:
+identities, cards, journal, settings, config and plist. Retained5sessions
+(ready3/archived2),5cards/146history,16completedinputs. No manual data/config
+changes. Previous navigation-follow release retained. Already encoded requests
+keep their prior instruction; new requests use the new default with the current
+empty instruction setting. No live speech-quality/model-output test was run.
+
+Receipt is a docs-only follow-up; unchanged installed binaries do not require
+another deployment. GitHub checks for the final documentation HEAD still apply.
+
+Independent postflight06:11:59UTC confirms healthy service and preservation;
+main reread flow_ready06:10:50.015 and two startup recovered receipts at
+06:10:51.196/06:10:52.037. No errors/damaged records in the checked startup
+window. Two preceding shutdown live_recovery/skipped are not failures. Journal
+outputs344=confirmed257/superseded83/unknown4, unchanged, pending finals/leases0.
+All A30 obligations complete; no custom setting or existing request was rewritten.
