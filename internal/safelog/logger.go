@@ -584,7 +584,8 @@ func telegramStructuredField(key, value string) (string, bool) {
 	valid := false
 	switch key {
 	case "callback_ref", "card_ref", "expected_card_ref", "session_ref", "presentation_ref", "run_ref",
-		"node_ref", "previous_session_ref", "target_session_ref", "parent_operation_ref":
+		"node_ref", "previous_session_ref", "target_session_ref", "parent_operation_ref",
+		"provider_session_ref", "approval_ref":
 		valid = traceRefPattern.MatchString(value)
 	case "button_refs":
 		refs := strings.Split(value, ",")

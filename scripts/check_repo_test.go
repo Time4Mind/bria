@@ -901,7 +901,7 @@ func TestArchitectureCheckerCapsCoherentCustodyResponsibilities(t *testing.T) {
 		{path: "internal/nativecli", limit: 600},
 		{path: "internal/nativeapproval", limit: 380},
 		{path: "internal/nativecontrolport", limit: 60},
-		{path: "internal/nativeapprovalflow", limit: 150},
+		{path: "internal/nativeapprovalflow", limit: 175},
 		{path: "internal/nativecapture", limit: 60},
 		{path: "internal/documentproduction", limit: 100},
 		{path: "internal/providerpreferences", limit: 100},

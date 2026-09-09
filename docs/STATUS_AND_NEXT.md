@@ -1,5 +1,14 @@
 # Handoff: статус и следующий план
 
+> Текущий запрос A34: после рестарта в активной `workdir6` остался распознанный
+> command approval при effective auto-approve ON. Live evidence показывает
+> generation4 и стабильный fingerprint; код после любого non-stale исхода ставит
+> generation-wide uncertain barrier и молча отбрасывает ошибку. Исправление готово:
+> generation хранит набор command-derived uncertain DecisionID, поэтому старый
+> запрос не replay-ится, а distinct проходит; lifecycle безопасно логируется.
+> RED/GREEN, review и полный check-full PASS. Выпуск выполняется. Договор/todo:
+> [APPROVAL_RESTART_STALL_TODO.md](APPROVAL_RESTART_STALL_TODO.md).
+
 > GitHub Issue #1 исправлен: Codex quota collector удаляет session-only bypass
 > только из собственной копии argv; рабочая конфигурация и экраны Ноды/Статус
 > не менялись. Runtime `f67434d` в origin/main, полный gate и оба CI PASS.

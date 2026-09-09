@@ -20,6 +20,7 @@ const (
 	RecoveryOutcome
 	ProviderFailure
 	FinalSave
+	NativeApproval
 )
 
 const (
@@ -38,6 +39,9 @@ const (
 	AwaitingRecovery
 	RecoveryUnknown
 	RecoveryExhausted
+	ApprovalConfirmed
+	ApprovalStale
+	ApprovalUncertain
 )
 
 const (
@@ -79,18 +83,21 @@ const (
 // it is omitted from logs unless CandidatesKnown denotes a complete search.
 // Empty TargetSessionID means no session for clear/list events, not a raw label.
 type Event struct {
-	Time              time.Time
-	Stage             Stage
-	Reason            Reason
-	Outcome           Outcome
-	OperationID       string
-	ParentOperationID string
-	SessionID         string
-	NodeID            string
-	PreviousSessionID string
-	TargetSessionID   string
-	CandidatesKnown   bool
-	CandidateCount    uint64
+	Time                time.Time
+	Stage               Stage
+	Reason              Reason
+	Outcome             Outcome
+	OperationID         string
+	ParentOperationID   string
+	SessionID           string
+	NodeID              string
+	PreviousSessionID   string
+	TargetSessionID     string
+	ProviderSessionID   string
+	ApprovalFingerprint string
+	Generation          uint64
+	CandidatesKnown     bool
+	CandidateCount      uint64
 }
 
 // Observer must be non-blocking and must not affect controller success/failure.
@@ -111,8 +118,8 @@ func Operation(ctx context.Context) string {
 	return value
 }
 
-var stages = [...]string{"unknown", "session.archive_outcome", "selection.fallback", "selection.persist", "selection.project", "session.recovery_outcome", "session.provider_failure", "session.final_save"}
-var outcomes = [...]string{"unknown", "scheduled", "archived", "deleted", "selected", "cleared", "preserved", "persisted", "projected", "skipped", "failed", "recovered", "awaiting_recovery", "recovery_unknown", "recovery_exhausted"}
+var stages = [...]string{"unknown", "session.archive_outcome", "selection.fallback", "selection.persist", "selection.project", "session.recovery_outcome", "session.provider_failure", "session.final_save", "native.approval"}
+var outcomes = [...]string{"unknown", "scheduled", "archived", "deleted", "selected", "cleared", "preserved", "persisted", "projected", "skipped", "failed", "recovered", "awaiting_recovery", "recovery_unknown", "recovery_exhausted", "confirmed", "stale", "uncertain"}
 var reasons = [...]string{
 	"unknown", "immediate_close", "scheduled_close", "manual_selection", "recent_selectable", "durable_selectable",
 	"no_selectable", "newer_selection", "other_node", "stale_selection", "session_card", "session_list", "native_surface",

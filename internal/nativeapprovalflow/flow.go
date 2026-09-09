@@ -16,16 +16,39 @@ import (
 )
 
 type Flow struct {
-	once    sync.Once
-	gate    chan struct{}
-	claimed map[domain.SessionID]approvalClaim
+	Observer  Observer
+	once      sync.Once
+	gate      chan struct{}
+	claimed   map[domain.SessionID]approvalClaim
+	uncertain map[domain.SessionID]uncertainClaims
 }
+
+type Outcome string
+
+const (
+	Confirmed Outcome = "confirmed"
+	Stale     Outcome = "stale"
+	Uncertain Outcome = "uncertain"
+)
+
+type Event struct {
+	SessionID, ProviderSessionID, Fingerprint string
+	Generation                                uint64
+	Outcome                                   Outcome
+}
+
+type Observer interface{ ObserveNativeApproval(context.Context, Event) }
 
 type approvalClaim struct {
 	generation  string
 	fingerprint string
 	hash        string
 	outcome     approvalOutcome
+}
+
+type uncertainClaims struct {
+	generation string
+	identities map[string]struct{}
 }
 
 type approvalOutcome uint8
@@ -99,9 +122,16 @@ func (f *Flow) Observe(ctx context.Context, id domain.SessionID, source nativeco
 	// noninteractive frame when Codex starts parallel tools. Bind the claim to
 	// the parsed dialog too, so the next command is not mistaken for a replay.
 	generation := fmt.Sprintf("%s:%d", snapshot.ProviderSessionID, snapshot.Generation)
+	identity := request.DecisionID
+	if uncertain, exists := f.uncertain[id]; exists {
+		if uncertain.generation != generation {
+			delete(f.uncertain, id)
+		} else if _, blocked := uncertain.identities[identity]; blocked {
+			return nil
+		}
+	}
 	if previous, exists := f.claimed[id]; exists && previous.generation == generation {
-		if previous.outcome == approvalUncertain ||
-			previous.outcome == approvalConfirmed && previous.fingerprint == request.Fingerprint ||
+		if previous.outcome == approvalConfirmed && previous.fingerprint == request.Fingerprint ||
 			previous.outcome == approvalStale && previous.fingerprint == request.Fingerprint && previous.hash == snapshot.Hash {
 			return nil
 		}
@@ -116,11 +146,29 @@ func (f *Flow) Observe(ctx context.Context, id domain.SessionID, source nativeco
 	}
 	_, err = driver.NativeControl(ctx, id, nativecontrolport.Request{Key: "approve_once", ExpectedHash: snapshot.Hash, ExpectedProviderSessionID: snapshot.ProviderSessionID, ExpectedGeneration: snapshot.Generation})
 	outcome := approvalConfirmed
+	telemetryOutcome := Confirmed
 	if errors.Is(err, nativecontrolport.ErrStale) {
 		outcome = approvalStale
+		telemetryOutcome = Stale
 	} else if err != nil {
 		outcome = approvalUncertain
+		telemetryOutcome = Uncertain
+		if f.uncertain == nil {
+			f.uncertain = make(map[domain.SessionID]uncertainClaims)
+		}
+		uncertain := f.uncertain[id]
+		if uncertain.generation != generation {
+			uncertain = uncertainClaims{generation: generation, identities: make(map[string]struct{})}
+		}
+		uncertain.identities[identity] = struct{}{}
+		f.uncertain[id] = uncertain
 	}
 	f.claimed[id] = approvalClaim{generation: generation, fingerprint: request.Fingerprint, hash: snapshot.Hash, outcome: outcome}
+	if f.Observer != nil {
+		f.Observer.ObserveNativeApproval(ctx, Event{
+			SessionID: string(id), ProviderSessionID: snapshot.ProviderSessionID, Fingerprint: request.Fingerprint,
+			Generation: snapshot.Generation, Outcome: telemetryOutcome,
+		})
+	}
 	return err
 }

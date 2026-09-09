@@ -25,6 +25,8 @@ func controllerFields(fields map[string]string, event controllertelemetry.Event,
 		"node_ref":             ref("node", event.NodeID),
 		"previous_session_ref": ref("session", event.PreviousSessionID),
 		"target_session_ref":   ref("session", event.TargetSessionID),
+		"provider_session_ref": ref("provider_session", event.ProviderSessionID),
+		"approval_ref":         ref("approval", event.ApprovalFingerprint),
 	} {
 		if value != "" {
 			fields[field] = value
@@ -32,5 +34,8 @@ func controllerFields(fields map[string]string, event controllertelemetry.Event,
 	}
 	if event.CandidatesKnown {
 		fields["candidate_count"] = strconv.FormatUint(event.CandidateCount, 10)
+	}
+	if event.Generation > 0 {
+		fields["generation"] = strconv.FormatUint(event.Generation, 10)
 	}
 }

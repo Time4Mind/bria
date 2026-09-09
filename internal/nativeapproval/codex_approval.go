@@ -29,6 +29,7 @@ type CodexCommandApproval struct {
 	Reason      string `json:"reason"`
 	Preview     string `json:"preview"`
 	Fingerprint string `json:"fingerprint"`
+	DecisionID  string `json:"decision_id"`
 	OptionCount int    `json:"option_count"`
 	Incomplete  bool   `json:"incomplete"`
 }
@@ -102,11 +103,13 @@ func ParseCodexCommandApproval(screen string) (CodexCommandApproval, bool) {
 			nonempty = append(nonempty, line)
 		}
 	}
+	decisionSource := ""
 	if len(nonempty) == 1 && nonempty[0] == "2. No, and tell Codex what to do differently (esc)" {
 		request.OptionCount = 2
 	} else if len(nonempty) >= 2 && strings.HasPrefix(nonempty[0], "2. Yes, and don't ask again for commands that start with `") &&
 		strings.HasSuffix(nonempty[len(nonempty)-2], "` (p)") && nonempty[len(nonempty)-1] == "3. No, and tell Codex what to do differently (esc)" {
 		request.OptionCount = 3
+		decisionSource = strings.TrimSuffix(strings.TrimPrefix(strings.Join(nonempty[:len(nonempty)-1], " "), "2. Yes, and don't ask again for commands that start with `"), "` (p)")
 	} else {
 		return zero, false
 	}
@@ -117,6 +120,11 @@ func ParseCodexCommandApproval(screen string) (CodexCommandApproval, bool) {
 	if request.Preview == "" && !collapsed {
 		return zero, false
 	}
+	if decisionSource == "" {
+		decisionSource = request.Environment + "\x00" + request.Reason + "\x00" + request.Preview
+	}
+	decisionSum := sha256.Sum256([]byte(strings.Join(strings.Fields(decisionSource), " ")))
+	request.DecisionID = hex.EncodeToString(decisionSum[:])
 	sum := sha256.Sum256([]byte(strings.Join(rawLines, "\n")))
 	request.Fingerprint = hex.EncodeToString(sum[:])
 	return request, true

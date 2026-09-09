@@ -178,11 +178,17 @@ Decision claim внутри flow связывает provider/generation с finge
 заменили один диалог другим без промежуточного неинтерактивного кадра. Тот же
 fingerprint не повторяется. Новый receipt вместе с уже отличающимся активным
 fingerprint подтверждает предыдущий Enter без промежуточного пустого кадра.
-Неопределённый исход сохраняет более строгий барьер
-на всю generation: collapsed → full, непустой неинтерактивный кадр и другой
-диалог не получают второй Enter до смены generation. Внутрипроцессный claim не
-является durable runtime-журналом через перезапуск контроллера; durable O_EXCL
-claim предусмотрен отдельно у diagnostic helper.
+Неопределённый исход сохраняет барьер для DecisionID конкретной команды до смены
+generation. DecisionID берётся из нормализованной команды в approval-опции, поэтому
+reflow/collapse того же запроса и его повторное появление не получают второй Enter.
+Другой DecisionID в той же generation обрабатывается независимо; все uncertain
+DecisionID сохраняются набором и не теряются после успешного следующего approval.
+Внутрипроцессный набор не является durable runtime-журналом через перезапуск
+контроллера; durable O_EXCL claim предусмотрен отдельно у diagnostic helper.
+
+Каждая фактическая попытка пишет payload-free `native.approval` с outcome
+`confirmed|stale|uncertain`, generation и HMAC-ссылками на logical session,
+provider session и fingerprint. Текст команды и reason в лог не попадают.
 
 ## Ограничения и проверка
 

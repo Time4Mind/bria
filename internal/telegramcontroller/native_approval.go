@@ -4,10 +4,31 @@ import (
 	"context"
 	"errors"
 
+	"bria/internal/controllertelemetry"
 	"bria/internal/domain"
+	"bria/internal/nativeapprovalflow"
 	"bria/internal/sessionruntime"
 	"bria/internal/settingsport"
 )
+
+type nativeApprovalObserver struct{ observer controllertelemetry.Observer }
+
+func (o nativeApprovalObserver) ObserveNativeApproval(ctx context.Context, event nativeapprovalflow.Event) {
+	if o.observer == nil {
+		return
+	}
+	outcome := controllertelemetry.ApprovalConfirmed
+	if event.Outcome == nativeapprovalflow.Stale {
+		outcome = controllertelemetry.ApprovalStale
+	} else if event.Outcome == nativeapprovalflow.Uncertain {
+		outcome = controllertelemetry.ApprovalUncertain
+	}
+	o.observer.ObserveControllerEvent(ctx, controllertelemetry.Event{
+		Stage: controllertelemetry.NativeApproval, Outcome: outcome,
+		SessionID: event.SessionID, ProviderSessionID: event.ProviderSessionID,
+		ApprovalFingerprint: event.Fingerprint, Generation: event.Generation,
+	})
+}
 
 func (c *Controller) autoApprovalEnabled(ctx context.Context) (bool, error) {
 	if c.settings == nil {

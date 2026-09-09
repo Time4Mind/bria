@@ -1368,9 +1368,9 @@ var packagePolicies = map[string]packagePolicy{
 		maxProductionLines: 180,
 	},
 	"internal/nativeapprovalflow": {
-		responsibility:     "gate and deduplicate native one-shot approvals against current settings and exact provider generation",
+		responsibility:     "gate, deduplicate and report native one-shot approvals against current settings and exact provider generation",
 		allowedImports:     []string{"internal/domain", "internal/nativeapproval", "internal/nativecontrolport"},
-		maxProductionLines: 150,
+		maxProductionLines: 175,
 	},
 	"internal/nativecontrolport": {
 		responsibility:     "define exact provider-generation native screen and one-shot control ports",

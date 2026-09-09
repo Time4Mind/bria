@@ -19,7 +19,8 @@ func TestSelectionFieldsPersistWithClosedVocabulary(t *testing.T) {
 	fields := map[string]string{
 		"stage":    "selection.fallback",
 		"node_ref": ref, "previous_session_ref": ref, "target_session_ref": ref,
-		"parent_operation_ref": ref, "candidate_count": "18446744073709551615",
+		"parent_operation_ref": ref, "provider_session_ref": ref, "approval_ref": ref,
+		"candidate_count":  "18446744073709551615",
 		"selection_reason": "durable_selectable", "selection_outcome": "selected",
 	}
 	if err := logger.Write(safelog.Event{Class: safelog.Detailed, Type: "telegram.flow_stage", Fields: fields}); err != nil {

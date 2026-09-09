@@ -1073,6 +1073,7 @@ func New(
 		quotas:              options.Quotas,
 		models:              options.Models,
 		native:              options.Native,
+		nativeApprovals:     nativeapprovalflow.Flow{Observer: nativeApprovalObserver{observer: options.ControllerObserver}},
 		nativeSnapshots:     make(map[domain.SessionID]sessionruntime.NativeSnapshot),
 		sessionNamer:        options.SessionNamer,
 		preparation: telegramturnhelpers.Preparation{

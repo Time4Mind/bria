@@ -154,6 +154,30 @@ func TestControllerUnknownsAndEmptySelectionPersistWithoutInventedFacts(t *testi
 	}
 }
 
+func TestNativeApprovalLifecycleUsesOnlyCorrelatedReferences(t *testing.T) {
+	dir := t.TempDir()
+	logger, err := safelog.Open(safelog.Options{Directory: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	observer, err := observability.NewTelegramFlowObserver(logger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observer.ObserveControllerEvent(context.Background(), controllertelemetry.Event{
+		Stage: controllertelemetry.NativeApproval, Outcome: controllertelemetry.ApprovalUncertain,
+		SessionID: "private-session", ProviderSessionID: "private-provider",
+		ApprovalFingerprint: strings.Repeat("a", 64), Generation: 4,
+	})
+	observer.Close()
+	rows := controllerRows(t, dir, "detailed.jsonl")
+	if len(rows) != 1 || rows[0].Fields["stage"] != "native.approval" || rows[0].Result != "uncertain" ||
+		rows[0].Fields["generation"] != "4" || rows[0].Fields["session_ref"] == "" ||
+		rows[0].Fields["provider_session_ref"] == "" || rows[0].Fields["approval_ref"] == "" {
+		t.Fatalf("approval lifecycle row=%+v", rows)
+	}
+}
+
 func TestControllerAndCardObserversShareQueueDuringConcurrentClose(t *testing.T) {
 	dir := t.TempDir()
 	logger, err := safelog.Open(safelog.Options{Directory: dir})
