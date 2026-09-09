@@ -1,5 +1,25 @@
 # Archive resume diagnosis 2026-09-09
 
+## Final release receipt
+
+R1-R4 complete at 2026-09-09 12:09 UTC (15:09 Moscow). Runtime source
+42f0684bb79e6212dd558a389e790984e436b6bc is in origin/main; Stage1 CI34348964485
+and Platform CI34348964526 passed. Full local gate and ungated fast-response
+1000-repeat race test passed. Installed version20260909-archive-resume-quiet;
+launchd gui/501/com.time4mind.bria.v2 running PID44368, same sole lock holder.
+Installed SHA256: bria f16e969402d8f8c6034045241873e476b414ed63a21cdda07be34895aca1be7d;
+Codex adapter f68d871a964fe2fe2701317543ff9543ff16d45d080e0bbc519f677f851052c5;
+Claude adapter7c8eb38b4d6489ff12c24fb624da2adc265ead8ded18dada2ab574fff7b6388c.
+All match local tested trio. Config/state compatibility and Telegram getMe pass;
+fresh telegram.flow_ready receipt12:09:26UTC. Before/after snapshot hashes for
+identities/cards/journal/config/plist/settings unchanged:6 sessions,6 cards,
+300 history records,18 inputs. Only Bria service restarted; no Codex terminal kill
+or manual lifecycle/journal edit. R5 remains an explicit unverified user boundary:
+owner archive-click and real provider resume have not been executed after release.
+This receipt is docs-only and needs no second binary deployment.
+
+## Historical diagnosis and release iterations
+
 Scope: diagnose failed archive resume of Bria session
 `d61b7c05-923e-43e1-a369-a8571e619075`; local source and live receipts,
 read-only production checks, no replay or lifecycle mutation.
