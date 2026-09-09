@@ -56,7 +56,7 @@ tests pass, and the combined exact release completes the full and live gates.
 | A36.1 | Nodes and Status show `Назад`, not `Меню` | verified locally | Public signed-button RED produced `≡ Меню`; preserving the semantic label through projection/presentation is GREEN and keeps the authenticated action unchanged |
 | A36.2 | Diagnose the malformed current active-card formatting | verified | Active `workdir6` card was on page 53/54 inside technical history; bounded neighboring metadata contained 10-16-line `exec` commands rendered as undifferentiated spoiler text |
 | A36.3 | Match the useful historical formatting without legacy-state coupling | verified locally | Historical legacy/ccbot comparison isolated native Rich code blocks as the useful difference; current spacing is already equivalent and remains unchanged |
-| A36.4 | Verify and release the combined A35+A36 version | in progress | Public wire, pagination, independent 20+20 limits, notification, approval and 10x focused race checks pass; full `VERSION=20260910-status-formatting make check-full` passes; Git/CI/install/restart/postflight remain |
+| A36.4 | Verify and release the combined A35+A36 version | verified | Commit `7ce4578` passed Stage 1 `34408284521` and Platform matrix `34408284601`; `20260910-status-formatting` is installed with matching trio hashes, PID 51199 running as sole lock holder, and preserved state/settings/config |
 
 Ranked hypotheses: (1) the callback renders before an asynchronous quota refresh
 updates the cache; (2) the first transport edit completes late and is mistaken for
@@ -147,3 +147,23 @@ signed back label. Focused affected-package race tests passed ten repetitions an
 the complete `VERSION=20260910-status-formatting make check-full` passed. No
 state, settings, config, Telegram input or live message was modified during
 diagnosis and local verification.
+
+## Combined release receipt
+
+Commit `7ce4578d12255b2b082fcfa5c336185a656b9f90` is the exact source used for
+the installed executable trio. Stage 1 run `34408284521` and Platform matrix
+run `34408284601` passed. The active release is
+`20260910-status-formatting`; `previous` points to
+`20260909-approval-restart-stall`. Installed SHA-256 values are
+`d122410e...38383` for Bria, `f9e24dbe...a46ec` for the Codex adapter and
+`54203c53...cdab3` for the Claude adapter.
+
+Postflight at 2026-09-10 00:50 Europe/Moscow found launchd state `running`,
+PID 51199 and exactly that process holding `.state.json.lock`. Seven sessions,
+seven cards and 553 card-history entries were preserved; the message journal
+remained at 12 sessions and 26 inputs and gained one startup/recovery output.
+Config and settings hashes remained unchanged. The structured startup window
+contains `telegram.flow_ready`, one recovered live session and no critical
+event. The visible Telegram rendering and the one-click Status update still
+require the owner's next ordinary interaction for live acceptance; no manual
+Telegram input was sent during deployment.
