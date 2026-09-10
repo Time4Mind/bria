@@ -21,8 +21,16 @@
 > frame до остановки process tree; stderr-вариант отклонён реальным
 > process-boundary тестом. Focused plain, race, architecture и metadata-only
 > live Codex test PASS; transient/network/auth сохраняют старый binding.
-> Финальный `20260910-terminal-recovery-satellite-v2 make check-full` PASS.
-> Нужны push/CI/deploy и live ready нового shared satellite.
+> Финальный выпуск завершён: `067a508f` в `origin/main`, полный
+> `20260910-terminal-recovery-satellite-v2 make check-full` и exact-SHA CI
+> Stage 1 `34529896838` / Platform `34529897002` PASS. Установлен versioned
+> release, PID46682 running/sole process; hashes/config/settings/getMe проверены.
+> `workdir7` ready, сохранила exact provider thread и живые terminal/Codex PID,
+> generation4→5; stable awaiting среди активных сессий нет. Shared Luna
+> автоматически заменила доказанно отсутствующий empty rollout и стала ready с
+> новым binding `01a08d25...`; queue 31 inputs сохранена. Per-session exact
+> active reconnect, archived stop и FIFO проверены automated restart/race,
+> live-настройка не переключалась. A42 закрыт; повторный deploy не нужен.
 
 > A41 выпущен: старая one-shot схема препроцессинга заменена постоянными
 > скрытыми Codex/Luna-сателлитами с режимами `disabled`, `shared` и

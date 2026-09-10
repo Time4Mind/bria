@@ -45,9 +45,9 @@
 | A42.1 | Идентифицировать live-сессию и причину состояния | bounded timeline state/log/native evidence | verified | `workdir7`, создана 10:42 MSK. Exact binding `01a08ac8...`, tmux PID 20903 и Codex PID 20909 живы; transcript продолжался около часа после перехода в awaiting. Native history знает accepted `783531720`, но не старый unknown `783531721`; строгая reconciliation после успешного attach возвращает ошибку и отцепляет observer. Dead terminal, потерянный binding и replay нового pending исключены. Payload не читался. |
 | A42.2 | Устранить устойчивый `awaiting_recovery` | public RED/GREEN двух terminal branches | verified locally | Exact attach больше не откатывается из-за старого replay-fenced unknown без native receipt. `terminal_unavailable` проходит через bounded safe startup class и архивирует сессию; generic/transient ошибка не получает эту классификацию и остаётся retryable. |
 | A42.3 | Не повторять старый accepted input | restart/recovery regression | verified locally | Старый unknown сохраняет фазу и не lease-ится повторно, но допускает более новый pending root. Reconciliation/selector/root tests по 10 повторов PASS. |
-| A42.4 | Выпустить и проверить live | full gate, exact-SHA CI, service/state postflight | in progress | Первый runtime `e9e8fa1` прошёл оба CI и восстановил `workdir7` из `awaiting_recovery` в `ready` с тем же provider thread и generation 2→3; tmux/Codex PID сохранились. Postflight выявил отдельный missing-empty-satellite case, поэтому terminal criterion ещё не закрыт. |
-| A42.5 | Проверить reconnect preprocess satellite при restart Bria | shared и per-session identity/queue restart tests | verified locally | Для физически сохранённого rollout shared warmup exact-resume-ит прежний binding. После main recovery `Reconcile` делает то же для каждого active primary; archived primary не запускается. Очередь остаётся в durable main journal. Новые restart tests по 10 повторов и full race PASS. |
-| A42.6 | Не оставлять startup без сателлита, если прогретый пустой thread ещё не получил rollout | exact missing classification, fresh replacement; transient error preserves binding | verified locally | Live Codex metadata probe доказал `no rollout found` для сохранённого shared ID: пустой thread ещё не имел физического rollout. RED/GREEN классифицирует только этот ответ, передаёт валидируемый `startup_failed/thread_not_found` protocol frame до остановки process tree и создаёт fresh replacement с атомарной заменой binding. Generic/network/auth failure не заменяет ID. Одинаковый slot path используется shared и per-session. |
+| A42.4 | Выпустить и проверить live | full gate, exact-SHA CI, service/state postflight | verified | Runtime `067a508f429189877c679b8e093aff90de111069` в `origin/main`; Stage 1 `34529896838` и Platform `34529897002` PASS. Установлен `20260910-terminal-recovery-satellite-v2`, PID 46682 running/sole process. `workdir7` осталась `ready`, сохранила provider thread `01a08ac8...`, generation 4→5 и живые tmux/Codex PID 20903/20909. Среди 4 активных сессий только `ready/running`, `awaiting_recovery` нет. |
+| A42.5 | Проверить reconnect preprocess satellite при restart Bria | shared и per-session identity/queue restart tests | verified | Shared mode проверен live. Для физически сохранённого rollout exact-resume используется прежний binding; после main recovery `Reconcile` делает то же для каждого active primary в per-session mode, archived primary не запускается. Per-session не включался live, чтобы не менять настройку; exact identity/active-only/archived и FIFO покрыты automated restart/race tests. Durable journal сохранил 13 sessions/31 inputs; 8 sessions и 8 cards сохранены. |
+| A42.6 | Не оставлять startup без сателлита, если прогретый пустой thread ещё не получил rollout | exact missing classification, fresh replacement; transient error preserves binding | verified | Live shared binding `01a08c7f...` не имел rollout. После двух bounded exact-resume попыток новый protocol frame классифицировал proven missing и создал replacement `01a08d25-93a5-7c10-9148-e813ce0dff64`; service log зафиксировал `ready` через 533 ms. Generic/network/auth failure по-прежнему не заменяет ID. После `ready` свежих failed/critical нет. |
 
 ## Локальная проверка перед выпуском
 
@@ -76,3 +76,21 @@
   полный `make check-full` вне filesystem sandbox: policy, links, secret scan,
   format, architecture, весь plain/integration набор, vet, operational packaging,
   полный race и executable trio.
+
+## Release receipt 2026-09-11 Europe/Moscow
+
+- Source и CI: `067a508f429189877c679b8e093aff90de111069` является exact
+  `origin/main`; Stage 1 `34529896838` и Platform `34529897002` завершились
+  `success` для этого SHA.
+- Установка: `current -> releases/20260910-terminal-recovery-satellite-v2`,
+  `previous -> releases/20260910-terminal-recovery-satellite`. SHA-256 тройки:
+  `bria` `6e6cffe1...`, Codex adapter `1b644520...`, Claude adapter `d4db9e21...`;
+  mode 755. Первый pointer-switch через `mv` был отклонён reread до restart:
+  macOS последовал symlink-каталогу. Два созданных temporary symlink удалены,
+  pointers безопасно переключены `ln -sfn`, hashes повторно совпали.
+- Service: только `gui/501/com.time4mind.bria.v2`, runs 5, PID 46682 running;
+  `bria version`, `check-config` и identity-only `check-telegram` PASS.
+  Config `058fc7fd...`, settings `89aa3a55...`, plist `d23a49c1...` не изменились.
+- Данные и lifecycle: 8 sessions/8 cards, journal 13 sessions/31 inputs.
+  Active statuses: 3 ready, 1 running; stable awaiting отсутствует. Shared Luna
+  replacement ready; critical events после нового `telegram.flow_ready` - 0.
