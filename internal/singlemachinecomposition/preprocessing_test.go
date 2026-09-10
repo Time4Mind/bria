@@ -7,6 +7,7 @@ import (
 
 	"bria/internal/domain"
 	"bria/internal/promptpreprocess"
+	"bria/internal/promptpreprocesssession"
 	"bria/internal/safelog"
 )
 
@@ -37,6 +38,26 @@ func TestPreprocessingObserverPersistsIdentityWithoutPrompt(t *testing.T) {
 	}
 	if strings.Contains(encoded, "private prompt") {
 		t.Fatal("prompt leaked into preprocessing observation")
+	}
+}
+
+func TestPreprocessingSessionObserverPersistsSafeLifecycleOnly(t *testing.T) {
+	logger, err := safelog.Open(safelog.Options{Directory: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	observer := preprocessingSessionObserver{logger: logger}
+	if err := observer.ObservePreprocessingSession(context.Background(), promptpreprocesssession.LifecycleObservation{
+		State: "ready", Provider: domain.ProviderCodex, Model: "gpt-5.6-luna",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	events, err := logger.Read(safelog.Service)
+	if err != nil || len(events) != 1 {
+		t.Fatalf("events = (%#v, %v)", events, err)
+	}
+	if events[0].Type != "prompt.preprocessing_session" || events[0].Fields["state"] != "ready" || events[0].Fields["model"] != "gpt-5.6-luna" || events[0].Fields["duration_ms"] != "0" {
+		t.Fatalf("event = %#v", events[0])
 	}
 }
 

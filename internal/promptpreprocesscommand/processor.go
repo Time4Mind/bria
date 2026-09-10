@@ -46,6 +46,21 @@ type candidate struct {
 	revision uint64
 }
 
+// Selection is an opaque, executable-pinned cheap-provider selection for the
+// hidden preprocessing session runtime.
+type Selection struct {
+	candidate   candidate
+	environment []string
+}
+
+func (selection Selection) Provider() domain.Provider { return selection.candidate.provider }
+func (selection Selection) Model() string             { return selection.candidate.model }
+func (selection Selection) Executable() string        { return selection.candidate.path }
+func (selection Selection) Environment() []string {
+	return append([]string(nil), selection.environment...)
+}
+func (selection Selection) Valid() bool { return sameExecutable(selection.candidate) }
+
 type Processor struct {
 	source       configurationSource
 	environment  []string
@@ -68,6 +83,8 @@ func New(source config.Store, environment []string, computerID domain.ComputerID
 		failed: make(map[domain.Provider]bool),
 	}, nil
 }
+
+func (processor *Processor) ComputerID() domain.ComputerID { return processor.computerID }
 
 // Warm starts the configured cheap-model preprocessing session during Bria
 // startup. This removes the first-user-request cold start from the ten-second
@@ -134,6 +151,22 @@ func (processor *Processor) Process(ctx context.Context, request promptpreproces
 		result.ModelEvidence = "codex_cli_header"
 	}
 	return result, nil
+}
+
+func (processor *Processor) Select(ctx context.Context) (Selection, error) {
+	selected, environment, err := processor.selectCandidate(ctx)
+	if err != nil {
+		return Selection{}, err
+	}
+	return Selection{candidate: selected, environment: append([]string(nil), environment...)}, nil
+}
+
+func (processor *Processor) Report(selection Selection, succeeded bool) {
+	if succeeded {
+		processor.recordSuccess(selection.candidate)
+		return
+	}
+	processor.recordFailure(selection.candidate)
 }
 
 func (processor *Processor) selectCandidate(ctx context.Context) (candidate, []string, error) {

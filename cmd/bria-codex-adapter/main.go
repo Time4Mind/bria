@@ -42,12 +42,38 @@ func run(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	return codex.RunAdapter(ctx, os.Stdin, os.Stdout, codex.AdapterConfig{
+	technical, err := parsePreprocessingMode(os.Getenv)
+	if err != nil {
+		return err
+	}
+	configuration := codex.AdapterConfig{
 		RawCommand:     command,
 		Workdir:        workdir,
 		ResumeThreadID: resumeThreadID,
 		ClientInfo:     codex.ClientInfo{Name: "bria-codex-adapter", Version: "1"},
-	})
+	}
+	if technical {
+		configuration.ThreadApprovalPolicy = "never"
+		configuration.ThreadSandbox = "read-only"
+		configuration.ThreadEphemeral = true
+		configuration.RequireReadOnly = true
+		configuration.RejectInteractions = true
+	}
+	return codex.RunAdapter(ctx, os.Stdin, os.Stdout, configuration)
+}
+
+func parsePreprocessingMode(getenv func(string) string) (bool, error) {
+	if getenv == nil {
+		return false, errors.New("adapter environment contract is missing")
+	}
+	switch getenv("BRIA_PREPROCESS_SESSION") {
+	case "":
+		return false, nil
+	case "1":
+		return true, nil
+	default:
+		return false, errors.New("preprocessing adapter mode is invalid")
+	}
 }
 
 func parseRawCommand(args []string) ([]string, error) {

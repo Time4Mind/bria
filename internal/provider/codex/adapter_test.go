@@ -87,6 +87,37 @@ func TestAdapterReadySubmitFinalAndConfirmedClose(t *testing.T) {
 	}
 }
 
+func TestAdapterStartsEphemeralReadOnlyTechnicalThread(t *testing.T) {
+	workdir := t.TempDir()
+	parentInput, adapterInput := io.Pipe()
+	adapterOutput := newLineWriter()
+	runDone := make(chan error, 1)
+	go func() {
+		runDone <- codex.RunAdapter(context.Background(), parentInput, adapterOutput, codex.AdapterConfig{
+			RawCommand: []string{os.Args[0], "-test.run=^TestRawCodexAppServerHelperProcess$", "--", "app-server"},
+			RawEnv: []string{
+				"BRIA_CODEX_RAW_HELPER=1", "BRIA_EXPECT_WORKDIR=" + workdir,
+				"BRIA_EXPECT_EPHEMERAL=1", "BRIA_EXPECT_SANDBOX=read-only",
+			},
+			Workdir: workdir, ThreadEphemeral: true, ThreadSandbox: "read-only", RequireReadOnly: true,
+			ClientInfo: codex.ClientInfo{Name: "bria-preprocess", Version: "test"},
+		})
+	}()
+	assertJSONLine(t, adapterOutput, map[string]any{
+		"protocol": float64(1), "type": "ready", "provider_session_id": "provider-thread-1",
+		"readiness": "protocol", "authentication": "unknown",
+	})
+	writeParentLine(t, adapterInput, `{"protocol":1,"type":"close"}`)
+	select {
+	case err := <-runDone:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("technical adapter did not close")
+	}
+}
+
 func TestAdapterPublishesOfficialThreadNameWithCompletion(t *testing.T) {
 	workdir := t.TempDir()
 	parentInput, adapterInput := io.Pipe()
@@ -548,14 +579,19 @@ func runRawHelper() {
 	requireRaw(ok)
 	requireRaw(params["cwd"] == os.Getenv("BRIA_EXPECT_WORKDIR"))
 	if expectedResumeThreadID == "" {
-		requireRaw(params["ephemeral"] == false)
+		expectedEphemeral := os.Getenv("BRIA_EXPECT_EPHEMERAL") == "1"
+		requireRaw(params["ephemeral"] == expectedEphemeral)
 	} else {
 		requireRaw(params["threadId"] == expectedResumeThreadID)
 		_, hasEphemeral := params["ephemeral"]
 		requireRaw(!hasEphemeral)
 	}
 	requireRaw(params["approvalPolicy"] == "never")
-	requireRaw(params["sandbox"] == "danger-full-access")
+	expectedSandbox := os.Getenv("BRIA_EXPECT_SANDBOX")
+	if expectedSandbox == "" {
+		expectedSandbox = "danger-full-access"
+	}
+	requireRaw(params["sandbox"] == expectedSandbox)
 	providerThreadID := "provider-thread-1"
 	if expectedResumeThreadID != "" {
 		providerThreadID = expectedResumeThreadID
@@ -567,7 +603,7 @@ func runRawHelper() {
 		"thread": map[string]any{
 			"id":        providerThreadID,
 			"sessionId": "provider-session-1",
-			"ephemeral": false,
+			"ephemeral": os.Getenv("BRIA_EXPECT_EPHEMERAL") == "1",
 			"cwd":       os.Getenv("BRIA_EXPECT_WORKDIR"),
 		},
 		"approvalPolicy": "untrusted",

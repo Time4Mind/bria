@@ -122,6 +122,33 @@ func TestClientRunsPersistentThreadAndReturnsOnlyCompletedFinalAnswer(t *testing
 	}
 }
 
+func TestClientStartsAnExplicitEphemeralThread(t *testing.T) {
+	transcript := strings.Join([]string{
+		`{"id":1,"result":{"userAgent":"codex-cli/test","codexHome":"/redacted","platformFamily":"unix","platformOs":"macos"}}`,
+		`{"id":2,"result":{"thread":{"id":"thread-ephemeral","sessionId":"session-ephemeral","ephemeral":true,"cwd":"/tmp/isolated","status":{"type":"idle"}},"approvalPolicy":"never","sandbox":{"type":"readOnly","networkAccess":false}}}`,
+	}, "\n") + "\n"
+	var output bytes.Buffer
+	client, err := codex.NewClient(strings.NewReader(transcript), &output, codex.Options{ClientInfo: codex.ClientInfo{Name: "bria", Version: "test"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Initialize(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	thread, err := client.StartThread(context.Background(), codex.ThreadStartRequest{
+		Cwd: "/tmp/isolated", ApprovalPolicy: "never", Sandbox: "read-only", Ephemeral: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !thread.Ephemeral || thread.ThreadID != "thread-ephemeral" {
+		t.Fatalf("thread = %#v", thread)
+	}
+	if !strings.Contains(output.String(), `"ephemeral":true`) {
+		t.Fatalf("thread/start request = %q", output.String())
+	}
+}
+
 func TestClientListsThreadsThroughStateDBOnlyWithOfficialSchema(t *testing.T) {
 	t.Parallel()
 

@@ -52,6 +52,11 @@ type AdapterConfig struct {
 	// ResumeThreadID is the exact persisted Codex thread.id to resume. Empty
 	// means create a new thread.
 	ResumeThreadID        string
+	ThreadApprovalPolicy  string
+	ThreadSandbox         string
+	ThreadEphemeral       bool
+	RequireReadOnly       bool
+	RejectInteractions    bool
 	MaxParentMessageBytes int
 	MaxTextBytes          int
 	MaxQueuedSubmits      int
@@ -104,18 +109,26 @@ func RunAdapter(ctx context.Context, parentInput io.ReadCloser, parentOutput io.
 		process.stop()
 		session.waitForTurn()
 	}()
+	onServerRequest := func(requestCtx context.Context, request ServerRequest) (ServerResponse, error) {
+		return session.handleServerRequest(requestCtx, request)
+	}
+	onServerResponseAccepted := func(request ServerRequest) error {
+		return session.writeInteractionResponseAccepted(request)
+	}
+	if config.RejectInteractions {
+		onServerRequest = func(context.Context, ServerRequest) (ServerResponse, error) {
+			return ServerResponse{}, ErrUnsupportedRequest
+		}
+		onServerResponseAccepted = nil
+	}
 	client, err := NewClient(process.stdout, process.stdin, Options{
 		ClientInfo:  config.ClientInfo,
 		InputCloser: process.stdout,
 		OnNotification: func(notification Notification) error {
 			return session.handleNotification(notification)
 		},
-		OnServerRequest: func(requestCtx context.Context, request ServerRequest) (ServerResponse, error) {
-			return session.handleServerRequest(requestCtx, request)
-		},
-		OnServerResponseAccepted: func(request ServerRequest) error {
-			return session.writeInteractionResponseAccepted(request)
-		},
+		OnServerRequest:          onServerRequest,
+		OnServerResponseAccepted: onServerResponseAccepted,
 	})
 	if err != nil {
 		return ErrAdapterConfiguration
@@ -125,14 +138,26 @@ func RunAdapter(ctx context.Context, parentInput io.ReadCloser, parentOutput io.
 	if _, err := client.Initialize(runCtx); err != nil {
 		return classifyStartupError(err)
 	}
+	approvalPolicy := config.ThreadApprovalPolicy
+	if approvalPolicy == "" {
+		approvalPolicy = "never"
+	}
+	sandbox := config.ThreadSandbox
+	if sandbox == "" {
+		sandbox = "danger-full-access"
+	}
 	thread, err := client.StartThread(runCtx, ThreadStartRequest{
 		Cwd:            config.Workdir,
 		ResumeThreadID: config.ResumeThreadID,
-		ApprovalPolicy: "never",
-		Sandbox:        "danger-full-access",
+		ApprovalPolicy: approvalPolicy,
+		Sandbox:        sandbox,
+		Ephemeral:      config.ThreadEphemeral,
 	})
 	if err != nil {
 		return classifyStartupError(err)
+	}
+	if config.RequireReadOnly && (!thread.HasEffectiveSandbox || normalizeSandbox(thread.EffectiveSandbox.Type) != "readonly" || thread.EffectiveSandbox.NetworkAccess) {
+		return ErrRawProcess
 	}
 	session.threadID = thread.ThreadID
 	session.providerSessionID = thread.ThreadID
@@ -239,6 +264,10 @@ func validateAdapterConfig(parentInput io.ReadCloser, parentOutput io.Writer, co
 		config.ClientInfo.Name == "" || config.ClientInfo.Version == "" ||
 		config.MaxParentMessageBytes < 0 || config.MaxTextBytes < 0 || config.MaxQueuedSubmits < 0 ||
 		(config.ResumeThreadID != "" && !validRequestID(config.ResumeThreadID)) {
+		return ErrAdapterConfiguration
+	}
+	if (config.ThreadEphemeral && config.ResumeThreadID != "") ||
+		(config.RequireReadOnly && config.ThreadSandbox != "read-only") {
 		return ErrAdapterConfiguration
 	}
 	appServerCount := 0

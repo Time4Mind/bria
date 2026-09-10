@@ -1,5 +1,5 @@
-// Package promptpreprocess defines the isolated stateless prompt-rewrite
-// boundary and the durable envelope used before provider hand-off.
+// Package promptpreprocess defines the isolated prompt-rewrite boundary and
+// the durable envelope used before provider hand-off.
 package promptpreprocess
 
 import (
@@ -21,6 +21,7 @@ type Request struct {
 	ComputerID  domain.ComputerID
 	SessionID   domain.SessionID
 	MessageID   string
+	Sequence    uint64
 	Instruction string
 	Text        string
 }
@@ -32,6 +33,13 @@ type Result struct {
 	// ModelEvidence identifies a provider-reported model receipt, not a price
 	// ranking. Empty means Model is only the requested configuration.
 	ModelEvidence string
+	// Completion retires the one-shot technical provider session only after the
+	// caller has durably accepted this result or its validated fallback.
+	Completion Completion
+}
+
+type Completion interface {
+	Accept(context.Context) error
 }
 
 type Processor interface {

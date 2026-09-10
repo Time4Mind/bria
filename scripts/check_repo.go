@@ -1276,9 +1276,9 @@ var packagePolicies = map[string]packagePolicy{
 		maxProductionLines: 60,
 	},
 	"internal/telegramturnhelpers": {
-		responsibility:     "prepare media and preprocessed prompts and validate exact durable turn admission",
+		responsibility:     "prepare media and preprocessed prompts, finalize preprocessing after persistence and validate exact durable turn admission",
 		allowedImports:     []string{"internal/coordinator", "internal/domain", "internal/promptpreprocess", "internal/sessionruntime", "internal/settingsport", "internal/turnprocessing"},
-		maxProductionLines: 375,
+		maxProductionLines: 400,
 	},
 	"internal/nativerender": {
 		responsibility:     "rasterize bounded native ANSI captures independently of runtime and transport",
@@ -1794,7 +1794,7 @@ var packagePolicies = map[string]packagePolicy{
 		maxProductionLines: 350,
 	},
 	"internal/promptpreprocess": {
-		responsibility:     "define stateless prompt rewriting and its durable pre-provider envelope",
+		responsibility:     "define prompt rewriting, its durable pre-provider envelope and post-persistence completion boundary",
 		allowedImports:     []string{"internal/domain"},
 		maxProductionLines: 250,
 	},
@@ -1807,6 +1807,11 @@ var packagePolicies = map[string]packagePolicy{
 		responsibility:     "run isolated one-shot prompt rewriting through the cheapest enabled local provider",
 		allowedImports:     []string{"internal/config", "internal/domain", "internal/processenv", "internal/processgroup", "internal/promptpreprocess"},
 		maxProductionLines: 450,
+	},
+	"internal/promptpreprocesssession": {
+		responsibility:     "maintain the bounded hidden one-shot preprocessing session pool and its isolated external Codex adapter transport",
+		allowedImports:     []string{"internal/domain", "internal/processgroup", "internal/promptpreprocess", "internal/promptpreprocesscommand", "internal/runtimeprotocol"},
+		maxProductionLines: 750,
 	},
 	"internal/p4runtimecomposition": {
 		responsibility: "compose opt-in P4 media and Screen runtime adapters",
@@ -1838,9 +1843,9 @@ var packagePolicies = map[string]packagePolicy{
 		responsibility: "compose the single-computer Bria process and bind post-commit status refresh delivery",
 		allowedImports: []string{
 			"internal/providermodels",
-			"internal/acceptedcontinuation", "internal/app", "internal/authcomposition", "internal/callbacktoken", "internal/claudestore", "internal/config", "internal/coordinator", "internal/domain", "internal/durablecomposition", "internal/durableflow", "internal/interactioncomposition", "internal/messagejournal", "internal/nativerecoverycomposition", "internal/observability", "internal/processenv", "internal/promptpreprocess", "internal/promptpreprocesscommand", "internal/providerquota", "internal/recoverycomposition", "internal/recoveryruntime", "internal/runtimefactory", "internal/safelog", "internal/screenproduction", "internal/sessioncreation", "internal/sessionexpiry", "internal/sessionid", "internal/sessionnaming", "internal/sessionruntime", "internal/sessionsupervisor", "internal/settings", "internal/settingscomposition", "internal/storage", "internal/supervisioncomposition", "internal/telegram", "internal/telegrambridge", "internal/telegramcompletioncomposition", "internal/telegramcontroller", "internal/telegramflow", "internal/telegramnotify", "internal/telegrampipeline", "internal/telegrampromptcomposition", "internal/telegramrecoverycomposition", "internal/telegramruntimecomposition", "internal/turnruntimecomposition", "internal/workdir",
+			"internal/acceptedcontinuation", "internal/app", "internal/authcomposition", "internal/callbacktoken", "internal/claudestore", "internal/config", "internal/coordinator", "internal/domain", "internal/durablecomposition", "internal/durableflow", "internal/interactioncomposition", "internal/messagejournal", "internal/nativerecoverycomposition", "internal/observability", "internal/processenv", "internal/promptpreprocess", "internal/promptpreprocesscommand", "internal/promptpreprocesssession", "internal/providerquota", "internal/recoverycomposition", "internal/recoveryruntime", "internal/runtimefactory", "internal/safelog", "internal/screenproduction", "internal/sessioncreation", "internal/sessionexpiry", "internal/sessionid", "internal/sessionnaming", "internal/sessionruntime", "internal/sessionsupervisor", "internal/settings", "internal/settingscomposition", "internal/storage", "internal/supervisioncomposition", "internal/telegram", "internal/telegrambridge", "internal/telegramcompletioncomposition", "internal/telegramcontroller", "internal/telegramflow", "internal/telegramnotify", "internal/telegrampipeline", "internal/telegrampromptcomposition", "internal/telegramrecoverycomposition", "internal/telegramruntimecomposition", "internal/turnruntimecomposition", "internal/workdir",
 		},
-		maxProductionLines: 1025,
+		maxProductionLines: 1050,
 	},
 	"internal/secretfile": {
 		responsibility:     "pass a bounded secret file to a callback with guaranteed transient zeroization",

@@ -28,6 +28,13 @@ func (function promptObserverFunc) ObservePreprocessing(ctx context.Context, obs
 	return function(ctx, observation)
 }
 
+type preprocessingCompletionFunc func(context.Context)
+
+func (function preprocessingCompletionFunc) Accept(ctx context.Context) error {
+	function(ctx)
+	return nil
+}
+
 func TestDurablePreprocessingPersistsCleanedTextBeforeProviderAcceptance(t *testing.T) {
 	ready := readySession(t, "aaaaaaaa-aaaa-4aaa-9aaa-aaaaaaaaaaaa", domain.ProviderCodex, t.TempDir(), "provider-a", 1)
 	payload, err := promptpreprocess.Encode("clean", "raw speech")
@@ -36,6 +43,8 @@ func TestDurablePreprocessingPersistsCleanedTextBeforeProviderAcceptance(t *test
 	}
 	ui := &projectionUIState{}
 	providerText := ""
+	preparedBeforeAccepted := false
+	preprocessingAccepted := false
 	notifications := make(chan telegramcontroller.Notification, 3)
 	interactive := &interactiveSubmitter{submitWithCallbacks: func(_ context.Context, _ domain.SessionID, text string, callbacks sessionruntime.TurnCallbacks) (sessionruntime.TurnResult, error) {
 		providerText = text
@@ -49,13 +58,25 @@ func TestDurablePreprocessingPersistsCleanedTextBeforeProviderAcceptance(t *test
 		return nil
 	}),
 		telegramcontroller.Options{Recovered: []domain.Session{ready}, UIState: ui, Preprocessor: promptProcessorFunc(func(_ context.Context, request promptpreprocess.Request) (promptpreprocess.Result, error) {
-			if request.Text != "raw speech" || request.Instruction != "clean" || request.SessionID != ready.ID() {
+			if request.Text != "raw speech" || request.Instruction != "clean" || request.SessionID != ready.ID() || request.Sequence != 1 {
 				t.Fatalf("preprocessing request = %#v", request)
 			}
-			return promptpreprocess.Result{Text: "cleaned prompt", Provider: domain.ProviderCodex, Model: "cheap"}, nil
+			return promptpreprocess.Result{
+				Text: "cleaned prompt", Provider: domain.ProviderCodex, Model: "cheap",
+				Completion: preprocessingCompletionFunc(func(context.Context) {
+					if !preparedBeforeAccepted {
+						t.Fatal("preprocessing session closed before prepared payload was durable")
+					}
+					preprocessingAccepted = true
+				}),
+			}, nil
+		}), PreprocessingObserver: promptObserverFunc(func(context.Context, promptpreprocess.Observation) error {
+			if !preparedBeforeAccepted {
+				t.Fatal("preprocessing completion was logged before prepared payload was durable")
+			}
+			return nil
 		})})
 	t.Cleanup(func() { _ = controller.Close(context.Background()) })
-	preparedBeforeAccepted := false
 	receipt, err := controller.ProcessDurableInput(context.Background(), telegramcontroller.DurableLeasedInput{
 		SessionID: ready.ID(), MessageID: "telegram-update:501", Sequence: 1, Payload: payload,
 	}, telegramcontroller.DurableInputCallbacks{
@@ -74,7 +95,7 @@ func TestDurablePreprocessingPersistsCleanedTextBeforeProviderAcceptance(t *test
 			return nil
 		},
 	})
-	if err != nil || !receipt.Accepted || providerText != "cleaned prompt" {
+	if err != nil || !receipt.Accepted || providerText != "cleaned prompt" || !preprocessingAccepted {
 		t.Fatalf("durable preprocessing = (%#v, %v), provider text %q", receipt, err, providerText)
 	}
 	first, second := <-notifications, <-notifications
@@ -95,6 +116,38 @@ func TestDurablePreprocessingPersistsCleanedTextBeforeProviderAcceptance(t *test
 	}
 	if len(history) < 1 || !strings.HasPrefix(history[0], "👨") || !strings.Contains(history[0], "cleaned prompt") {
 		t.Fatalf("card history = %#v", history)
+	}
+}
+
+func TestDurablePreprocessingPersistenceFailureDoesNotRetireTechnicalSession(t *testing.T) {
+	ready := readySession(t, "abababab-abab-4bab-9bab-abababababab", domain.ProviderCodex, t.TempDir(), "provider-persist", 1)
+	payload, err := promptpreprocess.Encode("clean", "raw speech")
+	if err != nil {
+		t.Fatal(err)
+	}
+	retired := false
+	providerCalled := false
+	controller := newController(t, nil, &memorySessions{byID: map[domain.SessionID]domain.Session{ready.ID(): ready}}, &interactiveSubmitter{submitWithCallbacks: func(context.Context, domain.SessionID, string, sessionruntime.TurnCallbacks) (sessionruntime.TurnResult, error) {
+		providerCalled = true
+		return sessionruntime.TurnResult{}, nil
+	}}, nil, telegramcontroller.Options{
+		Recovered: []domain.Session{ready},
+		Preprocessor: promptProcessorFunc(func(context.Context, promptpreprocess.Request) (promptpreprocess.Result, error) {
+			return promptpreprocess.Result{
+				Text: "cleaned", Completion: preprocessingCompletionFunc(func(context.Context) { retired = true }),
+			}, nil
+		}),
+	})
+	t.Cleanup(func() { _ = controller.Close(context.Background()) })
+	sentinel := errors.New("persistence unavailable")
+	_, err = controller.ProcessDurableInput(context.Background(), telegramcontroller.DurableLeasedInput{
+		SessionID: ready.ID(), MessageID: "telegram-update:599", Sequence: 9, Payload: payload,
+	}, telegramcontroller.DurableInputCallbacks{
+		OnPrepared: func(context.Context, telegramcontroller.DurableInputPreparation) error { return sentinel },
+		OnAccepted: func(context.Context, telegramcontroller.DurableInputAcceptance) error { return nil },
+	})
+	if !errors.Is(err, sentinel) || retired || providerCalled {
+		t.Fatalf("persist failure = err:%v retired:%t provider_called:%t", err, retired, providerCalled)
 	}
 }
 

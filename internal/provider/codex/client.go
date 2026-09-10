@@ -146,6 +146,7 @@ type ThreadStartRequest struct {
 	Cwd            string
 	ApprovalPolicy string
 	Sandbox        string
+	Ephemeral      bool
 	// ResumeThreadID selects thread/resume instead of creating a new thread.
 	// It must be the previously persisted thread.id provider binding.
 	ResumeThreadID string
@@ -161,6 +162,7 @@ type ThreadStartResult struct {
 	// optional live-session tree root and is exposed separately below.
 	SessionID                  string
 	ReportedSessionID          string
+	Ephemeral                  bool
 	Cwd                        string
 	RequestedApprovalPolicy    string
 	EffectiveApprovalPolicy    string
@@ -419,7 +421,7 @@ func (client *Client) StartThread(ctx context.Context, request ThreadStartReques
 	}
 	method := "thread/start"
 	var params any = threadStartParams{
-		Cwd: request.Cwd, Ephemeral: false,
+		Cwd: request.Cwd, Ephemeral: request.Ephemeral,
 		ApprovalPolicy: request.ApprovalPolicy, Sandbox: request.Sandbox,
 	}
 	if request.ResumeThreadID != "" {
@@ -439,7 +441,8 @@ func (client *Client) StartThread(ctx context.Context, request ThreadStartReques
 	}
 	if result.Thread.ID == "" ||
 		(request.ResumeThreadID != "" && result.Thread.ID != request.ResumeThreadID) ||
-		(result.Thread.Ephemeral != nil && *result.Thread.Ephemeral) ||
+		(result.Thread.Ephemeral != nil && *result.Thread.Ephemeral != request.Ephemeral) ||
+		(request.Ephemeral && result.Thread.Ephemeral == nil) ||
 		(result.Thread.Name != nil && !boundedExactText(*result.Thread.Name, DefaultMaxMessageBytes, true)) {
 		return ThreadStartResult{}, ErrInvalidResponse
 	}
@@ -466,6 +469,7 @@ func (client *Client) StartThread(ctx context.Context, request ThreadStartReques
 		Name:                       optionalString(result.Thread.Name),
 		SessionID:                  result.Thread.ID,
 		ReportedSessionID:          result.Thread.SessionID,
+		Ephemeral:                  request.Ephemeral,
 		Cwd:                        effectiveCwd,
 		RequestedApprovalPolicy:    request.ApprovalPolicy,
 		EffectiveApprovalPolicy:    effectiveApprovalPolicy,

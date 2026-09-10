@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"bria/internal/coordinator"
@@ -66,33 +67,34 @@ func (p Preparation) Payload(ctx context.Context, text string) []byte {
 	return payload
 }
 
-func (p Preparation) Process(ctx context.Context, session domain.Session, messageID string, payload []byte) (string, bool, []byte) {
+func (p Preparation) Process(ctx context.Context, session domain.Session, messageID string, sequence uint64, payload []byte) (string, bool, []byte, promptpreprocess.Completion) {
 	state, err := promptpreprocess.DecodeState(payload)
 	if err != nil {
 		p.observeFailure(ctx, session, messageID, promptpreprocess.Result{}, "decode", "invalid_input", err)
-		return strings.TrimSpace(string(payload)), true, nil
+		return strings.TrimSpace(string(payload)), true, nil, nil
 	}
 	if !state.Enabled {
-		return strings.TrimSpace(state.Original), false, nil
+		return strings.TrimSpace(state.Original), false, nil, nil
 	}
 	if state.Prepared {
 		if p.Observer != nil {
 			_ = p.Observer.ObservePreprocessing(context.WithoutCancel(ctx), promptpreprocess.CachedObservation(promptpreprocess.Request{ComputerID: session.ComputerID(), SessionID: session.ID(), MessageID: messageID}, state.Failed))
 		}
-		return state.Processed, state.Failed, nil
+		return state.Processed, state.Failed, nil, nil
 	}
 	if p.Processor == nil {
 		err = errors.New("preprocessor is unavailable")
 		p.observeFailure(ctx, session, messageID, promptpreprocess.Result{}, "select", "unavailable", err)
 		prepared, _ := promptpreprocess.MarkPrepared(payload, state.Original, true)
-		return state.Original, true, prepared
+		return state.Original, true, prepared, nil
 	}
 	preprocessContext, cancel := context.WithTimeout(ctx, p.Timeout)
 	result, processErr := p.Processor.Process(preprocessContext, promptpreprocess.Request{
 		ComputerID: session.ComputerID(), SessionID: session.ID(), MessageID: messageID,
-		Instruction: state.Instruction, Text: state.Original,
+		Sequence: sequence, Instruction: state.Instruction, Text: state.Original,
 	})
 	cancel()
+	completion := result.Completion
 	var validationErr error
 	if processErr == nil {
 		validationErr = promptpreprocess.ValidateResult(state.Original, result.Text)
@@ -109,14 +111,40 @@ func (p Preparation) Process(ctx context.Context, session domain.Session, messag
 		}
 		p.observeFailure(ctx, session, messageID, result, stage, category, processErr)
 		prepared, _ := promptpreprocess.MarkPrepared(payload, state.Original, true)
-		return state.Original, true, prepared
+		return state.Original, true, prepared, completion
 	}
 	cleaned := strings.TrimSpace(result.Text)
-	if p.Observer != nil {
-		_ = p.Observer.ObservePreprocessing(context.WithoutCancel(ctx), promptpreprocess.SuccessObservation(promptpreprocess.Request{ComputerID: session.ComputerID(), SessionID: session.ID(), MessageID: messageID}, result))
-	}
+	completion = p.acceptedCompletion(promptpreprocess.Request{
+		ComputerID: session.ComputerID(), SessionID: session.ID(), MessageID: messageID, Sequence: sequence,
+	}, result, completion)
 	prepared, _ := promptpreprocess.MarkPrepared(payload, cleaned, false)
-	return cleaned, false, prepared
+	return cleaned, false, prepared, completion
+}
+
+func (p Preparation) acceptedCompletion(request promptpreprocess.Request, result promptpreprocess.Result, inner promptpreprocess.Completion) promptpreprocess.Completion {
+	if p.Observer == nil {
+		return inner
+	}
+	return &acceptedPreprocessingCompletion{observer: p.Observer, request: request, result: result, inner: inner}
+}
+
+type acceptedPreprocessingCompletion struct {
+	once     sync.Once
+	observer promptpreprocess.Observer
+	request  promptpreprocess.Request
+	result   promptpreprocess.Result
+	inner    promptpreprocess.Completion
+	err      error
+}
+
+func (completion *acceptedPreprocessingCompletion) Accept(ctx context.Context) error {
+	completion.once.Do(func() {
+		_ = completion.observer.ObservePreprocessing(context.WithoutCancel(ctx), promptpreprocess.SuccessObservation(completion.request, completion.result))
+		if completion.inner != nil {
+			completion.err = completion.inner.Accept(ctx)
+		}
+	})
+	return completion.err
 }
 
 func (p Preparation) observeFailure(ctx context.Context, session domain.Session, messageID string, result promptpreprocess.Result, stage, category string, processErr error) {

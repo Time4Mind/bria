@@ -1,5 +1,10 @@
 # Handoff: статус и следующий план
 
+> Текущий запрос A40 - одна скрытая готовая Luna/cheap-model session для
+> препроцессинга, immediate replacement после lease и close старой только после
+> durable acceptance. Договор, coverage и todo:
+> [PREPROCESS_SESSION_POOL_TODO.md](PREPROCESS_SESSION_POOL_TODO.md).
+
 > Текущий запрос A39 - исправление задержки `Новое`, failed создания и
 > всех доступных recovery-эпизодов. Последняя session сохранена, но после
 > `adapter_failed` осталась `awaiting_recovery` без binding и без auto-retry;

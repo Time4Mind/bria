@@ -2469,7 +2469,7 @@ func (controller *Controller) enqueueSession(ctx context.Context, updateID, sour
 		controller.setPromptState(ctx, sessionID, messageID, input.Text, "🙅‍♂")
 		return coordinator.Decision{Kind: coordinator.DecisionSkip}
 	}
-	processed, preprocessingFailed, _ := controller.preparation.Process(ctx, session, messageID, payload)
+	processed, preprocessingFailed, _, preprocessingCompletion := controller.preparation.Process(ctx, session, messageID, 0, payload)
 	input.Text = processed
 	if state, decodeErr := promptpreprocess.DecodeState(payload); decodeErr == nil && state.Enabled {
 		controller.publishPreprocessingState(ctx, sessionID, messageID, input.Text, preprocessingFailed)
@@ -2479,11 +2479,20 @@ func (controller *Controller) enqueueSession(ctx context.Context, updateID, sour
 	controller.setProcessedPromptState(ctx, sessionID, messageID, input.Text, "👨‍💻", preprocessingFailed)
 	select {
 	case worker.queue <- queuedTurn{text: input.Text, messageID: messageID}:
+		if preprocessingCompletion != nil {
+			_ = preprocessingCompletion.Accept(context.WithoutCancel(ctx))
+		}
 		return coordinator.Decision{Kind: coordinator.DecisionSkip}
 	case <-controller.rootContext.Done():
+		if preprocessingCompletion != nil {
+			_ = preprocessingCompletion.Accept(context.WithoutCancel(ctx))
+		}
 		controller.setProcessedPromptState(ctx, sessionID, messageID, input.Text, "🙅‍♂", preprocessingFailed)
 		return coordinator.Decision{Kind: coordinator.DecisionSkip}
 	default:
+		if preprocessingCompletion != nil {
+			_ = preprocessingCompletion.Accept(context.WithoutCancel(ctx))
+		}
 		controller.setProcessedPromptState(ctx, sessionID, messageID, input.Text, "🙅‍♂", preprocessingFailed)
 		return coordinator.Decision{Kind: coordinator.DecisionSkip}
 	}
@@ -2627,10 +2636,13 @@ func (controller *Controller) ProcessDurableInput(
 	if observingBatch {
 		return receipt, turnprocessing.ErrInputDeferred
 	}
-	promptText, preprocessingFailed, preparedPayload := controller.preparation.Process(ctx, session, input.MessageID, input.Payload)
+	promptText, preprocessingFailed, preparedPayload, preprocessingCompletion := controller.preparation.Process(ctx, session, input.MessageID, input.Sequence, input.Payload)
 	if err := telegramturnhelpers.PersistPrepared(ctx, input, preparedPayload, callbacks); err != nil {
 		controller.publishProcessedPromptState(ctx, input.SessionID, input.MessageID, promptText, "🙅‍♂", preprocessingFailed)
 		return receipt, err
+	}
+	if preprocessingCompletion != nil {
+		_ = preprocessingCompletion.Accept(context.WithoutCancel(ctx))
 	}
 	if preprocessingEnabled {
 		controller.publishPreprocessingState(ctx, input.SessionID, input.MessageID, promptText, preprocessingFailed)

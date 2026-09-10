@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strconv"
 	"time"
 
@@ -22,6 +23,7 @@ import (
 	"bria/internal/observability"
 	"bria/internal/promptpreprocess"
 	"bria/internal/promptpreprocesscommand"
+	"bria/internal/promptpreprocesssession"
 	"bria/internal/providermodels"
 	"bria/internal/providerquota"
 	"bria/internal/recoverycomposition"
@@ -310,15 +312,31 @@ func runTelegramController(
 		return fmt.Errorf("open Telegram flow trace: %w", err)
 	}
 	defer flowTrace.Close()
-	promptPreprocessor, err := promptpreprocesscommand.New(providerPreferences, dependencies.Environment(), computerID)
+	executable, err := dependencies.Executable()
+	if err != nil {
+		return errors.New("resolve Bria executable")
+	}
+	promptCommandProcessor, err := promptpreprocesscommand.New(providerPreferences, dependencies.Environment(), computerID)
 	if err != nil {
 		return fmt.Errorf("compose prompt preprocessor: %w", err)
 	}
+	promptPreprocessor, err := promptpreprocesssession.New(
+		promptCommandProcessor, filepath.Join(filepath.Dir(executable), "bria-codex-adapter"),
+		preprocessingSessionObserver{logger: safeLogger},
+	)
+	if err != nil {
+		return fmt.Errorf("compose prompt preprocessing session pool: %w", err)
+	}
+	defer func() {
+		closeContext, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_ = promptPreprocessor.Close(closeContext)
+	}()
 	go promptPreprocessor.Warmup(ctx)
 	sessionNamer, err := sessionnaming.New(state, func(ctx context.Context) (bool, error) {
 		current, loadErr := preferences.Load(ctx)
 		return current.SessionNamingEnabled, loadErr
-	}, sessionnaming.CheapGenerator{Processor: promptPreprocessor})
+	}, sessionnaming.CheapGenerator{Processor: promptCommandProcessor})
 	if err != nil {
 		return fmt.Errorf("compose session naming: %w", err)
 	}
@@ -339,10 +357,6 @@ func runTelegramController(
 		Flow: flow, Wake: outputWake, OwnerPrivateChatID: configuration.PrivateChatID,
 	}
 	checkpoints := state.CoordinatorCheckpoints()
-	executable, err := dependencies.Executable()
-	if err != nil {
-		return errors.New("resolve Bria executable")
-	}
 	runtimeEnvironment := append([]string(nil), dependencies.Environment()...)
 	runtimeEnvironment = append(runtimeEnvironment, fmt.Sprintf("BRIA_SCREEN_CAPTURE_KIB=%d", effectiveSettings.ScreenCaptureLimitKiB))
 	starter, err := dependencies.ComposeRuntime(
@@ -722,6 +736,21 @@ func runTelegramController(
 }
 
 type preprocessingObserver struct{ logger *safelog.Logger }
+
+type preprocessingSessionObserver struct{ logger *safelog.Logger }
+
+func (observer preprocessingSessionObserver) ObservePreprocessingSession(_ context.Context, observation promptpreprocesssession.LifecycleObservation) error {
+	if observer.logger == nil {
+		return errors.New("safe logger is required")
+	}
+	return observer.logger.Write(safelog.Event{
+		Class: safelog.Service, Type: "prompt.preprocessing_session", ErrorCategory: observation.ErrorCategory,
+		Fields: map[string]string{
+			"state": observation.State, "provider": string(observation.Provider), "model": observation.Model,
+			"duration_ms": strconv.FormatInt(max(0, observation.Duration.Milliseconds()), 10),
+		},
+	})
+}
 
 func (observer preprocessingObserver) ObservePreprocessing(_ context.Context, observation promptpreprocess.Observation) error {
 	if observer.logger == nil {

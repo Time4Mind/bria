@@ -16,6 +16,19 @@ func TestParseRawCommandPreservesDirectArgvAfterSeparator(t *testing.T) {
 	}
 }
 
+func TestParsePreprocessingModeIsExplicit(t *testing.T) {
+	for _, test := range []struct {
+		value string
+		want  bool
+		bad   bool
+	}{{}, {value: "1", want: true}, {value: "true", bad: true}} {
+		got, err := parsePreprocessingMode(func(string) string { return test.value })
+		if got != test.want || (err != nil) != test.bad {
+			t.Fatalf("parsePreprocessingMode(%q) = (%t, %v)", test.value, got, err)
+		}
+	}
+}
+
 func TestParseRawCommandRequiresSeparatorAndCommand(t *testing.T) {
 	tests := [][]string{
 		nil,
