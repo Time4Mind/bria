@@ -32,7 +32,31 @@
 | A40.3 | Close только после durable acceptance | controller regression test | verified | completion вызывается после `PersistPrepared` |
 | A40.4 | Без смешения контекста и гонок | FIFO/concurrency/race tests | verified | один request на thread, Busy+Ready максимум 2 |
 | A40.5 | Restart/config/failure cleanup | lifecycle tests и safe logs | verified | generation invalidation, shutdown cleanup, `close_failed` |
-| A40.6 | Полный выпуск и postflight | full gate, CI, hashes, service health | pending | live synthetic Telegram input не отправлять |
+| A40.6 | Полный выпуск и postflight | full gate, CI, hashes, service health | verified | runtime `84d1e4e`, оба exact-SHA CI PASS, installed version и live `ready` подтверждены; synthetic Telegram input не отправлялся |
+
+## Release receipt - 2026-09-10 17:16 MSK
+
+- Проверенный runtime commit: `84d1e4ec7bda1a063c7a901dd6ce111cedf9c931`.
+- Полный локальный gate: `VERSION=20260910-preprocess-session-pool`
+  `TMPDIR=/private/tmp make check-full` - PASS. Exact-SHA CI: Stage 1
+  `34487120974` и Platform matrix `34487120981` - SUCCESS.
+- Установлена версия `bria 20260910-preprocess-session-pool`; service
+  `gui/501/com.time4mind.bria.v2` - `running`, PID 7310, sole owner
+  `.state.json.lock`. `current` указывает на release
+  `20260910-preprocess-session-pool`, `previous` - на
+  `20260910-session-recovery`.
+- Hashes установленных `bria`, `bria-codex-adapter`,
+  `bria-claude-adapter`: `01ce80aa...`, `9371eb64...`, `8c4ce502...` -
+  совпадают с проверенными артефактами. Config/settings hashes не изменились:
+  `058fc7fd...` и `89aa3a55...`.
+- После restart safe log зафиксировал `prompt.preprocessing_session`:
+  `starting` -> `ready` за 955 ms для `gpt-5.6-luna`; новых
+  `failed`, `error` и `critical` в release window нет.
+- Сохранены 8 sessions, 8 cards, 557 history entries, 13 journal sessions и
+  28 inputs. `check-config` и identity-only `check-telegram` - OK.
+- Граница: app-server подтверждает принятие запрошенной модели Luna, но не
+  предоставляет независимый receipt фактически тарифицированной модели.
+  Пользовательский Telegram input для postflight намеренно не создавался.
 
 ## Проверенные исходные факты
 

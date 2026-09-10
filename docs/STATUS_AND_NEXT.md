@@ -4,6 +4,12 @@
 > препроцессинга, immediate replacement после lease и close старой только после
 > durable acceptance. Договор, coverage и todo:
 > [PREPROCESS_SESSION_POOL_TODO.md](PREPROCESS_SESSION_POOL_TODO.md).
+> Выпуск завершён: runtime `84d1e4e`, полный локальный gate и оба exact-SHA CI
+> PASS. Установлен `20260910-preprocess-session-pool`, PID 7310 running/sole
+> lock. После restart Luna-сессия перешла `starting` -> `ready` за 955 ms;
+> свежих failed/error/critical нет. Сохранены 8 sessions, 8 cards, 557 history,
+> 13 journal sessions и 28 inputs; config/settings hashes не изменились,
+> `check-config` и Telegram identity OK. Synthetic Telegram input не отправлялся.
 
 > Текущий запрос A39 - исправление задержки `Новое`, failed создания и
 > всех доступных recovery-эпизодов. Последняя session сохранена, но после
