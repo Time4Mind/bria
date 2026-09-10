@@ -84,6 +84,40 @@ func TestNodesAndStatusBackButtonKeepsVisibleLabel(t *testing.T) {
 	}
 }
 
+func TestSessionCardNodesCallbackCarriesExactReturnSession(t *testing.T) {
+	const session = domain.SessionID("11111111-1111-4111-9111-111111111111")
+	now := time.Unix(1_800_000_000, 0).UTC()
+	codec, err := callbacktoken.New(bytes.Repeat([]byte{8}, 32), nil, func() time.Time { return now })
+	if err != nil {
+		t.Fatal(err)
+	}
+	presenter, err := telegrambridge.NewPresenter(codec, func() time.Time { return now }, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	markup, err := presenter.PresentKeyboard(string(session), nil, telegramui.CardKeyboard{
+		Rows: []telegramui.ButtonRow{{{Action: telegramui.ActionMenuNodes}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := presenter.DecodeCallback(markup.InlineKeyboard[0][0].CallbackData)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := telegrampipeline.PlanAcceptedCallback(telegrampipeline.AcceptedCallback{
+		UpdateID: 1, SessionID: domain.SessionID(decoded.SessionID), Carrier: telegramstate.Carrier{ChatID: 1, MessageID: 2},
+		Action: decoded.Action, Target: decoded.Target,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	semantic, err := semanticActionFromPlan(plan)
+	if err != nil || semantic.Kind != telegramcontroller.SemanticMenuNodes || semantic.SessionID != session {
+		t.Fatalf("semantic=%#v err=%v", semantic, err)
+	}
+}
+
 func TestModelSelectorSurfaceAndCallbackKeepExactChoiceAndSession(t *testing.T) {
 	const session = domain.SessionID("11111111-1111-4111-9111-111111111111")
 	for _, kind := range []telegramcontroller.SemanticActionKind{telegramcontroller.SemanticNativeKey, telegramcontroller.SemanticModelMenu, telegramcontroller.SemanticModelChoice, telegramcontroller.SemanticEffortMenu, telegramcontroller.SemanticEffortChoice} {

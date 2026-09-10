@@ -104,6 +104,61 @@ func TestNodeMenuKeepsCoordinatorFirstAndMarksUnavailableNode(t *testing.T) {
 	}
 }
 
+func TestNodeMenuBackReturnsToExactOriginSession(t *testing.T) {
+	origin := readySessionOnNode(t, "11111111-1111-4111-9111-111111111111", "local")
+	sessions := newLockedSessions(origin)
+	controller := newController(t, nil, sessions, nil, nil, telegramcontroller.Options{
+		CreationEnvironment: &creationEnvironmentStub{computers: []sessioncreation.Computer{{ID: "local", Name: "Coordinator"}}},
+		Recovered:           []domain.Session{origin},
+	})
+
+	nodes, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{
+		Kind: telegramcontroller.SemanticMenuNodes, SessionID: origin.ID(),
+	})
+	if err != nil || nodes.Surface == nil {
+		t.Fatalf("nodes = %#v, err=%v", nodes, err)
+	}
+	back := nodes.Surface.Rows[len(nodes.Surface.Rows)-1][1]
+	if back.Label != "Назад" || back.Action != telegramcontroller.SemanticSelect || back.SessionID != origin.ID() {
+		t.Fatalf("session-origin back = %#v", back)
+	}
+	if err := controller.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	restarted := newController(t, nil, sessions, nil, nil, telegramcontroller.Options{
+		CreationEnvironment: &creationEnvironmentStub{computers: []sessioncreation.Computer{{ID: "local", Name: "Coordinator"}}},
+		Recovered:           []domain.Session{origin},
+	})
+	t.Cleanup(func() { _ = restarted.Close(context.Background()) })
+
+	returned, err := restarted.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{
+		Kind: back.Action, SessionID: back.SessionID,
+	})
+	if err != nil || returned.Card == nil || returned.Card.SessionID != origin.ID() {
+		t.Fatalf("returned = %#v, err=%v", returned, err)
+	}
+	menu, err := restarted.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticMenuBack})
+	if err != nil || menu.Surface == nil || menu.Card != nil || menu.Surface.Text != "Меню" {
+		t.Fatalf("menu after return = %#v, err=%v", menu, err)
+	}
+}
+
+func TestStatusBackWithoutSessionOriginKeepsMenuFallback(t *testing.T) {
+	controller := newController(t, nil, &memorySessions{}, nil, nil, telegramcontroller.Options{
+		CreationEnvironment: &creationEnvironmentStub{computers: []sessioncreation.Computer{{ID: "local", Name: "Coordinator"}}},
+	})
+	t.Cleanup(func() { _ = controller.Close(context.Background()) })
+
+	status, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticMenuStatus})
+	if err != nil || status.Surface == nil {
+		t.Fatalf("status = %#v, err=%v", status, err)
+	}
+	back := status.Surface.Rows[len(status.Surface.Rows)-1][1]
+	if back.Label != "Назад" || back.Action != telegramcontroller.SemanticMenuBack || back.SessionID != "" {
+		t.Fatalf("menu-origin back = %#v", back)
+	}
+}
+
 func TestStatusKeepsAgreedNodeButtonsAndAddsLegacyQuotaTable(t *testing.T) {
 	now := time.Now().UTC()
 	environment := &creationEnvironmentStub{computers: []sessioncreation.Computer{

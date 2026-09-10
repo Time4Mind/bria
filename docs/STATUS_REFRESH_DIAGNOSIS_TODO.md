@@ -183,3 +183,50 @@ contains `telegram.flow_ready`, one recovered live session and no critical
 event. The visible Telegram rendering and the one-click Status update still
 require the owner's next ordinary interaction for live acceptance; no manual
 Telegram input was sent during deployment.
+
+## A37+A38 follow-up contract - Rich quotes and contextual Nodes back
+
+- Exact result: render ordinary Markdown quote lines as Telegram Rich
+  blockquotes, and make `Назад` on the Nodes/Status surface opened from an
+  active session return to that exact session instead of the main menu.
+- Sources: Artem's live Telegram screenshot and live navigation report on
+  2026-09-10; current repository behavior and bounded historical renderer
+  comparison are supporting evidence. Timezone is Europe/Moscow; no analytical
+  period, denominator or population applies.
+- Unit and cases: one persisted card page and one signed callback flow. Raw and
+  escaped quote markers are covered outside code; fenced literals are excluded.
+  Nodes opened from a session carry that exact session as the return target;
+  Nodes/Status opened without one keep the menu fallback. Other Back controls
+  and node-selection behavior are excluded.
+- Allowed writes and acceptance: repository code, tests and this durable todo,
+  followed by the standing-authorized Time4Mind/bria release and restart of only
+  `gui/501/com.time4mind.bria.v2`. Acceptance requires public RED/GREEN coverage,
+  focused race tests, full `make check-full`, exact-SHA remote CI, installed hash
+  equality, healthy sole service/lock and preserved state/config/settings. Live
+  Telegram appearance and owner navigation remain explicitly unverified unless
+  observed after deployment.
+
+Coverage is split into two non-overlapping code zones: Rich normalization and
+wire acceptance (A37), and controller/runtime navigation projection (A38). The
+integration owner owns this todo, release synthesis and physical postflight.
+A37 is implemented and passed its local release gate at commit `8c56f27`; A38
+was added before installation, so both changes will be shipped as one runtime.
+
+The live detailed log at 2026-09-10 08:04 Europe/Moscow confirms the reported
+route: `menu_nodes`, then `refresh_status`, then `menu_back/open_menu`; every
+controller, transport and durable stage completed without an error. The defect
+was semantic rather than delivery-related: the presenter classified Nodes as a
+global action and replaced the card session identity with `GlobalSurfaceID`, so
+the controller's return target was empty. The visible-label-only test could not
+detect this.
+
+A38 now preserves the exact origin session in the signed Nodes callback and
+projects Status `Назад` as an exact session-selection callback. The callback is
+self-contained and was accepted by a fresh controller instance in the regression
+test, proving it does not depend on process-local navigation memory. A Status
+opened without a session origin still returns to the main menu, and selecting a
+session clears the temporary origin so its normal `Меню` button remains normal.
+The focused four-package suite and ten repeated race runs pass. The combined
+exact source passed `VERSION=20260910-rich-back-navigation make check-full`,
+including all-package tests/race, policy, architecture, vet, packaging and the
+executable-trio acceptance. Commit, exact-SHA CI and installation are pending.

@@ -209,7 +209,11 @@ func (presenter *Presenter) presentKeyboard(
 				)
 			}
 			tokenSessionID := logicalSessionID
-			if telegramui.IsGlobalAction(button.Action) {
+			// Nodes is a global surface, but when it is opened from a session
+			// card its signed callback must retain that card as the return target.
+			// Global menu/sessions surfaces already use GlobalSurfaceID here.
+			if telegramui.IsGlobalAction(button.Action) &&
+				!(button.Action == telegramui.ActionMenuNodes && logicalSessionID != telegramui.GlobalSurfaceID) {
 				tokenSessionID = telegramui.GlobalSurfaceID
 			} else if button.Action == telegramui.ActionSelectSession ||
 				telegramui.IsSessionSurfaceAction(button.Action) ||

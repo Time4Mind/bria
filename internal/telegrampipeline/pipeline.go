@@ -609,7 +609,9 @@ func PlanAcceptedCallback(callback AcceptedCallback) (CallbackPlan, error) {
 		return CallbackPlan{}, errors.New("non-page callback must not contain a target")
 	}
 	global := telegramui.IsGlobalAction(callback.Action)
-	if global != (callback.SessionID == domain.SessionID(telegramui.GlobalSurfaceID)) {
+	// Nodes may be opened either from a global menu or from a session card.
+	// The latter deliberately retains the signed origin session for Back.
+	if callback.Action != telegramui.ActionMenuNodes && global != (callback.SessionID == domain.SessionID(telegramui.GlobalSurfaceID)) {
 		return CallbackPlan{}, errors.New("global callback surface identity is invalid")
 	}
 	interactionAction := telegramui.IsInteractionAction(callback.Action)

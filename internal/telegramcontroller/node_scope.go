@@ -57,6 +57,19 @@ func (controller *Controller) clearNodeBack() {
 	controller.mu.Unlock()
 }
 
+func (controller *Controller) nodeBackButton() SemanticButton {
+	controller.mu.Lock()
+	sessionID := controller.nodeBackSession
+	controller.mu.Unlock()
+	if sessionID != "" {
+		// Bind the return target into the signed callback itself. The button must
+		// remain correct after a refresh or process restart instead of relying on
+		// the controller's ephemeral navigation memory when it is pressed.
+		return SemanticButton{Label: "Назад", Action: SemanticSelect, SessionID: sessionID}
+	}
+	return SemanticButton{Label: "Назад", Action: SemanticMenuBack}
+}
+
 func (controller *Controller) nodeListSemanticResult(ctx context.Context) (SemanticActionResult, error) {
 	return controller.statusSemanticResult(ctx)
 }
@@ -98,7 +111,7 @@ func (controller *Controller) statusSemanticResultWithRefresh(ctx context.Contex
 	for index, row := range view {
 		rows[index] = []SemanticButton{{Label: row[0].Label, Action: SemanticSelectNode, Choice: row[0].Choice}}
 	}
-	rows = append(rows, []SemanticButton{{Label: "Обновить", Action: SemanticRefreshStatus}, {Label: "Назад", Action: SemanticMenuBack}})
+	rows = append(rows, []SemanticButton{{Label: "Обновить", Action: SemanticRefreshStatus}, controller.nodeBackButton()})
 	return SemanticActionResult{Surface: &SemanticSurface{Text: telegramstatus.Render(time.Now(), items, quotas), RichMarkdown: true, Rows: rows}}, nil
 }
 
@@ -164,6 +177,7 @@ func (controller *Controller) selectNodeSemantic(ctx context.Context, choice int
 	controller.active = active
 	controller.mu.Unlock()
 	controller.selectionMu.Unlock()
+	controller.clearNodeBack()
 	controller.ScheduleStandby()
 	if active != "" {
 		card, err := controller.semanticCard(ctx, active, true)

@@ -192,7 +192,7 @@ func TestAcceptCallbackAllowsGlobalNavigationFromCurrentSessionCard(t *testing.T
 	if err != nil {
 		t.Fatalf("AcceptCallback() error = %v", err)
 	}
-	if accepted.SessionID != domain.SessionID(telegramui.GlobalSurfaceID) || accepted.Action != telegramui.ActionMenuNodes || accepted.Carrier != card().Carrier {
+	if accepted.SessionID != sessionID || accepted.Action != telegramui.ActionMenuNodes || accepted.Carrier != card().Carrier {
 		t.Fatalf("accepted callback = %#v", accepted)
 	}
 }

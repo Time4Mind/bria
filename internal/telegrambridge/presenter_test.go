@@ -77,7 +77,7 @@ func TestPresenterPreservesCanonicalRowsLabelsAndSignedSemanticCallbacks(t *test
 		{{SessionID: testSelectableSessionIDs[2], Action: telegramui.ActionSelectSession}},
 		{
 			{SessionID: telegramui.GlobalSurfaceID, Action: telegramui.ActionMenuNew},
-			{SessionID: telegramui.GlobalSurfaceID, Action: telegramui.ActionMenuNodes},
+			{SessionID: testLogicalSessionID, Action: telegramui.ActionMenuNodes},
 			{SessionID: telegramui.GlobalSurfaceID, Action: telegramui.ActionMenuBack},
 		},
 	}

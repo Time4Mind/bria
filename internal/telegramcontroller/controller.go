@@ -386,6 +386,7 @@ func (controller *Controller) handleSemanticAction(ctx context.Context, action S
 		}
 		decision, err = controller.cardDecision(ctx, action.SessionID, "")
 	case SemanticSelect:
+		controller.clearNodeBack()
 		decision, err = controller.use(ctx, action.SessionID)
 		if err == nil {
 			if native, ok := controller.restoreNativeSurface(action.SessionID); ok {
