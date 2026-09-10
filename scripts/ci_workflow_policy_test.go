@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-const actionsCacheCommit = "actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830"
+const actionsCacheCommit = "actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9"
 
 func TestMakefileExposesCompleteNonRaceReleaseGate(t *testing.T) {
 	t.Parallel()
