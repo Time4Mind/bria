@@ -18,7 +18,7 @@ GO_ENV = env GOENV=off GOTOOLCHAIN=local GOWORK=off GOPROXY=off GOSUMDB=off \
 	CGO_ENABLED=0
 GO_RACE_ENV = $(GO_ENV) CGO_ENABLED=1 GORACE=atexit_sleep_ms=0
 
-.PHONY: prepare-deps check check-policy check-format check-architecture check-test check-race check-vet check-operational check-full build release release-evidence release-supply-chain release-verify
+.PHONY: prepare-deps check check-policy check-format check-architecture check-test check-race check-vet check-operational check-executable check-full-no-race check-full build release release-evidence release-supply-chain release-verify
 
 # Explicit online preparation. All check/build targets remain offline and use
 # the same cache; go.sum verification is never disabled during acquisition.
@@ -66,7 +66,7 @@ build:
 	@./packaging/build-local.sh
 	@test -x bin/bria -a -x bin/bria-codex-adapter -a -x bin/bria-claude-adapter
 
-check-full: check check-race build
+check-executable: build
 	@help="$$(./bin/bria --help)"; \
 	case "$$help" in \
 		*'Usage:'*) ;; \
@@ -94,6 +94,10 @@ check-full: check check-race build
 		exit 1; \
 	}
 	@printf '%s\n' 'Bria executable trio acceptance: OK'
+
+check-full-no-race: check check-executable
+
+check-full: check check-race check-executable
 
 release:
 	@./packaging/verify-supply-chain.sh

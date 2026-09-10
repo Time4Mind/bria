@@ -1,5 +1,13 @@
 # Handoff: статус и следующий план
 
+> Текущий запрос A38: ускорить полный выпуск Bria без сокращения runtime/race/
+> platform/policy проверок. Fail-closed release-journal routing, Go cache и
+> параллельный Stage 1 реализованы локально по
+> [CI_ACCELERATION_TODO.md](CI_ACCELERATION_TODO.md). RED/GREEN, scripts,
+> packaging, non-race gate и actionlint PASS; финальные full gate/review ещё идут.
+> Product runtime, config, state и secrets не меняются. После полного gate -
+> автоматический push, exact-SHA CI и перезапуск только Bria с postflight.
+
 > Объединённый выпуск A35+A36 установлен. Status после первого клика
 > автоматически публикует свежую квоту; Ноды/Статус теперь сохраняют подпись
 > `Назад`; активная карточка форматирует многострочные exec-команды нативным Rich

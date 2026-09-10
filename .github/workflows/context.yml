@@ -1,5 +1,5 @@
 name: Stage 1 checks
-# Action commit SHAs below were resolved from official actions/* tag refs on 2026-09-03.
+# Action commit SHAs below were resolved from official actions/* tag refs.
 
 on:
   push:
@@ -8,26 +8,176 @@ on:
 permissions:
   contents: read
 
+env:
+  GOMODCACHE: ${{ github.workspace }}/.cache/go-mod
+  GOCACHE: ${{ github.workspace }}/.cache/go-build
+  TMPDIR: /tmp
+
 jobs:
-  validate-stage-1:
+  classify:
+    name: classify-stage-1-scope
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    outputs:
+      scope: ${{ steps.scope.outputs.scope }}
+    steps:
+      - name: Check out complete history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - id: go
+        name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Restore classifier and documentation cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            .cache/go-mod
+            .cache/go-build
+          key: bria-go-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-docs-${{ hashFiles('go.mod', 'go.sum', 'scripts/**/*.go') }}
+          restore-keys: |
+            bria-go-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-docs-
+      - id: scope
+        name: Classify changed paths fail closed
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          changed_paths="$(mktemp)"
+          trap 'rm -f "$changed_paths"' EXIT
+          base_sha="$PUSH_BEFORE"
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            base_sha="$PR_BASE_SHA"
+          fi
+          if [ -n "$base_sha" ] &&
+             ! printf '%s' "$base_sha" | grep -Eq '^0+$' &&
+             git cat-file -e "${base_sha}^{commit}" 2>/dev/null; then
+            git diff --no-renames --name-only -z "$base_sha" "$HEAD_SHA" >"$changed_paths"
+          else
+            : >"$changed_paths"
+          fi
+          scope="$(GOENV=off GOTOOLCHAIN=local GOWORK=off GOPROXY=off GOSUMDB=off \
+            go run -mod=readonly ./scripts ci-scope <"$changed_paths")"
+          case "$scope" in
+            docs-only|full) ;;
+            *) printf 'invalid CI scope: %s\n' "$scope" >&2; exit 1 ;;
+          esac
+          printf 'scope=%s\n' "$scope" >>"$GITHUB_OUTPUT"
+      - name: Run documentation gate
+        if: steps.scope.outputs.scope == 'docs-only'
+        run: |
+          make prepare-deps
+          make check-policy
+          go test ./scripts -run 'TestPolicyChecker|TestLinkChecker|TestFilenameChecker|TestClassifyCIScope|TestRunCIScope|TestStageOneWorkflow|TestPlatformWorkflow|TestMakefileExposes'
+
+  stage1_standard:
+    name: stage-1-standard
+    needs: classify
+    if: needs.classify.outputs.scope != 'docs-only'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Set up Go
+      - id: go
+        name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
           cache: false
-
-      - name: Run full stage 1 checks
+      - name: Restore standard Go cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            .cache/go-mod
+            .cache/go-build
+          key: bria-go-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-standard-${{ hashFiles('go.mod', 'go.sum') }}-${{ hashFiles('**/*.go', 'Makefile', 'packaging/**') }}
+          restore-keys: |
+            bria-go-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-standard-${{ hashFiles('go.mod', 'go.sum') }}-
+      - name: Prepare native dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y tmux
+          if ! command -v tmux >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y tmux
+          fi
           make prepare-deps
-          make check-full
-
+      - name: Run complete non-race checks
+        run: make check-full-no-race
       - name: Verify repository-policy mutation coverage
         run: go test ./scripts -run 'TestPolicyChecker|TestLinkChecker|TestFilenameChecker'
+
+  stage1_race:
+    name: stage-1-race
+    needs: classify
+    if: needs.classify.outputs.scope != 'docs-only'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - id: go
+        name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Restore race Go cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            .cache/go-mod
+            .cache/go-build
+          key: bria-go-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-race-${{ hashFiles('go.mod', 'go.sum') }}-${{ hashFiles('**/*.go', 'Makefile') }}
+          restore-keys: |
+            bria-go-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-race-${{ hashFiles('go.mod', 'go.sum') }}-
+      - name: Prepare native dependencies
+        run: |
+          if ! command -v tmux >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y tmux
+          fi
+          make prepare-deps
+      - name: Run full race detector suite
+        run: make check-race
+
+  validate_stage_1:
+    name: validate-stage-1
+    needs:
+      - classify
+      - stage1_standard
+      - stage1_race
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - name: Require the complete selected gate
+        shell: bash
+        env:
+          SCOPE: ${{ needs.classify.outputs.scope }}
+          CLASSIFY_RESULT: ${{ needs.classify.result }}
+          STANDARD_RESULT: ${{ needs.stage1_standard.result }}
+          RACE_RESULT: ${{ needs.stage1_race.result }}
+        run: |
+          set -euo pipefail
+          test "$CLASSIFY_RESULT" = success
+          case "$SCOPE" in
+            docs-only)
+              test "$STANDARD_RESULT" = skipped
+              test "$RACE_RESULT" = skipped
+              ;;
+            full)
+              test "$STANDARD_RESULT" = success
+              test "$RACE_RESULT" = success
+              ;;
+            *)
+              printf 'invalid or missing CI scope: %s\n' "$SCOPE" >&2
+              exit 1
+              ;;
+          esac

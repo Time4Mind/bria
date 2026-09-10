@@ -14,7 +14,67 @@ env:
   TMPDIR: /tmp
 
 jobs:
-  test-native:
+  classify:
+    name: classify-platform-scope
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    outputs:
+      scope: ${{ steps.scope.outputs.scope }}
+    steps:
+      - name: Check out complete history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - id: go
+        name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Restore classifier cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            .cache/go-mod
+            .cache/go-build
+          key: bria-go-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-classifier-${{ hashFiles('go.mod', 'go.sum', 'scripts/**/*.go') }}
+          restore-keys: |
+            bria-go-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-classifier-
+      - id: scope
+        name: Classify changed paths fail closed
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          changed_paths="$(mktemp)"
+          trap 'rm -f "$changed_paths"' EXIT
+          base_sha="$PUSH_BEFORE"
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            base_sha="$PR_BASE_SHA"
+          fi
+          if [ -n "$base_sha" ] &&
+             ! printf '%s' "$base_sha" | grep -Eq '^0+$' &&
+             git cat-file -e "${base_sha}^{commit}" 2>/dev/null; then
+            git diff --no-renames --name-only -z "$base_sha" "$HEAD_SHA" >"$changed_paths"
+          else
+            : >"$changed_paths"
+          fi
+          scope="$(GOENV=off GOTOOLCHAIN=local GOWORK=off GOPROXY=off GOSUMDB=off \
+            go run -mod=readonly ./scripts ci-scope <"$changed_paths")"
+          case "$scope" in
+            docs-only|full) ;;
+            *) printf 'invalid CI scope: %s\n' "$scope" >&2; exit 1 ;;
+          esac
+          printf 'scope=%s\n' "$scope" >>"$GITHUB_OUTPUT"
+
+  test_native:
+    name: test-native (${{ matrix.runner }})
+    needs: classify
+    if: needs.classify.outputs.scope != 'docs-only'
     strategy:
       fail-fast: false
       matrix:
@@ -26,13 +86,21 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        id: go
         with:
           go-version-file: go.mod
           cache: false
+      - name: Restore native Go cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            .cache/go-mod
+            .cache/go-build
+          key: bria-go-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-native-${{ hashFiles('go.mod', 'go.sum') }}
       - name: Prepare native test dependencies
         run: |
           printf 'TMPDIR=%s\n' "$(cd /tmp && pwd -P)" >> "$GITHUB_ENV"
-          if [ "$RUNNER_OS" = "Linux" ]; then
+          if [ "$RUNNER_OS" = "Linux" ] && ! command -v tmux >/dev/null; then
             sudo apt-get update
             sudo apt-get install -y tmux
           elif ! command -v tmux >/dev/null; then
@@ -61,7 +129,10 @@ jobs:
           go build -mod=readonly -trimpath -buildvcs=false -o bin/bria-codex-adapter ./cmd/bria-codex-adapter
           go build -mod=readonly -trimpath -buildvcs=false -o bin/bria-claude-adapter ./cmd/bria-claude-adapter
 
-  cross-compile-supported-targets:
+  cross_compile_supported_targets:
+    name: cross-compile-supported-targets (${{ matrix.goos }}, ${{ matrix.goarch }})
+    needs: classify
+    if: needs.classify.outputs.scope != 'docs-only'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     strategy:
@@ -79,9 +150,17 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        id: go
         with:
           go-version-file: go.mod
           cache: false
+      - name: Restore cross-compile Go cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            .cache/go-mod
+            .cache/go-build
+          key: bria-go-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-cross-${{ matrix.goos }}-${{ matrix.goarch }}-${{ hashFiles('go.mod', 'go.sum') }}
       - name: Prepare pinned Go modules
         run: make prepare-deps
       - name: Cross-compile executable trio
@@ -99,7 +178,10 @@ jobs:
           go build -mod=readonly -trimpath -buildvcs=false -o bin/bria-codex-adapter ./cmd/bria-codex-adapter
           go build -mod=readonly -trimpath -buildvcs=false -o bin/bria-claude-adapter ./cmd/bria-claude-adapter
 
-  wsl-contract:
+  wsl_contract:
+    name: wsl-contract
+    needs: classify
+    if: needs.classify.outputs.scope != 'docs-only'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -109,7 +191,10 @@ jobs:
       - name: State evidence boundary
         run: echo 'WSL runtime acceptance requires a real WSL host and is not claimed by this Linux CI job.'
 
-  docker-build:
+  docker_build:
+    name: docker-build
+    needs: classify
+    if: needs.classify.outputs.scope != 'docs-only'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -121,3 +206,46 @@ jobs:
           test "$(docker image inspect bria:ci --format '{{.Config.User}}')" = '65532:65532'
           test "$(docker image inspect bria:ci --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "${GITHUB_SHA}"
           test "$(docker image inspect bria:ci --format '{{index .Config.Labels "io.time4mind.bria.role-selection"}}')" = 'config-and-fail-closed-preflight'
+
+  validate_platform:
+    name: validate-platform
+    needs:
+      - classify
+      - test_native
+      - cross_compile_supported_targets
+      - wsl_contract
+      - docker_build
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - name: Require the selected platform gate
+        shell: bash
+        env:
+          SCOPE: ${{ needs.classify.outputs.scope }}
+          CLASSIFY_RESULT: ${{ needs.classify.result }}
+          NATIVE_RESULT: ${{ needs.test_native.result }}
+          CROSS_RESULT: ${{ needs.cross_compile_supported_targets.result }}
+          WSL_RESULT: ${{ needs.wsl_contract.result }}
+          DOCKER_RESULT: ${{ needs.docker_build.result }}
+        run: |
+          set -euo pipefail
+          test "$CLASSIFY_RESULT" = success
+          case "$SCOPE" in
+            docs-only)
+              test "$NATIVE_RESULT" = skipped
+              test "$CROSS_RESULT" = skipped
+              test "$WSL_RESULT" = skipped
+              test "$DOCKER_RESULT" = skipped
+              ;;
+            full)
+              test "$NATIVE_RESULT" = success
+              test "$CROSS_RESULT" = success
+              test "$WSL_RESULT" = success
+              test "$DOCKER_RESULT" = success
+              ;;
+            *)
+              printf 'invalid or missing CI scope: %s\n' "$SCOPE" >&2
+              exit 1
+              ;;
+          esac

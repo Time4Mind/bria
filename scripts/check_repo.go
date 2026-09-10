@@ -2616,6 +2616,13 @@ func selectedCheckNames(selected string) []string {
 }
 
 func run() int {
+	if len(os.Args) == 2 && os.Args[1] == "ci-scope" {
+		if err := runCIScope(os.Stdin, os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, "ERROR:", err)
+			return 1
+		}
+		return 0
+	}
 	root, err := findRepositoryRoot()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "ERROR:", err)
@@ -2623,7 +2630,7 @@ func run() int {
 	}
 	selected := "policy"
 	if len(os.Args) > 2 {
-		fmt.Fprintln(os.Stderr, "usage: check_repo [policy|links|filenames|architecture|release-evidence|all]")
+		fmt.Fprintln(os.Stderr, "usage: check_repo [policy|links|filenames|architecture|release-evidence|ci-scope|all]")
 		return 2
 	}
 	if len(os.Args) == 2 {
@@ -2661,7 +2668,7 @@ func run() int {
 		}
 	}
 	if !known {
-		fmt.Fprintln(os.Stderr, "usage: check_repo [policy|links|filenames|architecture|release-evidence|all]")
+		fmt.Fprintln(os.Stderr, "usage: check_repo [policy|links|filenames|architecture|release-evidence|ci-scope|all]")
 		return 2
 	}
 	return exitCode
