@@ -1,16 +1,16 @@
 # Handoff: статус и следующий план
 
-> Текущий запрос A41 - старая one-shot схема препроцессинга заменяется
-> постоянными скрытыми Codex/Luna-сателлитами. Режимы: `disabled`, один общий
-> FIFO-сателлит для всех основных сессий и один изолированный сателлит на каждую
-> основную сессию; default и миграция старого `true` - `shared`. Персональный
-> provider process закрывается только после durable archive основной сессии,
-> thread identity сохраняется для exact restore и не показывается в UI/archive.
-> Реальный Luna E2E подтвердил два запроса разных primary в одном shared thread
-> и exact resume того же thread после перезапуска adapter process. Также
-> исправляется повторный recovery неизменного history barrier: новая попытка
-> разрешена только после изменения безопасного evidence или binding lifecycle.
-> Договор, coverage и release status:
+> A41 выпущен: старая one-shot схема препроцессинга заменена постоянными
+> скрытыми Codex/Luna-сателлитами с режимами `disabled`, `shared` и
+> `per_session`; default и миграция старого `true` - `shared`. Реальный Luna E2E
+> подтвердил общий thread для двух primary и exact resume, lifecycle archive и
+> UI invisibility закрыты тестами. Source `b573960` в `origin/main`, полный gate
+> и оба exact-SHA CI PASS. Установлен
+> `20260910-persistent-preprocess-satellites`, PID47217 running/sole lock;
+> hashes/config/state/Telegram identity и сохранность 8 sessions/31 inputs
+> подтверждены. Shared Luna ready за 1205ms. Один стартовый recovery failure
+> ранее проблемной сессии не повторился за 2 минуты благодаря stable evidence
+> barrier. Ручной Telegram prompt не отправлялся. Договор и release receipt:
 > [PER_SESSION_PREPROCESS_SATELLITE_TODO.md](PER_SESSION_PREPROCESS_SATELLITE_TODO.md).
 
 > Текущий запрос A40 - одна скрытая готовая Luna/cheap-model session для
