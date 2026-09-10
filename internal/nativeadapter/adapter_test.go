@@ -77,7 +77,11 @@ func runNativeFixture() {
 	if os.WriteFile(filepath.Join(os.Getenv("CODEX_HOME"), "session_index.jsonl"), append(index, '\n'), 0600) != nil {
 		os.Exit(85)
 	}
-	fmt.Print("\x1b[2J\x1b[H›\n")
+	if os.Getenv("NATIVE_ADAPTER_FIXTURE_NOT_READY") == "1" {
+		fmt.Print("\x1b[2J\x1b[HStarting fixture services (0/1)\n")
+	} else {
+		fmt.Print("\x1b[2J\x1b[H›\n")
+	}
 	scanner := bufio.NewScanner(os.Stdin)
 	approvalPending := false
 	for scanner.Scan() {

@@ -378,6 +378,15 @@ type recordingActiveStore struct {
 	saved []domain.SessionID
 }
 
+type recordingNodeSelectionStore struct {
+	mu     sync.Mutex
+	active map[domain.ComputerID]domain.SessionID
+}
+
+func (s *recordingNodeSelectionStore) SetActiveSession(ctx context.Context, id domain.SessionID) error {
+	return s.SetNodeActiveSession(ctx, "local", id)
+}
+
 type projectionUIState struct {
 	mu      sync.Mutex
 	saved   []domain.SessionID
@@ -451,6 +460,30 @@ func (s *projectionUIState) snapshot() projectionUISnapshot {
 func (s *recordingActiveStore) SetActiveSession(_ context.Context, id domain.SessionID) error {
 	s.saved = append(s.saved, id)
 	return nil
+}
+
+func (s *recordingNodeSelectionStore) SetSelectedNode(context.Context, domain.ComputerID) error {
+	return nil
+}
+
+func (s *recordingNodeSelectionStore) SetNodeActiveSession(_ context.Context, node domain.ComputerID, id domain.SessionID) error {
+	s.mu.Lock()
+	s.active[node] = id
+	s.mu.Unlock()
+	return nil
+}
+
+func (s *recordingNodeSelectionStore) ClearNodeActiveSession(_ context.Context, node domain.ComputerID) error {
+	s.mu.Lock()
+	delete(s.active, node)
+	s.mu.Unlock()
+	return nil
+}
+
+func (s *recordingNodeSelectionStore) Active(node domain.ComputerID) domain.SessionID {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.active[node]
 }
 
 func (p *testPreferences) Snapshot(context.Context) (telegramcontroller.PreferenceSnapshot, error) {
@@ -1772,6 +1805,10 @@ func TestMessageDuringAsyncStartingEntersDurableCustodyBeforeProviderReady(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
+	awaiting, err := starting.AwaitRecovery()
+	if err != nil {
+		t.Fatal(err)
+	}
 	store := newLockedSessions(starting)
 	outcomes := make(chan telegramcontroller.SessionStartOutcome, 1)
 	begin := asyncCreatorFunc(func(_ context.Context, intent app.ConfirmedSessionIntent) (telegramcontroller.PendingSessionStart, error) {
@@ -1808,10 +1845,133 @@ func TestMessageDuringAsyncStartingEntersDurableCustodyBeforeProviderReady(t *te
 	default:
 		t.Fatal("starting input did not enter durable custody")
 	}
-	store.Set(ready)
-	outcomes <- telegramcontroller.SessionStartOutcome{Session: ready}
+	store.Set(awaiting)
+	outcomes <- telegramcontroller.SessionStartOutcome{Session: awaiting, StartError: errors.New("provider startup failed")}
 	close(outcomes)
-	eventuallyStatusContains(t, controller, message(82, "/status"), "готова")
+	eventuallyCurrentCardContains(t, controller, starting.ID(), "ожидает восстановления")
+	store.Set(ready)
+	controller.RefreshRecoveryCard(context.Background(), ready.ID())
+	eventuallyCurrentCardContains(t, controller, ready.ID(), "готова")
+}
+
+func TestExhaustedEmptyAsyncStartRestoresPreviousActiveCard(t *testing.T) {
+	workdir := t.TempDir()
+	previous := readySession(t, "22222222-2222-4222-9222-222222222222", domain.ProviderCodex, workdir, "provider-previous", 1)
+	starting, err := domain.NewStartingSession(
+		"33333333-3333-4333-9333-333333333333",
+		"telegram-update:85",
+		"local",
+		domain.ProviderCodex,
+		workdir,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	failed, err := starting.AwaitRecovery()
+	if err != nil {
+		t.Fatal(err)
+	}
+	startErr := errors.New("private provider startup failure")
+	outcomes := make(chan telegramcontroller.SessionStartOutcome, 1)
+	notifications := make(chan telegramcontroller.Notification, 2)
+	activeStore := &recordingNodeSelectionStore{active: make(map[domain.ComputerID]domain.SessionID)}
+	store := newLockedSessions(previous, starting)
+	controller := newController(t,
+		creatorFunc(nil), store, submitterFunc(nil),
+		notifierFunc(func(_ context.Context, notification telegramcontroller.Notification) error {
+			notifications <- notification
+			return nil
+		}),
+		telegramcontroller.Options{
+			Recovered: []domain.Session{previous}, UIState: activeStore,
+			AsyncCreator: asyncCreatorFunc(func(_ context.Context, intent app.ConfirmedSessionIntent) (telegramcontroller.PendingSessionStart, error) {
+				if intent.IntentID != starting.IntentID() {
+					t.Fatalf("intent id = %q, want %q", intent.IntentID, starting.IntentID())
+				}
+				return telegramcontroller.PendingSessionStart{Session: starting, Outcome: outcomes}, nil
+			}),
+		},
+	)
+	t.Cleanup(func() { _ = controller.Close(context.Background()) })
+	mustStatus(t, controller, message(84, "/use "+string(previous.ID())))
+	created := mustStatus(t, controller, message(85, "/new codex "+workdir))
+	if !strings.Contains(created.Status.Text, "starting") || !strings.Contains(created.Status.Text, string(starting.ID())) {
+		t.Fatalf("starting card = %#v", created)
+	}
+	result := app.CreateSessionResult{Session: failed, StartError: startErr, StartAttempts: 3}
+	store.Delete(starting.ID())
+	outcomes <- telegramcontroller.SessionStartOutcome{
+		Session: failed, StartError: startErr,
+		Err: &app.InitialStartExhaustedError{Result: result, Attempts: 3},
+	}
+	close(outcomes)
+	select {
+	case notification := <-notifications:
+		if notification.SessionID != starting.ID() || notification.Kind != telegramcontroller.NotificationError || strings.Contains(notification.Text, startErr.Error()) {
+			t.Fatalf("failure notification = %#v", notification)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("failed async start was not observed")
+	}
+	restored, err := controller.ProjectCurrent(context.Background(), "")
+	if err != nil || restored.Card == nil || restored.Card.SessionID != previous.ID() {
+		t.Fatalf("restored card = (%#v, %v), want previous %q", restored, err, previous.ID())
+	}
+	if got := activeStore.Active("local"); got != previous.ID() {
+		t.Fatalf("durable active = %q, want previous %q", got, previous.ID())
+	}
+}
+
+func TestLateAsyncStartFailureDoesNotOverwriteNewerUserSelection(t *testing.T) {
+	workdir := t.TempDir()
+	previous := readySession(t, "44444444-4444-4444-8444-444444444444", domain.ProviderCodex, workdir, "provider-previous", 1)
+	selected := readySession(t, "55555555-5555-4555-8555-555555555555", domain.ProviderCodex, workdir, "provider-selected", 1)
+	starting, err := domain.NewStartingSession("66666666-6666-4666-8666-666666666666", "telegram-update:87", "local", domain.ProviderCodex, workdir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	failed, err := starting.AwaitRecovery()
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := newLockedSessions(previous, selected, starting)
+	outcomes := make(chan telegramcontroller.SessionStartOutcome, 1)
+	notifications := make(chan telegramcontroller.Notification, 1)
+	activeStore := &recordingNodeSelectionStore{active: make(map[domain.ComputerID]domain.SessionID)}
+	controller := newController(t,
+		creatorFunc(nil), store, submitterFunc(nil),
+		notifierFunc(func(_ context.Context, notification telegramcontroller.Notification) error {
+			notifications <- notification
+			return nil
+		}),
+		telegramcontroller.Options{
+			Recovered: []domain.Session{previous, selected}, UIState: activeStore,
+			AsyncCreator: asyncCreatorFunc(func(context.Context, app.ConfirmedSessionIntent) (telegramcontroller.PendingSessionStart, error) {
+				return telegramcontroller.PendingSessionStart{Session: starting, Outcome: outcomes}, nil
+			}),
+		},
+	)
+	t.Cleanup(func() { _ = controller.Close(context.Background()) })
+	mustStatus(t, controller, message(86, "/use "+string(previous.ID())))
+	mustStatus(t, controller, message(87, "/new codex "+workdir))
+	mustStatus(t, controller, message(88, "/use "+string(selected.ID())))
+	store.Delete(starting.ID())
+	startErr := errors.New("private provider startup failure")
+	result := app.CreateSessionResult{Session: failed, StartError: startErr, StartAttempts: 3}
+	outcomes <- telegramcontroller.SessionStartOutcome{Session: failed, StartError: startErr, Err: &app.InitialStartExhaustedError{Result: result, Attempts: 3}}
+	close(outcomes)
+	select {
+	case <-notifications:
+	case <-time.After(time.Second):
+		t.Fatal("late failed async start was not observed")
+	}
+	current, err := controller.ProjectCurrent(context.Background(), "")
+	if err != nil || current.Card == nil || current.Card.SessionID != selected.ID() {
+		t.Fatalf("current card = (%#v, %v), want newer selection %q", current, err, selected.ID())
+	}
+	if got := activeStore.Active("local"); got != selected.ID() {
+		t.Fatalf("durable active = %q, want newer selection %q", got, selected.ID())
+	}
 }
 
 func TestMessageDuringAsyncResumeEntersDurableCustodyAndExactReadyWins(t *testing.T) {
@@ -3023,6 +3183,19 @@ func eventuallyStatusContains(t *testing.T, controller *telegramcontroller.Contr
 	t.Fatalf("status never contained %q", want)
 }
 
+func eventuallyCurrentCardContains(t *testing.T, controller *telegramcontroller.Controller, id domain.SessionID, want string) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		decision, err := controller.ProjectCurrent(context.Background(), "")
+		if err == nil && decision.Card != nil && decision.Card.SessionID == id && strings.Contains(decision.Card.Header, want) {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("current card %q never contained %q", id, want)
+}
+
 func readySession(t *testing.T, id string, provider domain.Provider, workdir, providerID string, generation uint64) domain.Session {
 	t.Helper()
 	starting, err := domain.NewStartingSession(domain.SessionID(id), domain.IntentID("intent-"+id), "local", provider, workdir)
@@ -3338,6 +3511,12 @@ func newLockedSessions(sessions ...domain.Session) *lockedSessions {
 func (sessions *lockedSessions) Set(session domain.Session) {
 	sessions.mu.Lock()
 	sessions.byID[session.ID()] = session
+	sessions.mu.Unlock()
+}
+
+func (sessions *lockedSessions) Delete(id domain.SessionID) {
+	sessions.mu.Lock()
+	delete(sessions.byID, id)
 	sessions.mu.Unlock()
 }
 

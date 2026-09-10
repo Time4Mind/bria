@@ -2206,12 +2206,13 @@ func (controller *Controller) asyncStartFailed(sessionID domain.SessionID, text 
 	controller.mu.Lock()
 	failed := controller.pending[sessionID]
 	delete(controller.pending, sessionID)
-	if controller.active == sessionID {
+	restorePrevious := controller.active == sessionID
+	if restorePrevious {
 		controller.active = previousActive
 	}
 	nodeID := failed.ComputerID()
 	controller.mu.Unlock()
-	if nodeID != "" {
+	if nodeID != "" && restorePrevious {
 		ctx := context.WithoutCancel(controller.rootContext)
 		_ = controller.nodes.RestoreActive(ctx, nodeID, previousActive)
 	}

@@ -23,7 +23,7 @@ func main() {
 	defer stop()
 	if len(os.Args) > 1 && os.Args[1] == "--native" {
 		if err := runNative(ctx, os.Args[2:], os.Stdin, os.Stdout); err != nil {
-			fmt.Fprintln(os.Stderr, "bria-native-startup:"+nativeadapter.StartupFailureClass(err))
+			fmt.Fprintln(os.Stderr, nativeadapter.StartupFailureMarker(err))
 			os.Exit(1)
 		}
 		return

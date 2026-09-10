@@ -1201,8 +1201,13 @@ var packagePolicies = map[string]packagePolicy{
 	},
 	"internal/sessionrecoverycontrol": {
 		responsibility:     "serialize exact-binding recovery decisions after independent process waits",
-		allowedImports:     []string{"internal/app", "internal/domain", "internal/sessionsupervisor"},
-		maxProductionLines: 250,
+		allowedImports:     []string{"internal/app", "internal/domain", "internal/initialstartretry", "internal/sessionsupervisor"},
+		maxProductionLines: 325,
+	},
+	"internal/recoverybackoff": {
+		responsibility:     "schedule per-session recovery attempts with lifecycle-aware capped exponential backoff",
+		allowedImports:     []string{"internal/domain"},
+		maxProductionLines: 100,
 	},
 	"internal/telegramcontrolport": {
 		responsibility:     "define neutral session, output and authorization contracts for controller composition",
@@ -1256,6 +1261,11 @@ var packagePolicies = map[string]packagePolicy{
 	"internal/runtimediagnostic": {
 		responsibility:     "drain bounded adapter diagnostics into payload-free closed failure classes",
 		maxProductionLines: 180,
+	},
+	"internal/nativestartupdiagnostic": {
+		responsibility:     "classify payload-free native startup failures by bounded stage and class",
+		allowedImports:     []string{"internal/nativetranscript", "internal/runtimediagnostic"},
+		maxProductionLines: 100,
 	},
 	"internal/tooltext": {
 		responsibility:     "retain and encode bounded readable tool text independently of transcript rendering",
@@ -1342,7 +1352,7 @@ var packagePolicies = map[string]packagePolicy{
 	},
 	"internal/nativeadapter": {
 		responsibility:     "bridge exact native CLI terminal sessions, validated photo attachments, transcripts and throttled unsolicited screen observations",
-		allowedImports:     []string{"internal/domain", "internal/nativeacceptance", "internal/nativeattachment", "internal/nativecapture", "internal/nativecli", "internal/nativephotostaging", "internal/nativereceiptstore", "internal/nativeterminal", "internal/nativetranscript", "internal/runtimediagnostic", "internal/runtimeprotocol"},
+		allowedImports:     []string{"internal/domain", "internal/nativeacceptance", "internal/nativeattachment", "internal/nativecapture", "internal/nativecli", "internal/nativephotostaging", "internal/nativereceiptstore", "internal/nativestartupdiagnostic", "internal/nativeterminal", "internal/nativetranscript", "internal/runtimediagnostic", "internal/runtimeprotocol"},
 		maxProductionLines: 850,
 	},
 	"internal/nativecapture": {
@@ -1399,8 +1409,13 @@ var packagePolicies = map[string]packagePolicy{
 	},
 	"internal/app": {
 		responsibility:     "implement provider-independent session use cases",
-		allowedImports:     []string{"internal/domain", "internal/providerattachport"},
+		allowedImports:     []string{"internal/domain", "internal/initialstartretry", "internal/providerattachport"},
 		maxProductionLines: 1100,
+	},
+	"internal/initialstartretry": {
+		responsibility:     "retry initial provider starts and recover unbound starting sessions through exact durable transitions",
+		allowedImports:     []string{"internal/domain", "internal/providerattachport"},
+		maxProductionLines: 325,
 	},
 	"internal/artifactproduction": {
 		responsibility:     "compose durable final artifact delivery with content integrity, exact attempt receipts, and fenced manual-retry recovery",
@@ -1825,7 +1840,7 @@ var packagePolicies = map[string]packagePolicy{
 			"internal/providermodels",
 			"internal/acceptedcontinuation", "internal/app", "internal/authcomposition", "internal/callbacktoken", "internal/claudestore", "internal/config", "internal/coordinator", "internal/domain", "internal/durablecomposition", "internal/durableflow", "internal/interactioncomposition", "internal/messagejournal", "internal/nativerecoverycomposition", "internal/observability", "internal/processenv", "internal/promptpreprocess", "internal/promptpreprocesscommand", "internal/providerquota", "internal/recoverycomposition", "internal/recoveryruntime", "internal/runtimefactory", "internal/safelog", "internal/screenproduction", "internal/sessioncreation", "internal/sessionexpiry", "internal/sessionid", "internal/sessionnaming", "internal/sessionruntime", "internal/sessionsupervisor", "internal/settings", "internal/settingscomposition", "internal/storage", "internal/supervisioncomposition", "internal/telegram", "internal/telegrambridge", "internal/telegramcompletioncomposition", "internal/telegramcontroller", "internal/telegramflow", "internal/telegramnotify", "internal/telegrampipeline", "internal/telegrampromptcomposition", "internal/telegramrecoverycomposition", "internal/telegramruntimecomposition", "internal/turnruntimecomposition", "internal/workdir",
 		},
-		maxProductionLines: 1000,
+		maxProductionLines: 1025,
 	},
 	"internal/secretfile": {
 		responsibility:     "pass a bounded secret file to a callback with guaranteed transient zeroization",
@@ -1917,8 +1932,8 @@ var packagePolicies = map[string]packagePolicy{
 	},
 	"internal/supervisioncomposition": {
 		responsibility:     "compose startup and live supervision for exact local provider bindings",
-		allowedImports:     []string{"internal/app", "internal/controllertelemetry", "internal/domain", "internal/sessionattachment", "internal/sessionrecoverycontrol", "internal/sessionsupervisor"},
-		maxProductionLines: 400,
+		allowedImports:     []string{"internal/app", "internal/controllertelemetry", "internal/domain", "internal/recoverybackoff", "internal/sessionattachment", "internal/sessionrecoverycontrol", "internal/sessionsupervisor"},
+		maxProductionLines: 450,
 	},
 	"internal/telegram": {
 		responsibility:     "implement the Telegram HTTP transport and classify delivery outcomes",
@@ -2328,6 +2343,7 @@ func checkGraph(packages []packageInfo) []string {
 			}
 			if beginsWith(source, "internal/app") &&
 				!beginsWith(target, "internal/app") &&
+				!beginsWith(target, "internal/initialstartretry") &&
 				!beginsWith(target, "internal/providerattachport") &&
 				!beginsWith(target, "internal/domain") {
 				problems["app imports infrastructure: "+edge] = struct{}{}

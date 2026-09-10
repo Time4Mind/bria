@@ -2,10 +2,36 @@ package sessionrecoverycontrol
 
 import (
 	"context"
+	"time"
 
 	"bria/internal/domain"
 	"bria/internal/sessionsupervisor"
 )
+
+// DeferUnboundInitial normalizes crash-left starting state without launching a
+// provider. The live manager then owns config-aware retry, reporting and backoff.
+func DeferUnboundInitial(ctx context.Context, store Store, session domain.Session, computer domain.ComputerID, now func() time.Time) (domain.Session, bool, error) {
+	_, bound := session.Binding()
+	target, recovering := session.RecoveryTarget()
+	if session.ComputerID() != computer || bound || session.Status() != domain.SessionStarting && !(session.Status() == domain.SessionAwaitingRecovery && recovering && target == domain.SessionStarting) {
+		return session, false, nil
+	}
+	if session.Status() == domain.SessionAwaitingRecovery {
+		return session, true, nil
+	}
+	at := now().UTC()
+	if at.Before(session.StateChangedAt()) {
+		at = session.StateChangedAt()
+	}
+	awaiting, err := session.AwaitRecoveryAt(at)
+	if err != nil {
+		return session, true, err
+	}
+	if err := store.Replace(ctx, session, awaiting); err != nil {
+		return session, true, err
+	}
+	return awaiting, true, nil
+}
 
 type FilteredStore struct {
 	Store

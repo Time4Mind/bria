@@ -1,5 +1,4 @@
-// Package supervisioncomposition owns startup and live process supervision for
-// exact local provider bindings.
+// Package supervisioncomposition owns startup and live supervision for exact local provider bindings.
 package supervisioncomposition
 
 import (
@@ -11,6 +10,7 @@ import (
 	"bria/internal/app"
 	"bria/internal/controllertelemetry"
 	"bria/internal/domain"
+	"bria/internal/recoverybackoff"
 	"bria/internal/sessionattachment"
 	"bria/internal/sessionrecoverycontrol"
 	"bria/internal/sessionsupervisor"
@@ -28,6 +28,7 @@ type Options struct {
 	Store                       Store
 	Waiter                      sessionsupervisor.ProcessWaiter
 	Restarter                   sessionsupervisor.Restarter
+	InitialRestarter            sessionsupervisor.Restarter
 	AcceptedTurns               sessionsupervisor.AcceptedTurnReconciler
 	ShouldContinueAcceptedTurns func(context.Context, domain.Session, domain.ProviderBinding, sessionsupervisor.AcceptedTurnReconciliation) (bool, error)
 	ContinueAcceptedTurns       func(context.Context, domain.Session, domain.ProviderBinding, sessionsupervisor.AcceptedTurnReconciliation) error
@@ -36,22 +37,24 @@ type Options struct {
 	WaitBeforeRetry             sessionsupervisor.RetryWaiter
 	Now                         func() time.Time
 	Report                      func(error)
+	ReportSession               func(domain.SessionID, error)
 }
 
 type watchedBinding struct {
-	binding domain.ProviderBinding
-	cancel  context.CancelFunc
+	identity recoverybackoff.Identity
+	cancel   context.CancelFunc
 }
 
 type Manager struct {
-	computer  domain.ComputerID
-	store     Store
-	restarter sessionsupervisor.Restarter
-	control   *sessionrecoverycontrol.Control
-	startup   *sessionsupervisor.Supervisor
-	interval  time.Duration
-	report    func(error)
-
+	computer         domain.ComputerID
+	store            Store
+	restarter        sessionsupervisor.Restarter
+	control          *sessionrecoverycontrol.Control
+	startup          *sessionsupervisor.Supervisor
+	interval         time.Duration
+	recoveryBackoff  *recoverybackoff.Tracker
+	report           func(error)
+	reportSession    func(domain.SessionID, error)
 	mu               sync.Mutex
 	observer         controllertelemetry.Observer
 	recoveryNotifier func(context.Context, domain.SessionID)
@@ -71,7 +74,7 @@ func New(options Options) (*Manager, error) {
 		ShouldContinueAcceptedTurns: options.ShouldContinueAcceptedTurns,
 		ContinueAcceptedTurns:       options.ContinueAcceptedTurns,
 	}
-	control, err := sessionrecoverycontrol.New(options.Store, options.Waiter, options.Restarter, supervisorOptions)
+	control, err := sessionrecoverycontrol.New(options.Store, options.Waiter, options.Restarter, options.InitialRestarter, supervisorOptions)
 	if err != nil {
 		return nil, ErrInvalidOptions
 	}
@@ -79,14 +82,19 @@ func New(options Options) (*Manager, error) {
 	if err != nil {
 		return nil, ErrInvalidOptions
 	}
+	reportSession := options.ReportSession
+	if reportSession == nil {
+		reportSession = func(_ domain.SessionID, err error) { options.Report(err) }
+	}
 	return &Manager{
 		computer: options.LocalComputerID, store: options.Store, restarter: options.Restarter, control: control, startup: startup,
-		interval: options.SweepInterval, now: options.Now, report: options.Report, workers: make(map[domain.SessionID]watchedBinding),
+		interval: options.SweepInterval, recoveryBackoff: recoverybackoff.Default(), now: options.Now, report: options.Report,
+		reportSession: reportSession,
+		workers:       make(map[domain.SessionID]watchedBinding),
 	}, nil
 }
 
-// RequireSafeFallback permits a runtime without supervision seams only when no
-// persisted session can contain an accepted in-flight turn.
+// RequireSafeFallback rejects fallback when persisted accepted work may exist.
 func RequireSafeFallback(ctx context.Context, store Store) error {
 	if ctx == nil || store == nil {
 		return ErrInvalidOptions
@@ -94,8 +102,7 @@ func RequireSafeFallback(ctx context.Context, store Store) error {
 	return sessionrecoverycontrol.RequireSafeFallback(ctx, store)
 }
 
-// RecoverStartup reconciles crash-sensitive sessions first, then delegates all
-// remaining safe states to the ordinary exact-resume recovery path.
+// RecoverStartup reconciles crash-sensitive sessions before ordinary recovery.
 func (manager *Manager) RecoverStartup(ctx context.Context) (app.SessionRecoveryResult, error) {
 	if manager == nil || ctx == nil {
 		return app.SessionRecoveryResult{}, ErrInvalidOptions
@@ -112,10 +119,24 @@ func (manager *Manager) RecoverStartup(ctx context.Context) (app.SessionRecovery
 	handled := make(map[domain.SessionID]struct{})
 	var result app.SessionRecoveryResult
 	for _, session := range sessions {
+		deferred, initial, deferErr := sessionrecoverycontrol.DeferUnboundInitial(ctx, manager.store, session, manager.computer, manager.now)
+		if deferErr != nil {
+			if ctx.Err() == nil {
+				manager.reportSession(session.ID(), deferErr)
+			}
+			return result, deferErr
+		}
+		if session.ComputerID() == manager.computer && initial {
+			session = deferred
+			handled[session.ID()] = struct{}{}
+			result.Awaiting++
+			manager.observeRecovery(ctx, session.ID(), controllertelemetry.StartupRecovery, sessionsupervisor.Result{Session: session, AwaitingRecovery: true}, nil)
+			continue
+		}
 		target, _ := session.RecoveryTarget()
+		_, bound := session.Binding()
 		ready := session.Status() == domain.SessionReady || session.Status() == domain.SessionAwaitingRecovery && target == domain.SessionReady
 		attacher, canAttach := manager.restarter.(app.SessionAttacher)
-		_, bound := session.Binding()
 		attach := canAttach && attacher.SupportsAttach(session.Provider()) && bound && sessionrecoverycontrol.StartupRecoverable(session.Status())
 		if session.ComputerID() != manager.computer || !sessionrecoverycontrol.HazardousRecovery(session) && !ready && !attach {
 			continue
@@ -133,8 +154,10 @@ func (manager *Manager) RecoverStartup(ctx context.Context) (app.SessionRecovery
 		}
 		manager.observeRecovery(ctx, session.ID(), controllertelemetry.StartupRecovery, recovered, err)
 		if err != nil {
+			if ctx.Err() == nil {
+				manager.reportSession(session.ID(), err)
+			}
 			if errors.Is(err, sessionsupervisor.ErrReconciliationRequired) || errors.Is(err, sessionsupervisor.ErrRecoveryExhausted) {
-				manager.report(err)
 				// Empty card history does not prove absent input custody.
 				if !errors.Is(err, sessionsupervisor.ErrReconciliationRequired) && (manager.control.DeleteUnrecoverableRecovery(ctx, session) || manager.control.DeleteEmptyRecovery(ctx, session)) {
 					result.FinalizedClosing++
@@ -207,50 +230,75 @@ func (manager *Manager) sweep(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	desired := make(map[domain.SessionID]domain.ProviderBinding)
+	desired := make(map[domain.SessionID]recoverybackoff.Identity)
 	for _, session := range sessions {
 		attacher, canAttach := manager.restarter.(app.SessionAttacher)
 		retryAttach := canAttach && attacher.SupportsAttach(session.Provider()) && session.Status() == domain.SessionAwaitingRecovery
-		if session.ComputerID() != manager.computer || !sessionrecoverycontrol.LiveSupervisable(session.Status()) && !retryAttach {
+		target, recovering := session.RecoveryTarget()
+		_, bound := session.Binding()
+		retryInitial := session.Status() == domain.SessionAwaitingRecovery && recovering && target == domain.SessionStarting && !bound
+		if session.ComputerID() != manager.computer || !sessionrecoverycontrol.LiveSupervisable(session.Status()) && !retryAttach && !retryInitial {
 			continue
 		}
 		if binding, bound := session.Binding(); bound {
-			desired[session.ID()] = binding
+			desired[session.ID()] = recoverybackoff.Identity{Binding: binding, Lifecycle: session.StateChangedAt()}
+		} else if retryInitial {
+			desired[session.ID()] = recoverybackoff.Identity{Lifecycle: session.StateChangedAt(), Initial: true}
 		}
 	}
 	manager.mu.Lock()
 	defer manager.mu.Unlock()
+	now := manager.now()
 	for id, watched := range manager.workers {
-		if binding, ok := desired[id]; !ok || binding != watched.binding {
+		if identity, ok := desired[id]; !ok || identity != watched.identity {
 			watched.cancel()
 			delete(manager.workers, id)
 		}
 	}
-	for id, binding := range desired {
+	manager.recoveryBackoff.Retain(desired)
+	for id, identity := range desired {
 		if _, exists := manager.workers[id]; exists {
 			continue
 		}
+		if !manager.recoveryBackoff.Ready(id, identity, now) {
+			continue
+		}
 		workerCtx, cancel := context.WithCancel(ctx)
-		manager.workers[id] = watchedBinding{binding: binding, cancel: cancel}
+		manager.workers[id] = watchedBinding{identity: identity, cancel: cancel}
 		manager.wait.Add(1)
-		go manager.watch(workerCtx, id, binding)
+		go manager.watch(workerCtx, id, identity)
 	}
 	return nil
 }
 
-func (manager *Manager) watch(ctx context.Context, id domain.SessionID, binding domain.ProviderBinding) {
+func (manager *Manager) watch(ctx context.Context, id domain.SessionID, identity recoverybackoff.Identity) {
 	defer manager.wait.Done()
-	result, err := manager.control.Watch(ctx, id, binding)
-	manager.observeRecovery(ctx, id, controllertelemetry.LiveRecovery, result, err)
-	if err != nil && !errors.Is(err, context.Canceled) {
-		manager.report(err)
+	var result sessionsupervisor.Result
+	var err error
+	if identity.Initial {
+		result, err = manager.control.RecoverUnboundInitial(ctx, manager.computer, id)
+	} else {
+		result, err = manager.control.Watch(ctx, id, identity.Binding)
 	}
+	manager.observeRecovery(ctx, id, controllertelemetry.LiveRecovery, result, err)
+	shouldReport := err != nil && !errors.Is(err, context.Canceled)
 	manager.mu.Lock()
-	if current, exists := manager.workers[id]; exists && current.binding == binding {
+	if current, exists := manager.workers[id]; exists && current.identity == identity {
 		delete(manager.workers, id)
+	}
+	if err != nil && ctx.Err() == nil {
+		if result.Session.ID() == id {
+			identity.Lifecycle = result.Session.StateChangedAt()
+		}
+		manager.recoveryBackoff.Failed(id, identity, manager.now())
+	} else if result.Recovered || result.Archived || result.Deleted || result.Stale {
+		manager.recoveryBackoff.Succeeded(id)
 	}
 	notify := manager.recoveryNotifier
 	manager.mu.Unlock()
+	if shouldReport {
+		manager.reportSession(id, err)
+	}
 	if notify != nil && !result.Stale && (result.AwaitingRecovery || result.Recovered || result.Archived || result.Deleted) {
 		notifyCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()

@@ -9,8 +9,7 @@ import (
 	"bria/internal/sessionrecoverycontrol"
 )
 
-// RecoverSession reuses exact-binding reconciliation for an explicit retry.
-// It never submits a prompt. Unknown accepted outcomes remain in recovery.
+// RecoverSession explicitly retries exact binding without submitting a prompt.
 func (manager *Manager) RecoverSession(ctx context.Context, id domain.SessionID) (domain.Session, error) {
 	if manager == nil || ctx == nil || id == "" {
 		return domain.Session{}, ErrInvalidOptions
@@ -23,8 +22,7 @@ func (manager *Manager) RecoverSession(ctx context.Context, id domain.SessionID)
 	return result.Session, err
 }
 
-// SetRecoveryNotifier refreshes only automatic live outcomes after commit.
-// It runs outside locks, must honor context, and owns delivery error handling.
+// SetRecoveryNotifier refreshes committed automatic outcomes outside locks.
 func (manager *Manager) SetRecoveryNotifier(notify func(context.Context, domain.SessionID)) {
 	manager.mu.Lock()
 	manager.recoveryNotifier = notify

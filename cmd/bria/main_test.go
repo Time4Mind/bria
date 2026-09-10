@@ -478,6 +478,7 @@ func TestRunAppliesEffectiveSessionLifetimeToCreatedSession(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	runtime := &blockingProviderRuntime{entered: make(chan struct{}, 1)}
 	calls := 0
 	dependencies := testCommandDependencies(t, &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		calls++
@@ -489,6 +490,24 @@ func TestRunAppliesEffectiveSessionLifetimeToCreatedSession(t *testing.T) {
 		case 3:
 			return telegramResponse(fmt.Sprintf(`{"ok":true,"result":[{"update_id":21,"message":{"message_id":22,"from":{"id":42,"is_bot":false,"first_name":"A"},"chat":{"id":42,"type":"private"},"text":%q}}]}`, "/new codex "+temporary)), nil
 		case 4:
+			deadline := time.Now().Add(2 * time.Second)
+			for {
+				state, openErr := storage.OpenSessionStore(statePath)
+				if openErr != nil {
+					t.Fatal(openErr)
+				}
+				sessions, listErr := state.List(context.Background())
+				if listErr != nil {
+					t.Fatal(listErr)
+				}
+				if len(sessions) == 1 && sessions[0].Status() == domain.SessionReady {
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatalf("created session did not become ready: %#v", sessions)
+				}
+				time.Sleep(time.Millisecond)
+			}
 			cancel()
 			return telegramResponse(`{"ok":true,"result":{"message_id":23,"from":{"id":600,"is_bot":true},"chat":{"id":42,"type":"private"},"text":"session"}}`), nil
 		default:
@@ -496,6 +515,9 @@ func TestRunAppliesEffectiveSessionLifetimeToCreatedSession(t *testing.T) {
 			return nil, nil
 		}
 	})})
+	dependencies.composeRuntime = func(config.Config, []string, string, sessionruntime.Options) (providerRuntime, error) {
+		return runtime, nil
+	}
 	var stdout, stderr strings.Builder
 	if code := runContextWithDependencies(ctx, []string{"run", "--config", configPath}, &stdout, &stderr, dependencies); code != 0 {
 		t.Fatalf("run exit code = %d, stderr = %q", code, stderr.String())

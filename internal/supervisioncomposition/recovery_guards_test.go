@@ -48,6 +48,39 @@ func (*failedStartRuntime) Start(context.Context, app.StartSessionRequest) (doma
 	return domain.ProviderBinding{}, errors.New("private-start-error")
 }
 
+type startupReplaceFailStore struct{ *memoryStore }
+
+func (*startupReplaceFailStore) Replace(context.Context, domain.Session, domain.Session) error {
+	return errors.New("private-persistence-error")
+}
+
+func TestStartupRecoveryReportsEverySessionSpecificFailure(t *testing.T) {
+	ready, _ := readySession(t)
+	store := &startupReplaceFailStore{memoryStore: &memoryStore{session: ready}}
+	runtime := &runtimeStub{}
+	reported := make(chan domain.SessionID, 1)
+	manager, err := supervisioncomposition.New(supervisioncomposition.Options{
+		LocalComputerID: "computer", Store: store, Restarter: runtime, Waiter: runtime,
+		AcceptedTurns: &recoveryReconciler{}, MaxRestartAttempts: 1, SweepInterval: time.Hour,
+		Now: time.Now, WaitBeforeRetry: func(context.Context, int) error { return nil }, Report: func(error) {},
+		ReportSession: func(id domain.SessionID, _ error) { reported <- id },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, recoverErr := manager.RecoverStartup(context.Background()); recoverErr == nil {
+		t.Fatal("RecoverStartup() error = nil, want persistence failure")
+	}
+	select {
+	case id := <-reported:
+		if id != ready.ID() {
+			t.Fatalf("reported session = %q, want %q", id, ready.ID())
+		}
+	default:
+		t.Fatal("session-specific startup recovery failure was not reported")
+	}
+}
+
 func TestReconciledReadyStartupFailureObservesPersistedAwaitingState(t *testing.T) {
 	ready, _ := readySession(t)
 	runtime := &failedStartRuntime{}

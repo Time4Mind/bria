@@ -112,7 +112,7 @@ func (creator asyncSessionCreator) BeginCreate(ctx context.Context, intent app.C
 		defer close(outcome)
 		started := time.Now()
 		result, completeErr := creator.creator.CompleteCreate(creator.root, prepared)
-		recordSessionStartup(creator.logger, intent, time.Since(started), errors.Join(result.StartError, completeErr))
+		recordSessionStartup(creator.logger, intent, prepared.Session.ID(), result.StartAttempts, time.Since(started), errors.Join(result.StartError, completeErr))
 		outcome <- telegramcontroller.SessionStartOutcome{
 			Session: result.Session, Replayed: result.Replayed, StartError: result.StartError, Err: completeErr,
 		}
@@ -385,6 +385,7 @@ func runTelegramController(
 	waiter, canWait := starter.(sessionruntime.ProcessSupervisor)
 	reader, canReconcile := starter.(sessionruntime.AcceptedTurnReader)
 	if canWait && canReconcile {
+		initialStarter := liveConfigStarter{base: starter, store: providerPreferences}
 		providerHistory, err := recoverycomposition.NewReconciler(reader, state)
 		if err != nil {
 			return fmt.Errorf("compose provider recovery reader: %w", err)
@@ -393,15 +394,16 @@ func runTelegramController(
 			domain.ProviderCodex: providerHistory, domain.ProviderClaude: providerHistory,
 		}}
 		resumeReconciler = &durableRecovery
-		reportRecovery := func(reportErr error) {
-			_ = safeLogger.Write(safelog.Event{Class: safelog.Critical, Type: "session.recovery_failed", ErrorCategory: "session_recovery", Error: reportErr.Error(), Fields: map[string]string{"component": "sessionsupervisor", "operation": "recover"}})
+		reportRecovery := func(reportErr error) { recordSessionRecoveryFailure(safeLogger, "", reportErr) }
+		reportSessionRecovery := func(id domain.SessionID, reportErr error) {
+			recordSessionRecoveryFailure(safeLogger, id, reportErr)
 		}
 		supervision, err := supervisioncomposition.New(supervisioncomposition.Options{
-			LocalComputerID: computerID, Store: state, Waiter: waiter, Restarter: starter,
+			LocalComputerID: computerID, Store: state, Waiter: waiter, Restarter: starter, InitialRestarter: initialStarter,
 			AcceptedTurns: durableRecovery, MaxRestartAttempts: 3, SweepInterval: supervisionSweepInterval,
 			ShouldContinueAcceptedTurns: (acceptedcontinuation.Selector{Journal: journal}).Required,
 			ContinueAcceptedTurns:       continueAccepted,
-			Now:                         clock, WaitBeforeRetry: waitRecoveryRetry, Report: reportRecovery,
+			Now:                         clock, WaitBeforeRetry: waitRecoveryRetry, Report: reportRecovery, ReportSession: reportSessionRecovery,
 		})
 		if err != nil {
 			return fmt.Errorf("compose session supervision: %w", err)
@@ -422,6 +424,12 @@ func runTelegramController(
 		state,
 		liveConfigStarter{base: starter, store: providerPreferences},
 		app.WithSessionLifetime(sessionLifetime),
+		app.WithInitialStartRetry(app.InitialStartRetryPolicy{
+			MaxAttempts: 3, Delay: 500 * time.Millisecond,
+			OnFailure: func(failure app.InitialStartAttemptFailure) {
+				recordSessionStartupAttempt(safeLogger, failure)
+			},
+		}),
 	)
 	if err != nil {
 		return fmt.Errorf("create session service: %w", err)

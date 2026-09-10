@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"bria/internal/domain"
+	"bria/internal/initialstartretry"
 	"bria/internal/providerattachport"
 )
 
@@ -15,7 +16,21 @@ var ErrIntentConflict = errors.New("confirmed session intent conflicts with its 
 
 var ErrComputerNotLocal = errors.New("confirmed session computer is not local")
 
-var ErrOutcomeUnknown = errors.New("create session durable outcome is unknown")
+var ErrOutcomeUnknown = initialstartretry.ErrOutcomeUnknown
+
+var ErrInitialStartExhausted = initialstartretry.ErrInitialStartExhausted
+
+const MaxInitialStartAttempts = initialstartretry.MaxAttempts
+
+const providerStartFinalizationTimeout = 5 * time.Second
+
+// InitialStartRetryPolicy controls retries of SessionStarter.Start while the
+// same newly-created session remains durably in starting. MaxAttempts includes
+// the first attempt. Delay is applied between attempts.
+type InitialStartRetryPolicy = initialstartretry.Policy
+type InitialStartAttemptFailure = initialstartretry.AttemptFailure
+
+type InitialStartExhaustedError = initialstartretry.ExhaustedError
 
 // ConfirmedSessionIntent contains the immutable choices confirmed by the user.
 // IntentID must be reused when the same confirmation is replayed.
@@ -38,11 +53,7 @@ const (
 
 // CreateSessionResult is a confirmed durable creation outcome. StartError is
 // non-nil only when the session was durably moved to awaiting recovery.
-type CreateSessionResult struct {
-	Session    domain.Session
-	Replayed   bool
-	StartError error
-}
+type CreateSessionResult = initialstartretry.CreateSessionResult
 
 // PreparedSessionCreate is the durable, pre-provider half of session
 // creation. CompleteCreate performs the potentially slow provider launch.
@@ -95,6 +106,8 @@ type SessionCreator struct {
 	starter         SessionStarter
 	clock           func() time.Time
 	lifetime        domain.SessionLifetime
+	initialRetry    InitialStartRetryPolicy
+	retryConfigured bool
 }
 
 type SessionCreatorOption func(*SessionCreator) error
@@ -115,6 +128,21 @@ func WithSessionClock(clock func() time.Time) SessionCreatorOption {
 			return errors.New("session clock is required")
 		}
 		creator.clock = clock
+		return nil
+	}
+}
+
+// WithInitialStartRetry opts newly-created sessions into bounded provider
+// startup retry and proof-checked empty cleanup after all attempts fail.
+// Without this option SessionCreator preserves the historical single-attempt,
+// awaiting-recovery behavior.
+func WithInitialStartRetry(policy InitialStartRetryPolicy) SessionCreatorOption {
+	return func(creator *SessionCreator) error {
+		if err := initialstartretry.ValidatePolicy(policy); err != nil {
+			return err
+		}
+		creator.initialRetry = policy
+		creator.retryConfigured = true
 		return nil
 	}
 }
@@ -141,6 +169,7 @@ func NewSessionCreator(
 		starter:         starter,
 		clock:           func() time.Time { return time.Now().UTC() },
 		lifetime:        domain.SessionLifetimeNever,
+		initialRetry:    InitialStartRetryPolicy{MaxAttempts: 1},
 	}
 	for _, option := range options {
 		if option == nil {
@@ -279,27 +308,44 @@ func (creator *SessionCreator) CompleteCreate(ctx context.Context, prepared Prep
 	if !persisted.Equal(stored) {
 		return CreateSessionResult{}, errors.New("prepared session creation no longer matches durable state")
 	}
-	startRequest := prepared.request
-	binding, startErr := creator.starter.Start(ctx, startRequest)
-	if startErr == nil {
-		ready, transitionErr := stored.Ready(binding)
-		if transitionErr != nil {
-			if abortErr := creator.starter.Abort(ctx, startRequest, binding); abortErr != nil {
-				return CreateSessionResult{Session: stored}, errors.Join(
-					ErrOutcomeUnknown,
-					fmt.Errorf("invalid provider binding: %w", transitionErr),
-					fmt.Errorf("abort invalid provider start: %w", abortErr),
-				)
-			}
-			return creator.persistStartFailure(
-				ctx,
-				stored,
+	startResult, startErr := initialstartretry.Run(
+		ctx,
+		stored,
+		prepared.request,
+		creator.store,
+		creator.starter,
+		creator.initialRetry,
+		creator.retryConfigured,
+	)
+	result := startResult.CreateSessionResult
+	if startErr != nil {
+		return result, startErr
+	}
+	if startResult.StartError != nil {
+		if startResult.Exhausted {
+			return result, &InitialStartExhaustedError{Result: result, Attempts: startResult.StartAttempts}
+		}
+		return result, nil
+	}
+	persistenceCtx, cancelPersistence := context.WithTimeout(context.WithoutCancel(ctx), providerStartFinalizationTimeout)
+	defer cancelPersistence()
+	ready, transitionErr := stored.Ready(startResult.Binding)
+	if transitionErr != nil {
+		if abortErr := creator.starter.Abort(persistenceCtx, prepared.request, startResult.Binding); abortErr != nil {
+			return CreateSessionResult{Session: stored}, errors.Join(
+				ErrOutcomeUnknown,
 				fmt.Errorf("invalid provider binding: %w", transitionErr),
+				fmt.Errorf("abort invalid provider start: %w", abortErr),
 			)
 		}
-		return creator.persistReady(ctx, stored, ready, startRequest, binding)
+		failed, persistErr := initialstartretry.PersistFailure(
+			persistenceCtx, stored, fmt.Errorf("invalid provider binding: %w", transitionErr), creator.store,
+		)
+		return failed.CreateSessionResult, persistErr
 	}
-	return creator.persistStartFailure(ctx, stored, startErr)
+	result, persistErr := creator.persistReady(persistenceCtx, stored, ready, prepared.request, startResult.Binding)
+	result.StartAttempts = startResult.StartAttempts
+	return result, persistErr
 }
 
 func (creator *SessionCreator) persistReady(
@@ -338,44 +384,10 @@ func (creator *SessionCreator) persistReady(
 	if casErr == nil {
 		casErr = errors.New("ready transition was not visible after successful compare-and-swap")
 	}
-	return creator.persistStartFailure(
-		ctx,
-		starting,
-		fmt.Errorf("persist ready session: %w", casErr),
+	failed, persistErr := initialstartretry.PersistFailure(
+		ctx, starting, fmt.Errorf("persist ready session: %w", casErr), creator.store,
 	)
-}
-
-func (creator *SessionCreator) persistStartFailure(
-	ctx context.Context,
-	starting domain.Session,
-	startErr error,
-) (CreateSessionResult, error) {
-	awaitingRecovery, err := starting.AwaitRecovery()
-	if err != nil {
-		return CreateSessionResult{Session: starting}, fmt.Errorf("prepare awaiting-recovery session: %w", err)
-	}
-	casErr := creator.store.CompareAndSwap(ctx, starting, awaitingRecovery)
-	persisted, loadErr := creator.store.Load(ctx, starting.ID())
-	if loadErr == nil && persisted.Equal(awaitingRecovery) {
-		return CreateSessionResult{
-			Session:    persisted,
-			StartError: startErr,
-		}, nil
-	}
-	if loadErr != nil {
-		return CreateSessionResult{Session: starting}, errors.Join(
-			ErrOutcomeUnknown,
-			fmt.Errorf("reread awaiting-recovery session: %w", loadErr),
-			casErr,
-		)
-	}
-	if casErr == nil {
-		casErr = errors.New("awaiting-recovery transition was not visible after successful compare-and-swap")
-	}
-	return CreateSessionResult{Session: persisted}, errors.Join(
-		fmt.Errorf("persist awaiting-recovery session: %w", casErr),
-		fmt.Errorf("reread session status %q, want %q", persisted.Status(), domain.SessionAwaitingRecovery),
-	)
+	return failed.CreateSessionResult, persistErr
 }
 
 func sameConfirmedIntent(session domain.Session, intent ConfirmedSessionIntent) bool {

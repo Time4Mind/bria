@@ -1,5 +1,21 @@
 # Handoff: статус и следующий план
 
+> Текущий запрос A39 - исправление задержки `Новое`, failed создания и
+> всех доступных recovery-эпизодов. Последняя session сохранена, но после
+> `adapter_failed` осталась `awaiting_recovery` без binding и без auto-retry;
+> активной осталась прежняя session. Внутренний путь `Новое` занял менее 0.7 s,
+> click-to-ingress не измеряется. История содержит 682 recovery failures, включая
+> 680 записей двух ошибок на каждом 10-second sweep. Артём разрешил product fixes:
+> bounded initial retry + safe empty cleanup, capped recovery backoff, safe
+> startup stage logging и UI consistency; после full gate действует standing
+> release sequence. Todo/evidence:
+> [SESSION_CREATION_RECOVERY_DIAGNOSIS_TODO.md](SESSION_CREATION_RECOVERY_DIAGNOSIS_TODO.md).
+> Initial retry, config-aware live recovery для `starting`/unbound awaiting,
+> lifecycle backoff, safe session-correlated startup logs, native cleanup и UI
+> selection regressions реализованы. Public RED/GREEN, focused race, architecture
+> gate и свежий полный `VERSION=20260910-session-recovery make check-full` PASS;
+> выполняется standing release sequence.
+
 > Текущий запрос A38: ускорить полный выпуск Bria без сокращения runtime/race/
 > platform/policy проверок. Fail-closed release-journal routing, Go cache и
 > параллельный Stage 1 выпущены по

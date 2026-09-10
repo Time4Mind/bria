@@ -18,7 +18,7 @@ func main() {
 	defer stop()
 	if err := run(ctx, os.Args[1:]); err != nil {
 		if len(os.Args) > 1 && os.Args[1] == "--native" {
-			_, _ = fmt.Fprintln(os.Stderr, "bria-native-startup:"+nativeadapter.StartupFailureClass(err))
+			_, _ = fmt.Fprintln(os.Stderr, nativeadapter.StartupFailureMarker(err))
 		} else {
 			_, _ = fmt.Fprintln(os.Stderr, "bria codex adapter failed")
 		}

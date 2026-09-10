@@ -61,12 +61,12 @@ func Run(ctx context.Context, input io.ReadCloser, output io.Writer, config Conf
 	var inputErr error
 	input, inputErr = interruptibleInput(input)
 	if inputErr != nil {
-		return inputErr
+		return atStartupStage(StartupStageOpenTerminal, inputErr)
 	}
 	defer input.Close()
 	if config.AttachOnly && (!config.Persistent || config.ResumeID == "") ||
 		config.Persistent && (config.LogicalSessionID == "" || !filepath.IsAbs(config.StateDir)) {
-		return nativeterminal.ErrBindingMismatch
+		return atStartupStage(StartupStageOpenTerminal, nativeterminal.ErrBindingMismatch)
 	}
 	environment := childEnvironment(config.Environment)
 	binding := nativeterminal.Binding{LogicalSessionID: config.LogicalSessionID, NativeSessionID: config.ResumeID, Provider: string(config.Provider), Workdir: config.Workdir}
@@ -76,7 +76,7 @@ func Run(ctx context.Context, input io.ReadCloser, output io.Writer, config Conf
 	if config.Persistent && config.ResumeID != "" {
 		term, err = nativeterminal.AttachExisting(ctx, config.StateDir, binding)
 		if err != nil && (config.AttachOnly || !errors.Is(err, nativeterminal.ErrNotManaged)) {
-			return err
+			return atStartupStage(StartupStageOpenTerminal, err)
 		}
 	}
 	attached := term != nil
@@ -87,13 +87,13 @@ func Run(ctx context.Context, input io.ReadCloser, output io.Writer, config Conf
 		}
 	}
 	if err != nil {
-		return err
+		return atStartupStage(StartupStageOpenTerminal, err)
 	}
-	bound, physicallyClosed := attached, false
+	bound, physicallyClosed, protocolReady := attached, false, false
 	defer func() {
 		closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		if bound && !physicallyClosed {
+		if bound && !physicallyClosed && (attached || protocolReady) {
 			returnErr = errors.Join(returnErr, term.Detach(closeCtx))
 		} else {
 			returnErr = errors.Join(returnErr, term.Close(closeCtx))
@@ -105,15 +105,15 @@ func Run(ctx context.Context, input io.ReadCloser, output io.Writer, config Conf
 		state, err = nativecli.Ready(startup, term, plan)
 		cancel()
 		if err != nil {
-			return err
+			return atStartupStage(StartupStageNativeReadinessStatus, err)
 		}
 		if config.Persistent {
 			if err := os.MkdirAll(config.StateDir, 0700); err != nil {
-				return err
+				return atStartupStage(StartupStageBindingPersistence, err)
 			}
 			binding.NativeSessionID = state.SessionID
 			if err := term.PersistBinding(ctx, config.StateDir, binding); err != nil {
-				return err
+				return atStartupStage(StartupStageBindingPersistence, err)
 			}
 			bound = true
 		}
@@ -124,12 +124,12 @@ func Run(ctx context.Context, input io.ReadCloser, output io.Writer, config Conf
 		a.config.ScreenCaptureLimitKiB = nativecapture.DefaultLimitKiB
 	}
 	defer func() {
-		if !bound || physicallyClosed {
+		if !bound || physicallyClosed || (!attached && !protocolReady) {
 			returnErr = errors.Join(returnErr, a.cleanupAttachments())
 		}
 	}()
 	if err = a.loadReceipts(); err != nil {
-		return err
+		return atStartupStage(StartupStageReceiptBaseline, err)
 	}
 	defer func() {
 		if a.reader != nil {
@@ -139,12 +139,13 @@ func Run(ctx context.Context, input io.ReadCloser, output io.Writer, config Conf
 	// Baseline already existing history, never replay it as a new accepted input.
 	if !attached {
 		if err = a.baseline(ctx); err != nil && !(errors.Is(err, nativetranscript.ErrNotFound) && a.reader == nil) {
-			return err
+			return atStartupStage(StartupStageReceiptBaseline, err)
 		}
 	}
 	if err = a.emit(runtimeprotocol.AdapterMessage{Type: runtimeprotocol.TypeReady, ProviderSessionID: a.id, Readiness: "protocol", Authentication: "unknown", Model: a.model}); err != nil {
-		return err
+		return atStartupStage(StartupStageProtocolReadyEmission, err)
 	}
+	protocolReady = true
 	requests := make(chan runtimeprotocol.ParentMessage)
 	readErr := make(chan error, 1)
 	readCtx, stopRead := context.WithCancel(ctx)

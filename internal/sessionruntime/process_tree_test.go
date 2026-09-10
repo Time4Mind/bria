@@ -136,10 +136,10 @@ func TestSeparateRawProcess(t *testing.T) {
 	if err := grandchild.Start(); err != nil {
 		os.Exit(53)
 	}
-	if err := os.WriteFile("raw.pid", []byte(strconv.Itoa(os.Getpid())), 0o600); err != nil {
+	if err := publishTreePID("raw.pid", os.Getpid()); err != nil {
 		os.Exit(54)
 	}
-	if err := os.WriteFile("raw-grandchild.pid", []byte(strconv.Itoa(grandchild.Process.Pid)), 0o600); err != nil {
+	if err := publishTreePID("raw-grandchild.pid", grandchild.Process.Pid); err != nil {
 		os.Exit(55)
 	}
 	<-signals
@@ -207,12 +207,20 @@ func startGrandchildAdapter() {
 	if err := command.Start(); err != nil {
 		os.Exit(41)
 	}
-	if err := os.WriteFile("grandchild.pid", []byte(strconv.Itoa(command.Process.Pid)), 0o600); err != nil {
+	if err := publishTreePID("grandchild.pid", command.Process.Pid); err != nil {
 		os.Exit(42)
 	}
 	for {
 		time.Sleep(time.Hour)
 	}
+}
+
+func publishTreePID(path string, pid int) error {
+	temporary := path + ".tmp"
+	if err := os.WriteFile(temporary, []byte(strconv.Itoa(pid)), 0o600); err != nil {
+		return err
+	}
+	return os.Rename(temporary, path)
 }
 
 func TestSessionRuntimeGrandchildProcess(t *testing.T) {

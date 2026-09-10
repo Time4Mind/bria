@@ -21,7 +21,7 @@ func TestNativeMigrationKeepsExactPackageBoundaries(t *testing.T) {
 		path    string
 		imports []string
 	}{
-		{"internal/nativeadapter", []string{"internal/domain", "internal/nativeacceptance", "internal/nativeattachment", "internal/nativecapture", "internal/nativecli", "internal/nativephotostaging", "internal/nativereceiptstore", "internal/nativeterminal", "internal/nativetranscript", "internal/runtimediagnostic", "internal/runtimeprotocol"}},
+		{"internal/nativeadapter", []string{"internal/domain", "internal/nativeacceptance", "internal/nativeattachment", "internal/nativecapture", "internal/nativecli", "internal/nativephotostaging", "internal/nativereceiptstore", "internal/nativestartupdiagnostic", "internal/nativeterminal", "internal/nativetranscript", "internal/runtimediagnostic", "internal/runtimeprotocol"}},
 		{"internal/nativecapture", nil},
 		{"internal/nativeattachment", nil},
 		{"internal/nativecli", []string{"internal/domain", "internal/nativeapproval"}},
@@ -47,6 +47,62 @@ func TestNativeMigrationKeepsExactPackageBoundaries(t *testing.T) {
 				t.Fatalf("native composition %s -> %s: %v", command, target, errors)
 			}
 		}
+	}
+}
+
+func TestArchitectureCheckerRegistersInitialRecoverySupportBoundaries(t *testing.T) {
+	for _, test := range []struct {
+		path           string
+		responsibility string
+		imports        []string
+		limit          int
+	}{
+		{
+			path:           "internal/initialstartretry",
+			responsibility: "retry initial provider starts and recover unbound starting sessions through exact durable transitions",
+			imports:        []string{"internal/domain", "internal/providerattachport"},
+			limit:          325,
+		},
+		{
+			path:           "internal/nativestartupdiagnostic",
+			responsibility: "classify payload-free native startup failures by bounded stage and class",
+			imports:        []string{"internal/nativetranscript", "internal/runtimediagnostic"},
+			limit:          100,
+		},
+		{
+			path:           "internal/recoverybackoff",
+			responsibility: "schedule per-session recovery attempts with lifecycle-aware capped exponential backoff",
+			imports:        []string{"internal/domain"},
+			limit:          100,
+		},
+	} {
+		t.Run(test.path, func(t *testing.T) {
+			policy, ok := packagePolicies[test.path]
+			if !ok {
+				t.Fatalf("packagePolicies[%q] is missing", test.path)
+			}
+			if policy.responsibility != test.responsibility ||
+				strings.Join(policy.allowedImports, "\x00") != strings.Join(test.imports, "\x00") ||
+				policy.maxProductionLines != test.limit || policy.compositionRoot || policy.externalOnlyEvidence != "" {
+				t.Fatalf("recovery support policy %s = %#v", test.path, policy)
+			}
+		})
+	}
+
+	if errors := checkGraph(graphWithEdge("internal/app", "internal/initialstartretry")); len(errors) != 0 {
+		t.Fatalf("app use-case split rejected: %v", errors)
+	}
+	assertErrorContains(
+		t,
+		checkGraph(graphWithEdge("internal/app", "internal/recoverybackoff")),
+		"app imports infrastructure: internal/app -> internal/recoverybackoff",
+	)
+}
+
+func TestArchitectureCheckerBudgetsLiveRecoveryComposition(t *testing.T) {
+	policy := packagePolicies["internal/supervisioncomposition"]
+	if policy.maxProductionLines != 450 {
+		t.Fatalf("supervision composition budget = %d, want 450", policy.maxProductionLines)
 	}
 }
 
@@ -640,7 +696,7 @@ func TestArchitectureCheckerRegistersCurrentCompositionBoundaries(t *testing.T) 
 				"internal/providermodels",
 				"internal/acceptedcontinuation", "internal/app", "internal/authcomposition", "internal/callbacktoken", "internal/claudestore", "internal/config", "internal/coordinator", "internal/domain", "internal/durablecomposition", "internal/durableflow", "internal/interactioncomposition", "internal/messagejournal", "internal/nativerecoverycomposition", "internal/observability", "internal/processenv", "internal/promptpreprocess", "internal/promptpreprocesscommand", "internal/providerquota", "internal/recoverycomposition", "internal/recoveryruntime", "internal/runtimefactory", "internal/safelog", "internal/screenproduction", "internal/sessioncreation", "internal/sessionexpiry", "internal/sessionid", "internal/sessionnaming", "internal/sessionruntime", "internal/sessionsupervisor", "internal/settings", "internal/settingscomposition", "internal/storage", "internal/supervisioncomposition", "internal/telegram", "internal/telegrambridge", "internal/telegramcompletioncomposition", "internal/telegramcontroller", "internal/telegramflow", "internal/telegramnotify", "internal/telegrampipeline", "internal/telegrampromptcomposition", "internal/telegramrecoverycomposition", "internal/telegramruntimecomposition", "internal/turnruntimecomposition", "internal/workdir",
 			},
-			limit: 1000,
+			limit: 1025,
 		},
 		{
 			path:           "internal/p4runtimecomposition",

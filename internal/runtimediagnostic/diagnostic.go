@@ -12,6 +12,7 @@ type Drain struct {
 	size, total int
 	overlong    bool
 	class       string
+	stage       string
 }
 
 // Drain all stderr without retaining it. Only the first32KiB is classified,
@@ -38,27 +39,42 @@ func (d *Drain) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 func (d *Drain) lineComplete() {
-	if !d.overlong && d.class == "" {
+	if !d.overlong {
 		line := string(d.line[:d.size])
 		if d.size > 0 && d.line[d.size-1] == '\r' {
 			line = line[:len(line)-1]
 		}
-		known := map[string]string{
-			"native CLI authentication required":                     "authentication_required",
-			"native CLI workspace trust confirmation required":       "workspace_trust_required",
-			"native CLI bypass forbidden for current operating user": "bypass_forbidden",
-			"native Codex resumed a different session":               "session_mismatch",
-			"native Claude requires declared session UUID":           "session_identity_invalid",
-			"native CLI exited":                                      "cli_exited",
-			"native Claude adapter failed":                           "adapter_failed",
-		}
-		if class := known[line]; class != "" {
-			d.class = class
-		}
-		for _, class := range []string{"authentication_required", "workspace_trust_required", "bypass_forbidden", "session_mismatch", "session_identity_invalid", "cli_exited", "readiness_timeout", "adapter_failed", "native_transcript_record_too_large", "native_transcript_read_limit", "native_transcript_malformed", "native_transcript_binding_invalid"} {
-			if line == "bria-native-startup:"+class {
-				d.class = class
+		classes := []string{"authentication_required", "workspace_trust_required", "bypass_forbidden", "session_mismatch", "session_identity_invalid", "cli_exited", "readiness_timeout", "adapter_failed", "native_transcript_record_too_large", "native_transcript_read_limit", "native_transcript_malformed", "native_transcript_binding_invalid"}
+		staged := false
+		for _, stage := range []string{"unknown", "open_terminal", "native_readiness_status", "binding_persistence", "receipt_baseline", "protocol_ready_emission"} {
+			for _, class := range classes {
+				if line == "bria-native-startup:"+stage+":"+class {
+					d.stage, d.class, staged = stage, class, true
+					break
+				}
+			}
+			if staged {
 				break
+			}
+		}
+		if !staged && d.class == "" {
+			known := map[string]string{
+				"native CLI authentication required":                     "authentication_required",
+				"native CLI workspace trust confirmation required":       "workspace_trust_required",
+				"native CLI bypass forbidden for current operating user": "bypass_forbidden",
+				"native Codex resumed a different session":               "session_mismatch",
+				"native Claude requires declared session UUID":           "session_identity_invalid",
+				"native CLI exited":                                      "cli_exited",
+				"native Claude adapter failed":                           "adapter_failed",
+			}
+			if class := known[line]; class != "" {
+				d.class = class
+			}
+			for _, class := range classes {
+				if line == "bria-native-startup:"+class {
+					d.class = class
+					break
+				}
 			}
 		}
 	}
@@ -73,12 +89,13 @@ func (d *Drain) Wrap(err error) error {
 	if d.class == "" {
 		return err
 	}
-	return &startupFailure{cause: err, class: d.class}
+	return &startupFailure{cause: err, class: d.class, stage: d.stage}
 }
 
 type startupFailure struct {
 	cause error
 	class string
+	stage string
 }
 
 func (e *startupFailure) Error() string { return e.cause.Error() + " (startup_class=" + e.class + ")" }
@@ -88,6 +105,14 @@ func FailureClass(err error) string {
 	var failure *startupFailure
 	if errors.As(err, &failure) {
 		return failure.class
+	}
+	return ""
+}
+
+func FailureStage(err error) string {
+	var failure *startupFailure
+	if errors.As(err, &failure) {
+		return failure.stage
 	}
 	return ""
 }
