@@ -1,6 +1,4 @@
-// Package durableflow coordinates provider-neutral input hand-off and output
-// delivery through the durable message journal. It deliberately keeps provider
-// and transport protocols outside this package.
+// Package durableflow coordinates provider-neutral durable hand-off and delivery.
 package durableflow
 
 import (
@@ -26,8 +24,7 @@ var (
 	ErrInvalidResolution        = errors.New("invalid accepted input resolution")
 )
 
-// InputProvider owns the provider-specific acceptance boundary. Accepted may
-// be returned only after the provider has acknowledged this exact MessageID.
+// InputProvider may return Accepted only for the exact acknowledged MessageID.
 type InputProvider interface {
 	Handoff(context.Context, ProviderInput) (HandoffResult, error)
 }
@@ -45,12 +42,10 @@ const (
 
 type InputProcessCallbacks struct {
 	// OnPrepared replaces only the payload of the exact leased pending input.
-	// It is used for deterministic pre-provider transformations.
 	OnPrepared func(context.Context, ProviderInput) error
-	// OnAccepted is the only path that may transition the leased input to
-	// accepted. The receipt must be the exact tuple supplied to Process.
+	// OnAccepted requires the exact tuple supplied to Process.
 	OnAccepted func(context.Context, HandoffResult) error
-	// OnCompleted commits an exact result after acceptance, even after Process returns.
+	// OnCompleted commits an exact result after acceptance.
 	OnCompleted func(context.Context, InputProcessResult) error
 }
 
@@ -65,15 +60,12 @@ type InputProcessor interface {
 	Process(context.Context, ProviderInput, InputProcessCallbacks) (InputProcessResult, error)
 }
 
-// OutputSender owns one external delivery attempt. It must return Confirmed
-// only with an unambiguous durable receipt.
+// OutputSender returns Confirmed only with an unambiguous durable receipt.
 type OutputSender interface {
 	Deliver(context.Context, ProviderOutput) (DeliveryResult, error)
 }
 
-// Journal is the durable transition boundary used by Flow. The concrete
-// messagejournal.Journal implements it; the interface also makes persistence
-// failure behavior independently testable.
+// Journal is Flow's durable transition boundary.
 type Journal interface {
 	EnqueueInput(context.Context, string, string, []byte) (messagejournal.Input, bool, error)
 	EnqueueInputWithAttachments(context.Context, string, string, []byte, []messagejournal.AttachmentRef) (messagejournal.Input, bool, error)
@@ -101,16 +93,13 @@ type Journal interface {
 type HandoffState string
 
 const (
-	// HandoffAccepted proves that the provider accepted the input.
+	// HandoffAccepted proves exact provider acceptance.
 	HandoffAccepted HandoffState = "accepted"
-	// HandoffDeferred proves that no provider hand-off began and is safe to
-	// attempt again automatically.
+	// HandoffDeferred is safe to retry automatically.
 	HandoffDeferred HandoffState = "deferred"
-	// HandoffRejected is a definite failed hand-off that requires an explicit
-	// RetryInput before the ordered lane can continue.
+	// HandoffRejected requires explicit RetryInput.
 	HandoffRejected HandoffState = "rejected"
-	// HandoffUnknown is an ambiguous hand-off. It is never retried
-	// automatically because the provider may already have accepted it.
+	// HandoffUnknown may already have been accepted and is never auto-retried.
 	HandoffUnknown HandoffState = "unknown"
 )
 
@@ -139,8 +128,7 @@ const (
 	AcceptedPending        AcceptedResolution = "accepted" // Proven acceptance, terminal still pending.
 )
 
-// AcceptedInput is the exact durable identity requiring provider-history
-// reconciliation after a process or machine restart.
+// AcceptedInput is the exact durable identity requiring history reconciliation.
 type AcceptedInput struct {
 	SessionID            string
 	MessageID            string
@@ -152,8 +140,7 @@ type AcceptedInput struct {
 	Attachments          []messagejournal.AttachmentRef
 }
 
-// AcceptedResolutionResult is an exact provider-history receipt. All identity
-// fields must match the AcceptedInput supplied to the resolver.
+// AcceptedResolutionResult must match the supplied AcceptedInput identity.
 type AcceptedResolutionResult struct {
 	SessionID        string
 	MessageID        string
@@ -166,7 +153,7 @@ type AcceptedInputResolver interface {
 	ResolveAccepted(context.Context, AcceptedInput) (AcceptedResolutionResult, error)
 }
 
-// ProviderInput is an immutable copy of one leased journal input.
+// ProviderInput is one immutable leased journal input.
 type ProviderInput struct {
 	SessionID   string
 	MessageID   string
@@ -175,8 +162,7 @@ type ProviderInput struct {
 	Attachments []messagejournal.AttachmentRef
 }
 
-// HandoffResult is both the provider result and the durable transition receipt
-// returned by DispatchNextInput.
+// HandoffResult is a provider result and durable transition receipt.
 type HandoffResult struct {
 	SessionID string
 	MessageID string
@@ -193,8 +179,7 @@ type ProviderOutput struct {
 	Payload     []byte
 }
 
-// DeliveryResult is both the transport result and the durable transition
-// receipt returned by DeliverNextOutput.
+// DeliveryResult is the transport result and durable transition receipt.
 type DeliveryResult struct {
 	SessionID   string
 	OperationID string
@@ -203,8 +188,7 @@ type DeliveryResult struct {
 	Receipt     string
 }
 
-// EnqueueReceipt proves that the journal accepted an identity and payload.
-// Inserted is false for an exact idempotent replay.
+// EnqueueReceipt proves journal acceptance; Inserted is false for exact replay.
 type EnqueueReceipt struct {
 	Inserted    bool
 	SessionID   string
@@ -219,9 +203,7 @@ type Options struct {
 	Now           func() time.Time
 }
 
-// Flow is safe for concurrent use. The journal serializes short durable state
-// transitions, while provider and sender calls run outside that lock so
-// independent sessions do not block one another.
+// Flow is concurrency-safe; external calls run outside journal transitions.
 type Flow struct {
 	acceptanceFence acceptedinput.Fence
 	journal         Journal
@@ -255,8 +237,7 @@ func New(journal Journal, provider InputProvider, sender OutputSender, options O
 	}, nil
 }
 
-// EnqueueInput is the only ingress acknowledgement boundary: success means the
-// exact identity and payload survived the journal's write and reread probe.
+// EnqueueInput success means identity and payload survived write and reread.
 func (flow *Flow) EnqueueInput(ctx context.Context, sessionID, messageID string, payload []byte) (EnqueueReceipt, error) {
 	input, inserted, err := flow.journal.EnqueueInput(ctx, sessionID, messageID, payload)
 	return EnqueueReceipt{
@@ -272,9 +253,7 @@ func (flow *Flow) EnqueueInputWithAttachments(ctx context.Context, sessionID, me
 	return EnqueueReceipt{Inserted: inserted, SessionID: input.SessionID, MessageID: input.MessageID, Sequence: input.Sequence}, err
 }
 
-// DispatchNextInput leases and hands off only the oldest unresolved item in a
-// session lane. Deferred is safe to release; every failed or ambiguous outcome
-// blocks the lane until explicit retry.
+// DispatchNextInput hands off only the oldest unresolved item in a session lane.
 func (flow *Flow) DispatchNextInput(ctx context.Context, sessionID string) (HandoffResult, error) {
 	if flow.provider == nil {
 		return HandoffResult{}, ErrInputProviderRequired
@@ -291,9 +270,7 @@ func (flow *Flow) DispatchNextInput(ctx context.Context, sessionID string) (Hand
 		Attachments: cloneAttachmentRefs(input.Attachments),
 	}
 	provided, providerErr := flow.provider.Handoff(ctx, request)
-	// Once the external hand-off has begun, caller cancellation cannot be
-	// allowed to return the item to automatic dispatch. Journal persistence is
-	// local and bounded independently from the provider call.
+	// Caller cancellation cannot release a possibly handed-off item.
 	custodyCtx := context.WithoutCancel(ctx)
 	result := HandoffResult{
 		SessionID: input.SessionID,

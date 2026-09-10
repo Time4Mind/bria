@@ -14,8 +14,10 @@ import (
 	"sync"
 	"time"
 
+	"bria/internal/domain"
 	"bria/internal/processgroup"
 	"bria/internal/promptpreprocess"
+	"bria/internal/promptpreprocessbinding"
 	"bria/internal/promptpreprocesscommand"
 	"bria/internal/runtimeprotocol"
 )
@@ -36,15 +38,24 @@ type codexSession struct {
 	closeErr  error
 }
 
-func startCodexSession(ctx context.Context, selection promptpreprocesscommand.Selection, adapterExecutable string) (*codexSession, error) {
-	if !selection.Valid() || !filepath.IsAbs(adapterExecutable) {
+func startCodexSession(ctx context.Context, selection promptpreprocesscommand.Selection, adapterExecutable, resumeProviderSessionID string) (*codexSession, error) {
+	return startCodexSessionIn(ctx, selection, adapterExecutable, resumeProviderSessionID, "")
+}
+
+func startCodexSessionIn(ctx context.Context, selection promptpreprocesscommand.Selection, adapterExecutable, resumeProviderSessionID, workdir string) (*codexSession, error) {
+	if !selection.Valid() || !filepath.IsAbs(adapterExecutable) || resumeProviderSessionID != "" && !promptpreprocessbinding.ValidProviderThreadID(resumeProviderSessionID) {
 		return nil, ErrUnavailable
 	}
-	workdir, err := os.MkdirTemp("", ".bria-preprocess-session-")
+	var err error
+	if workdir == "" {
+		workdir, err = os.MkdirTemp("", ".bria-preprocess-session-")
+	} else {
+		err = prepareSatelliteWorkdir(workdir)
+	}
 	if err != nil {
 		return nil, ErrInvocation
 	}
-	if err := os.Chmod(workdir, 0o700); err != nil {
+	if err = os.Chmod(workdir, 0o700); err != nil {
 		_ = os.RemoveAll(workdir)
 		return nil, ErrInvocation
 	}
@@ -55,7 +66,11 @@ func startCodexSession(ctx context.Context, selection promptpreprocesscommand.Se
 	}
 	command := exec.CommandContext(context.Background(), adapterExecutable, arguments...)
 	command.Dir = workdir
-	command.Env = append(selection.Environment(), "BRIA_START_MODE=new", "BRIA_PREPROCESS_SESSION=1")
+	startEnvironment := []string{"BRIA_START_MODE=new", "BRIA_PREPROCESS_SESSION=1"}
+	if resumeProviderSessionID != "" {
+		startEnvironment = []string{"BRIA_START_MODE=resume", "BRIA_PROVIDER_SESSION_ID=" + resumeProviderSessionID, "BRIA_PREPROCESS_SESSION=1"}
+	}
+	command.Env = append(selection.Environment(), startEnvironment...)
 	input, err := command.StdinPipe()
 	if err != nil {
 		_ = os.RemoveAll(workdir)
@@ -97,14 +112,43 @@ func startCodexSession(ctx context.Context, selection promptpreprocesscommand.Se
 	stopStartupCancellation := context.AfterFunc(ctx, current.cancel)
 	ready, err := current.read(ctx)
 	startupStillOwned := stopStartupCancellation()
-	if err != nil || !startupStillOwned || ctx.Err() != nil || ready.Type != runtimeprotocol.TypeReady || ready.ProviderSessionID == "" || ready.Readiness != "protocol" {
+	if err != nil || !startupStillOwned || ctx.Err() != nil || ready.Type != runtimeprotocol.TypeReady || !promptpreprocessbinding.ValidProviderThreadID(ready.ProviderSessionID) || ready.Readiness != "protocol" {
 		closeCtx, closeCancel := closeContext()
 		defer closeCancel()
 		_ = current.Close(closeCtx)
 		return nil, ErrInvocation
 	}
 	current.threadID = ready.ProviderSessionID
+	if resumeProviderSessionID != "" && current.threadID != resumeProviderSessionID {
+		closeCtx, closeCancel := closeContext()
+		defer closeCancel()
+		_ = current.Close(closeCtx)
+		return nil, ErrInvocation
+	}
 	return current, nil
+}
+
+func satelliteWorkdir(computerID domain.ComputerID, key promptpreprocessbinding.BindingKey) (string, error) {
+	cacheRoot, err := os.UserCacheDir()
+	if err != nil || !filepath.IsAbs(cacheRoot) || strings.TrimSpace(string(computerID)) == "" {
+		return "", ErrUnavailable
+	}
+	identity := sha256.Sum256([]byte(string(computerID) + "\x00" + string(key.Mode) + "\x00" + string(key.SessionID)))
+	return filepath.Join(cacheRoot, "bria", "preprocessing-satellites", hex.EncodeToString(identity[:16])), nil
+}
+
+func prepareSatelliteWorkdir(path string) error {
+	if !filepath.IsAbs(path) || filepath.Clean(path) != path {
+		return ErrUnavailable
+	}
+	if err := os.MkdirAll(path, 0o700); err != nil {
+		return ErrInvocation
+	}
+	info, err := os.Lstat(path)
+	if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return ErrInvocation
+	}
+	return os.Chmod(path, 0o700)
 }
 
 func confirmTreeGone(command *exec.Cmd, timeout time.Duration) error {
@@ -167,6 +211,13 @@ func (current *codexSession) Process(ctx context.Context, request promptpreproce
 			return promptpreprocess.Result{ModelEvidence: modelEvidence}, errProtocol
 		}
 	}
+}
+
+func (current *codexSession) Binding() string {
+	if current == nil {
+		return ""
+	}
+	return current.threadID
 }
 
 func (current *codexSession) write(message runtimeprotocol.ParentMessage) error {

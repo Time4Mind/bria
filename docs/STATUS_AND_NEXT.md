@@ -1,5 +1,18 @@
 # Handoff: статус и следующий план
 
+> Текущий запрос A41 - старая one-shot схема препроцессинга заменяется
+> постоянными скрытыми Codex/Luna-сателлитами. Режимы: `disabled`, один общий
+> FIFO-сателлит для всех основных сессий и один изолированный сателлит на каждую
+> основную сессию; default и миграция старого `true` - `shared`. Персональный
+> provider process закрывается только после durable archive основной сессии,
+> thread identity сохраняется для exact restore и не показывается в UI/archive.
+> Реальный Luna E2E подтвердил два запроса разных primary в одном shared thread
+> и exact resume того же thread после перезапуска adapter process. Также
+> исправляется повторный recovery неизменного history barrier: новая попытка
+> разрешена только после изменения безопасного evidence или binding lifecycle.
+> Договор, coverage и release status:
+> [PER_SESSION_PREPROCESS_SATELLITE_TODO.md](PER_SESSION_PREPROCESS_SATELLITE_TODO.md).
+
 > Текущий запрос A40 - одна скрытая готовая Luna/cheap-model session для
 > препроцессинга, immediate replacement после lease и close старой только после
 > durable acceptance. Договор, coverage и todo:

@@ -8,7 +8,7 @@ import (
 )
 
 const (
-	FormatVersion                = 5
+	FormatVersion                = 6
 	DefaultQueueLimit            = 32
 	DefaultCardPages             = 64
 	DefaultTechnicalOutputLines  = 10
@@ -37,6 +37,14 @@ type VoiceRecognition string
 
 const VoiceParakeet VoiceRecognition = "parakeet"
 
+type SatellitePreprocessingMode string
+
+const (
+	SatellitePreprocessingDisabled   SatellitePreprocessingMode = "disabled"
+	SatellitePreprocessingShared     SatellitePreprocessingMode = "shared"
+	SatellitePreprocessingPerSession SatellitePreprocessingMode = "per_session"
+)
+
 type Settings struct {
 	Version                   int               `json:"version"`
 	ContinueExisting          bool              `json:"continue_existing"`
@@ -57,11 +65,14 @@ type Settings struct {
 	ShowHiddenDirectories     bool              `json:"show_hidden_directories"`
 	DefaultProviders          map[string]string `json:"default_providers"`
 	DefaultWorkdirs           map[string]string `json:"default_workdirs"`
-	PreprocessingEnabled      bool              `json:"preprocessing_enabled"`
-	PreprocessingInstruction  string            `json:"preprocessing_instruction"`
-	SessionNamingEnabled      bool              `json:"session_naming_enabled"`
-	StandbyEnabled            bool              `json:"standby_enabled"`
-	AutoApproveCommands       bool              `json:"auto_approve_commands"`
+	// PreprocessingEnabled is a compatibility projection for consumers being
+	// migrated to SatellitePreprocessingMode. The typed mode is authoritative.
+	PreprocessingEnabled       bool                       `json:"preprocessing_enabled"`
+	SatellitePreprocessingMode SatellitePreprocessingMode `json:"satellite_preprocessing_mode"`
+	PreprocessingInstruction   string                     `json:"preprocessing_instruction"`
+	SessionNamingEnabled       bool                       `json:"session_naming_enabled"`
+	StandbyEnabled             bool                       `json:"standby_enabled"`
+	AutoApproveCommands        bool                       `json:"auto_approve_commands"`
 }
 
 type Effective struct {
@@ -85,6 +96,7 @@ type Effective struct {
 	DefaultProviders           map[string]string
 	DefaultWorkdirs            map[string]string
 	PreprocessingEnabled       bool
+	SatellitePreprocessingMode SatellitePreprocessingMode
 	PreprocessingInstruction   string
 	SessionNamingEnabled       bool
 	StandbyEnabled             bool
@@ -92,7 +104,7 @@ type Effective struct {
 }
 
 func Default() Settings {
-	return Settings{Version: FormatVersion, ContinueExisting: true, ScreenEnabled: false, ScreenCaptureLimitKiB: DefaultScreenCaptureLimitKiB, CardDetail: CardDetailStandard, CardPageLimit: DefaultCardPages, ShowTechnicalActions: true, TechnicalOutputLines: DefaultTechnicalOutputLines, TechnicalCommandLines: DefaultTechnicalCommandLines, NotifyBackgroundQuestions: false, NotifyBackgroundErrors: true, SessionLifetime: Lifetime12Hours, QueueLimit: DefaultQueueLimit, VoiceRecognition: VoiceParakeet, RetryUndeliveredFiles: false, ArchiveRecommendations: false, DefaultProviders: map[string]string{}, DefaultWorkdirs: map[string]string{}, AutoApproveCommands: true}
+	return Settings{Version: FormatVersion, ContinueExisting: true, ScreenEnabled: false, ScreenCaptureLimitKiB: DefaultScreenCaptureLimitKiB, CardDetail: CardDetailStandard, CardPageLimit: DefaultCardPages, ShowTechnicalActions: true, TechnicalOutputLines: DefaultTechnicalOutputLines, TechnicalCommandLines: DefaultTechnicalCommandLines, NotifyBackgroundQuestions: false, NotifyBackgroundErrors: true, SessionLifetime: Lifetime12Hours, QueueLimit: DefaultQueueLimit, VoiceRecognition: VoiceParakeet, RetryUndeliveredFiles: false, ArchiveRecommendations: false, DefaultProviders: map[string]string{}, DefaultWorkdirs: map[string]string{}, PreprocessingEnabled: true, SatellitePreprocessingMode: SatellitePreprocessingShared, AutoApproveCommands: true}
 }
 
 func (s Settings) Effective() Effective {
@@ -116,7 +128,8 @@ func (s Settings) Effective() Effective {
 		ShowHiddenDirectories:      s.ShowHiddenDirectories,
 		DefaultProviders:           cloneStringMap(s.DefaultProviders),
 		DefaultWorkdirs:            cloneStringMap(s.DefaultWorkdirs),
-		PreprocessingEnabled:       s.PreprocessingEnabled,
+		PreprocessingEnabled:       s.SatellitePreprocessingMode != SatellitePreprocessingDisabled,
+		SatellitePreprocessingMode: s.SatellitePreprocessingMode,
 		PreprocessingInstruction:   s.PreprocessingInstruction,
 		SessionNamingEnabled:       s.SessionNamingEnabled,
 		StandbyEnabled:             s.StandbyEnabled,
@@ -152,6 +165,11 @@ func (s Settings) Validate() error {
 	}
 	if s.VoiceRecognition != VoiceParakeet {
 		return fmt.Errorf("unsupported voice recognition %q", s.VoiceRecognition)
+	}
+	switch s.SatellitePreprocessingMode {
+	case SatellitePreprocessingDisabled, SatellitePreprocessingShared, SatellitePreprocessingPerSession:
+	default:
+		return fmt.Errorf("unsupported satellite preprocessing mode %q", s.SatellitePreprocessingMode)
 	}
 	for computerID, provider := range s.DefaultProviders {
 		if !validMapKey(computerID) || provider != "codex" && provider != "claude" {

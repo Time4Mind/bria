@@ -5,6 +5,15 @@ import (
 	"testing"
 )
 
+func TestTechnicalPreprocessingConfigurationIsPersistentAndReadOnly(t *testing.T) {
+	configuration := adapterConfiguration([]string{"/opt/codex", "app-server"}, "/tmp/work", "thread-123", true)
+	if configuration.ThreadEphemeral || configuration.ThreadApprovalPolicy != "never" ||
+		configuration.ThreadSandbox != "read-only" || !configuration.RequireReadOnly ||
+		!configuration.RejectInteractions || configuration.ResumeThreadID != "thread-123" {
+		t.Fatalf("technical configuration = %#v, want persistent exact-resume read-only satellite", configuration)
+	}
+}
+
 func TestParseRawCommandPreservesDirectArgvAfterSeparator(t *testing.T) {
 	want := []string{"/opt/codex", "app-server"}
 	got, err := parseRawCommand([]string{"--", "/opt/codex", "app-server"})

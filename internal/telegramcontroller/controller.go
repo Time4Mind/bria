@@ -160,6 +160,9 @@ const (
 	SemanticSettingsProviderCodex            = telegramsemantic.SemanticSettingsProviderCodex
 	SemanticSettingsProviderClaude           = telegramsemantic.SemanticSettingsProviderClaude
 	SemanticSettingsPreprocessing            = telegramsemantic.SemanticSettingsPreprocessing
+	SemanticSettingsPreprocessingDisabled    = telegramsemantic.SemanticSettingsPreprocessingDisabled
+	SemanticSettingsPreprocessingShared      = telegramsemantic.SemanticSettingsPreprocessingShared
+	SemanticSettingsPreprocessingPerSession  = telegramsemantic.SemanticSettingsPreprocessingPerSession
 	SemanticSettingsPreprocessingInstruction = telegramsemantic.SemanticSettingsPreprocessingInstruction
 	SemanticSettingsPreprocessingReset       = telegramsemantic.SemanticSettingsPreprocessingReset
 	SemanticSettingsSessionNaming            = telegramsemantic.SemanticSettingsSessionNaming
@@ -529,7 +532,9 @@ func (controller *Controller) handleGlobalSemanticAction(ctx context.Context, ac
 			return SemanticActionResult{}, errors.New("settings action has no category")
 		}
 		if action.Kind == SemanticSettingsProviderCodex || action.Kind == SemanticSettingsProviderClaude {
-			controller.preparation.Invalidate(controller.currentNodeID())
+			if err := controller.preparation.Reconfigure(ctx, controller.currentNodeID()); err != nil {
+				return SemanticActionResult{}, err
+			}
 		}
 		if action.Kind == SemanticSettingsStandby {
 			controller.ScheduleStandby()
@@ -554,11 +559,14 @@ func (controller *Controller) handleGlobalSemanticAction(ctx context.Context, ac
 		controller.nodeRenamePending = true
 		controller.mu.Unlock()
 		return SemanticActionResult{Surface: &SemanticSurface{Text: "Отправьте новое имя ноды одним текстовым сообщением (до 64 символов).", Rows: [][]SemanticButton{{{Label: "Отмена", Action: SemanticMenuSettings}}}}}, nil
-	case SemanticSettingsPreprocessing, SemanticSettingsPreprocessingReset:
+	case SemanticSettingsPreprocessing, SemanticSettingsPreprocessingDisabled, SemanticSettingsPreprocessingShared,
+		SemanticSettingsPreprocessingPerSession, SemanticSettingsPreprocessingReset:
 		if err := telegramsettings.Apply(ctx, controller.settings, controller.scopedProviderPreferences(), string(action.Kind)); err != nil {
 			return SemanticActionResult{}, err
 		}
-		controller.preparation.Invalidate(controller.currentNodeID())
+		if err := controller.preparation.Reconfigure(ctx, controller.currentNodeID()); err != nil {
+			return SemanticActionResult{}, err
+		}
 		return controller.settingsCategorySemanticResult(ctx, telegramsettingsview.CategoryPreprocessing)
 	case SemanticAuthorizeCodex, SemanticAuthorizeClaude:
 		provider := domain.ProviderCodex
@@ -769,7 +777,9 @@ func (controller *Controller) submitAuthorization(ctx context.Context, update co
 		controller.pendingAuthorization = nil
 	}
 	controller.mu.Unlock()
-	controller.preparation.Invalidate(controller.currentNodeID())
+	if err := controller.preparation.Reconfigure(ctx, controller.currentNodeID()); err != nil {
+		return coordinator.Decision{}, err
+	}
 	return controller.status(authorizationProviderName(challenge.Provider) + " авторизован. Сообщение с секретом удалено."), nil
 }
 func authorizationProviderName(provider domain.Provider) string {
@@ -803,7 +813,9 @@ func (controller *Controller) consumeAuthorizationMessage(ctx context.Context, u
 		if binding.Provider != domain.ProviderCodex && binding.Provider != domain.ProviderClaude {
 			return coordinator.Decision{}, true, errors.New("authorization tombstone has invalid provider")
 		}
-		controller.preparation.Invalidate(controller.currentNodeID())
+		if err := controller.preparation.Reconfigure(ctx, controller.currentNodeID()); err != nil {
+			return coordinator.Decision{}, true, err
+		}
 		return controller.status(authorizationProviderName(binding.Provider) + " авторизован. Сообщение с секретом удалено."), true, nil
 	}
 	return controller.status("Авторизация не подтверждена. Сообщение с секретом удалено."), true, nil
@@ -1310,7 +1322,9 @@ func (controller *Controller) consumePreprocessingInstruction(ctx context.Contex
 	controller.mu.Lock()
 	controller.preprocessingInstructionPending = false
 	controller.mu.Unlock()
-	controller.preparation.Invalidate(controller.currentNodeID())
+	if err := controller.preparation.Reconfigure(ctx, controller.currentNodeID()); err != nil {
+		return coordinator.Decision{}, true, err
+	}
 	return controller.status("Инструкция препроцессинга сохранена."), true, nil
 }
 

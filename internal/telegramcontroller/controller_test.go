@@ -553,6 +553,12 @@ func (p *testPreferences) TogglePreprocessing(context.Context) error {
 	p.settings.PreprocessingEnabled = !p.settings.PreprocessingEnabled
 	return nil
 }
+func (p *testPreferences) SetSatellitePreprocessingMode(_ context.Context, mode settingsport.SatellitePreprocessingMode) error {
+	_, _ = p.Snapshot(context.Background())
+	p.settings.SatellitePreprocessingMode = mode
+	p.settings.PreprocessingEnabled = mode != settingsport.SatellitePreprocessingDisabled
+	return nil
+}
 func (p *testPreferences) SetPreprocessingInstruction(_ context.Context, instruction string) error {
 	_, _ = p.Snapshot(context.Background())
 	p.settings.PreprocessingInstruction = instruction

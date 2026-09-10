@@ -1,4 +1,3 @@
-// Package acceptedrecovery reconciles accepted input custody before exact session recovery.
 package acceptedrecovery
 
 import (
@@ -7,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"bria/internal/acceptedrecovery/evidence"
 	"bria/internal/domain"
 	"bria/internal/durableflow"
 	"bria/internal/sessionsupervisor"
@@ -25,7 +25,7 @@ func (reconciler AcceptedTurnReconciler) ReconcileAcceptedTurns(ctx context.Cont
 		return sessionsupervisor.AcceptedTurnReconciliation{}, errAcceptedTurnHistoryUnverifiable
 	}
 	resolver := &acceptedInputHistoryResolver{history: reconciler.Histories[binding.Provider], sessionID: sessionID, binding: binding, finals: reconciler.FinalRestorer}
-	inputs, err := reconciler.Flow.Inputs(ctx, string(sessionID))
+	inputs, err := reconciler.Flow.RecoveryInputs(ctx, string(sessionID))
 	if err != nil {
 		return sessionsupervisor.AcceptedTurnReconciliation{}, err
 	}
@@ -48,7 +48,16 @@ func (reconciler AcceptedTurnReconciler) ReconcileAcceptedTurns(ctx context.Cont
 		}
 		receipt.Turns = append(receipt.Turns, sessionsupervisor.ReconciledAcceptedTurn{MessageID: result.MessageID, Outcome: outcome, TurnID: resolver.turnIDs[result.MessageID]})
 	}
+	if errors.Is(err, errAcceptedTurnHistoryUnverifiable) {
+		if revision, revisionErr := reconciler.RecoveryEvidenceRevision(ctx, sessionID, binding); revisionErr == nil {
+			err = evidence.Barrier{Cause: err, Revision: revision}
+		}
+	}
 	return receipt, err
+}
+
+func (reconciler AcceptedTurnReconciler) RecoveryEvidenceRevision(ctx context.Context, sessionID domain.SessionID, binding domain.ProviderBinding) (string, error) {
+	return evidence.Revision(ctx, reconciler.Flow, reconciler.Histories[binding.Provider], sessionID, binding)
 }
 
 type acceptedInputHistoryResolver struct {

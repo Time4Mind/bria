@@ -104,6 +104,12 @@ func TestArchitectureCheckerBudgetsLiveRecoveryComposition(t *testing.T) {
 	if policy.maxProductionLines != 450 {
 		t.Fatalf("supervision composition budget = %d, want 450", policy.maxProductionLines)
 	}
+	recoveryBarrier := packagePolicies["internal/supervisioncomposition/recoverybarrier"]
+	if recoveryBarrier.responsibility != "coordinate stable recovery evidence barriers with lifecycle-aware retry backoff" ||
+		strings.Join(recoveryBarrier.allowedImports, "\x00") != strings.Join([]string{"internal/domain", "internal/recoverybackoff"}, "\x00") ||
+		recoveryBarrier.maxProductionLines != 100 {
+		t.Fatalf("recovery barrier policy = %#v", recoveryBarrier)
+	}
 }
 
 func TestNativeAttachmentKeepsStdlibBoundaryAndThreeExactConsumers(t *testing.T) {
@@ -668,8 +674,14 @@ func TestArchitectureCheckerRegistersCurrentCompositionBoundaries(t *testing.T) 
 		{
 			path:           "internal/acceptedrecovery",
 			responsibility: "reconcile exact accepted history and fence archived session resume",
-			imports:        []string{"internal/domain", "internal/durableflow", "internal/sessionruntime", "internal/sessionsupervisor", "internal/turncontinuation"},
+			imports:        []string{"internal/acceptedrecovery/evidence", "internal/domain", "internal/durableflow", "internal/sessionruntime", "internal/sessionsupervisor", "internal/turncontinuation"},
 			limit:          300,
+		},
+		{
+			path:           "internal/acceptedrecovery/evidence",
+			responsibility: "fingerprint payload-free journal and provider metadata for stable recovery barriers",
+			imports:        []string{"internal/domain", "internal/durableflow", "internal/sessionruntime", "internal/sessionsupervisor"},
+			limit:          150,
 		},
 		{
 			path:           "internal/telegramruntimecomposition",
@@ -696,7 +708,7 @@ func TestArchitectureCheckerRegistersCurrentCompositionBoundaries(t *testing.T) 
 				"internal/providermodels",
 				"internal/acceptedcontinuation", "internal/app", "internal/authcomposition", "internal/callbacktoken", "internal/claudestore", "internal/config", "internal/coordinator", "internal/domain", "internal/durablecomposition", "internal/durableflow", "internal/interactioncomposition", "internal/messagejournal", "internal/nativerecoverycomposition", "internal/observability", "internal/processenv", "internal/promptpreprocess", "internal/promptpreprocesscommand", "internal/promptpreprocesssession", "internal/providerquota", "internal/recoverycomposition", "internal/recoveryruntime", "internal/runtimefactory", "internal/safelog", "internal/screenproduction", "internal/sessioncreation", "internal/sessionexpiry", "internal/sessionid", "internal/sessionnaming", "internal/sessionruntime", "internal/sessionsupervisor", "internal/settings", "internal/settingscomposition", "internal/storage", "internal/supervisioncomposition", "internal/telegram", "internal/telegrambridge", "internal/telegramcompletioncomposition", "internal/telegramcontroller", "internal/telegramflow", "internal/telegramnotify", "internal/telegrampipeline", "internal/telegrampromptcomposition", "internal/telegramrecoverycomposition", "internal/telegramruntimecomposition", "internal/turnruntimecomposition", "internal/workdir",
 			},
-			limit: 1050,
+			limit: 1250,
 		},
 		{
 			path:           "internal/p4runtimecomposition",
@@ -962,23 +974,26 @@ func TestArchitectureCheckerCapsCoherentCustodyResponsibilities(t *testing.T) {
 		{path: "internal/documentproduction", limit: 100},
 		{path: "internal/providerpreferences", limit: 100},
 		{path: "internal/settingscodec", limit: 150},
-		{path: "internal/telegramcallbackview", limit: 500},
+		{path: "internal/telegramcallbackview", limit: 525},
 		{path: "internal/telegramhistory", limit: 100},
 		{path: "internal/telegramrich", limit: 250},
 		{path: "internal/nativerender", limit: 550},
 		{path: "internal/nativescreencache", limit: 400},
-		{path: "internal/telegramturnhelpers", limit: 400},
+		{path: "internal/telegramturnhelpers", limit: 425},
 		{path: "internal/mediaproduction", limit: 800},
 		{path: "internal/screen", limit: 750},
 		{path: "internal/screenproduction", limit: 200},
 		{path: "internal/settings", limit: 800},
-		{path: "internal/settingscomposition", limit: 200},
+		{path: "internal/settingscomposition", limit: 225},
 		{path: "internal/runtimeprotocol", limit: 1150},
 		{path: "internal/telegrampromptcomposition", limit: 225},
-		{path: "internal/telegramsettingsview", limit: 280},
+		{path: "internal/telegramsettingsview", limit: 325},
 		{path: "internal/nativeterminal", limit: 510},
 		{path: "internal/nativetranscript", limit: 1100},
 		{path: "internal/providerquota", limit: 350},
+		{path: "internal/promptpreprocessbinding", limit: 450},
+		{path: "internal/promptpreprocesscore", limit: 1050},
+		{path: "internal/promptpreprocesssession", limit: 750},
 		{path: "internal/storage", limit: 1900},
 		{path: "internal/statejson", limit: 100},
 		{path: "internal/telegram", limit: 1750},
@@ -1878,13 +1893,13 @@ func TestArchitectureCheckerRegistersSettingsAndProviderInputPolicies(t *testing
 			path:           "internal/settingsport",
 			responsibility: "define the storage-neutral preferences boundary used by Telegram control surfaces",
 			imports:        []string{"internal/domain", "internal/settingscapability"},
-			limit:          100,
+			limit:          125,
 		},
 		{
 			path:           "internal/settingscomposition",
 			responsibility: "compose neutral Telegram settings ports with canonical local settings and configuration stores",
 			imports:        []string{"internal/domain", "internal/providerpreferences", "internal/settings", "internal/settingsport"},
-			limit:          200,
+			limit:          225,
 		},
 		{
 			path:           "internal/telegramsettings",
@@ -1896,7 +1911,7 @@ func TestArchitectureCheckerRegistersSettingsAndProviderInputPolicies(t *testing
 			path:           "internal/telegramsettingsview",
 			responsibility: "render escaped grouped settings tables through neutral preferences ports",
 			imports:        []string{"internal/domain", "internal/settingsport"},
-			limit:          280,
+			limit:          325,
 		},
 	}
 

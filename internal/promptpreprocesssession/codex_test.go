@@ -21,6 +21,10 @@ import (
 )
 
 func TestMain(m *testing.M) {
+	if os.Getenv("PREPROCESS_RESUME_ADAPTER_FIXTURE") == "1" {
+		runResumeAdapterFixture()
+		os.Exit(0)
+	}
 	if os.Getenv("PREPROCESS_ADAPTER_HANG_CLOSE") == "1" {
 		runHangingCloseAdapterFixture()
 		os.Exit(0)
@@ -51,7 +55,7 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-func TestCodexSessionIsReadyProcessesOneTurnAndCloses(t *testing.T) {
+func TestCodexSessionIsReadyProcessesMultipleTurnsAndCloses(t *testing.T) {
 	store := testConfigStore(os.Args[0])
 	commands, err := promptpreprocesscommand.New(store, append(os.Environ(), "PREPROCESS_APP_SERVER_FIXTURE=1", "PREPROCESS_ADAPTER_FIXTURE=1", "BRIA_TEST_TELEGRAM_TOKEN=redacted"), "local")
 	if err != nil {
@@ -63,7 +67,7 @@ func TestCodexSessionIsReadyProcessesOneTurnAndCloses(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	current, err := startCodexSession(ctx, selection, os.Args[0])
+	current, err := startCodexSession(ctx, selection, os.Args[0], "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,8 +78,65 @@ func TestCodexSessionIsReadyProcessesOneTurnAndCloses(t *testing.T) {
 	if err != nil || result.Text != "cleaned fixture" || result.ModelEvidence != "" {
 		t.Fatalf("result = (%#v, %v)", result, err)
 	}
+	result, err = current.Process(ctx, promptpreprocess.Request{
+		ComputerID: "local", SessionID: "session", MessageID: "message-2", Sequence: 2,
+		Instruction: "clean", Text: "raw again",
+	})
+	if err != nil || result.Text != "cleaned fixture" {
+		t.Fatalf("second result = (%#v, %v)", result, err)
+	}
 	if err := current.Close(ctx); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestCodexSessionPassesExactResumeBindingToAdapter(t *testing.T) {
+	store := testConfigStore(os.Args[0])
+	commands, err := promptpreprocesscommand.New(store, append(os.Environ(),
+		"PREPROCESS_RESUME_ADAPTER_FIXTURE=1", "PREPROCESS_EXPECT_RESUME_THREAD_ID=thread-persisted",
+		"BRIA_TEST_TELEGRAM_TOKEN=redacted"), "local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	selection, err := commands.Select(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	current, err := startCodexSession(ctx, selection, os.Args[0], "thread-persisted")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current.Binding() != "thread-persisted" {
+		t.Fatalf("binding = %q", current.Binding())
+	}
+	if err := current.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSatelliteWorkdirIsStablePerTopologyAndPrivate(t *testing.T) {
+	shared := BindingKey{Mode: ModeShared}
+	first, err := satelliteWorkdir("computer-a", shared)
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := satelliteWorkdir("computer-a", shared)
+	if err != nil || again != first {
+		t.Fatalf("stable workdir = (%q, %v), want %q", again, err, first)
+	}
+	personal, err := satelliteWorkdir("computer-a", BindingKey{Mode: ModePerSession, SessionID: "session-a"})
+	if err != nil || personal == first {
+		t.Fatalf("personal workdir = (%q, %v), shared %q", personal, err, first)
+	}
+	private := filepath.Join(t.TempDir(), "satellite")
+	if err := prepareSatelliteWorkdir(private); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Lstat(private)
+	if err != nil || !info.IsDir() || info.Mode().Perm() != 0o700 {
+		t.Fatalf("workdir info = (%#v, %v)", info, err)
 	}
 }
 
@@ -94,7 +155,7 @@ func TestCodexSessionStartupCancellationStopsSilentAdapterTree(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 	started := time.Now()
-	if current, startErr := startCodexSession(ctx, selection, os.Args[0]); startErr == nil || current != nil {
+	if current, startErr := startCodexSession(ctx, selection, os.Args[0], ""); startErr == nil || current != nil {
 		t.Fatalf("silent adapter startup = (%#v, %v)", current, startErr)
 	}
 	if time.Since(started) > 2*time.Second {
@@ -113,7 +174,7 @@ func TestCodexSessionCloseKillsUnresponsiveExternalAdapter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	current, err := startCodexSession(context.Background(), selection, os.Args[0])
+	current, err := startCodexSession(context.Background(), selection, os.Args[0], "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +195,7 @@ func TestCodexSessionCloseKillsUnresponsiveExternalAdapter(t *testing.T) {
 	}
 }
 
-func TestLiveLunaPreprocessingSessionPool(t *testing.T) {
+func TestLiveLunaPersistentSatellite(t *testing.T) {
 	if os.Getenv("BRIA_LIVE_PREPROCESS_SESSION") != "1" {
 		t.Skip("live provider acceptance is opt-in")
 	}
@@ -154,19 +215,62 @@ func TestLiveLunaPreprocessingSessionPool(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	processor, err := New(commands, adapter)
+	bindings, err := OpenFileBindingStore(filepath.Join(t.TempDir(), "satellites.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	processor, err := NewWithBindingStore(commands, adapter, bindings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	defer processor.Close(context.Background())
 	processor.Warmup(ctx)
-	request := promptpreprocess.Request{
+	first := promptpreprocess.Request{
 		ComputerID: "local", SessionID: "live-test", MessageID: "live-message", Sequence: 1,
+		Mode:        promptpreprocess.ModeShared,
 		Instruction: "Исправь только очевидные ошибки. Верни только готовый запрос.",
 		Text:        "проверь пажалуста что тесты проходят",
 	}
+	liveProcessAndAccept(t, ctx, processor, first)
+	sharedKey := BindingKey{Mode: ModeShared}
+	before, found, err := bindings.Load(ctx, sharedKey)
+	if err != nil || !found || before.ProviderSessionID == "" {
+		t.Fatalf("first shared binding = (%#v, %t, %v)", before, found, err)
+	}
+
+	second := first
+	second.SessionID = "live-test-other-primary"
+	second.MessageID = "live-message-2"
+	second.Sequence = 2
+	second.Text = "исправь пажалуста второй запрос"
+	liveProcessAndAccept(t, ctx, processor, second)
+	afterSecond, found, err := bindings.Load(ctx, sharedKey)
+	if err != nil || !found || afterSecond.ProviderSessionID != before.ProviderSessionID {
+		t.Fatalf("shared thread changed between primary sessions: before=%#v after=%#v found=%t err=%v", before, afterSecond, found, err)
+	}
+	if err := processor.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	resumed, err := NewWithBindingStore(commands, adapter, bindings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resumed.Close(context.Background())
+	third := first
+	third.MessageID = "live-message-after-restart"
+	third.Sequence = 3
+	third.Text = "исправь пажалуста запрос после перезапуска"
+	liveProcessAndAccept(t, ctx, resumed, third)
+	afterRestart, found, err := bindings.Load(ctx, sharedKey)
+	if err != nil || !found || afterRestart.ProviderSessionID != before.ProviderSessionID {
+		t.Fatalf("shared thread was not resumed exactly: before=%#v after=%#v found=%t err=%v", before, afterRestart, found, err)
+	}
+}
+
+func liveProcessAndAccept(t *testing.T, ctx context.Context, processor *Processor, request promptpreprocess.Request) {
+	t.Helper()
 	result, err := processor.Process(ctx, request)
 	if err != nil {
 		t.Fatal(err)
@@ -270,21 +374,49 @@ func runAppServerFixture() {
 		"thread":         map[string]any{"id": "preprocess-thread", "sessionId": "preprocess-session", "ephemeral": true, "cwd": params["cwd"], "status": map[string]any{"type": "idle"}},
 		"approvalPolicy": "never", "sandbox": map[string]any{"type": "readOnly", "networkAccess": false},
 	}})
-	request = read()
-	params, _ = request["params"].(map[string]any)
-	if request["method"] != "turn/start" || params["threadId"] != "preprocess-thread" || params["model"] != "gpt-5.6-luna" || params["effort"] != "low" {
-		os.Exit(36)
+	for turn := 1; ; turn++ {
+		request = read()
+		params, _ = request["params"].(map[string]any)
+		if request["method"] != "turn/start" || params["threadId"] != "preprocess-thread" || params["model"] != "gpt-5.6-luna" || params["effort"] != "low" {
+			os.Exit(36)
+		}
+		turnID := fmt.Sprintf("preprocess-turn-%d", turn)
+		_ = encoder.Encode(map[string]any{"id": request["id"], "result": map[string]any{"turn": map[string]any{"id": turnID, "items": []any{}, "itemsView": "notLoaded", "status": "inProgress", "error": nil}}})
+		_ = encoder.Encode(map[string]any{"method": "item/completed", "params": map[string]any{
+			"threadId": "preprocess-thread", "turnId": turnID,
+			"item": map[string]any{"type": "agentMessage", "id": "final-item", "text": "cleaned fixture", "phase": "final_answer"},
+		}})
+		_ = encoder.Encode(map[string]any{"method": "turn/completed", "params": map[string]any{
+			"threadId": "preprocess-thread", "turn": map[string]any{"id": turnID, "items": []any{}, "itemsView": "summary", "status": "completed", "error": nil},
+		}})
 	}
-	turnID := "preprocess-turn"
-	_ = encoder.Encode(map[string]any{"id": request["id"], "result": map[string]any{"turn": map[string]any{"id": turnID, "items": []any{}, "itemsView": "notLoaded", "status": "inProgress", "error": nil}}})
-	_ = encoder.Encode(map[string]any{"method": "item/completed", "params": map[string]any{
-		"threadId": "preprocess-thread", "turnId": turnID,
-		"item": map[string]any{"type": "agentMessage", "id": "final-item", "text": "cleaned fixture", "phase": "final_answer"},
-	}})
-	_ = encoder.Encode(map[string]any{"method": "turn/completed", "params": map[string]any{
-		"threadId": "preprocess-thread", "turn": map[string]any{"id": turnID, "items": []any{}, "itemsView": "summary", "status": "completed", "error": nil},
-	}})
-	_, _ = io.Copy(io.Discard, reader)
+}
+
+func runResumeAdapterFixture() {
+	if os.Getenv("BRIA_PREPROCESS_SESSION") != "1" || os.Getenv("BRIA_START_MODE") != "resume" ||
+		os.Getenv("BRIA_PROVIDER_SESSION_ID") != os.Getenv("PREPROCESS_EXPECT_RESUME_THREAD_ID") {
+		os.Exit(44)
+	}
+	reader := bufio.NewReader(os.Stdin)
+	encoder := json.NewEncoder(os.Stdout)
+	threadID := os.Getenv("PREPROCESS_EXPECT_RESUME_THREAD_ID")
+	_ = encoder.Encode(map[string]any{
+		"protocol": 1, "type": "ready", "provider_session_id": threadID,
+		"readiness": "protocol", "authentication": "unknown",
+	})
+	for {
+		line, err := reader.ReadBytes('\n')
+		if err != nil {
+			return
+		}
+		var request map[string]any
+		if json.Unmarshal(line, &request) != nil {
+			os.Exit(45)
+		}
+		if request["type"] == "close" {
+			return
+		}
+	}
 }
 
 func runHangingCloseAdapterFixture() {

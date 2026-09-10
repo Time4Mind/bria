@@ -86,6 +86,13 @@ func Apply(ctx context.Context, preferences settingsport.Preferences, providers 
 			return errors.New("preprocessing settings are not configured")
 		}
 		return preprocessing.TogglePreprocessing(ctx)
+	case "settings_preprocessing_disabled", "settings_preprocessing_shared", "settings_preprocessing_per_session":
+		preprocessing, ok := preferences.(settingsport.SatellitePreprocessingPreferences)
+		if !ok {
+			return errors.New("satellite preprocessing settings are not configured")
+		}
+		mode := settingsport.SatellitePreprocessingMode(strings.TrimPrefix(action, "settings_preprocessing_"))
+		return preprocessing.SetSatellitePreprocessingMode(ctx, mode)
 	case "settings_preprocessing_reset":
 		preprocessing, ok := preferences.(settingsport.PreprocessingPreferences)
 		if !ok {

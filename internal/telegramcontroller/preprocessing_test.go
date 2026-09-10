@@ -410,3 +410,32 @@ func TestPreprocessingInstructionEditConsumesOneTextMessageAndCanBeCancelled(t *
 		t.Fatalf("cancelled edit changed instruction to %q", preferences.settings.PreprocessingInstruction)
 	}
 }
+
+func TestSatellitePreprocessingModeActionsReachSettingsAndRerenderCategory(t *testing.T) {
+	preferences := &testPreferences{settings: settingsport.Snapshot{
+		ContinueExisting: true, CardDetail: "standard", CardPageLimit: 64,
+		ShowTechnicalActions: true, SessionLifetime: "never", QueueLimit: 32,
+		VoiceRecognition: "parakeet", PreprocessingEnabled: true,
+		SatellitePreprocessingMode: settingsport.SatellitePreprocessingShared,
+	}}
+	controller := newController(t, nil, &memorySessions{}, nil, nil, telegramcontroller.Options{Settings: preferences})
+	t.Cleanup(func() { _ = controller.Close(context.Background()) })
+
+	for _, item := range []struct {
+		action telegramcontroller.SemanticActionKind
+		mode   settingsport.SatellitePreprocessingMode
+		label  string
+	}{
+		{telegramcontroller.SemanticSettingsPreprocessingDisabled, settingsport.SatellitePreprocessingDisabled, "Выключен"},
+		{telegramcontroller.SemanticSettingsPreprocessingPerSession, settingsport.SatellitePreprocessingPerSession, "На сессию"},
+		{telegramcontroller.SemanticSettingsPreprocessingShared, settingsport.SatellitePreprocessingShared, "Общий"},
+	} {
+		result, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: item.action})
+		if err != nil || result.Surface == nil || !strings.Contains(result.Surface.Text, item.label) {
+			t.Fatalf("HandleSemanticAction(%q) = (%#v, %v), want preprocessing category label %q", item.action, result, err, item.label)
+		}
+		if preferences.settings.SatellitePreprocessingMode != item.mode {
+			t.Fatalf("mode after %q = %q, want %q", item.action, preferences.settings.SatellitePreprocessingMode, item.mode)
+		}
+	}
+}

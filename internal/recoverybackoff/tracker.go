@@ -1,5 +1,3 @@
-// Package recoverybackoff tracks retry eligibility for independently owned
-// recovery identities. Callers provide synchronization.
 package recoverybackoff
 
 import (
@@ -16,15 +14,12 @@ type Identity struct {
 	Lifecycle time.Time
 	Initial   bool
 }
-
 type failure struct {
-	identity   Identity
-	retryAfter time.Time
-	nextDelay  time.Duration
+	identity       Identity
+	retryAfter     time.Time
+	nextDelay      time.Duration
+	stableRevision string
 }
-
-// Tracker keeps exponential retry state without starting goroutines or taking
-// locks. Identity must change whenever a binding or lifecycle generation does.
 type Tracker struct {
 	base     time.Duration
 	maximum  time.Duration
@@ -37,33 +32,23 @@ func New(base, maximum time.Duration) (*Tracker, error) {
 	}
 	return &Tracker{base: base, maximum: maximum, failures: make(map[domain.SessionID]failure)}, nil
 }
+func Default() *Tracker { tracker, _ := New(time.Minute, 20*time.Minute); return tracker }
 
-func Default() *Tracker {
-	tracker, _ := New(time.Minute, 20*time.Minute)
-	return tracker
-}
-
-// Ready reports whether an immediate attempt is allowed. A changed identity
-// starts a fresh lifecycle and discards the prior delay.
 func (tracker *Tracker) Ready(id domain.SessionID, identity Identity, now time.Time) bool {
 	failed, exists := tracker.failures[id]
-	if !exists {
-		return true
-	}
-	if failed.identity != identity {
+	if !exists || failed.identity != identity {
 		delete(tracker.failures, id)
 		return true
 	}
-	return !now.Before(failed.retryAfter)
+	return failed.stableRevision == "" && !now.Before(failed.retryAfter)
 }
 
-// Failed records one real failed attempt and advances its uncapped retry
-// sequence until the configured maximum is reached.
 func (tracker *Tracker) Failed(id domain.SessionID, identity Identity, now time.Time) {
 	failed := tracker.failures[id]
 	if failed.identity != identity {
 		failed = failure{identity: identity}
 	}
+	failed.stableRevision = ""
 	delay := failed.nextDelay
 	if delay == 0 {
 		delay = tracker.base
@@ -73,7 +58,29 @@ func (tracker *Tracker) Failed(id domain.SessionID, identity Identity, now time.
 	tracker.failures[id] = failed
 }
 
-// Retain removes sessions which disappeared or changed lifecycle identity.
+func (tracker *Tracker) BlockUntilEvidenceChanges(id domain.SessionID, identity Identity, revision string) {
+	if revision != "" {
+		tracker.failures[id] = failure{identity: identity, stableRevision: revision}
+	}
+}
+
+func (tracker *Tracker) StableBarrier(id domain.SessionID, identity Identity) (string, bool) {
+	failed, exists := tracker.failures[id]
+	if !exists || failed.identity != identity || failed.stableRevision == "" {
+		return "", false
+	}
+	return failed.stableRevision, true
+}
+
+func (tracker *Tracker) ReleaseIfEvidenceChanged(id domain.SessionID, identity Identity, revision string) bool {
+	stable, blocked := tracker.StableBarrier(id, identity)
+	if !blocked || revision == "" || revision == stable {
+		return false
+	}
+	delete(tracker.failures, id)
+	return true
+}
+
 func (tracker *Tracker) Retain(desired map[domain.SessionID]Identity) {
 	for id, failed := range tracker.failures {
 		if identity, exists := desired[id]; !exists || identity != failed.identity {
@@ -82,12 +89,10 @@ func (tracker *Tracker) Retain(desired map[domain.SessionID]Identity) {
 	}
 }
 
-func (tracker *Tracker) Succeeded(id domain.SessionID) {
-	delete(tracker.failures, id)
-}
+func (tracker *Tracker) Succeeded(id domain.SessionID) { delete(tracker.failures, id) }
 
 func doubled(current, maximum time.Duration) time.Duration {
-	if current >= maximum || current > maximum/2 {
+	if current > maximum/2 {
 		return maximum
 	}
 	return current * 2

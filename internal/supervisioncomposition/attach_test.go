@@ -34,11 +34,12 @@ func TestAttachStartupAndSweepNeverDeclarePersistedLiveCLIExited(t *testing.T) {
 	ready, prior := readySession(t)
 	store := &memoryStore{session: ready}
 	runtime := &attachRuntime{runtimeStub: &runtimeStub{}}
+	clock := newRecoveryClock(ready.StateChangedAt())
 	runtime.unavailable.Store(true)
 	manager, err := supervisioncomposition.New(supervisioncomposition.Options{
 		LocalComputerID: "computer", Store: store, Restarter: runtime, Waiter: runtime,
 		AcceptedTurns: acceptedStub{}, MaxRestartAttempts: 1, SweepInterval: 5 * time.Millisecond,
-		Now: time.Now, WaitBeforeRetry: func(context.Context, int) error { return nil }, Report: func(error) {},
+		Now: clock.Now, WaitBeforeRetry: func(context.Context, int) error { return nil }, Report: func(error) {},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -59,6 +60,13 @@ func TestAttachStartupAndSweepNeverDeclarePersistedLiveCLIExited(t *testing.T) {
 			t.Error("manager shutdown hung")
 		}
 	})
+	time.Sleep(30 * time.Millisecond)
+	currentBeforeRetry, loadErr := store.Load(ctx, ready.ID())
+	retainedBeforeRetry, retained := currentBeforeRetry.Binding()
+	if loadErr != nil || currentBeforeRetry.Status() != domain.SessionAwaitingRecovery || !retained || retainedBeforeRetry != prior || runtime.confirmations() != 0 {
+		t.Fatalf("startup failure changed session before cooldown: %+v err=%v confirmed=%d", currentBeforeRetry, loadErr, runtime.confirmations())
+	}
+	clock.Advance(time.Minute)
 	deadline := time.After(time.Second)
 	ticker := time.NewTicker(time.Millisecond)
 	defer ticker.Stop()

@@ -85,6 +85,9 @@ const (
 	ActionSettingsProviderCodex                Action = "settings_provider_codex"
 	ActionSettingsProviderClaude               Action = "settings_provider_claude"
 	ActionSettingsPreprocessing                Action = "settings_preprocessing"
+	ActionSettingsPreprocessingDisabled        Action = "settings_preprocessing_disabled"
+	ActionSettingsPreprocessingShared          Action = "settings_preprocessing_shared"
+	ActionSettingsPreprocessingPerSession      Action = "settings_preprocessing_per_session"
 	ActionSettingsPreprocessingInstruction     Action = "settings_preprocessing_instruction"
 	ActionSettingsPreprocessingReset           Action = "settings_preprocessing_reset"
 	ActionSettingsSessionNaming                Action = "settings_session_naming"
@@ -128,7 +131,8 @@ func IsGlobalAction(action Action) bool {
 		ActionSettingsLifetimeNever, ActionSettingsLifetime6Hours, ActionSettingsLifetime12Hours,
 		ActionSettingsLifetime24Hours, ActionSettingsLifetime48Hours,
 		ActionSettingsProviderCodex, ActionSettingsProviderClaude,
-		ActionSettingsPreprocessing, ActionSettingsPreprocessingInstruction, ActionSettingsPreprocessingReset, ActionSettingsSessionNaming, ActionSettingsStandby,
+		ActionSettingsPreprocessing, ActionSettingsPreprocessingDisabled, ActionSettingsPreprocessingShared, ActionSettingsPreprocessingPerSession,
+		ActionSettingsPreprocessingInstruction, ActionSettingsPreprocessingReset, ActionSettingsSessionNaming, ActionSettingsStandby,
 		ActionAuthorizeCodex, ActionAuthorizeClaude:
 		// Outbound resolution is also an owner-only global surface, but its
 		// exact operation/update identity is bound server-side by the presenter.

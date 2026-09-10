@@ -37,7 +37,7 @@ func Render() Surface {
 	surface := table("Настройки", "Раздел", "Содержимое",
 		Field{"Содержимое карточки", "Детализация, страницы и технические действия"},
 		Field{"Кнопки сессии", "Отображение Screen"}, Field{"Распознавание речи", "Движок распознавания"},
-		Field{"Препроцессинг", "Состояние и инструкция"}, Field{"Сессии и архив", "Рекомендации, срок жизни и очередь"},
+		Field{"Препроцессинг", "Режим сателлита и инструкция"}, Field{"Сессии и архив", "Рекомендации, срок жизни и очередь"},
 		Field{"Уведомления", "Фоновые вопросы и ошибки"}, Field{"Создание сессии", "Автоимя и значения по умолчанию"}, Field{"CLI", "Включение и авторизация"})
 	surface.Rows = [][]Button{
 		{{Label: "🧾 Содержимое карточки", Action: "settings_category", Choice: int(CategoryCard)}},
@@ -95,13 +95,18 @@ func RenderCategory(ctx context.Context, preferences settingsport.Preferences, p
 		fields = []Field{{"Движок", current.VoiceRecognition}}
 	case CategoryPreprocessing:
 		text = "✨ Препроцессинг"
-		fields = []Field{{"Состояние", state(current.PreprocessingEnabled, false)}}
+		fields = []Field{{"Режим сателлита", satellitePreprocessingModeLabel(current)}}
 		if current.PreprocessingInstruction == "" {
 			fields = append(fields, Field{"Инструкция", "встроенная"})
 		} else {
 			fields = append(fields, Field{"Инструкция", "пользовательская"})
 		}
-		rows = onePerRow(Button{Label: "Включить / выключить", Action: "settings_preprocessing"}, Button{Label: "Изменить инструкцию", Action: "settings_preprocessing_instruction"}, Button{Label: "Вернуть встроенную", Action: "settings_preprocessing_reset"})
+		rows = [][]Button{{
+			{Label: "Выключен", Action: "settings_preprocessing_disabled"},
+			{Label: "Общий", Action: "settings_preprocessing_shared"},
+			{Label: "На сессию", Action: "settings_preprocessing_per_session"},
+		}}
+		rows = append(rows, onePerRow(Button{Label: "Изменить инструкцию", Action: "settings_preprocessing_instruction"}, Button{Label: "Вернуть встроенную", Action: "settings_preprocessing_reset"})...)
 	case CategoryArchive:
 		text = "🗄 Сессии и архив"
 		fields = []Field{{"Продолжать текущую", state(current.ContinueExisting, false)}, {"Рекомендации архива", state(current.ArchiveRecommendations, true)}, {"Срок жизни сессий", current.SessionLifetime}, {"Очередь", fmt.Sprint(current.QueueLimit)}}
@@ -185,7 +190,7 @@ func CategoryForAction(action string) (Category, bool) {
 		return CategoryCard, true
 	case "settings_screen", "settings_screen_capture_limit":
 		return CategorySessionButtons, true
-	case "settings_preprocessing", "settings_preprocessing_instruction", "settings_preprocessing_reset":
+	case "settings_preprocessing", "settings_preprocessing_disabled", "settings_preprocessing_shared", "settings_preprocessing_per_session", "settings_preprocessing_instruction", "settings_preprocessing_reset":
 		return CategoryPreprocessing, true
 	case "settings_continue_existing", "settings_archive_recommendations", "settings_lifetime_never", "settings_lifetime_6h", "settings_lifetime_12h", "settings_lifetime_24h", "settings_lifetime_48h":
 		return CategoryArchive, true
@@ -200,11 +205,27 @@ func CategoryForAction(action string) (Category, bool) {
 	}
 }
 
+func satellitePreprocessingModeLabel(current settingsport.Snapshot) string {
+	switch current.SatellitePreprocessingMode {
+	case settingsport.SatellitePreprocessingPerSession:
+		return "На сессию"
+	case settingsport.SatellitePreprocessingShared:
+		return "Общий"
+	case settingsport.SatellitePreprocessingDisabled:
+		return "Выключен"
+	default:
+		if current.PreprocessingEnabled {
+			return "Общий"
+		}
+		return "Выключен"
+	}
+}
+
 func snapshot(ctx context.Context, preferences settingsport.Preferences, queueLimit int) (settingsport.Snapshot, error) {
 	if preferences != nil {
 		return preferences.Snapshot(ctx)
 	}
-	return settingsport.Snapshot{ContinueExisting: true, CardDetail: "standard", CardPageLimit: 64, ShowTechnicalActions: true, NotifyBackgroundQuestions: false, NotifyBackgroundErrors: true, SessionLifetime: "never", QueueLimit: queueLimit, VoiceRecognition: "parakeet", AutoApproveCommands: true}, nil
+	return settingsport.Snapshot{ContinueExisting: true, CardDetail: "standard", CardPageLimit: 64, ShowTechnicalActions: true, NotifyBackgroundQuestions: false, NotifyBackgroundErrors: true, SessionLifetime: "never", QueueLimit: queueLimit, VoiceRecognition: "parakeet", PreprocessingEnabled: true, SatellitePreprocessingMode: settingsport.SatellitePreprocessingShared, AutoApproveCommands: true}, nil
 }
 
 func state(value, plural bool) string {

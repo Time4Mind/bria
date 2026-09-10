@@ -3,14 +3,130 @@ package supervisioncomposition_test
 import (
 	"context"
 	"errors"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"bria/internal/app"
 	"bria/internal/domain"
+	"bria/internal/sessionsupervisor"
 	"bria/internal/supervisioncomposition"
 )
+
+type stableBarrierError struct{ revision string }
+
+func (err stableBarrierError) Error() string                         { return "accepted turn provider history is unverifiable" }
+func (err stableBarrierError) StableRecoveryBarrierRevision() string { return err.revision }
+
+type mutableStableBarrierReconciler struct {
+	mu       sync.Mutex
+	revision string
+	calls    int
+}
+
+func (reconciler *mutableStableBarrierReconciler) ReconcileAcceptedTurns(context.Context, domain.SessionID, domain.ProviderBinding) (sessionsupervisor.AcceptedTurnReconciliation, error) {
+	reconciler.mu.Lock()
+	defer reconciler.mu.Unlock()
+	reconciler.calls++
+	return sessionsupervisor.AcceptedTurnReconciliation{}, stableBarrierError{revision: reconciler.revision}
+}
+
+func (reconciler *mutableStableBarrierReconciler) RecoveryEvidenceRevision(context.Context, domain.SessionID, domain.ProviderBinding) (string, error) {
+	reconciler.mu.Lock()
+	defer reconciler.mu.Unlock()
+	return reconciler.revision, nil
+}
+
+func (reconciler *mutableStableBarrierReconciler) setRevision(revision string) {
+	reconciler.mu.Lock()
+	reconciler.revision = revision
+	reconciler.mu.Unlock()
+}
+
+func (reconciler *mutableStableBarrierReconciler) attempts() int {
+	reconciler.mu.Lock()
+	defer reconciler.mu.Unlock()
+	return reconciler.calls
+}
+
+func TestStableRecoveryBarrierRetriesOnlyAfterEvidenceRevisionChanges(t *testing.T) {
+	ready, _ := readySession(t)
+	awaiting, err := ready.AwaitRecoveryAt(ready.StateChangedAt())
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := &memoryStore{session: awaiting}
+	runtime := &attachRuntime{runtimeStub: &runtimeStub{}}
+	reconciler := &mutableStableBarrierReconciler{revision: "evidence-v1"}
+	var reports atomic.Int32
+	manager, err := supervisioncomposition.New(supervisioncomposition.Options{
+		LocalComputerID: "computer", Store: store, Restarter: runtime, Waiter: runtime,
+		AcceptedTurns: reconciler, MaxRestartAttempts: 1, SweepInterval: 5 * time.Millisecond,
+		Now: time.Now, WaitBeforeRetry: func(context.Context, int) error { return nil },
+		Report: func(error) {}, ReportSession: func(domain.SessionID, error) { reports.Add(1) },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	startup, err := manager.RecoverStartup(context.Background())
+	if err != nil || startup.Awaiting != 1 || reconciler.attempts() != 1 || reports.Load() != 1 {
+		t.Fatalf("startup = %+v, %v attempts=%d reports=%d", startup, err, reconciler.attempts(), reports.Load())
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- manager.Run(ctx) }()
+	defer stopRecoveryManager(t, cancel, done)
+	time.Sleep(30 * time.Millisecond)
+	if reconciler.attempts() != 1 || reports.Load() != 1 {
+		t.Fatalf("unchanged barrier retried immediately: attempts=%d reports=%d", reconciler.attempts(), reports.Load())
+	}
+	reconciler.setRevision("evidence-v2")
+	deadline := time.Now().Add(time.Second)
+	for (reconciler.attempts() < 2 || reports.Load() < 2) && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if reconciler.attempts() != 2 || reports.Load() != 2 {
+		t.Fatalf("changed evidence attempts=%d reports=%d, want 2/2", reconciler.attempts(), reports.Load())
+	}
+	time.Sleep(30 * time.Millisecond)
+	if reconciler.attempts() != 2 || reports.Load() != 2 {
+		t.Fatalf("new stable barrier repeated: attempts=%d reports=%d", reconciler.attempts(), reports.Load())
+	}
+	current, err := store.Load(context.Background(), awaiting.ID())
+	if err != nil || !current.Equal(awaiting) {
+		t.Fatalf("stable barrier changed custody session: %+v, %v", current, err)
+	}
+	prior, bound := current.Binding()
+	if !bound {
+		t.Fatal("awaiting session lost binding")
+	}
+	nextBinding := prior
+	nextBinding.Generation++
+	changedReady, err := current.Recovered(nextBinding, time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	changedIdentity, err := changedReady.AwaitRecoveryAt(time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Replace(context.Background(), current, changedIdentity); err != nil {
+		t.Fatal(err)
+	}
+	deadline = time.Now().Add(time.Second)
+	for (reconciler.attempts() < 3 || reports.Load() < 3) && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if reconciler.attempts() != 3 || reports.Load() != 3 {
+		t.Fatalf("changed identity attempts=%d reports=%d, want 3/3", reconciler.attempts(), reports.Load())
+	}
+	time.Sleep(30 * time.Millisecond)
+	if reconciler.attempts() != 3 || reports.Load() != 3 {
+		t.Fatalf("changed identity retried more than once: attempts=%d reports=%d", reconciler.attempts(), reports.Load())
+	}
+}
 
 type failingAttachRuntime struct {
 	*runtimeStub

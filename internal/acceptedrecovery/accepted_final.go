@@ -10,8 +10,6 @@ import (
 	"bria/internal/turncontinuation"
 )
 
-// AcceptedFinalRestorer persists an exact accepted request's final idempotently
-// before its durable input is committed completed. It must reject conflicts.
 type AcceptedFinalRestorer interface {
 	RestoreAcceptedFinal(context.Context, domain.SessionID, string, string) error
 }

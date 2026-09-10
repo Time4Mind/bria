@@ -17,6 +17,7 @@ import (
 	"bria/internal/sessionruntime"
 	"bria/internal/settings"
 	"bria/internal/settingscomposition"
+	"bria/internal/settingsport"
 	"bria/internal/telegramcontroller"
 	"bria/internal/telegramsettingsview"
 )
@@ -78,9 +79,11 @@ func TestPreferencesMutationsPersistAndLocalReloadSharesOneFile(t *testing.T) {
 				t.Fatal("session naming remained disabled")
 			}
 		}},
-		{"preprocessing", func() error { return preferences.TogglePreprocessing(context.Background()) }, func(t *testing.T, got settings.Settings) {
-			if !got.PreprocessingEnabled {
-				t.Fatal("preprocessing remained disabled")
+		{"preprocessing", func() error {
+			return preferences.SetSatellitePreprocessingMode(context.Background(), settingsport.SatellitePreprocessingPerSession)
+		}, func(t *testing.T, got settings.Settings) {
+			if got.SatellitePreprocessingMode != settings.SatellitePreprocessingPerSession || !got.PreprocessingEnabled {
+				t.Fatalf("preprocessing mode=%q enabled=%t", got.SatellitePreprocessingMode, got.PreprocessingEnabled)
 			}
 		}},
 		{"preprocessing instruction", func() error { return preferences.SetPreprocessingInstruction(context.Background(), "clean speech") }, func(t *testing.T, got settings.Settings) {
@@ -213,7 +216,7 @@ func TestPreferencesDriveTypedControllerAndDurableFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	persisted, err := reopened.Load(context.Background())
-	if err != nil || persisted.ContinueExisting || !persisted.ScreenEnabled || persisted.CardDetail != settings.CardDetailCompact || persisted.CardPageLimit != 128 || persisted.ShowTechnicalActions || !persisted.NotifyBackgroundQuestions || persisted.NotifyBackgroundErrors || !persisted.ArchiveRecommendations || !persisted.SessionNamingEnabled || !persisted.PreprocessingEnabled || persisted.PreprocessingInstruction != "clean speech" || persisted.SessionLifetime != settings.Lifetime48Hours {
+	if err != nil || persisted.ContinueExisting || !persisted.ScreenEnabled || persisted.CardDetail != settings.CardDetailCompact || persisted.CardPageLimit != 128 || persisted.ShowTechnicalActions || !persisted.NotifyBackgroundQuestions || persisted.NotifyBackgroundErrors || !persisted.ArchiveRecommendations || !persisted.SessionNamingEnabled || persisted.PreprocessingEnabled || persisted.SatellitePreprocessingMode != settings.SatellitePreprocessingDisabled || persisted.PreprocessingInstruction != "clean speech" || persisted.SessionLifetime != settings.Lifetime48Hours {
 		t.Fatalf("durable controller settings = %+v, %v", persisted, err)
 	}
 }

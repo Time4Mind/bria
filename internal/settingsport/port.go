@@ -10,28 +10,29 @@ import (
 )
 
 type Snapshot struct {
-	ContinueExisting          bool
-	ScreenEnabled             bool
-	ScreenCaptureLimitKiB     int
-	CardDetail                string
-	CardPageLimit             int
-	ShowTechnicalActions      bool
-	TechnicalOutputLines      int
-	TechnicalCommandLines     int
-	NotifyBackgroundQuestions bool
-	NotifyBackgroundErrors    bool
-	SessionLifetime           string
-	QueueLimit                int
-	VoiceRecognition          string
-	ArchiveRecommendations    bool
-	ShowHiddenDirectories     bool
-	DefaultProviders          map[domain.ComputerID]domain.Provider
-	DefaultWorkdirs           map[domain.ComputerID]string
-	PreprocessingEnabled      bool
-	PreprocessingInstruction  string
-	SessionNamingEnabled      bool
-	StandbyEnabled            bool
-	AutoApproveCommands       bool
+	ContinueExisting           bool
+	ScreenEnabled              bool
+	ScreenCaptureLimitKiB      int
+	CardDetail                 string
+	CardPageLimit              int
+	ShowTechnicalActions       bool
+	TechnicalOutputLines       int
+	TechnicalCommandLines      int
+	NotifyBackgroundQuestions  bool
+	NotifyBackgroundErrors     bool
+	SessionLifetime            string
+	QueueLimit                 int
+	VoiceRecognition           string
+	ArchiveRecommendations     bool
+	ShowHiddenDirectories      bool
+	DefaultProviders           map[domain.ComputerID]domain.Provider
+	DefaultWorkdirs            map[domain.ComputerID]string
+	PreprocessingEnabled       bool
+	SatellitePreprocessingMode SatellitePreprocessingMode
+	PreprocessingInstruction   string
+	SessionNamingEnabled       bool
+	StandbyEnabled             bool
+	AutoApproveCommands        bool
 }
 
 type Preferences interface {
@@ -60,6 +61,20 @@ type CreationPreferences interface {
 type PreprocessingPreferences interface {
 	TogglePreprocessing(context.Context) error
 	SetPreprocessingInstruction(context.Context, string) error
+}
+
+type SatellitePreprocessingMode string
+
+const (
+	SatellitePreprocessingDisabled   SatellitePreprocessingMode = "disabled"
+	SatellitePreprocessingShared     SatellitePreprocessingMode = "shared"
+	SatellitePreprocessingPerSession SatellitePreprocessingMode = "per_session"
+)
+
+// SatellitePreprocessingPreferences is the typed replacement for the legacy
+// binary preprocessing toggle.
+type SatellitePreprocessingPreferences interface {
+	SetSatellitePreprocessingMode(context.Context, SatellitePreprocessingMode) error
 }
 
 type StandbyPreferences interface {

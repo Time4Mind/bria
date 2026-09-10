@@ -46,6 +46,11 @@ func run(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	configuration := adapterConfiguration(command, workdir, resumeThreadID, technical)
+	return codex.RunAdapter(ctx, os.Stdin, os.Stdout, configuration)
+}
+
+func adapterConfiguration(command []string, workdir, resumeThreadID string, technical bool) codex.AdapterConfig {
 	configuration := codex.AdapterConfig{
 		RawCommand:     command,
 		Workdir:        workdir,
@@ -55,11 +60,10 @@ func run(ctx context.Context, args []string) error {
 	if technical {
 		configuration.ThreadApprovalPolicy = "never"
 		configuration.ThreadSandbox = "read-only"
-		configuration.ThreadEphemeral = true
 		configuration.RequireReadOnly = true
 		configuration.RejectInteractions = true
 	}
-	return codex.RunAdapter(ctx, os.Stdin, os.Stdout, configuration)
+	return configuration
 }
 
 func parsePreprocessingMode(getenv func(string) string) (bool, error) {

@@ -75,6 +75,9 @@ const (
 	SemanticSettingsProviderCodex            SemanticActionKind = "settings_provider_codex"
 	SemanticSettingsProviderClaude           SemanticActionKind = "settings_provider_claude"
 	SemanticSettingsPreprocessing            SemanticActionKind = "settings_preprocessing"
+	SemanticSettingsPreprocessingDisabled    SemanticActionKind = "settings_preprocessing_disabled"
+	SemanticSettingsPreprocessingShared      SemanticActionKind = "settings_preprocessing_shared"
+	SemanticSettingsPreprocessingPerSession  SemanticActionKind = "settings_preprocessing_per_session"
 	SemanticSettingsPreprocessingInstruction SemanticActionKind = "settings_preprocessing_instruction"
 	SemanticSettingsPreprocessingReset       SemanticActionKind = "settings_preprocessing_reset"
 	SemanticSettingsSessionNaming            SemanticActionKind = "settings_session_naming"
@@ -98,7 +101,8 @@ func IsGlobal(kind SemanticActionKind) bool {
 		SemanticSettingsLifetimeNever, SemanticSettingsLifetime6Hours, SemanticSettingsLifetime12Hours,
 		SemanticSettingsLifetime24Hours, SemanticSettingsLifetime48Hours,
 		SemanticSettingsProviderCodex, SemanticSettingsProviderClaude,
-		SemanticSettingsPreprocessing, SemanticSettingsPreprocessingInstruction, SemanticSettingsPreprocessingReset,
+		SemanticSettingsPreprocessing, SemanticSettingsPreprocessingDisabled, SemanticSettingsPreprocessingShared, SemanticSettingsPreprocessingPerSession,
+		SemanticSettingsPreprocessingInstruction, SemanticSettingsPreprocessingReset,
 		SemanticSettingsSessionNaming, SemanticSettingsStandby,
 		SemanticSettingsRenameNode,
 		SemanticAuthorizeCodex, SemanticAuthorizeClaude:

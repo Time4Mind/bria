@@ -10,12 +10,20 @@
 | Слой | Где задаётся | За что отвечает |
 | --- | --- | --- |
 | Конфигурация процесса Bria | `bria run --config /absolute/path/config.json` | Владелец, бот, state path, доступные providers, executable/argv, инфраструктура |
-| Настройки пользователя Bria | `<state_path>.settings.json`, меню «Настройки» | Интерфейс, очереди/срок жизни, preprocessing, standby, `auto_approve_commands` |
+| Настройки пользователя Bria | `<state_path>.settings.json`, меню «Настройки» | Интерфейс, очереди/срок жизни, satellite preprocessing, standby, `auto_approve_commands` |
 | Настройки самого Codex | Provider-owned config/CLI | Модель, reasoning effort, tools/MCP и прочие настройки провайдера |
 
 Эти JSON-документы не взаимозаменяемы. Поле `auto_approve_commands` не является
 полем главного `config.json`. `CODEX_COMMAND` и `CODEX_FLAGS` также не являются
 настройками Bria и не импортируются из CCBot.
+
+В settings v6 поле `satellite_preprocessing_mode` принимает `disabled`,
+`shared` или `per_session`; default - `shared`. Старое boolean-поле
+`preprocessing_enabled` мигрирует как `true -> shared`, `false -> disabled` и
+больше не записывается новым codec. Инструкция хранится отдельно в
+`preprocessing_instruction`; пустое значение выбирает встроенный prompt. После
+первой записи settings v6 предыдущей strict-сборке для binary-only rollback
+нужен отдельно подготовленный совместимый settings-файл.
 
 ## Главный config.json
 

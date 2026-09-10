@@ -25,8 +25,10 @@ func legacySettingsDocument(version int) string {
 	if version >= 3 {
 		document += `,"archive_recommendations":true,"default_providers":{"local":"claude"},"default_workdirs":{"local":"/workspace"}`
 	}
-	if version >= 4 {
+	if version >= 4 && version <= 5 {
 		document += `,"preprocessing_enabled":true,"preprocessing_instruction":"clean speech"`
+	} else if version >= 6 {
+		document += `,"satellite_preprocessing_mode":"shared","preprocessing_instruction":"clean speech"`
 	}
 	if version >= 5 {
 		document += `,"session_naming_enabled":true`
@@ -51,15 +53,15 @@ func TestCodecCompatibilityMigratesEveryVersionAndPersistsApprovalChoice(t *test
 					t.Fatal(err)
 				}
 				before, err := store.Current(context.Background())
-				if err != nil || before.Revision != 7 || before.Settings.Version != 5 {
+				if err != nil || before.Revision != 7 || before.Settings.Version != settings.FormatVersion {
 					t.Fatalf("migration = %+v, %v", before, err)
 				}
 				want := settings.Settings{
-					Version: 5, ContinueExisting: false, ScreenEnabled: true, ScreenCaptureLimitKiB: 48,
+					Version: settings.FormatVersion, ContinueExisting: false, ScreenEnabled: true, ScreenCaptureLimitKiB: 48,
 					CardDetail: settings.CardDetailCompact, CardPageLimit: 64, ShowTechnicalActions: false, TechnicalOutputLines: 10, TechnicalCommandLines: 10,
 					NotifyBackgroundQuestions: true, NotifyBackgroundErrors: false, SessionLifetime: settings.Lifetime48Hours,
 					QueueLimit: 41, VoiceRecognition: settings.VoiceParakeet, RetryUndeliveredFiles: true,
-					DefaultProviders: map[string]string{}, DefaultWorkdirs: map[string]string{}, AutoApproveCommands: choice != "false",
+					DefaultProviders: map[string]string{}, DefaultWorkdirs: map[string]string{}, PreprocessingEnabled: true, SatellitePreprocessingMode: settings.SatellitePreprocessingShared, AutoApproveCommands: choice != "false",
 				}
 				if version >= 2 {
 					want.CardPageLimit = 128
@@ -71,6 +73,7 @@ func TestCodecCompatibilityMigratesEveryVersionAndPersistsApprovalChoice(t *test
 				}
 				if version >= 4 {
 					want.PreprocessingEnabled = true
+					want.SatellitePreprocessingMode = settings.SatellitePreprocessingShared
 					want.PreprocessingInstruction = "clean speech"
 				}
 				want.SessionNamingEnabled = version >= 5

@@ -223,6 +223,12 @@ func PresentButton(button telegramui.Button) (string, callbacktoken.Action, int,
 		return presentGlobalButton(button, "Claude", callbacktoken.ActionSettingsProviderClaude)
 	case telegramui.ActionSettingsPreprocessing:
 		return presentGlobalButton(button, "Включить / выключить", callbacktoken.ActionSettingsPreprocessing)
+	case telegramui.ActionSettingsPreprocessingDisabled:
+		return presentGlobalButton(button, modeButtonLabel(button, "Выключен"), callbacktoken.ActionSettingsPreprocessingDisabled)
+	case telegramui.ActionSettingsPreprocessingShared:
+		return presentGlobalButton(button, modeButtonLabel(button, "Общий"), callbacktoken.ActionSettingsPreprocessingShared)
+	case telegramui.ActionSettingsPreprocessingPerSession:
+		return presentGlobalButton(button, modeButtonLabel(button, "На сессию"), callbacktoken.ActionSettingsPreprocessingPerSession)
 	case telegramui.ActionSettingsPreprocessingInstruction:
 		return presentGlobalButton(button, "Изменить инструкцию", callbacktoken.ActionSettingsPreprocessingInstruction)
 	case telegramui.ActionSettingsPreprocessingReset:
@@ -302,6 +308,14 @@ func presentGlobalButton(button telegramui.Button, label string, action callback
 	}
 	return label, action, 0, nil
 }
+
+func modeButtonLabel(button telegramui.Button, fallback string) string {
+	if button.Label != "" {
+		return button.Label
+	}
+	return fallback
+}
+
 func validPageTarget(target telegramui.ButtonTarget) bool {
 	return target.Page >= 1 && target.Page <= callbacktoken.MaxTarget && !target.FollowLatest && target.SessionSlot == 0 && target.InteractionChoice == 0 && target.Choice == 0
 }
@@ -435,6 +449,12 @@ func DecodeFields(fields callbacktoken.Fields) (telegramui.Action, telegramui.Bu
 		return telegramui.ActionSettingsProviderClaude, telegramui.ButtonTarget{}, nil
 	case callbacktoken.ActionSettingsPreprocessing:
 		return telegramui.ActionSettingsPreprocessing, telegramui.ButtonTarget{}, nil
+	case callbacktoken.ActionSettingsPreprocessingDisabled:
+		return telegramui.ActionSettingsPreprocessingDisabled, telegramui.ButtonTarget{}, nil
+	case callbacktoken.ActionSettingsPreprocessingShared:
+		return telegramui.ActionSettingsPreprocessingShared, telegramui.ButtonTarget{}, nil
+	case callbacktoken.ActionSettingsPreprocessingPerSession:
+		return telegramui.ActionSettingsPreprocessingPerSession, telegramui.ButtonTarget{}, nil
 	case callbacktoken.ActionSettingsPreprocessingInstruction:
 		return telegramui.ActionSettingsPreprocessingInstruction, telegramui.ButtonTarget{}, nil
 	case callbacktoken.ActionSettingsPreprocessingReset:

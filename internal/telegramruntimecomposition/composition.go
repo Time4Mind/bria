@@ -221,6 +221,12 @@ func semanticActionFromPlan(plan telegrampipeline.CallbackPlan) (telegramcontrol
 		kind = telegramcontroller.SemanticSettingsProviderClaude
 	case telegramui.ActionSettingsPreprocessing:
 		kind = telegramcontroller.SemanticSettingsPreprocessing
+	case telegramui.ActionSettingsPreprocessingDisabled:
+		kind = telegramcontroller.SemanticSettingsPreprocessingDisabled
+	case telegramui.ActionSettingsPreprocessingShared:
+		kind = telegramcontroller.SemanticSettingsPreprocessingShared
+	case telegramui.ActionSettingsPreprocessingPerSession:
+		kind = telegramcontroller.SemanticSettingsPreprocessingPerSession
 	case telegramui.ActionSettingsPreprocessingInstruction:
 		kind = telegramcontroller.SemanticSettingsPreprocessingInstruction
 	case telegramui.ActionSettingsPreprocessingReset:
@@ -319,7 +325,8 @@ func callbackEffectForAction(action telegramui.Action) telegrampipeline.Callback
 		telegramui.ActionSettingsLifetime6Hours, telegramui.ActionSettingsLifetime12Hours,
 		telegramui.ActionSettingsLifetime24Hours, telegramui.ActionSettingsLifetime48Hours,
 		telegramui.ActionSettingsProviderCodex, telegramui.ActionSettingsProviderClaude,
-		telegramui.ActionSettingsPreprocessing, telegramui.ActionSettingsPreprocessingInstruction, telegramui.ActionSettingsPreprocessingReset, telegramui.ActionSettingsSessionNaming, telegramui.ActionSettingsStandby:
+		telegramui.ActionSettingsPreprocessing, telegramui.ActionSettingsPreprocessingDisabled, telegramui.ActionSettingsPreprocessingShared, telegramui.ActionSettingsPreprocessingPerSession,
+		telegramui.ActionSettingsPreprocessingInstruction, telegramui.ActionSettingsPreprocessingReset, telegramui.ActionSettingsSessionNaming, telegramui.ActionSettingsStandby:
 		return telegrampipeline.EffectChangeSettings
 	case telegramui.ActionAuthorizeCodex:
 		return telegrampipeline.EffectAuthorizeCodex
@@ -380,6 +387,7 @@ func projectSemanticSurface(surface telegramcontroller.SemanticSurface) (*telegr
 			button := telegramui.Button{Action: action}
 			switch action {
 			case telegramui.ActionSettingsCategory, telegramui.ActionMenuSettings, telegramui.ActionSelectNode,
+				telegramui.ActionSettingsPreprocessingDisabled, telegramui.ActionSettingsPreprocessingShared, telegramui.ActionSettingsPreprocessingPerSession,
 				telegramui.ActionNativeKey, telegramui.ActionModelMenu, telegramui.ActionModelChoice, telegramui.ActionEffortMenu, telegramui.ActionEffortChoice,
 				telegramui.ActionCreateChoice, telegramui.ActionCreateFirst,
 				telegramui.ActionCreateSelectCodex, telegramui.ActionCreateSelectClaude,
@@ -526,6 +534,12 @@ func telegramUIAction(action telegramcontroller.SemanticActionKind) (telegramui.
 		return telegramui.ActionSettingsProviderClaude, nil
 	case telegramcontroller.SemanticSettingsPreprocessing:
 		return telegramui.ActionSettingsPreprocessing, nil
+	case telegramcontroller.SemanticSettingsPreprocessingDisabled:
+		return telegramui.ActionSettingsPreprocessingDisabled, nil
+	case telegramcontroller.SemanticSettingsPreprocessingShared:
+		return telegramui.ActionSettingsPreprocessingShared, nil
+	case telegramcontroller.SemanticSettingsPreprocessingPerSession:
+		return telegramui.ActionSettingsPreprocessingPerSession, nil
 	case telegramcontroller.SemanticSettingsPreprocessingInstruction:
 		return telegramui.ActionSettingsPreprocessingInstruction, nil
 	case telegramcontroller.SemanticSettingsPreprocessingReset:

@@ -8,8 +8,6 @@ import (
 	"bria/internal/sessionsupervisor"
 )
 
-// CheckResume fences provider resume on the retained binding before a new
-// generation is started. A missing terminal is not a missing acceptance.
 func (reconciler AcceptedTurnReconciler) CheckResume(ctx context.Context, session domain.Session) error {
 	binding, bound := session.Binding()
 	if ctx == nil || session.ID() == "" || !bound {

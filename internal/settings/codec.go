@@ -16,31 +16,32 @@ const MaxDocumentBytes = 64 << 10
 // ShowHiddenDirectories is additive v5: absence means OFF; older strict binaries
 // reject the new field.
 type settingsDocument struct {
-	Version                   int               `json:"version"`
-	Revision                  uint64            `json:"revision"`
-	ContinueExisting          bool              `json:"continue_existing"`
-	ScreenEnabled             bool              `json:"screen_enabled"`
-	ScreenCaptureLimitKiB     int               `json:"screen_capture_limit_kib,omitempty"`
-	CardDetail                CardDetail        `json:"card_detail"`
-	CardPageLimit             int               `json:"card_page_limit,omitempty"`
-	ShowTechnicalActions      bool              `json:"show_technical_actions"`
-	TechnicalOutputLines      int               `json:"technical_output_lines"`
-	TechnicalCommandLines     int               `json:"technical_command_lines"`
-	NotifyBackgroundQuestions bool              `json:"notify_background_questions"`
-	NotifyBackgroundErrors    bool              `json:"notify_background_errors"`
-	SessionLifetime           SessionLifetime   `json:"session_lifetime"`
-	QueueLimit                int               `json:"queue_limit"`
-	VoiceRecognition          VoiceRecognition  `json:"voice_recognition"`
-	RetryUndeliveredFiles     bool              `json:"retry_undelivered_files"`
-	ArchiveRecommendations    bool              `json:"archive_recommendations"`
-	ShowHiddenDirectories     bool              `json:"show_hidden_directories"`
-	DefaultProviders          map[string]string `json:"default_providers"`
-	DefaultWorkdirs           map[string]string `json:"default_workdirs"`
-	PreprocessingEnabled      bool              `json:"preprocessing_enabled"`
-	PreprocessingInstruction  string            `json:"preprocessing_instruction"`
-	SessionNamingEnabled      bool              `json:"session_naming_enabled"`
-	StandbyEnabled            bool              `json:"standby_enabled"`
-	AutoApproveCommands       bool              `json:"auto_approve_commands"`
+	Version                    int                        `json:"version"`
+	Revision                   uint64                     `json:"revision"`
+	ContinueExisting           bool                       `json:"continue_existing"`
+	ScreenEnabled              bool                       `json:"screen_enabled"`
+	ScreenCaptureLimitKiB      int                        `json:"screen_capture_limit_kib,omitempty"`
+	CardDetail                 CardDetail                 `json:"card_detail"`
+	CardPageLimit              int                        `json:"card_page_limit,omitempty"`
+	ShowTechnicalActions       bool                       `json:"show_technical_actions"`
+	TechnicalOutputLines       int                        `json:"technical_output_lines"`
+	TechnicalCommandLines      int                        `json:"technical_command_lines"`
+	NotifyBackgroundQuestions  bool                       `json:"notify_background_questions"`
+	NotifyBackgroundErrors     bool                       `json:"notify_background_errors"`
+	SessionLifetime            SessionLifetime            `json:"session_lifetime"`
+	QueueLimit                 int                        `json:"queue_limit"`
+	VoiceRecognition           VoiceRecognition           `json:"voice_recognition"`
+	RetryUndeliveredFiles      bool                       `json:"retry_undelivered_files"`
+	ArchiveRecommendations     bool                       `json:"archive_recommendations"`
+	ShowHiddenDirectories      bool                       `json:"show_hidden_directories"`
+	DefaultProviders           map[string]string          `json:"default_providers"`
+	DefaultWorkdirs            map[string]string          `json:"default_workdirs"`
+	LegacyPreprocessingEnabled *bool                      `json:"preprocessing_enabled,omitempty"`
+	SatellitePreprocessingMode SatellitePreprocessingMode `json:"satellite_preprocessing_mode,omitempty"`
+	PreprocessingInstruction   string                     `json:"preprocessing_instruction"`
+	SessionNamingEnabled       bool                       `json:"session_naming_enabled"`
+	StandbyEnabled             bool                       `json:"standby_enabled"`
+	AutoApproveCommands        bool                       `json:"auto_approve_commands"`
 }
 
 // Decode reads one complete settings document. Every field is explicit so a
@@ -83,6 +84,7 @@ func Decode(reader io.Reader) (Snapshot, error) {
 	if err := settingscodec.RequireVersionFields(seen, decoded.Version); err != nil {
 		return Snapshot{}, fmt.Errorf("validate settings JSON: %w", err)
 	}
+	sourceVersion := decoded.Version
 	if decoded.Version >= 1 && decoded.Version < 3 {
 		decoded.Version = FormatVersion
 		if decoded.CardPageLimit == 0 {
@@ -94,8 +96,15 @@ func Decode(reader io.Reader) (Snapshot, error) {
 		if decoded.DefaultWorkdirs == nil {
 			decoded.DefaultWorkdirs = map[string]string{}
 		}
-	} else if decoded.Version == 3 || decoded.Version == 4 {
+	} else if decoded.Version >= 3 && decoded.Version < FormatVersion {
 		decoded.Version = FormatVersion
+	}
+	if sourceVersion <= 5 {
+		if decoded.LegacyPreprocessingEnabled != nil && !*decoded.LegacyPreprocessingEnabled {
+			decoded.SatellitePreprocessingMode = SatellitePreprocessingDisabled
+		} else {
+			decoded.SatellitePreprocessingMode = SatellitePreprocessingShared
+		}
 	}
 	if _, ok := seen["auto_approve_commands"]; !ok {
 		decoded.AutoApproveCommands = true
@@ -134,45 +143,50 @@ func documentFromSnapshot(snapshot Snapshot) settingsDocument {
 		NotifyBackgroundQuestions: s.NotifyBackgroundQuestions,
 		NotifyBackgroundErrors:    s.NotifyBackgroundErrors,
 		SessionLifetime:           s.SessionLifetime, QueueLimit: s.QueueLimit,
-		VoiceRecognition:         s.VoiceRecognition,
-		RetryUndeliveredFiles:    s.RetryUndeliveredFiles,
-		ArchiveRecommendations:   s.ArchiveRecommendations,
-		ShowHiddenDirectories:    s.ShowHiddenDirectories,
-		DefaultProviders:         cloneStringMap(s.DefaultProviders),
-		DefaultWorkdirs:          cloneStringMap(s.DefaultWorkdirs),
-		PreprocessingEnabled:     s.PreprocessingEnabled,
-		PreprocessingInstruction: s.PreprocessingInstruction,
-		SessionNamingEnabled:     s.SessionNamingEnabled,
-		StandbyEnabled:           s.StandbyEnabled,
-		AutoApproveCommands:      s.AutoApproveCommands,
+		VoiceRecognition:           s.VoiceRecognition,
+		RetryUndeliveredFiles:      s.RetryUndeliveredFiles,
+		ArchiveRecommendations:     s.ArchiveRecommendations,
+		ShowHiddenDirectories:      s.ShowHiddenDirectories,
+		DefaultProviders:           cloneStringMap(s.DefaultProviders),
+		DefaultWorkdirs:            cloneStringMap(s.DefaultWorkdirs),
+		SatellitePreprocessingMode: s.SatellitePreprocessingMode,
+		PreprocessingInstruction:   s.PreprocessingInstruction,
+		SessionNamingEnabled:       s.SessionNamingEnabled,
+		StandbyEnabled:             s.StandbyEnabled,
+		AutoApproveCommands:        s.AutoApproveCommands,
 	}
 }
 
 func (document settingsDocument) snapshot() Snapshot {
+	mode := document.SatellitePreprocessingMode
+	if mode == "" {
+		mode = SatellitePreprocessingShared
+	}
 	return Snapshot{Revision: document.Revision, Settings: Settings{
-		Version:                   document.Version,
-		ContinueExisting:          document.ContinueExisting,
-		ScreenEnabled:             document.ScreenEnabled,
-		ScreenCaptureLimitKiB:     document.ScreenCaptureLimitKiB,
-		CardDetail:                document.CardDetail,
-		CardPageLimit:             document.CardPageLimit,
-		ShowTechnicalActions:      document.ShowTechnicalActions,
-		TechnicalOutputLines:      document.TechnicalOutputLines,
-		TechnicalCommandLines:     document.TechnicalCommandLines,
-		NotifyBackgroundQuestions: document.NotifyBackgroundQuestions,
-		NotifyBackgroundErrors:    document.NotifyBackgroundErrors,
-		SessionLifetime:           document.SessionLifetime,
-		QueueLimit:                document.QueueLimit,
-		VoiceRecognition:          document.VoiceRecognition,
-		RetryUndeliveredFiles:     document.RetryUndeliveredFiles,
-		ArchiveRecommendations:    document.ArchiveRecommendations,
-		ShowHiddenDirectories:     document.ShowHiddenDirectories,
-		DefaultProviders:          cloneStringMap(document.DefaultProviders),
-		DefaultWorkdirs:           cloneStringMap(document.DefaultWorkdirs),
-		PreprocessingEnabled:      document.PreprocessingEnabled,
-		PreprocessingInstruction:  document.PreprocessingInstruction,
-		SessionNamingEnabled:      document.SessionNamingEnabled,
-		StandbyEnabled:            document.StandbyEnabled,
-		AutoApproveCommands:       document.AutoApproveCommands,
+		Version:                    document.Version,
+		ContinueExisting:           document.ContinueExisting,
+		ScreenEnabled:              document.ScreenEnabled,
+		ScreenCaptureLimitKiB:      document.ScreenCaptureLimitKiB,
+		CardDetail:                 document.CardDetail,
+		CardPageLimit:              document.CardPageLimit,
+		ShowTechnicalActions:       document.ShowTechnicalActions,
+		TechnicalOutputLines:       document.TechnicalOutputLines,
+		TechnicalCommandLines:      document.TechnicalCommandLines,
+		NotifyBackgroundQuestions:  document.NotifyBackgroundQuestions,
+		NotifyBackgroundErrors:     document.NotifyBackgroundErrors,
+		SessionLifetime:            document.SessionLifetime,
+		QueueLimit:                 document.QueueLimit,
+		VoiceRecognition:           document.VoiceRecognition,
+		RetryUndeliveredFiles:      document.RetryUndeliveredFiles,
+		ArchiveRecommendations:     document.ArchiveRecommendations,
+		ShowHiddenDirectories:      document.ShowHiddenDirectories,
+		DefaultProviders:           cloneStringMap(document.DefaultProviders),
+		DefaultWorkdirs:            cloneStringMap(document.DefaultWorkdirs),
+		PreprocessingEnabled:       mode != SatellitePreprocessingDisabled,
+		SatellitePreprocessingMode: mode,
+		PreprocessingInstruction:   document.PreprocessingInstruction,
+		SessionNamingEnabled:       document.SessionNamingEnabled,
+		StandbyEnabled:             document.StandbyEnabled,
+		AutoApproveCommands:        document.AutoApproveCommands,
 	}}
 }

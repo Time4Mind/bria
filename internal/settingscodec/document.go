@@ -31,7 +31,8 @@ var creationDocumentFields = []string{
 	"default_workdirs",
 }
 
-var preprocessingDocumentFields = []string{"preprocessing_enabled", "preprocessing_instruction"}
+var legacyPreprocessingDocumentFields = []string{"preprocessing_enabled", "preprocessing_instruction"}
+var satellitePreprocessingDocumentFields = []string{"satellite_preprocessing_mode", "preprocessing_instruction"}
 var namingDocumentFields = []string{"session_naming_enabled"}
 
 // Inspect requires one object with known, unique top-level fields and the base
@@ -62,7 +63,10 @@ func Inspect(document []byte) (map[string]struct{}, error) {
 	for _, field := range creationDocumentFields {
 		allowed[field] = struct{}{}
 	}
-	for _, field := range preprocessingDocumentFields {
+	for _, field := range legacyPreprocessingDocumentFields {
+		allowed[field] = struct{}{}
+	}
+	for _, field := range satellitePreprocessingDocumentFields {
 		allowed[field] = struct{}{}
 	}
 	for _, field := range namingDocumentFields {
@@ -113,15 +117,32 @@ func RequireVersionFields(seen map[string]struct{}, version int) error {
 	var fields []string
 	switch version {
 	case 3:
-		fields = creationDocumentFields
+		fields = append(fields, creationDocumentFields...)
 	case 4:
-		fields = append(creationDocumentFields, preprocessingDocumentFields...)
+		fields = append(fields, creationDocumentFields...)
+		fields = append(fields, legacyPreprocessingDocumentFields...)
 	case 5:
-		fields = append(append(creationDocumentFields, preprocessingDocumentFields...), namingDocumentFields...)
+		fields = append(fields, creationDocumentFields...)
+		fields = append(fields, legacyPreprocessingDocumentFields...)
+		fields = append(fields, namingDocumentFields...)
+	case 6:
+		fields = append(fields, creationDocumentFields...)
+		fields = append(fields, satellitePreprocessingDocumentFields...)
+		fields = append(fields, namingDocumentFields...)
 	}
 	for _, field := range fields {
 		if _, ok := seen[field]; !ok {
 			return fmt.Errorf("missing field %q", field)
+		}
+	}
+	if version >= 1 && version <= 5 {
+		if _, ok := seen["satellite_preprocessing_mode"]; ok {
+			return fmt.Errorf("field %q is not supported by settings version %d", "satellite_preprocessing_mode", version)
+		}
+	}
+	if version == 6 {
+		if _, ok := seen["preprocessing_enabled"]; ok {
+			return fmt.Errorf("field %q is not supported by settings version %d", "preprocessing_enabled", version)
 		}
 	}
 	return nil

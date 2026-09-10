@@ -21,6 +21,7 @@ var _ settingsport.AutoApprovalPreferences = Preferences{}
 var _ settingsport.TechnicalOutputPreferences = Preferences{}
 var _ settingsport.TechnicalCommandPreferences = Preferences{}
 var _ settingsport.HiddenDirectoryPreferences = Preferences{}
+var _ settingsport.SatellitePreprocessingPreferences = Preferences{}
 
 func (p Preferences) Snapshot(ctx context.Context) (settingsport.Snapshot, error) {
 	if p.Store == nil {
@@ -38,16 +39,17 @@ func (p Preferences) Snapshot(ctx context.Context) (settingsport.Snapshot, error
 		NotifyBackgroundQuestions: current.NotifyBackgroundQuestions,
 		NotifyBackgroundErrors:    current.NotifyBackgroundErrors,
 		SessionLifetime:           string(current.SessionLifetime), QueueLimit: current.QueueLimit,
-		VoiceRecognition:         string(current.VoiceRecognition),
-		ArchiveRecommendations:   current.ArchiveRecommendations,
-		ShowHiddenDirectories:    current.ShowHiddenDirectories,
-		DefaultProviders:         providerDefaults(current.DefaultProviders),
-		DefaultWorkdirs:          workdirDefaults(current.DefaultWorkdirs),
-		PreprocessingEnabled:     current.PreprocessingEnabled,
-		PreprocessingInstruction: current.PreprocessingInstruction,
-		SessionNamingEnabled:     current.SessionNamingEnabled,
-		StandbyEnabled:           current.StandbyEnabled,
-		AutoApproveCommands:      current.AutoApproveCommands,
+		VoiceRecognition:           string(current.VoiceRecognition),
+		ArchiveRecommendations:     current.ArchiveRecommendations,
+		ShowHiddenDirectories:      current.ShowHiddenDirectories,
+		DefaultProviders:           providerDefaults(current.DefaultProviders),
+		DefaultWorkdirs:            workdirDefaults(current.DefaultWorkdirs),
+		PreprocessingEnabled:       current.SatellitePreprocessingMode != settings.SatellitePreprocessingDisabled,
+		SatellitePreprocessingMode: settingsport.SatellitePreprocessingMode(current.SatellitePreprocessingMode),
+		PreprocessingInstruction:   current.PreprocessingInstruction,
+		SessionNamingEnabled:       current.SessionNamingEnabled,
+		StandbyEnabled:             current.StandbyEnabled,
+		AutoApproveCommands:        current.AutoApproveCommands,
 	}, nil
 }
 
@@ -145,7 +147,21 @@ func (p Preferences) ToggleSessionNaming(ctx context.Context) error {
 	return p.update(ctx, func(current *settings.Settings) { current.SessionNamingEnabled = !current.SessionNamingEnabled })
 }
 func (p Preferences) TogglePreprocessing(ctx context.Context) error {
-	return p.update(ctx, func(current *settings.Settings) { current.PreprocessingEnabled = !current.PreprocessingEnabled })
+	return p.update(ctx, func(current *settings.Settings) {
+		if current.SatellitePreprocessingMode == settings.SatellitePreprocessingDisabled {
+			current.SatellitePreprocessingMode = settings.SatellitePreprocessingShared
+			current.PreprocessingEnabled = true
+			return
+		}
+		current.SatellitePreprocessingMode = settings.SatellitePreprocessingDisabled
+		current.PreprocessingEnabled = false
+	})
+}
+func (p Preferences) SetSatellitePreprocessingMode(ctx context.Context, mode settingsport.SatellitePreprocessingMode) error {
+	return p.update(ctx, func(current *settings.Settings) {
+		current.SatellitePreprocessingMode = settings.SatellitePreprocessingMode(mode)
+		current.PreprocessingEnabled = mode != settingsport.SatellitePreprocessingDisabled
+	})
 }
 func (p Preferences) SetPreprocessingInstruction(ctx context.Context, instruction string) error {
 	return p.update(ctx, func(current *settings.Settings) { current.PreprocessingInstruction = instruction })

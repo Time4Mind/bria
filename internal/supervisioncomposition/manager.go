@@ -14,6 +14,7 @@ import (
 	"bria/internal/sessionattachment"
 	"bria/internal/sessionrecoverycontrol"
 	"bria/internal/sessionsupervisor"
+	"bria/internal/supervisioncomposition/recoverybarrier"
 )
 
 var ErrInvalidOptions = errors.New("session supervision composition is unavailable")
@@ -52,7 +53,7 @@ type Manager struct {
 	control          *sessionrecoverycontrol.Control
 	startup          *sessionsupervisor.Supervisor
 	interval         time.Duration
-	recoveryBackoff  *recoverybackoff.Tracker
+	recoveryGate     *recoverybarrier.Gate
 	report           func(error)
 	reportSession    func(domain.SessionID, error)
 	mu               sync.Mutex
@@ -88,7 +89,7 @@ func New(options Options) (*Manager, error) {
 	}
 	return &Manager{
 		computer: options.LocalComputerID, store: options.Store, restarter: options.Restarter, control: control, startup: startup,
-		interval: options.SweepInterval, recoveryBackoff: recoverybackoff.Default(), now: options.Now, report: options.Report,
+		interval: options.SweepInterval, recoveryGate: recoverybarrier.New(options.AcceptedTurns), now: options.Now, report: options.Report,
 		reportSession: reportSession,
 		workers:       make(map[domain.SessionID]watchedBinding),
 	}, nil
@@ -154,6 +155,13 @@ func (manager *Manager) RecoverStartup(ctx context.Context) (app.SessionRecovery
 		}
 		manager.observeRecovery(ctx, session.ID(), controllertelemetry.StartupRecovery, recovered, err)
 		if err != nil {
+			if errors.Is(err, sessionsupervisor.ErrReconciliationRequired) || errors.Is(err, sessionsupervisor.ErrRecoveryExhausted) {
+				failedSession := session
+				if recovered.Session.ID() == session.ID() {
+					failedSession = recovered.Session
+				}
+				manager.recordRecoveryFailure(session.ID(), failedSession, binding, err)
+			}
 			if ctx.Err() == nil {
 				manager.reportSession(session.ID(), err)
 			}
@@ -246,6 +254,10 @@ func (manager *Manager) sweep(ctx context.Context) error {
 			desired[session.ID()] = recoverybackoff.Identity{Lifecycle: session.StateChangedAt(), Initial: true}
 		}
 	}
+	blocked := make(map[domain.SessionID]bool)
+	for id, identity := range desired {
+		blocked[id] = manager.recoveryGate.Blocked(ctx, id, identity)
+	}
 	manager.mu.Lock()
 	defer manager.mu.Unlock()
 	now := manager.now()
@@ -255,12 +267,15 @@ func (manager *Manager) sweep(ctx context.Context) error {
 			delete(manager.workers, id)
 		}
 	}
-	manager.recoveryBackoff.Retain(desired)
+	manager.recoveryGate.Retain(desired)
 	for id, identity := range desired {
+		if blocked[id] {
+			continue
+		}
 		if _, exists := manager.workers[id]; exists {
 			continue
 		}
-		if !manager.recoveryBackoff.Ready(id, identity, now) {
+		if !manager.recoveryGate.Ready(id, identity, now) {
 			continue
 		}
 		workerCtx, cancel := context.WithCancel(ctx)
@@ -290,9 +305,9 @@ func (manager *Manager) watch(ctx context.Context, id domain.SessionID, identity
 		if result.Session.ID() == id {
 			identity.Lifecycle = result.Session.StateChangedAt()
 		}
-		manager.recoveryBackoff.Failed(id, identity, manager.now())
+		manager.recoveryGate.Failed(id, identity, err, manager.now())
 	} else if result.Recovered || result.Archived || result.Deleted || result.Stale {
-		manager.recoveryBackoff.Succeeded(id)
+		manager.recoveryGate.Succeeded(id)
 	}
 	notify := manager.recoveryNotifier
 	manager.mu.Unlock()
@@ -304,6 +319,11 @@ func (manager *Manager) watch(ctx context.Context, id domain.SessionID, identity
 		defer cancel()
 		notify(notifyCtx, id)
 	}
+}
+
+func (manager *Manager) recordRecoveryFailure(id domain.SessionID, session domain.Session, binding domain.ProviderBinding, err error) {
+	identity := recoverybackoff.Identity{Binding: binding, Lifecycle: session.StateChangedAt()}
+	manager.recoveryGate.Failed(id, identity, err, manager.now())
 }
 
 func (manager *Manager) stopWorkers() {

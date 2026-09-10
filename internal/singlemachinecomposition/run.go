@@ -93,9 +93,11 @@ type liveConfigStarter struct {
 }
 
 type asyncSessionCreator struct {
-	creator *app.SessionCreator
-	root    context.Context
-	logger  *safelog.Logger
+	creator    *app.SessionCreator
+	root       context.Context
+	logger     *safelog.Logger
+	satellites preprocessingSatelliteLifecycle
+	report     preprocessingSatelliteLifecycleReporter
 }
 
 func (creator asyncSessionCreator) BeginCreate(ctx context.Context, intent app.ConfirmedSessionIntent) (telegramcontroller.PendingSessionStart, error) {
@@ -115,6 +117,7 @@ func (creator asyncSessionCreator) BeginCreate(ctx context.Context, intent app.C
 		started := time.Now()
 		result, completeErr := creator.creator.CompleteCreate(creator.root, prepared)
 		recordSessionStartup(creator.logger, intent, prepared.Session.ID(), result.StartAttempts, time.Since(started), errors.Join(result.StartError, completeErr))
+		applySatelliteCreation(creator.root, creator.satellites, creator.report, result, completeErr)
 		outcome <- telegramcontroller.SessionStartOutcome{
 			Session: result.Session, Replayed: result.Replayed, StartError: result.StartError, Err: completeErr,
 		}
@@ -161,7 +164,9 @@ func (confirmedReadiness) Ready(context.Context, coordinator.Checkpoint) error {
 type unavailableProviderRuntime struct{}
 
 type expirySessionCloser struct {
-	closer *app.SessionCloser
+	closer interface {
+		Close(context.Context, domain.SessionID) (app.CloseSessionResult, error)
+	}
 }
 
 func (adapter expirySessionCloser) Close(ctx context.Context, id domain.SessionID) error {
@@ -320,18 +325,28 @@ func runTelegramController(
 	if err != nil {
 		return fmt.Errorf("compose prompt preprocessor: %w", err)
 	}
-	promptPreprocessor, err := promptpreprocesssession.New(
-		promptCommandProcessor, filepath.Join(filepath.Dir(executable), "bria-codex-adapter"),
+	satelliteBindings, err := promptpreprocesssession.OpenFileBindingStore(configuration.StatePath + ".preprocessing-satellites.json")
+	if err != nil {
+		return fmt.Errorf("open prompt preprocessing satellite bindings: %w", err)
+	}
+	promptPreprocessor, err := promptpreprocesssession.NewWithBindingStore(
+		promptCommandProcessor, filepath.Join(filepath.Dir(executable), "bria-codex-adapter"), satelliteBindings,
 		preprocessingSessionObserver{logger: safeLogger},
 	)
 	if err != nil {
-		return fmt.Errorf("compose prompt preprocessing session pool: %w", err)
+		return fmt.Errorf("compose prompt preprocessing satellite manager: %w", err)
 	}
+	satelliteReporter := preprocessingSatelliteLifecycleReporter(func(ctx context.Context, action string, id domain.SessionID, actionErr error) {
+		recordPreprocessingSatelliteLifecycle(safeLogger, action, id, actionErr)
+	})
 	defer func() {
 		closeContext, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		_ = promptPreprocessor.Close(closeContext)
 	}()
+	if modeErr := promptPreprocessor.SetMode(ctx, mapSatellitePreprocessingMode(effectiveSettings.SatellitePreprocessingMode)); modeErr != nil {
+		recordPreprocessingSatelliteLifecycle(safeLogger, "configure", "", modeErr)
+	}
 	go promptPreprocessor.Warmup(ctx)
 	sessionNamer, err := sessionnaming.New(state, func(ctx context.Context) (bool, error) {
 		current, loadErr := preferences.Load(ctx)
@@ -431,6 +446,13 @@ func runTelegramController(
 	if err != nil {
 		return fmt.Errorf("recover persisted sessions: %w", err)
 	}
+	primarySessions, err := state.List(ctx)
+	if err != nil {
+		return fmt.Errorf("list primary sessions for preprocessing satellites: %w", err)
+	}
+	if reconcileErr := promptPreprocessor.Reconcile(ctx, preprocessingSatelliteStates(computerID, primarySessions)); reconcileErr != nil {
+		recordPreprocessingSatelliteLifecycle(safeLogger, "reconcile", "", reconcileErr)
+	}
 	creator, err := app.NewSessionCreator(
 		computerID,
 		workdir.ExistingDirectory{},
@@ -456,6 +478,7 @@ func runTelegramController(
 	if resumeReconciler != nil {
 		archivedResumer = durablecomposition.GuardedArchivedResumer{Base: baseArchivedResumer, Sessions: state, Reconciler: *resumeReconciler}
 	}
+	archivedResumer = satelliteArchivedResumer{base: archivedResumer, satellites: promptPreprocessor, report: satelliteReporter}
 	sessionCloser, err := app.NewSessionCloser(state, starter, clock)
 	if err != nil {
 		return fmt.Errorf("create session closer: %w", err)
@@ -464,7 +487,8 @@ func runTelegramController(
 	if err != nil {
 		return fmt.Errorf("create session turn lifecycle: %w", err)
 	}
-	expiry, err := sessionexpiry.New(state, expirySessionCloser{closer: sessionCloser}, clock)
+	satelliteCloser := satelliteSessionCloser{base: sessionCloser, satellites: promptPreprocessor, report: satelliteReporter}
+	expiry, err := sessionexpiry.New(state, expirySessionCloser{closer: satelliteCloser}, clock)
 	if err != nil {
 		return fmt.Errorf("create session expiry scheduler: %w", err)
 	}
@@ -545,14 +569,14 @@ func runTelegramController(
 			QueueLimit: effectiveSettings.QueueLimit, Lifecycle: starter, UIState: state,
 			Settings: telegramPreferences, Providers: settingscomposition.ProviderPreferences{Store: providerPreferences},
 			CreationEnvironment:   creationEnvironment,
-			AsyncCreator:          asyncSessionCreator{creator: creator, root: ctx, logger: safeLogger},
+			AsyncCreator:          asyncSessionCreator{creator: creator, root: ctx, logger: safeLogger, satellites: promptPreprocessor, report: satelliteReporter},
 			Quotas:                quotaService,
 			Models:                modelCatalog,
 			Native:                nativeController,
 			Preprocessor:          promptPreprocessor,
 			SessionNamer:          sessionNamer,
 			PreprocessingObserver: preprocessingObserver{logger: safeLogger}, ControllerObserver: flowTrace,
-			Stopper: turnStopper, ArchivedResumer: archivedResumer, Recoverer: sessionRecoverer, SessionCloser: sessionCloser,
+			Stopper: turnStopper, ArchivedResumer: archivedResumer, Recoverer: sessionRecoverer, SessionCloser: satelliteCloser,
 			TurnLifecycle: turnLifecycle, DurableInput: inputCustody, DurableOutput: outputCustody,
 			InputPreparer: inputPreparer, Attachments: attachments, RuntimeEvents: runtimeEvents, Finals: finals,
 			AcceptedObserver: acceptedObserver,
@@ -738,6 +762,32 @@ func runTelegramController(
 type preprocessingObserver struct{ logger *safelog.Logger }
 
 type preprocessingSessionObserver struct{ logger *safelog.Logger }
+
+func mapSatellitePreprocessingMode(mode settings.SatellitePreprocessingMode) promptpreprocesssession.Mode {
+	switch mode {
+	case settings.SatellitePreprocessingDisabled:
+		return promptpreprocesssession.ModeDisabled
+	case settings.SatellitePreprocessingPerSession:
+		return promptpreprocesssession.ModePerSession
+	default:
+		return promptpreprocesssession.ModeShared
+	}
+}
+
+func recordPreprocessingSatelliteLifecycle(logger *safelog.Logger, action string, id domain.SessionID, actionErr error) {
+	if logger == nil {
+		return
+	}
+	result, category, detail := "completed", "", ""
+	if actionErr != nil {
+		result, category, detail = "failed", "satellite_lifecycle", actionErr.Error()
+	}
+	_ = logger.Write(safelog.Event{
+		Class: safelog.Service, Type: "prompt.preprocessing_satellite_lifecycle", EntityID: string(id),
+		Result: result, ErrorCategory: category, Error: detail,
+		Fields: map[string]string{"action": action},
+	})
+}
 
 func (observer preprocessingSessionObserver) ObservePreprocessingSession(_ context.Context, observation promptpreprocesssession.LifecycleObservation) error {
 	if observer.logger == nil {

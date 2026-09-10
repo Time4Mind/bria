@@ -36,6 +36,21 @@ func (p Preparation) Invalidate(node domain.ComputerID) {
 	}
 }
 
+// Reconfigure invalidates provider selection and then restores the topology
+// selected by the just-persisted settings document.
+func (p Preparation) Reconfigure(ctx context.Context, node domain.ComputerID) error {
+	p.Invalidate(node)
+	controller, ok := p.Processor.(promptpreprocess.ModeController)
+	if !ok || p.Settings == nil {
+		return nil
+	}
+	snapshot, err := p.Settings.Snapshot(ctx)
+	if err != nil {
+		return err
+	}
+	return controller.SetMode(ctx, preprocessingMode(snapshot))
+}
+
 func MediaPromptLabel(kind string) string {
 	switch kind {
 	case "voice":
@@ -57,10 +72,11 @@ func (p Preparation) Payload(ctx context.Context, text string) []byte {
 		return []byte(text)
 	}
 	snapshot, err := p.Settings.Snapshot(ctx)
-	if err != nil || !snapshot.PreprocessingEnabled || promptpreprocess.Bypass(text) {
+	if err != nil || promptpreprocess.Bypass(text) {
 		return []byte(text)
 	}
-	payload, err := promptpreprocess.Encode(snapshot.PreprocessingInstruction, text)
+	mode := preprocessingMode(snapshot)
+	payload, err := promptpreprocess.EncodeMode(mode, snapshot.PreprocessingInstruction, text)
 	if err != nil {
 		return []byte(text)
 	}
@@ -78,20 +94,24 @@ func (p Preparation) Process(ctx context.Context, session domain.Session, messag
 	}
 	if state.Prepared {
 		if p.Observer != nil {
-			_ = p.Observer.ObservePreprocessing(context.WithoutCancel(ctx), promptpreprocess.CachedObservation(promptpreprocess.Request{ComputerID: session.ComputerID(), SessionID: session.ID(), MessageID: messageID}, state.Failed))
+			_ = p.Observer.ObservePreprocessing(context.WithoutCancel(ctx), promptpreprocess.CachedObservation(promptpreprocess.Request{ComputerID: session.ComputerID(), SessionID: session.ID(), MessageID: messageID, Mode: state.Mode}, state.Failed))
 		}
 		return state.Processed, state.Failed, nil, nil
 	}
 	if p.Processor == nil {
 		err = errors.New("preprocessor is unavailable")
 		p.observeFailure(ctx, session, messageID, promptpreprocess.Result{}, "select", "unavailable", err)
-		prepared, _ := promptpreprocess.MarkPrepared(payload, state.Original, true)
+		prepared, prepareErr := promptpreprocess.MarkPrepared(payload, state.Original, true)
+		if prepareErr != nil {
+			p.observeFailure(ctx, session, messageID, promptpreprocess.Result{}, "prepare", "invalid_state", prepareErr)
+			return state.Original, true, nil, nil
+		}
 		return state.Original, true, prepared, nil
 	}
 	preprocessContext, cancel := context.WithTimeout(ctx, p.Timeout)
 	result, processErr := p.Processor.Process(preprocessContext, promptpreprocess.Request{
 		ComputerID: session.ComputerID(), SessionID: session.ID(), MessageID: messageID,
-		Sequence: sequence, Instruction: state.Instruction, Text: state.Original,
+		Sequence: sequence, Mode: state.Mode, Instruction: state.Instruction, Text: state.Original,
 	})
 	cancel()
 	completion := result.Completion
@@ -110,15 +130,39 @@ func (p Preparation) Process(ctx context.Context, session domain.Session, messag
 			stage = "validate"
 		}
 		p.observeFailure(ctx, session, messageID, result, stage, category, processErr)
-		prepared, _ := promptpreprocess.MarkPrepared(payload, state.Original, true)
+		prepared, prepareErr := promptpreprocess.MarkPrepared(payload, state.Original, true)
+		if prepareErr != nil {
+			p.observeFailure(ctx, session, messageID, result, "prepare", "invalid_state", prepareErr)
+			return state.Original, true, nil, completion
+		}
 		return state.Original, true, prepared, completion
 	}
 	cleaned := strings.TrimSpace(result.Text)
 	completion = p.acceptedCompletion(promptpreprocess.Request{
-		ComputerID: session.ComputerID(), SessionID: session.ID(), MessageID: messageID, Sequence: sequence,
+		ComputerID: session.ComputerID(), SessionID: session.ID(), MessageID: messageID, Sequence: sequence, Mode: state.Mode,
 	}, result, completion)
-	prepared, _ := promptpreprocess.MarkPrepared(payload, cleaned, false)
+	prepared, prepareErr := promptpreprocess.MarkPrepared(payload, cleaned, false)
+	if prepareErr != nil {
+		p.observeFailure(ctx, session, messageID, result, "prepare", "invalid_state", prepareErr)
+		return state.Original, true, nil, completion
+	}
 	return cleaned, false, prepared, completion
+}
+
+func preprocessingMode(snapshot settingsport.Snapshot) promptpreprocess.Mode {
+	switch snapshot.SatellitePreprocessingMode {
+	case settingsport.SatellitePreprocessingDisabled:
+		return promptpreprocess.ModeDisabled
+	case settingsport.SatellitePreprocessingShared:
+		return promptpreprocess.ModeShared
+	case settingsport.SatellitePreprocessingPerSession:
+		return promptpreprocess.ModePerSession
+	case "":
+		if snapshot.PreprocessingEnabled {
+			return promptpreprocess.ModeShared
+		}
+	}
+	return promptpreprocess.ModeDisabled
 }
 
 func (p Preparation) acceptedCompletion(request promptpreprocess.Request, result promptpreprocess.Result, inner promptpreprocess.Completion) promptpreprocess.Completion {

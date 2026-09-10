@@ -68,6 +68,35 @@ func TestTrackerResetsForBindingLifecycleRemovalAndSuccess(t *testing.T) {
 	}
 }
 
+func TestTrackerStableBarrierReleasesOnlyForChangedEvidenceOrIdentity(t *testing.T) {
+	tracker, err := recoverybackoff.New(time.Minute, 20*time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Unix(1_000, 0).UTC()
+	identity := recoverybackoff.Identity{Lifecycle: now}
+	tracker.BlockUntilEvidenceChanges("session", identity, "evidence-v1")
+	if tracker.Ready("session", identity, now.Add(24*time.Hour)) {
+		t.Fatal("stable barrier became retryable with elapsed time")
+	}
+	if revision, blocked := tracker.StableBarrier("session", identity); !blocked || revision != "evidence-v1" {
+		t.Fatalf("stable barrier = %q, %t", revision, blocked)
+	}
+	if tracker.ReleaseIfEvidenceChanged("session", identity, "evidence-v1") || tracker.Ready("session", identity, now) {
+		t.Fatal("unchanged evidence released stable barrier")
+	}
+	if !tracker.ReleaseIfEvidenceChanged("session", identity, "evidence-v2") || !tracker.Ready("session", identity, now) {
+		t.Fatal("changed evidence did not release stable barrier")
+	}
+
+	tracker.BlockUntilEvidenceChanges("session", identity, "evidence-v2")
+	changed := identity
+	changed.Lifecycle = changed.Lifecycle.Add(time.Second)
+	if !tracker.Ready("session", changed, now) {
+		t.Fatal("changed session identity did not release stable barrier")
+	}
+}
+
 func TestNewRejectsInvalidPolicy(t *testing.T) {
 	for _, policy := range []struct{ base, maximum time.Duration }{
 		{base: 0, maximum: time.Minute},

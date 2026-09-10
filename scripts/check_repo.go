@@ -1278,7 +1278,7 @@ var packagePolicies = map[string]packagePolicy{
 	"internal/telegramturnhelpers": {
 		responsibility:     "prepare media and preprocessed prompts, finalize preprocessing after persistence and validate exact durable turn admission",
 		allowedImports:     []string{"internal/coordinator", "internal/domain", "internal/promptpreprocess", "internal/sessionruntime", "internal/settingsport", "internal/turnprocessing"},
-		maxProductionLines: 400,
+		maxProductionLines: 425,
 	},
 	"internal/nativerender": {
 		responsibility:     "rasterize bounded native ANSI captures independently of runtime and transport",
@@ -1307,7 +1307,7 @@ var packagePolicies = map[string]packagePolicy{
 	"internal/telegramcallbackview": {
 		responsibility:     "present callback buttons and map authenticated callback fields into UI semantics",
 		allowedImports:     []string{"internal/callbacktoken", "internal/telegramui"},
-		maxProductionLines: 500,
+		maxProductionLines: 525,
 	},
 	"internal/telegramhistory": {
 		responsibility:     "transform typed card history without persistence or I/O",
@@ -1572,8 +1572,13 @@ var packagePolicies = map[string]packagePolicy{
 	},
 	"internal/acceptedrecovery": {
 		responsibility:     "reconcile exact accepted history and fence archived session resume",
-		allowedImports:     []string{"internal/domain", "internal/durableflow", "internal/sessionruntime", "internal/sessionsupervisor", "internal/turncontinuation"},
+		allowedImports:     []string{"internal/acceptedrecovery/evidence", "internal/domain", "internal/durableflow", "internal/sessionruntime", "internal/sessionsupervisor", "internal/turncontinuation"},
 		maxProductionLines: 300,
+	},
+	"internal/acceptedrecovery/evidence": {
+		responsibility:     "fingerprint payload-free journal and provider metadata for stable recovery barriers",
+		allowedImports:     []string{"internal/domain", "internal/durableflow", "internal/sessionruntime", "internal/sessionsupervisor"},
+		maxProductionLines: 150,
 	},
 	"internal/executor": {
 		responsibility:       "execute coordinator commands on an owning computer",
@@ -1796,7 +1801,7 @@ var packagePolicies = map[string]packagePolicy{
 	"internal/promptpreprocess": {
 		responsibility:     "define prompt rewriting, its durable pre-provider envelope and post-persistence completion boundary",
 		allowedImports:     []string{"internal/domain"},
-		maxProductionLines: 250,
+		maxProductionLines: 300,
 	},
 	"internal/cardtranscript": {
 		responsibility:     "render bounded structured session transcript blocks for Telegram cards",
@@ -1808,9 +1813,19 @@ var packagePolicies = map[string]packagePolicy{
 		allowedImports:     []string{"internal/config", "internal/domain", "internal/processenv", "internal/processgroup", "internal/promptpreprocess"},
 		maxProductionLines: 450,
 	},
+	"internal/promptpreprocessbinding": {
+		responsibility:     "persist bounded hidden satellite lifecycle and provider thread bindings",
+		allowedImports:     []string{"internal/domain", "internal/promptpreprocess"},
+		maxProductionLines: 450,
+	},
+	"internal/promptpreprocesscore": {
+		responsibility:     "coordinate persistent shared and per-session satellite lanes, lifecycle and durable acceptance ordering",
+		allowedImports:     []string{"internal/domain", "internal/promptpreprocess", "internal/promptpreprocessbinding"},
+		maxProductionLines: 1050,
+	},
 	"internal/promptpreprocesssession": {
-		responsibility:     "maintain the bounded hidden one-shot preprocessing session pool and its isolated external Codex adapter transport",
-		allowedImports:     []string{"internal/domain", "internal/processgroup", "internal/promptpreprocess", "internal/promptpreprocesscommand", "internal/runtimeprotocol"},
+		responsibility:     "compose satellite coordination with cheapest-provider selection and isolated external Codex adapter transport",
+		allowedImports:     []string{"internal/domain", "internal/processgroup", "internal/promptpreprocess", "internal/promptpreprocessbinding", "internal/promptpreprocesscommand", "internal/promptpreprocesscore", "internal/runtimeprotocol"},
 		maxProductionLines: 750,
 	},
 	"internal/p4runtimecomposition": {
@@ -1845,7 +1860,7 @@ var packagePolicies = map[string]packagePolicy{
 			"internal/providermodels",
 			"internal/acceptedcontinuation", "internal/app", "internal/authcomposition", "internal/callbacktoken", "internal/claudestore", "internal/config", "internal/coordinator", "internal/domain", "internal/durablecomposition", "internal/durableflow", "internal/interactioncomposition", "internal/messagejournal", "internal/nativerecoverycomposition", "internal/observability", "internal/processenv", "internal/promptpreprocess", "internal/promptpreprocesscommand", "internal/promptpreprocesssession", "internal/providerquota", "internal/recoverycomposition", "internal/recoveryruntime", "internal/runtimefactory", "internal/safelog", "internal/screenproduction", "internal/sessioncreation", "internal/sessionexpiry", "internal/sessionid", "internal/sessionnaming", "internal/sessionruntime", "internal/sessionsupervisor", "internal/settings", "internal/settingscomposition", "internal/storage", "internal/supervisioncomposition", "internal/telegram", "internal/telegrambridge", "internal/telegramcompletioncomposition", "internal/telegramcontroller", "internal/telegramflow", "internal/telegramnotify", "internal/telegrampipeline", "internal/telegrampromptcomposition", "internal/telegramrecoverycomposition", "internal/telegramruntimecomposition", "internal/turnruntimecomposition", "internal/workdir",
 		},
-		maxProductionLines: 1050,
+		maxProductionLines: 1250,
 	},
 	"internal/secretfile": {
 		responsibility:     "pass a bounded secret file to a callback with guaranteed transient zeroization",
@@ -1910,12 +1925,12 @@ var packagePolicies = map[string]packagePolicy{
 	"internal/settingscomposition": {
 		responsibility:     "compose neutral Telegram settings ports with canonical local settings and configuration stores",
 		allowedImports:     []string{"internal/domain", "internal/providerpreferences", "internal/settings", "internal/settingsport"},
-		maxProductionLines: 200,
+		maxProductionLines: 225,
 	},
 	"internal/settingsport": {
 		responsibility:     "define the storage-neutral preferences boundary used by Telegram control surfaces",
 		allowedImports:     []string{"internal/domain", "internal/settingscapability"},
-		maxProductionLines: 100,
+		maxProductionLines: 125,
 	},
 	"internal/speech": {
 		responsibility:     "define local speech recognition boundary",
@@ -1937,8 +1952,13 @@ var packagePolicies = map[string]packagePolicy{
 	},
 	"internal/supervisioncomposition": {
 		responsibility:     "compose startup and live supervision for exact local provider bindings",
-		allowedImports:     []string{"internal/app", "internal/controllertelemetry", "internal/domain", "internal/recoverybackoff", "internal/sessionattachment", "internal/sessionrecoverycontrol", "internal/sessionsupervisor"},
+		allowedImports:     []string{"internal/app", "internal/controllertelemetry", "internal/domain", "internal/recoverybackoff", "internal/sessionattachment", "internal/sessionrecoverycontrol", "internal/sessionsupervisor", "internal/supervisioncomposition/recoverybarrier"},
 		maxProductionLines: 450,
+	},
+	"internal/supervisioncomposition/recoverybarrier": {
+		responsibility:     "coordinate stable recovery evidence barriers with lifecycle-aware retry backoff",
+		allowedImports:     []string{"internal/domain", "internal/recoverybackoff"},
+		maxProductionLines: 100,
 	},
 	"internal/telegram": {
 		responsibility:     "implement the Telegram HTTP transport and classify delivery outcomes",
@@ -2091,7 +2111,7 @@ var packagePolicies = map[string]packagePolicy{
 	"internal/telegramsettingsview": {
 		responsibility:     "render escaped grouped settings tables through neutral preferences ports",
 		allowedImports:     []string{"internal/domain", "internal/settingsport"},
-		maxProductionLines: 280,
+		maxProductionLines: 325,
 	},
 	"internal/telegramstatus": {
 		responsibility:     "render read-only provider quota summaries for Telegram status surfaces",

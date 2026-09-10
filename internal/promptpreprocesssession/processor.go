@@ -1,5 +1,5 @@
-// Package promptpreprocesssession owns the hidden one-shot provider-session
-// pool used for durable prompt preprocessing.
+// Package promptpreprocesssession owns hidden persistent provider-session
+// satellites used for durable prompt preprocessing.
 package promptpreprocesssession
 
 import (
@@ -12,23 +12,25 @@ import (
 	"bria/internal/domain"
 	"bria/internal/promptpreprocess"
 	"bria/internal/promptpreprocesscommand"
+	"bria/internal/promptpreprocesscore"
 )
 
 var (
-	ErrUnavailable = errors.New("prompt preprocessing session is unavailable")
-	ErrInvocation  = errors.New("prompt preprocessing session invocation failed")
+	ErrUnavailable = promptpreprocesscore.ErrUnavailable
+	ErrInvocation  = promptpreprocesscore.ErrInvocation
 	errProtocol    = errors.New("prompt preprocessing session protocol failed")
 )
 
 type Processor struct {
 	commands          *promptpreprocesscommand.Processor
 	adapterExecutable string
-	pool              *sessionPool
+	manager           *promptpreprocesscore.Manager
 	observer          LifecycleObserver
 }
 
 var _ promptpreprocess.Processor = (*Processor)(nil)
 var _ promptpreprocess.Invalidator = (*Processor)(nil)
+var _ promptpreprocess.ModeController = (*Processor)(nil)
 
 type LifecycleObservation struct {
 	State         string
@@ -43,6 +45,10 @@ type LifecycleObserver interface {
 }
 
 func New(commands *promptpreprocesscommand.Processor, adapterExecutable string, observers ...LifecycleObserver) (*Processor, error) {
+	return NewWithBindingStore(commands, adapterExecutable, nil, observers...)
+}
+
+func NewWithBindingStore(commands *promptpreprocesscommand.Processor, adapterExecutable string, store BindingStore, observers ...LifecycleObserver) (*Processor, error) {
 	if commands == nil || !strings.HasPrefix(adapterExecutable, "/") {
 		return nil, ErrUnavailable
 	}
@@ -50,57 +56,98 @@ func New(commands *promptpreprocesscommand.Processor, adapterExecutable string, 
 	if len(observers) > 0 {
 		processor.observer = observers[0]
 	}
-	processor.pool = newSessionPool(processor.startSession)
+	processor.manager = promptpreprocesscore.New(processor.startSession, store)
 	return processor, nil
 }
 
 func (processor *Processor) Warmup(ctx context.Context) {
-	if processor != nil && processor.pool != nil {
-		processor.pool.Warmup(ctx)
+	if processor != nil && processor.manager != nil {
+		go func() { _ = processor.manager.Warmup(ctx) }()
 	}
 }
 
 func (processor *Processor) Process(ctx context.Context, request promptpreprocess.Request) (promptpreprocess.Result, error) {
-	if processor == nil || processor.pool == nil || ctx == nil || ctx.Err() != nil ||
+	if processor == nil || processor.manager == nil || ctx == nil || ctx.Err() != nil ||
 		request.ComputerID != processor.commands.ComputerID() || strings.TrimSpace(request.MessageID) == "" ||
 		strings.TrimSpace(request.Instruction) == "" || strings.TrimSpace(request.Text) == "" {
 		return promptpreprocess.Result{}, ErrUnavailable
 	}
 	started := time.Now()
-	result, completion, err := processor.pool.Process(ctx, request)
+	result, err := processor.manager.Process(ctx, request)
 	state, category := "responded", ""
 	if err != nil {
 		state, category = "failed", "provider"
-		processor.pool.Invalidate()
 	}
 	processor.observe(context.WithoutCancel(ctx), LifecycleObservation{
 		State: state, Provider: result.Provider, Model: result.Model,
 		Duration: time.Since(started), ErrorCategory: category,
 	})
-	if completion != nil {
+	if result.Completion != nil {
 		result.Completion = &observedCompletion{
-			inner: completion, processor: processor, provider: result.Provider, model: result.Model,
+			inner: result.Completion, processor: processor, provider: result.Provider, model: result.Model,
 		}
 	}
 	return result, err
 }
 
 func (processor *Processor) Invalidate(computerID domain.ComputerID) {
-	if processor == nil || processor.pool == nil || computerID != processor.commands.ComputerID() {
+	if processor == nil || processor.manager == nil || computerID != processor.commands.ComputerID() {
 		return
 	}
 	processor.commands.Invalidate(computerID)
-	processor.pool.Invalidate()
+	processor.manager.Invalidate()
 }
 
 func (processor *Processor) Close(ctx context.Context) error {
-	if processor == nil || processor.pool == nil {
+	if processor == nil || processor.manager == nil {
 		return nil
 	}
-	return processor.pool.Close(ctx)
+	return processor.manager.Close(ctx)
 }
 
-func (processor *Processor) startSession(ctx context.Context) (session, error) {
+func (processor *Processor) SetMode(ctx context.Context, mode promptpreprocess.Mode) error {
+	if processor == nil || processor.manager == nil {
+		return ErrUnavailable
+	}
+	return processor.manager.SetMode(ctx, mode)
+}
+
+func (processor *Processor) Activate(ctx context.Context, id domain.SessionID) error {
+	if processor == nil || processor.manager == nil {
+		return ErrUnavailable
+	}
+	return processor.manager.Activate(ctx, id)
+}
+
+func (processor *Processor) Archive(ctx context.Context, id domain.SessionID) error {
+	if processor == nil || processor.manager == nil {
+		return ErrUnavailable
+	}
+	return processor.manager.Archive(ctx, id)
+}
+
+func (processor *Processor) Restore(ctx context.Context, id domain.SessionID) error {
+	if processor == nil || processor.manager == nil {
+		return ErrUnavailable
+	}
+	return processor.manager.Restore(ctx, id)
+}
+
+func (processor *Processor) Forget(ctx context.Context, id domain.SessionID) error {
+	if processor == nil || processor.manager == nil {
+		return ErrUnavailable
+	}
+	return processor.manager.Forget(ctx, id)
+}
+
+func (processor *Processor) Reconcile(ctx context.Context, states []PrimaryState) error {
+	if processor == nil || processor.manager == nil {
+		return ErrUnavailable
+	}
+	return processor.manager.Reconcile(ctx, states)
+}
+
+func (processor *Processor) startSession(ctx context.Context, start StartRequest) (promptpreprocesscore.Session, error) {
 	var lastErr error
 	for attempts := 0; attempts < 2; attempts++ {
 		selection, err := processor.commands.Select(ctx)
@@ -111,20 +158,23 @@ func (processor *Processor) startSession(ctx context.Context) (session, error) {
 		processor.observe(context.WithoutCancel(ctx), LifecycleObservation{
 			State: "starting", Provider: selection.Provider(), Model: selection.Model(),
 		})
-		var prepared session
-		readyState := "ready"
+		var prepared promptpreprocesscore.Session
 		switch selection.Provider() {
 		case domain.ProviderCodex:
-			prepared, err = startCodexSession(ctx, selection, processor.adapterExecutable)
-		case domain.ProviderClaude:
-			prepared = &statelessFallbackSession{processor: processor.commands}
-			readyState = "degraded"
+			var workdir string
+			workdir, err = satelliteWorkdir(processor.commands.ComputerID(), start.Key)
+			if err == nil {
+				prepared, err = startCodexSessionIn(ctx, selection, processor.adapterExecutable, start.ResumeProviderSessionID, workdir)
+			}
 		default:
+			// A stateless command is not a satellite: it cannot preserve context
+			// or resume an archived binding. Fail closed until that provider has
+			// a persistent read-only adapter contract.
 			err = ErrUnavailable
 		}
 		if err == nil {
 			processor.observe(context.WithoutCancel(ctx), LifecycleObservation{
-				State: readyState, Provider: selection.Provider(), Model: selection.Model(), Duration: time.Since(started),
+				State: "ready", Provider: selection.Provider(), Model: selection.Model(), Duration: time.Since(started),
 			})
 			return &observedSession{session: prepared, selection: selection, processor: processor.commands}, nil
 		}
@@ -163,9 +213,9 @@ func (completion *observedCompletion) Accept(ctx context.Context) error {
 		})
 		started := time.Now()
 		completion.err = completion.inner.Accept(ctx)
-		state, category := "closed", ""
+		state, category := "released", ""
 		if completion.err != nil {
-			state, category = "close_failed", "provider"
+			state, category = "release_failed", "provider"
 		}
 		completion.processor.observe(context.WithoutCancel(ctx), LifecycleObservation{
 			State: state, Provider: completion.provider, Model: completion.model,
@@ -176,7 +226,7 @@ func (completion *observedCompletion) Accept(ctx context.Context) error {
 }
 
 type observedSession struct {
-	session   session
+	session   promptpreprocesscore.Session
 	selection promptpreprocesscommand.Selection
 	processor *promptpreprocesscommand.Processor
 }
@@ -191,15 +241,7 @@ func (current *observedSession) Process(ctx context.Context, request promptprepr
 
 func (current *observedSession) Close(ctx context.Context) error { return current.session.Close(ctx) }
 
-type statelessFallbackSession struct {
-	processor *promptpreprocesscommand.Processor
-}
-
-func (fallback *statelessFallbackSession) Process(ctx context.Context, request promptpreprocess.Request) (promptpreprocess.Result, error) {
-	return fallback.processor.Process(ctx, request)
-}
-
-func (*statelessFallbackSession) Close(context.Context) error { return nil }
+func (current *observedSession) Binding() string { return current.session.Binding() }
 
 func closeContext() (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.Background(), 10*time.Second)
