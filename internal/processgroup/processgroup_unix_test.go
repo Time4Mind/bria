@@ -473,11 +473,7 @@ func TestProcessGroupHelper(t *testing.T) {
 		termination := make(chan os.Signal, 1)
 		signal.Notify(termination, syscall.SIGTERM)
 		defer signal.Stop(termination)
-		if err := os.WriteFile(
-			os.Getenv(helperReadyEnvironment),
-			[]byte(strconv.Itoa(os.Getpid())),
-			0o600,
-		); err != nil {
+		if err := publishPID(os.Getenv(helperReadyEnvironment), os.Getpid()); err != nil {
 			os.Exit(29)
 		}
 		<-termination

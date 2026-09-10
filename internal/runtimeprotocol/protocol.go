@@ -28,7 +28,7 @@ const (
 	DefaultMaxAnswersPerQuestion = 8
 )
 
-const StartupFailureThreadNotFound = "bria-startup-failure:thread_not_found"
+const StartupErrorThreadNotFound = "thread_not_found"
 
 var ErrProtocol = errors.New("runtime protocol violation")
 
@@ -48,6 +48,7 @@ const (
 	TypeInteractionResponse         MessageType = "interaction_response"
 	TypeReconcileAcceptedTurns      MessageType = "reconcile_accepted_turns"
 	TypeReady                       MessageType = "ready"
+	TypeStartupFailed               MessageType = "startup_failed"
 	TypeAccepted                    MessageType = "accepted"
 	TypeEvent                       MessageType = "event"
 	TypeFinal                       MessageType = "final"
@@ -390,6 +391,12 @@ func encodeAdapterLine(message AdapterMessage, max int) ([]byte, error) {
 			Type              MessageType `json:"type"`
 			ProviderSessionID string      `json:"provider_session_id"`
 		}{message.Protocol, message.Type, message.ProviderSessionID}, max)
+	case TypeStartupFailed:
+		return encodeLine(struct {
+			Protocol  int         `json:"protocol"`
+			Type      MessageType `json:"type"`
+			ErrorCode string      `json:"error_code"`
+		}{message.Protocol, message.Type, message.ErrorCode}, max)
 	case TypeNativeObservation:
 		return encodeLine(struct {
 			FullText          string      `json:"full_text,omitempty"`
@@ -534,6 +541,8 @@ func adapterFields(messageType MessageType) fieldRequirement {
 	switch messageType {
 	case TypeClosed:
 		return fields([]string{"protocol", "type", "provider_session_id"})
+	case TypeStartupFailed:
+		return fields([]string{"protocol", "type", "error_code"})
 	case TypeNativeObservation:
 		return fields([]string{"protocol", "type", "provider_session_id", "text", "hash"}, "model", "interactive", "full_text")
 	case TypeNativeSnapshot:
@@ -735,6 +744,10 @@ func validateAdapter(message AdapterMessage, limits Limits) error {
 	switch message.Type {
 	case TypeClosed:
 		if !validRequiredText(message.ProviderSessionID, limits.MaxTextBytes) || message.Readiness != "" || message.Authentication != "" || message.RequestID != "" || message.Kind != "" || message.Text != "" || message.Status != "" || message.ErrorCode != "" || message.MessageID != "" || message.ProviderSessionName != "" || message.InteractionRequest != nil || message.InteractionID != "" {
+			return ErrProtocol
+		}
+	case TypeStartupFailed:
+		if message.ErrorCode != StartupErrorThreadNotFound || message.RequestID != "" || message.Kind != "" || message.Text != "" || message.Status != "" || message.MessageID != "" || hasAdapterEnvelopeFields(message) {
 			return ErrProtocol
 		}
 	case TypeNativeObservation:

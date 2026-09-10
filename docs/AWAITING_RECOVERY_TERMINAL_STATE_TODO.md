@@ -47,7 +47,7 @@
 | A42.3 | Не повторять старый accepted input | restart/recovery regression | verified locally | Старый unknown сохраняет фазу и не lease-ится повторно, но допускает более новый pending root. Reconciliation/selector/root tests по 10 повторов PASS. |
 | A42.4 | Выпустить и проверить live | full gate, exact-SHA CI, service/state postflight | in progress | Первый runtime `e9e8fa1` прошёл оба CI и восстановил `workdir7` из `awaiting_recovery` в `ready` с тем же provider thread и generation 2→3; tmux/Codex PID сохранились. Postflight выявил отдельный missing-empty-satellite case, поэтому terminal criterion ещё не закрыт. |
 | A42.5 | Проверить reconnect preprocess satellite при restart Bria | shared и per-session identity/queue restart tests | verified locally | Для физически сохранённого rollout shared warmup exact-resume-ит прежний binding. После main recovery `Reconcile` делает то же для каждого active primary; archived primary не запускается. Очередь остаётся в durable main journal. Новые restart tests по 10 повторов и full race PASS. |
-| A42.6 | Не оставлять startup без сателлита, если прогретый пустой thread ещё не получил rollout | exact missing classification, fresh replacement; transient error preserves binding | verified locally | Live Codex metadata probe доказал `no rollout found` для сохранённого shared ID: пустой thread ещё не имел физического rollout. RED/GREEN классифицирует только этот ответ, передаёт безопасный process marker и создаёт fresh replacement с атомарной заменой binding. Generic/network/auth failure не заменяет ID. Одинаковый slot path используется shared и per-session. |
+| A42.6 | Не оставлять startup без сателлита, если прогретый пустой thread ещё не получил rollout | exact missing classification, fresh replacement; transient error preserves binding | verified locally | Live Codex metadata probe доказал `no rollout found` для сохранённого shared ID: пустой thread ещё не имел физического rollout. RED/GREEN классифицирует только этот ответ, передаёт валидируемый `startup_failed/thread_not_found` protocol frame до остановки process tree и создаёт fresh replacement с атомарной заменой binding. Generic/network/auth failure не заменяет ID. Одинаковый slot path используется shared и per-session. |
 
 ## Локальная проверка перед выпуском
 
@@ -62,3 +62,17 @@
   native tmux tests, vet, packaging, полный race и executable trio. Контрольный
   запуск `internal/nativeadapter` подтвердил, что массовый первый сбой был
   sandbox-only и не воспроизводится в разрешённом terminal context.
+- Первая process-boundary реализация пыталась передать классификацию через stderr
+  внешнего adapter. Она не работала: штатный `KillCurrentTree` завершает adapter
+  вместе с raw Codex раньше возврата в `main`. Исправление публикует узкий
+  типизированный frame из `RunAdapter` до остановки дерева. Обычный helper-тест
+  проверяет frame и класс ошибки; opt-in metadata-only тест с реальным Codex
+  подтвердил сквозной `ErrResumeUnavailable` без отправки prompt.
+- Первый повторный полный gate обнаружил независимую гонку в test-only ready
+  evidence: helper создавал PID-файл до записи значения, и reader один раз увидел
+  пустую строку. Runtime не затронут. Helper переведён на уже существующую
+  атомарную публикацию `publishPID`; 100 plain и 20 race повторов PASS.
+- Финальный candidate `VERSION=20260910-terminal-recovery-satellite-v2` прошёл
+  полный `make check-full` вне filesystem sandbox: policy, links, secret scan,
+  format, architecture, весь plain/integration набор, vet, operational packaging,
+  полный race и executable trio.

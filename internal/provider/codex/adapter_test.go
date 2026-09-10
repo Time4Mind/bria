@@ -327,6 +327,37 @@ func TestAdapterResumesExactPersistedThreadBeforeReportingReady(t *testing.T) {
 	}
 }
 
+func TestAdapterReportsMissingResumeThreadBeforeStoppingRawProcess(t *testing.T) {
+	workdir := t.TempDir()
+	parentInput, adapterInput := io.Pipe()
+	defer adapterInput.Close()
+	adapterOutput := newLineWriter()
+	runDone := make(chan error, 1)
+	go func() {
+		runDone <- codex.RunAdapter(context.Background(), parentInput, adapterOutput, codex.AdapterConfig{
+			RawCommand: []string{os.Args[0], "-test.run=^TestRawCodexAppServerHelperProcess$", "--", "app-server"},
+			RawEnv: []string{
+				"BRIA_CODEX_RAW_HELPER=1", "BRIA_EXPECT_WORKDIR=" + workdir,
+				"BRIA_EXPECT_RESUME_THREAD_ID=provider-thread-missing", "BRIA_RAW_HELPER_MODE=missing-thread",
+			},
+			Workdir: workdir, ResumeThreadID: "provider-thread-missing",
+			ClientInfo: codex.ClientInfo{Name: "bria-test", Version: "0.1.0"},
+		})
+	}()
+
+	assertJSONLine(t, adapterOutput, map[string]any{
+		"protocol": float64(1), "type": "startup_failed", "error_code": "thread_not_found",
+	})
+	select {
+	case err := <-runDone:
+		if !errors.Is(err, codex.ErrThreadNotFound) {
+			t.Fatalf("RunAdapter(missing resume) error = %v, want ErrThreadNotFound", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("RunAdapter(missing resume) did not stop")
+	}
+}
+
 func TestAdapterRejectsResumeWhenProviderReturnsDifferentThread(t *testing.T) {
 	workdir := t.TempDir()
 	parentInput, adapterInput := io.Pipe()
@@ -598,6 +629,10 @@ func runRawHelper() {
 	}
 	if returnedThreadID := os.Getenv("BRIA_RETURN_THREAD_ID"); returnedThreadID != "" {
 		providerThreadID = returnedThreadID
+	}
+	if os.Getenv("BRIA_RAW_HELPER_MODE") == "missing-thread" {
+		writeRawError(encoder, request["id"], -32600, "no rollout found for thread id "+providerThreadID)
+		return
 	}
 	writeRawResult(encoder, request["id"], map[string]any{
 		"thread": map[string]any{
@@ -1115,6 +1150,12 @@ func readRawObject(reader *bufio.Reader) map[string]any {
 
 func writeRawResult(encoder *json.Encoder, id any, result any) {
 	if encoder.Encode(map[string]any{"id": id, "result": result}) != nil {
+		os.Exit(82)
+	}
+}
+
+func writeRawError(encoder *json.Encoder, id any, code int, message string) {
+	if encoder.Encode(map[string]any{"id": id, "error": map[string]any{"code": code, "message": message}}) != nil {
 		os.Exit(82)
 	}
 }

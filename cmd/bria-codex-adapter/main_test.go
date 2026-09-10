@@ -1,12 +1,8 @@
 package main
 
 import (
-	"errors"
 	"reflect"
 	"testing"
-
-	providercodex "bria/internal/provider/codex"
-	"bria/internal/runtimeprotocol"
 )
 
 func TestTechnicalPreprocessingConfigurationIsPersistentAndReadOnly(t *testing.T) {
@@ -15,15 +11,6 @@ func TestTechnicalPreprocessingConfigurationIsPersistentAndReadOnly(t *testing.T
 		configuration.ThreadSandbox != "read-only" || !configuration.RequireReadOnly ||
 		!configuration.RejectInteractions || configuration.ResumeThreadID != "thread-123" {
 		t.Fatalf("technical configuration = %#v, want persistent exact-resume read-only satellite", configuration)
-	}
-}
-
-func TestStartupFailureMessageExposesOnlyMissingThreadClass(t *testing.T) {
-	if got := startupFailureMessage(providercodex.ErrThreadNotFound); got != runtimeprotocol.StartupFailureThreadNotFound {
-		t.Fatalf("missing-thread marker = %q", got)
-	}
-	if got := startupFailureMessage(errors.New("secret provider detail")); got != "bria codex adapter failed" {
-		t.Fatalf("generic marker = %q", got)
 	}
 }
 

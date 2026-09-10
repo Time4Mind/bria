@@ -2,7 +2,6 @@ package promptpreprocesssession
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -38,24 +37,6 @@ type codexSession struct {
 	writeMu   sync.Mutex
 	closeOnce sync.Once
 	closeErr  error
-}
-
-type startupMarker struct {
-	mu             sync.Mutex
-	threadNotFound bool
-}
-
-func (marker *startupMarker) Write(value []byte) (int, error) {
-	marker.mu.Lock()
-	marker.threadNotFound = marker.threadNotFound || bytes.Contains(value, []byte(runtimeprotocol.StartupFailureThreadNotFound))
-	marker.mu.Unlock()
-	return len(value), nil
-}
-
-func (marker *startupMarker) missingThread() bool {
-	marker.mu.Lock()
-	defer marker.mu.Unlock()
-	return marker.threadNotFound
 }
 
 func startCodexSession(ctx context.Context, selection promptpreprocesscommand.Selection, adapterExecutable, resumeProviderSessionID string) (*codexSession, error) {
@@ -102,9 +83,8 @@ func startCodexSessionIn(ctx context.Context, selection promptpreprocesscommand.
 		_ = os.RemoveAll(workdir)
 		return nil, ErrInvocation
 	}
-	startupFailure := &startupMarker{}
-	command.Stderr = startupFailure
-	if processgroup.Configure(command) != nil {
+	stderr, err := command.StderrPipe()
+	if err != nil || processgroup.Configure(command) != nil {
 		_ = input.Close()
 		_ = output.Close()
 		_ = os.RemoveAll(workdir)
@@ -115,6 +95,7 @@ func startCodexSessionIn(ctx context.Context, selection promptpreprocesscommand.
 	if err := command.Start(); err != nil {
 		_ = input.Close()
 		_ = output.Close()
+		_ = stderr.Close()
 		_ = os.RemoveAll(workdir)
 		return nil, ErrInvocation
 	}
@@ -123,6 +104,7 @@ func startCodexSessionIn(ctx context.Context, selection promptpreprocesscommand.
 		output: bufio.NewReaderSize(output, runtimeprotocol.DefaultMaxLineBytes),
 		done:   make(chan error, 1), cancel: func() { _ = processgroup.KillTree(command) },
 	}
+	go func() { _, _ = io.Copy(io.Discard, stderr) }()
 	go func() {
 		_ = command.Wait()
 		current.done <- confirmTreeGone(command, time.Second)
@@ -131,11 +113,12 @@ func startCodexSessionIn(ctx context.Context, selection promptpreprocesscommand.
 	stopStartupCancellation := context.AfterFunc(ctx, current.cancel)
 	ready, err := current.read(ctx)
 	startupStillOwned := stopStartupCancellation()
+	missingThread := err == nil && ready.Type == runtimeprotocol.TypeStartupFailed && ready.ErrorCode == runtimeprotocol.StartupErrorThreadNotFound
 	if err != nil || !startupStillOwned || ctx.Err() != nil || ready.Type != runtimeprotocol.TypeReady || !promptpreprocessbinding.ValidProviderThreadID(ready.ProviderSessionID) || ready.Readiness != "protocol" {
 		closeCtx, closeCancel := closeContext()
 		_ = current.Close(closeCtx)
 		closeCancel()
-		if resumeProviderSessionID != "" && startupFailure.missingThread() {
+		if resumeProviderSessionID != "" && missingThread {
 			return nil, promptpreprocesscore.ErrResumeUnavailable
 		}
 		return nil, ErrInvocation

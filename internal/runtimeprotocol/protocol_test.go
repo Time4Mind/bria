@@ -38,6 +38,7 @@ func TestExistingAdapterMessagesRemainWireCompatible(t *testing.T) {
 		want AdapterMessage
 	}{
 		{`{"protocol":1,"type":"ready","provider_session_id":"provider-1","readiness":"protocol","authentication":"unknown"}`, AdapterMessage{Protocol: 1, Type: TypeReady, ProviderSessionID: "provider-1", Readiness: "protocol", Authentication: "unknown"}},
+		{`{"protocol":1,"type":"startup_failed","error_code":"thread_not_found"}`, AdapterMessage{Protocol: 1, Type: TypeStartupFailed, ErrorCode: StartupErrorThreadNotFound}},
 		{`{"protocol":1,"type":"accepted","request_id":"request-1"}`, AdapterMessage{Protocol: 1, Type: TypeAccepted, RequestID: "request-1"}},
 		{`{"protocol":1,"type":"event","request_id":"request-1","kind":"commentary","text":"working"}`, AdapterMessage{Protocol: 1, Type: TypeEvent, RequestID: "request-1", Kind: "commentary", Text: "working"}},
 		{`{"protocol":1,"type":"final","request_id":"request-1","text":"done"}`, AdapterMessage{Protocol: 1, Type: TypeFinal, RequestID: "request-1", Text: "done"}},

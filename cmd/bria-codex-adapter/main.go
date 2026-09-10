@@ -11,7 +11,6 @@ import (
 	"bria/internal/domain"
 	"bria/internal/nativeadapter"
 	"bria/internal/provider/codex"
-	"bria/internal/runtimeprotocol"
 )
 
 func main() {
@@ -21,17 +20,10 @@ func main() {
 		if len(os.Args) > 1 && os.Args[1] == "--native" {
 			_, _ = fmt.Fprintln(os.Stderr, nativeadapter.StartupFailureMarker(err))
 		} else {
-			_, _ = fmt.Fprintln(os.Stderr, startupFailureMessage(err))
+			_, _ = fmt.Fprintln(os.Stderr, "bria codex adapter failed")
 		}
 		os.Exit(1)
 	}
-}
-
-func startupFailureMessage(err error) string {
-	if errors.Is(err, codex.ErrThreadNotFound) {
-		return runtimeprotocol.StartupFailureThreadNotFound
-	}
-	return "bria codex adapter failed"
 }
 
 func run(ctx context.Context, args []string) error {

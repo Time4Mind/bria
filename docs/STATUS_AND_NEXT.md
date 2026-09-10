@@ -16,9 +16,13 @@
 > `ready` с прежним thread и живыми tmux/Codex. Postflight выявил отдельную
 > границу: прогретый, но ни разу не использованный shared satellite получил ID,
 > однако Codex ещё не создал rollout, поэтому exact resume вернул доказанный
-> `thread not found`. Добавлен узкий replacement только для этого класса;
-> transient/network/auth сохраняют старый binding. Нужны повторный полный gate,
-> push/CI/deploy и live ready нового shared satellite.
+> `thread not found`. Добавлен узкий replacement только для этого класса.
+> Классификация проходит через валидируемый `startup_failed/thread_not_found`
+> frame до остановки process tree; stderr-вариант отклонён реальным
+> process-boundary тестом. Focused plain, race, architecture и metadata-only
+> live Codex test PASS; transient/network/auth сохраняют старый binding.
+> Финальный `20260910-terminal-recovery-satellite-v2 make check-full` PASS.
+> Нужны push/CI/deploy и live ready нового shared satellite.
 
 > A41 выпущен: старая one-shot схема препроцессинга заменена постоянными
 > скрытыми Codex/Luna-сателлитами с режимами `disabled`, `shared` и

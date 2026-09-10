@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -17,8 +18,8 @@ import (
 	"bria/internal/domain"
 	"bria/internal/promptpreprocess"
 	"bria/internal/promptpreprocesscommand"
+	"bria/internal/promptpreprocesscore"
 	providercodex "bria/internal/provider/codex"
-	"bria/internal/runtimeprotocol"
 )
 
 func TestMain(m *testing.M) {
@@ -114,22 +115,6 @@ func TestCodexSessionPassesExactResumeBindingToAdapter(t *testing.T) {
 	}
 	if err := current.Close(ctx); err != nil {
 		t.Fatal(err)
-	}
-}
-
-func TestStartupMarkerClassifiesOnlyExplicitMissingThreadMarker(t *testing.T) {
-	marker := &startupMarker{}
-	if _, err := marker.Write([]byte("bria codex adapter failed\n")); err != nil {
-		t.Fatal(err)
-	}
-	if marker.missingThread() {
-		t.Fatal("generic provider failure was classified as a missing thread")
-	}
-	if _, err := marker.Write([]byte("prefix " + runtimeprotocol.StartupFailureThreadNotFound + " suffix\n")); err != nil {
-		t.Fatal(err)
-	}
-	if !marker.missingThread() {
-		t.Fatal("explicit missing-thread marker was not classified")
 	}
 }
 
@@ -283,6 +268,38 @@ func TestLiveLunaPersistentSatellite(t *testing.T) {
 	afterRestart, found, err := bindings.Load(ctx, sharedKey)
 	if err != nil || !found || afterRestart.ProviderSessionID != before.ProviderSessionID {
 		t.Fatalf("shared thread was not resumed exactly: before=%#v after=%#v found=%t err=%v", before, afterRestart, found, err)
+	}
+}
+
+func TestLiveMissingCodexThreadCrossesAdapterBoundary(t *testing.T) {
+	if os.Getenv("BRIA_LIVE_MISSING_PREPROCESS_THREAD") != "1" {
+		t.Skip("live missing-thread acceptance is opt-in")
+	}
+	path, err := exec.LookPath("codex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	path, err = filepath.EvalSymlinks(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commands, err := promptpreprocesscommand.New(testConfigStore(path), append(os.Environ(), "BRIA_TEST_TELEGRAM_TOKEN=redacted"), "local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	selection, err := commands.Select(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	adapter, err := filepath.Abs(filepath.Join("..", "..", "bin", "bria-codex-adapter"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	current, err := startCodexSession(ctx, selection, adapter, "00000000-0000-4000-8000-000000000042")
+	if current != nil || !errors.Is(err, promptpreprocesscore.ErrResumeUnavailable) {
+		t.Fatalf("missing live thread = (%#v, %v), want ErrResumeUnavailable", current, err)
 	}
 }
 

@@ -154,6 +154,14 @@ func RunAdapter(ctx context.Context, parentInput io.ReadCloser, parentOutput io.
 		Ephemeral:      config.ThreadEphemeral,
 	})
 	if err != nil {
+		if errors.Is(err, ErrThreadNotFound) {
+			if writeErr := session.writeAdapterMessage(runtimeprotocol.AdapterMessage{
+				Protocol: runtimeprotocol.Version, Type: runtimeprotocol.TypeStartupFailed,
+				ErrorCode: runtimeprotocol.StartupErrorThreadNotFound,
+			}); writeErr != nil {
+				return writeErr
+			}
+		}
 		return classifyStartupError(err)
 	}
 	if config.RequireReadOnly && (!thread.HasEffectiveSandbox || normalizeSandbox(thread.EffectiveSandbox.Type) != "readonly" || thread.EffectiveSandbox.NetworkAccess) {
