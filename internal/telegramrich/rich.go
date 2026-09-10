@@ -10,6 +10,7 @@ import (
 // NormalizeRichMarkdown applies the compact table layout expected by Telegram.
 func NormalizeRichMarkdown(text string) string {
 	text = normalizeRichCodeFences(text)
+	text = normalizeRichBlockquotes(text)
 	lines := strings.Split(text, "\n")
 	rows := tableRows(lines)
 	var result []string

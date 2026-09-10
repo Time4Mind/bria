@@ -112,3 +112,33 @@ func TestActiveCardExecUsesNativeRichCodeOnWire(t *testing.T) {
 		t.Fatalf("active card tool formatting = %q", wire.Rich.Markdown)
 	}
 }
+
+func TestActiveCardMarkdownQuoteUsesNativeRichBlockquoteOnWire(t *testing.T) {
+	var wire struct {
+		Rich *telegram.InputRichMessage `json:"rich_message"`
+	}
+	client, err := telegram.NewClient("123:rich-quote-test", spacingHTTPClient(func(request *http.Request) (*http.Response, error) {
+		if err := json.NewDecoder(request.Body).Decode(&wire); err != nil {
+			t.Fatal(err)
+		}
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"ok":true,"result":{"message_id":55,"from":{"id":600,"is_bot":true},"chat":{"id":42,"type":"private"}}}`))}, nil
+	}), telegram.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sender, err := telegrambridge.NewSender(client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sender.Close(context.Background())
+	body := "Exact preview:\n\n&gt; Проверил прототип.\n&gt;\n&gt; Что проверено:\n&gt; - нет дублей;\n&gt; - арифметика сходится.\n\nСледующий абзац."
+	status := coordinator.Status{ConversationID: 42, SourceMessageID: 55, Text: "workdir · local · codex · готова\n\n─────  \n" + body, RichMarkdown: true}
+	keyboard := coordinator.KeyboardMarkup{{{Text: "1/1", CallbackData: "signed"}}}
+	if _, err := sender.EditStatusWithKeyboard(context.Background(), "active-card-quote", status, &keyboard); err != nil {
+		t.Fatal(err)
+	}
+	if wire.Rich == nil || !strings.Contains(wire.Rich.Markdown, "<blockquote>Проверил прототип.\n\nЧто проверено:\n- нет дублей;\n- арифметика сходится.</blockquote>") ||
+		strings.Contains(wire.Rich.Markdown, "&gt;") || !strings.HasSuffix(wire.Rich.Markdown, "</blockquote>\n\nСледующий абзац.") {
+		t.Fatalf("active card quote formatting = %q", wire.Rich.Markdown)
+	}
+}

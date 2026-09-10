@@ -22,6 +22,18 @@ func TestNormalizeRichMarkdownConvertsShellFenceForRichClients(t *testing.T) {
 	}
 }
 
+func TestNormalizeRichMarkdownConvertsQuotesButPreservesLiteralMarkers(t *testing.T) {
+	input := "Before\n\n> quoted\n>\n> - item\n\n```markdown\n> literal\n```"
+	want := "Before\n\n<blockquote>quoted\n\n- item</blockquote>\n\n<pre><code class=\"language-markdown\">&gt; literal</code></pre>"
+	got := telegram.NormalizeRichMarkdown(input)
+	if got != want {
+		t.Fatalf("normalized quote = %q, want %q", got, want)
+	}
+	if again := telegram.NormalizeRichMarkdown(got); again != got {
+		t.Fatalf("quote normalization changed on second pass: %q", again)
+	}
+}
+
 func TestNormalizeRichMarkdownPreservesEscapesAndNonTables(t *testing.T) {
 	cases := []struct{ input, want string }{
 		{"Before\n| A | B |\n|:---|---:|\n| x\\|y |  |\nAfter", "Before\n\n| <sub>A</sub> | <sub>B</sub> |\n|:---|---:|\n| <sub>x\\|y</sub> |  |\nAfter"},

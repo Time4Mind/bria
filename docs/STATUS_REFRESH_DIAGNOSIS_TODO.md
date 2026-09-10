@@ -44,6 +44,18 @@ defect is reproduced at a public projection/render seam, the requested historica
 behavior is isolated without importing legacy state, focused RED/GREEN and race
 tests pass, and the combined exact release completes the full and live gates.
 
+Task amendment A37: Artem's live screenshot of the same active card after the
+A36 release shows ordinary Markdown quote markers (`>`, `> >`, `> -`) rendered
+as visible prose. Source evidence is that screenshot, the persisted final entry
+and the exact Rich wire path. Unit: one contiguous Markdown blockquote in any
+old or new session-card entry. Population: raw and HTML-escaped quote markers
+outside literal code; exclusions: comparison operators, code spans/fences,
+technical spoilers and semantic content. Allowed writes and release targets are
+unchanged. Acceptance: the screenshot-shaped public wire test is RED before the
+fix and emits one native `<blockquote>` after it, old persisted history remains
+unchanged and becomes correct on ordinary card re-render, full gate and release
+postflight pass.
+
 | ID | Required outcome | Status | Evidence / open boundary |
 | --- | --- | --- | --- |
 | A35.1 | Identify the latest individual Status callback chains | verified | Two double-click groups: 17:50:25/27 UTC and 17:57:03/08 UTC; every callback/edit completed without an error |
@@ -57,6 +69,10 @@ tests pass, and the combined exact release completes the full and live gates.
 | A36.2 | Diagnose the malformed current active-card formatting | verified | Active `workdir6` card was on page 53/54 inside technical history; bounded neighboring metadata contained 10-16-line `exec` commands rendered as undifferentiated spoiler text |
 | A36.3 | Match the useful historical formatting without legacy-state coupling | verified locally | Historical legacy/ccbot comparison isolated native Rich code blocks as the useful difference; current spacing is already equivalent and remains unchanged |
 | A36.4 | Verify and release the combined A35+A36 version | verified | Commit `7ce4578` passed Stage 1 `34408284521` and Platform matrix `34408284601`; `20260910-status-formatting` is installed with matching trio hashes, PID 51199 running as sole lock holder, and preserved state/settings/config |
+| A37.1 | Reproduce the live blockquote defect from the active card | verified | Persisted final entry 215 retains 23 newlines and raw `>` markers; public Rich-wire RED sent the corresponding `&gt;` lines unchanged, matching the screenshot |
+| A37.2 | Render ordinary Markdown quotes natively without touching literals | verified locally | Consecutive raw or escaped quote lines become one `<blockquote>`; blank quote lines and lists are preserved, fenced markers stay code, and normalization is idempotent |
+| A37.3 | Prove old-session applicability | verified locally | The fix runs after persisted history is projected, not during ingestion; entry 215 needs no migration and will use the new renderer on its next ordinary page render |
+| A37.4 | Full verification and automatic follow-up release | in progress | Focused public Telegram/Rich/card tests pass; race, full gate, Git/CI/install/restart/postflight remain |
 
 Ranked hypotheses: (1) the callback renders before an asynchronous quota refresh
 updates the cache; (2) the first transport edit completes late and is mistaken for

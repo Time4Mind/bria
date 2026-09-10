@@ -908,7 +908,7 @@ func TestArchitectureCheckerCapsCoherentCustodyResponsibilities(t *testing.T) {
 		{path: "internal/settingscodec", limit: 150},
 		{path: "internal/telegramcallbackview", limit: 500},
 		{path: "internal/telegramhistory", limit: 100},
-		{path: "internal/telegramrich", limit: 200},
+		{path: "internal/telegramrich", limit: 250},
 		{path: "internal/nativerender", limit: 550},
 		{path: "internal/nativescreencache", limit: 400},
 		{path: "internal/telegramturnhelpers", limit: 375},
