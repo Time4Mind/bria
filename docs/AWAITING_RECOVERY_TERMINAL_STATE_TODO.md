@@ -45,10 +45,20 @@
 | A42.1 | Идентифицировать live-сессию и причину состояния | bounded timeline state/log/native evidence | verified | `workdir7`, создана 10:42 MSK. Exact binding `01a08ac8...`, tmux PID 20903 и Codex PID 20909 живы; transcript продолжался около часа после перехода в awaiting. Native history знает accepted `783531720`, но не старый unknown `783531721`; строгая reconciliation после успешного attach возвращает ошибку и отцепляет observer. Dead terminal, потерянный binding и replay нового pending исключены. Payload не читался. |
 | A42.2 | Устранить устойчивый `awaiting_recovery` | public RED/GREEN двух terminal branches | verified locally | Exact attach больше не откатывается из-за старого replay-fenced unknown без native receipt. `terminal_unavailable` проходит через bounded safe startup class и архивирует сессию; generic/transient ошибка не получает эту классификацию и остаётся retryable. |
 | A42.3 | Не повторять старый accepted input | restart/recovery regression | verified locally | Старый unknown сохраняет фазу и не lease-ится повторно, но допускает более новый pending root. Reconciliation/selector/root tests по 10 повторов PASS. |
-| A42.4 | Выпустить и проверить live | full gate, exact-SHA CI, service/state postflight | pending | Без ручной правки state и тестового Telegram input. |
-| A42.5 | Проверить reconnect preprocess satellite при restart Bria | shared и per-session identity/queue restart tests | verified locally | Shared warmup загружает прежний binding и exact-resume-ит один thread. После main recovery `Reconcile` exact-resume-ит прежний thread каждого active primary; archived primary не запускается. Очередь остаётся в durable main journal. Новые restart tests по 10 повторов и full race PASS. |
+| A42.4 | Выпустить и проверить live | full gate, exact-SHA CI, service/state postflight | in progress | Первый runtime `e9e8fa1` прошёл оба CI и восстановил `workdir7` из `awaiting_recovery` в `ready` с тем же provider thread и generation 2→3; tmux/Codex PID сохранились. Postflight выявил отдельный missing-empty-satellite case, поэтому terminal criterion ещё не закрыт. |
+| A42.5 | Проверить reconnect preprocess satellite при restart Bria | shared и per-session identity/queue restart tests | verified locally | Для физически сохранённого rollout shared warmup exact-resume-ит прежний binding. После main recovery `Reconcile` делает то же для каждого active primary; archived primary не запускается. Очередь остаётся в durable main journal. Новые restart tests по 10 повторов и full race PASS. |
+| A42.6 | Не оставлять startup без сателлита, если прогретый пустой thread ещё не получил rollout | exact missing classification, fresh replacement; transient error preserves binding | verified locally | Live Codex metadata probe доказал `no rollout found` для сохранённого shared ID: пустой thread ещё не имел физического rollout. RED/GREEN классифицирует только этот ответ, передаёт безопасный process marker и создаёт fresh replacement с атомарной заменой binding. Generic/network/auth failure не заменяет ID. Одинаковый slot path используется shared и per-session. |
 
 ## Локальная проверка перед выпуском
 
 - `TMPDIR=/private/tmp/bria-a42-tests VERSION=20260910-terminal-recovery make check-full` - PASS: policy, formatting, architecture, все unit/integration, полный race, vet, operational packaging и executable trio.
 - Первый диагностический gate с неканоническим macOS `TMPDIR=/var/...` воспроизвёл старое расхождение symlink-path в filesystem fixtures. Те же четыре пакета и затем весь gate прошли с каноническим `/private/tmp`; набор проверок не сокращался.
+- После первого live restart основной recovery прошёл, но shared warmup дважды получил
+  provider `start_failed`. Прямой metadata-only `thread/resume` без prompt вернул
+  `no rollout found`; это доказанный пустой warm thread, а не network/auth сбой.
+  Дополнительный focused plain/race и architecture gate для replacement-фикса PASS.
+- `TMPDIR=/private/tmp/bria-a42-tests VERSION=20260910-terminal-recovery-satellite make check-full`
+  PASS вне filesystem sandbox: policy, format, architecture, все unit/integration,
+  native tmux tests, vet, packaging, полный race и executable trio. Контрольный
+  запуск `internal/nativeadapter` подтвердил, что массовый первый сбой был
+  sandbox-only и не воспроизводится в разрешённом terminal context.

@@ -423,6 +423,31 @@ func TestThreadStartCanResumePersistedThreadIDWithDocumentedShape(t *testing.T) 
 	}
 }
 
+func TestThreadResumeClassifiesMissingRolloutWithoutLeakingRemoteMessage(t *testing.T) {
+	t.Parallel()
+
+	transcript := strings.Join([]string{
+		`{"id":1,"result":{"userAgent":"codex-cli/current"}}`,
+		`{"id":2,"error":{"code":-32600,"message":"no rollout found for thread id thread-missing"}}`,
+	}, "\n") + "\n"
+	client, err := codex.NewClient(strings.NewReader(transcript), io.Discard, codex.Options{
+		ClientInfo: codex.ClientInfo{Name: "bria", Version: "0.1.0"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Initialize(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	_, err = client.StartThread(context.Background(), codex.ThreadStartRequest{ResumeThreadID: "thread-missing"})
+	if !errors.Is(err, codex.ErrThreadNotFound) {
+		t.Fatalf("StartThread(resume) error = %v, want ErrThreadNotFound", err)
+	}
+	if strings.Contains(err.Error(), "thread-missing") {
+		t.Fatalf("classified error leaked provider thread id: %v", err)
+	}
+}
+
 func TestTurnCompletionIsAuthoritativeAndDoesNotInventFinalFromSummary(t *testing.T) {
 	t.Parallel()
 

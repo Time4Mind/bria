@@ -1346,7 +1346,7 @@ var packagePolicies = map[string]packagePolicy{
 	},
 	"cmd/bria-codex-adapter": {
 		responsibility:     "compose the Codex adapter process",
-		allowedImports:     []string{"internal/domain", "internal/nativeadapter", "internal/provider/codex"},
+		allowedImports:     []string{"internal/domain", "internal/nativeadapter", "internal/provider/codex", "internal/runtimeprotocol"},
 		maxProductionLines: 200,
 		compositionRoot:    true,
 	},

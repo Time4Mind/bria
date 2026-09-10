@@ -18,6 +18,7 @@ import (
 	"bria/internal/promptpreprocess"
 	"bria/internal/promptpreprocesscommand"
 	providercodex "bria/internal/provider/codex"
+	"bria/internal/runtimeprotocol"
 )
 
 func TestMain(m *testing.M) {
@@ -113,6 +114,22 @@ func TestCodexSessionPassesExactResumeBindingToAdapter(t *testing.T) {
 	}
 	if err := current.Close(ctx); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestStartupMarkerClassifiesOnlyExplicitMissingThreadMarker(t *testing.T) {
+	marker := &startupMarker{}
+	if _, err := marker.Write([]byte("bria codex adapter failed\n")); err != nil {
+		t.Fatal(err)
+	}
+	if marker.missingThread() {
+		t.Fatal("generic provider failure was classified as a missing thread")
+	}
+	if _, err := marker.Write([]byte("prefix " + runtimeprotocol.StartupFailureThreadNotFound + " suffix\n")); err != nil {
+		t.Fatal(err)
+	}
+	if !marker.missingThread() {
+		t.Fatal("explicit missing-thread marker was not classified")
 	}
 }
 

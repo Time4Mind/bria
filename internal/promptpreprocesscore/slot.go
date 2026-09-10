@@ -132,6 +132,9 @@ func (slot *satelliteSlot) ensureStarted(ctx context.Context) error {
 		if err == nil {
 			startContext, cancel := context.WithTimeout(slot.ctx, 30*time.Second)
 			prepared, err = slot.factory(startContext, StartRequest{Key: slot.key, ResumeProviderSessionID: resumeID})
+			if resumeID != "" && errors.Is(err, ErrResumeUnavailable) && startContext.Err() == nil {
+				prepared, err = slot.factory(startContext, StartRequest{Key: slot.key})
+			}
 			cancel()
 		}
 		if err == nil {

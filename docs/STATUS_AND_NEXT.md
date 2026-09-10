@@ -12,7 +12,13 @@
 > архивируется через bounded safe class. Shared и per-session satellite restart
 > exact-resume-ят прежние thread ID; archived personal не запускается. Полный
 > `20260910-terminal-recovery make check-full` PASS с каноническим `/private/tmp`.
-> Далее commit/push, exact-SHA CI, install/restart и live-проверка `workdir7`.
+> Runtime `e9e8fa1` прошёл оба exact-SHA CI и live восстановил `workdir7` в
+> `ready` с прежним thread и живыми tmux/Codex. Postflight выявил отдельную
+> границу: прогретый, но ни разу не использованный shared satellite получил ID,
+> однако Codex ещё не создал rollout, поэтому exact resume вернул доказанный
+> `thread not found`. Добавлен узкий replacement только для этого класса;
+> transient/network/auth сохраняют старый binding. Нужны повторный полный gate,
+> push/CI/deploy и live ready нового shared satellite.
 
 > A41 выпущен: старая one-shot схема препроцессинга заменена постоянными
 > скрытыми Codex/Luna-сателлитами с режимами `disabled`, `shared` и

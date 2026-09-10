@@ -994,6 +994,8 @@ func classifyStartupError(err error) error {
 	switch {
 	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
 		return err
+	case errors.Is(err, ErrThreadNotFound):
+		return ErrThreadNotFound
 	case errors.Is(err, ErrTransport), errors.Is(err, ErrUnexpectedEOF), errors.Is(err, ErrUncancellableInput):
 		return ErrAdapterTransport
 	default:

@@ -28,6 +28,8 @@ const (
 	DefaultMaxAnswersPerQuestion = 8
 )
 
+const StartupFailureThreadNotFound = "bria-startup-failure:thread_not_found"
+
 var ErrProtocol = errors.New("runtime protocol violation")
 
 type MessageType string

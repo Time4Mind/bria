@@ -343,6 +343,61 @@ func TestManagerRestartReconnectsSharedSatelliteThread(t *testing.T) {
 	}
 }
 
+func TestManagerReplacesOnlyProvenMissingEmptySharedThread(t *testing.T) {
+	store := newMemoryBindingStore()
+	key := BindingKey{Mode: ModeShared}
+	if err := store.Save(context.Background(), Binding{Key: key, Desired: DesiredActive, ProviderSessionID: "empty-thread"}); err != nil {
+		t.Fatal(err)
+	}
+	starts := make(chan StartRequest, 2)
+	manager := newManager(func(_ context.Context, request StartRequest) (Session, error) {
+		starts <- request
+		if request.ResumeProviderSessionID != "" {
+			return nil, ErrResumeUnavailable
+		}
+		return &managerFixtureSession{threadID: "replacement-thread", started: make(chan string, 1), release: make(chan struct{})}, nil
+	}, store)
+	defer manager.Close(context.Background())
+	if err := manager.Warmup(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if first := receiveStart(t, starts); first.ResumeProviderSessionID != "empty-thread" {
+		t.Fatalf("first start = %#v, want exact resume", first)
+	}
+	if replacement := receiveStart(t, starts); replacement.ResumeProviderSessionID != "" {
+		t.Fatalf("replacement start = %#v, want fresh thread", replacement)
+	}
+	waitBinding(t, store, key, DesiredActive, "replacement-thread")
+}
+
+func TestManagerDoesNotReplaceThreadAfterUnclassifiedResumeFailure(t *testing.T) {
+	store := newMemoryBindingStore()
+	key := BindingKey{Mode: ModeShared}
+	if err := store.Save(context.Background(), Binding{Key: key, Desired: DesiredActive, ProviderSessionID: "existing-thread"}); err != nil {
+		t.Fatal(err)
+	}
+	starts := make(chan StartRequest, 2)
+	manager := newManager(func(_ context.Context, request StartRequest) (Session, error) {
+		starts <- request
+		return nil, ErrInvocation
+	}, store)
+	defer manager.Close(context.Background())
+	if err := manager.Warmup(context.Background()); !errors.Is(err, ErrInvocation) {
+		t.Fatalf("Warmup() error = %v, want ErrInvocation", err)
+	}
+	if first := receiveStart(t, starts); first.ResumeProviderSessionID != "existing-thread" {
+		t.Fatalf("first start = %#v, want exact resume", first)
+	}
+	select {
+	case extra := <-starts:
+		t.Fatalf("unclassified failure created replacement: %#v", extra)
+	case <-time.After(20 * time.Millisecond):
+	}
+	if got := store.binding(t, key).ProviderSessionID; got != "existing-thread" {
+		t.Fatalf("binding = %q, want preserved existing thread", got)
+	}
+}
+
 func TestManagerRestartReconnectsOnlyActivePerSessionSatellites(t *testing.T) {
 	store := newMemoryBindingStore()
 	activeKey := BindingKey{Mode: ModePerSession, SessionID: "main-active"}

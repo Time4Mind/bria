@@ -13,8 +13,9 @@ import (
 )
 
 var (
-	ErrUnavailable = errors.New("prompt preprocessing satellite is unavailable")
-	ErrInvocation  = errors.New("prompt preprocessing satellite invocation failed")
+	ErrUnavailable       = errors.New("prompt preprocessing satellite is unavailable")
+	ErrInvocation        = errors.New("prompt preprocessing satellite invocation failed")
+	ErrResumeUnavailable = errors.New("prompt preprocessing satellite resume target is unavailable")
 )
 
 // Mode aliases the provider-neutral durable topology type.

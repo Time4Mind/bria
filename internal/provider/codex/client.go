@@ -35,6 +35,7 @@ var (
 	ErrNotificationHandler           = errors.New("codex app-server notification handler failed")
 	ErrServerRequestHandler          = errors.New("codex app-server request handler failed")
 	ErrServerResponseAcceptedHandler = errors.New("codex app-server response acceptance handler failed")
+	ErrThreadNotFound                = errors.New("codex app-server thread is unavailable")
 	ErrTransport                     = errors.New("codex app-server transport failed")
 	ErrUncancellableInput            = errors.New("codex app-server input cannot be closed for context cancellation")
 	ErrUnexpectedEOF                 = errors.New("codex app-server stream ended before the operation completed")
@@ -1238,10 +1239,14 @@ func validateResponse(method string, message incomingMessage) (incomingMessage, 
 		return message, nil
 	}
 	var remote struct {
-		Code int64 `json:"code"`
+		Code    int64  `json:"code"`
+		Message string `json:"message"`
 	}
 	if err := json.Unmarshal(message.Error, &remote); err != nil {
 		return incomingMessage{}, ErrInvalidResponse
+	}
+	if method == "thread/resume" && remote.Code == -32600 && strings.HasPrefix(remote.Message, "no rollout found for thread id ") {
+		return incomingMessage{}, errors.Join(&RemoteError{Method: method, Code: remote.Code}, ErrThreadNotFound)
 	}
 	return incomingMessage{}, &RemoteError{Method: method, Code: remote.Code}
 }
