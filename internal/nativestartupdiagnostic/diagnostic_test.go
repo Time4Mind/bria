@@ -9,6 +9,11 @@ import (
 	"bria/internal/nativetranscript"
 )
 
+type unavailableStartupError struct{}
+
+func (unavailableStartupError) Error() string                     { return "private terminal detail" }
+func (unavailableStartupError) NativeStartupFailureClass() string { return "terminal_unavailable" }
+
 func TestFailureClassNeverEchoesPrivateError(t *testing.T) {
 	for _, test := range []struct {
 		err  error
@@ -22,6 +27,7 @@ func TestFailureClassNeverEchoesPrivateError(t *testing.T) {
 		{nativetranscript.ErrLimit, "native_transcript_read_limit"},
 		{&nativetranscript.RecordLimitError{Offset: 1, Observed: 3, Limit: 2}, "native_transcript_record_too_large"},
 		{nativetranscript.ErrMalformed, "native_transcript_malformed"},
+		{unavailableStartupError{}, "terminal_unavailable"},
 	} {
 		if got := FailureClass(test.err); got != test.want {
 			t.Fatalf("FailureClass(%T)=%q want %q", test.err, got, test.want)

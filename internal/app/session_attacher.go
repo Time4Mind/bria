@@ -4,3 +4,5 @@ import "bria/internal/providerattachport"
 
 // SessionAttacher retains the application's exact attach-only capability API.
 type SessionAttacher = providerattachport.SessionAttacher
+
+var ErrTerminalUnavailable = providerattachport.ErrTerminalUnavailable

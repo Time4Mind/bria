@@ -13,7 +13,6 @@ import (
 type AcceptedFinalRestorer interface {
 	RestoreAcceptedFinal(context.Context, domain.SessionID, string, string) error
 }
-
 type acceptedFinalLookup interface {
 	LookupFinal(context.Context, domain.SessionID, domain.ProviderBinding, string) (sessionruntime.ReconciledAcceptedTurn, bool, error)
 }

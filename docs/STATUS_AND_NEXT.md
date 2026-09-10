@@ -1,5 +1,19 @@
 # Handoff: статус и следующий план
 
+> Текущий запрос A42 - определить происхождение live-сессии `ab396f5b...` и
+> исключить устойчивый статус `awaiting_recovery`: ранее открытая и физически
+> доступная сессия должна автоматически восстановиться, доказанно
+> невосстановимая - закрыться/архивироваться. Ручная правка state и replay
+> accepted input запрещены. Договор, coverage и todo:
+> [AWAITING_RECOVERY_TERMINAL_STATE_TODO.md](AWAITING_RECOVERY_TERMINAL_STATE_TODO.md).
+> RCA подтверждён: exact tmux/Codex `workdir7` жив, но старый journal `unknown`
+> без native receipt отменял уже успешный attach. Фикс сохраняет replay fence,
+> но не блокирует reconnect/новый pending; доказанно отсутствующий terminal
+> архивируется через bounded safe class. Shared и per-session satellite restart
+> exact-resume-ят прежние thread ID; archived personal не запускается. Полный
+> `20260910-terminal-recovery make check-full` PASS с каноническим `/private/tmp`.
+> Далее commit/push, exact-SHA CI, install/restart и live-проверка `workdir7`.
+
 > A41 выпущен: старая one-shot схема препроцессинга заменена постоянными
 > скрытыми Codex/Luna-сателлитами с режимами `disabled`, `shared` и
 > `per_session`; default и миграция старого `true` - `shared`. Реальный Luna E2E

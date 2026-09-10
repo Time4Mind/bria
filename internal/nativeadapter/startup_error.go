@@ -1,8 +1,19 @@
 package nativeadapter
 
-import "bria/internal/nativestartupdiagnostic"
+import (
+	"errors"
 
-// StartupStage remains an alias for the adapter's public startup diagnostics API.
+	"bria/internal/nativestartupdiagnostic"
+	"bria/internal/nativeterminal"
+)
+
+type terminalUnavailableStartupError struct{ error }
+
+func (terminalUnavailableStartupError) NativeStartupFailureClass() string {
+	return "terminal_unavailable"
+}
+func (e terminalUnavailableStartupError) Unwrap() error { return e.error }
+
 type StartupStage = nativestartupdiagnostic.Stage
 
 const (
@@ -15,6 +26,9 @@ const (
 )
 
 func atStartupStage(stage StartupStage, err error) error {
+	if errors.Is(err, nativeterminal.ErrTerminalUnavailable) {
+		err = terminalUnavailableStartupError{err}
+	}
 	return nativestartupdiagnostic.AtStage(stage, err)
 }
 

@@ -55,3 +55,29 @@ func TestExactCustodySnapshotAllowsNewRootBehindAcceptedPrior(t *testing.T) {
 		t.Fatal("canceled read succeeded")
 	}
 }
+
+func TestReplayFencedUnknownDoesNotBlockNewerRoot(t *testing.T) {
+	ctx := context.Background()
+	j, err := messagejournal.Open(filepath.Join(t.TempDir(), "journal.json"), messagejournal.DefaultLimits())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"old", "next"} {
+		if _, _, err := j.EnqueueInput(ctx, "s", id, []byte(id)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := j.LeaseNextInput(ctx, "s", "worker", time.Unix(10, 0), time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := j.MarkInputDeliveryUnknown(ctx, "s", "old", "worker"); err != nil {
+		t.Fatal(err)
+	}
+	if ready, err := acceptedinput.RootReady(ctx, j, "s", "next", 2); err != nil || !ready {
+		t.Fatalf("replay-fenced unknown blocked newer root: ready=%t err=%v", ready, err)
+	}
+	inputs, err := j.Inputs(ctx, "s")
+	if err != nil || inputs[0].Phase != messagejournal.InputUnknown {
+		t.Fatalf("old unknown lost replay fence: %+v err=%v", inputs, err)
+	}
+}

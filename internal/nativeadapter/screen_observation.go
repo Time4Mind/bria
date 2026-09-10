@@ -16,9 +16,7 @@ type nativeObservationState struct {
 	sentAt      time.Time
 }
 
-// Screen observations are transport UI state, never transcript events. Quiet
-// ordinary streaming text is coalesced to at most one changed snapshot per
-// 300ms. Telegram visibility/rate limits are owned by the UI consumer.
+// Screen observations are transport UI state, never transcript events.
 func (a *adapter) observeScreen(ctx context.Context, now time.Time) error {
 	if !a.observation.sentAt.IsZero() && now.Sub(a.observation.sentAt) < 300*time.Millisecond {
 		return nil

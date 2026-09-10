@@ -44,7 +44,7 @@ func (d *Drain) lineComplete() {
 		if d.size > 0 && d.line[d.size-1] == '\r' {
 			line = line[:len(line)-1]
 		}
-		classes := []string{"authentication_required", "workspace_trust_required", "bypass_forbidden", "session_mismatch", "session_identity_invalid", "cli_exited", "readiness_timeout", "adapter_failed", "native_transcript_record_too_large", "native_transcript_read_limit", "native_transcript_malformed", "native_transcript_binding_invalid"}
+		classes := []string{"authentication_required", "workspace_trust_required", "bypass_forbidden", "session_mismatch", "session_identity_invalid", "cli_exited", "readiness_timeout", "adapter_failed", "terminal_unavailable", "native_transcript_record_too_large", "native_transcript_read_limit", "native_transcript_malformed", "native_transcript_binding_invalid"}
 		staged := false
 		for _, stage := range []string{"unknown", "open_terminal", "native_readiness_status", "binding_persistence", "receipt_baseline", "protocol_ready_emission"} {
 			for _, class := range classes {

@@ -5,6 +5,7 @@ import (
 	"bria/internal/domain"
 	"bria/internal/runtimeprotocol"
 	"context"
+	"errors"
 )
 
 var _ app.SessionAttacher = (*Starter)(nil)
@@ -22,7 +23,11 @@ func (starter *Starter) Attach(ctx context.Context, request app.StartSessionRequ
 	if !starter.SupportsAttach(request.Provider) || request.Mode != app.SessionStartResume || request.PriorBinding == nil {
 		return domain.ProviderBinding{}, ErrBindingMismatch
 	}
-	return starter.start(ctx, request, true)
+	binding, err := starter.start(ctx, request, true)
+	if err != nil && StartupFailureClass(err) == "terminal_unavailable" {
+		err = errors.Join(app.ErrTerminalUnavailable, err)
+	}
+	return binding, err
 }
 
 func (starter *Starter) Detach(ctx context.Context, request app.StartSessionRequest, binding domain.ProviderBinding) error {

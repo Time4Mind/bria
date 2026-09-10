@@ -311,6 +311,73 @@ func TestManagerArchiveAndRestoreResumesSameBinding(t *testing.T) {
 	waitBinding(t, store, key, DesiredActive, "thread-persisted")
 }
 
+func TestManagerRestartReconnectsSharedSatelliteThread(t *testing.T) {
+	store := newMemoryBindingStore()
+	firstStarts := make(chan StartRequest, 1)
+	first := newManager(func(_ context.Context, request StartRequest) (Session, error) {
+		firstStarts <- request
+		return &managerFixtureSession{threadID: "shared-restart-thread", started: make(chan string, 1), release: make(chan struct{})}, nil
+	}, store)
+	if err := first.Warmup(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if request := receiveStart(t, firstStarts); request.ResumeProviderSessionID != "" || request.Key != (BindingKey{Mode: ModeShared}) {
+		t.Fatalf("first shared start = %#v", request)
+	}
+	waitBinding(t, store, BindingKey{Mode: ModeShared}, DesiredActive, "shared-restart-thread")
+	if err := first.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	restarted := make(chan StartRequest, 1)
+	second := newManager(func(_ context.Context, request StartRequest) (Session, error) {
+		restarted <- request
+		return &managerFixtureSession{threadID: request.ResumeProviderSessionID, started: make(chan string, 1), release: make(chan struct{})}, nil
+	}, store)
+	defer second.Close(context.Background())
+	if err := second.Warmup(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if request := receiveStart(t, restarted); request.Key != (BindingKey{Mode: ModeShared}) || request.ResumeProviderSessionID != "shared-restart-thread" {
+		t.Fatalf("shared restart did not reconnect exact thread: %#v", request)
+	}
+}
+
+func TestManagerRestartReconnectsOnlyActivePerSessionSatellites(t *testing.T) {
+	store := newMemoryBindingStore()
+	activeKey := BindingKey{Mode: ModePerSession, SessionID: "main-active"}
+	archivedKey := BindingKey{Mode: ModePerSession, SessionID: "main-archived"}
+	if err := store.Save(context.Background(), Binding{Key: activeKey, Desired: DesiredActive, ProviderSessionID: "active-thread"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Save(context.Background(), Binding{Key: archivedKey, Desired: DesiredArchived, ProviderSessionID: "archived-thread"}); err != nil {
+		t.Fatal(err)
+	}
+	starts := make(chan StartRequest, 2)
+	manager := newManager(func(_ context.Context, request StartRequest) (Session, error) {
+		starts <- request
+		return &managerFixtureSession{threadID: request.ResumeProviderSessionID, started: make(chan string, 1), release: make(chan struct{})}, nil
+	}, store)
+	defer manager.Close(context.Background())
+	if err := manager.SetMode(context.Background(), ModePerSession); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Reconcile(context.Background(), []PrimaryState{
+		{SessionID: activeKey.SessionID, Desired: DesiredActive},
+		{SessionID: archivedKey.SessionID, Desired: DesiredArchived},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if request := receiveStart(t, starts); request.Key != activeKey || request.ResumeProviderSessionID != "active-thread" {
+		t.Fatalf("per-session restart did not reconnect exact active thread: %#v", request)
+	}
+	select {
+	case request := <-starts:
+		t.Fatalf("archived per-session satellite restarted: %#v", request)
+	case <-time.After(20 * time.Millisecond):
+	}
+}
+
 func TestManagerForgetClosesSatelliteAndDeletesHiddenBinding(t *testing.T) {
 	store := newMemoryBindingStore()
 	starts, closed := make(chan StartRequest, 2), make(chan string, 2)

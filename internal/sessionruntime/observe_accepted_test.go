@@ -4,14 +4,29 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"testing"
 	"time"
 
+	"bria/internal/app"
 	"bria/internal/domain"
 	"bria/internal/sessionruntime"
 )
+
+func TestAttachClassifiesOnlyProvenTerminalUnavailability(t *testing.T) {
+	spec := sessionruntime.CommandSpec{Path: os.Args[0], Args: []string{"-test.run=TestObserveAdapterHelper"}, Env: []string{"BRIA_OBSERVE_HELPER=1", "BRIA_OBSERVE_UNAVAILABLE=1"}, PersistentTerminal: true}
+	starter, err := sessionruntime.NewStarter(map[domain.Provider]sessionruntime.CommandSpec{domain.ProviderCodex: spec}, sessionruntime.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	prior := domain.ProviderBinding{Provider: domain.ProviderCodex, SessionID: "persisted", Generation: 7}
+	_, err = starter.Attach(context.Background(), resumeRequest(testRequest(t.TempDir(), "unavailable"), prior))
+	if !errors.Is(err, app.ErrTerminalUnavailable) || sessionruntime.StartupFailureClass(err) != "terminal_unavailable" {
+		t.Fatalf("unavailable attach classification = %v class=%q", err, sessionruntime.StartupFailureClass(err))
+	}
+}
 
 func TestAttachObservesAcceptedWithoutSubmittingAndShutdownDetaches(t *testing.T) {
 	spec := sessionruntime.CommandSpec{Path: os.Args[0], Args: []string{"-test.run=TestObserveAdapterHelper"}, Env: []string{"BRIA_OBSERVE_HELPER=1"}, PersistentTerminal: true}
@@ -53,6 +68,10 @@ func TestObserveAdapterHelper(t *testing.T) {
 	}
 	if os.Getenv("BRIA_ATTACH_ONLY") != "1" || os.Getenv("BRIA_PERSISTENT_TERMINAL") != "1" {
 		os.Exit(42)
+	}
+	if os.Getenv("BRIA_OBSERVE_UNAVAILABLE") == "1" {
+		fmt.Fprintln(os.Stderr, "bria-native-startup:open_terminal:terminal_unavailable")
+		os.Exit(1)
 	}
 	fmt.Println(`{"protocol":1,"type":"ready","provider_session_id":"persisted","readiness":"protocol","authentication":"unknown"}`)
 	scanner := bufio.NewScanner(os.Stdin)

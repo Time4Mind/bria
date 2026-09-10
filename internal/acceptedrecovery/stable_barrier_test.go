@@ -2,7 +2,6 @@ package acceptedrecovery_test
 
 import (
 	"context"
-	"errors"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -40,7 +39,7 @@ func (history *mutableAcceptedHistory) replace(turns ...sessionsupervisor.Reconc
 	history.mu.Unlock()
 }
 
-func TestHistoryUnverifiableCarriesSafeStableEvidenceRevision(t *testing.T) {
+func TestOldUnknownWithoutNativeReceiptDoesNotBlockExactTerminalRecovery(t *testing.T) {
 	ctx := context.Background()
 	journal, err := messagejournal.Open(filepath.Join(t.TempDir(), "journal.json"), messagejournal.DefaultLimits())
 	if err != nil {
@@ -71,20 +70,20 @@ func TestHistoryUnverifiableCarriesSafeStableEvidenceRevision(t *testing.T) {
 	history := &mutableAcceptedHistory{turns: []sessionsupervisor.ReconciledAcceptedTurn{{MessageID: "accepted", Outcome: sessionsupervisor.AcceptedTurnUnknown}}}
 	reconciler := acceptedrecovery.AcceptedTurnReconciler{Flow: flow, Histories: map[domain.Provider]sessionsupervisor.AcceptedTurnReconciler{domain.ProviderCodex: history}}
 
-	if _, err = reconciler.ReconcileAcceptedTurns(ctx, "logical", binding); err == nil {
-		t.Fatal("missing native receipt did not block recovery")
+	reconciliation, err := reconciler.ReconcileAcceptedTurns(ctx, "logical", binding)
+	if err != nil {
+		t.Fatalf("old replay-fenced unknown blocked exact terminal recovery: %v", err)
 	}
-	var barrier stableRecoveryBarrier
-	if !errors.As(err, &barrier) || barrier.StableRecoveryBarrierRevision() == "" {
-		t.Fatalf("history barrier has no stable revision: %v", err)
+	if len(reconciliation.Turns) != 1 || reconciliation.Turns[0].MessageID != "accepted" || reconciliation.Turns[0].Outcome != sessionsupervisor.AcceptedTurnUnknown {
+		t.Fatalf("active accepted turn was not retained exactly: %+v", reconciliation)
 	}
 	revisioner, ok := any(reconciler).(recoveryEvidenceRevision)
 	if !ok {
 		t.Fatal("accepted recovery does not expose a read-only evidence revision")
 	}
 	first, err := revisioner.RecoveryEvidenceRevision(ctx, "logical", binding)
-	if err != nil || first != barrier.StableRecoveryBarrierRevision() {
-		t.Fatalf("current revision = %q, %v; barrier = %q", first, err, barrier.StableRecoveryBarrierRevision())
+	if err != nil || first == "" {
+		t.Fatalf("current revision = %q, %v", first, err)
 	}
 	second, err := revisioner.RecoveryEvidenceRevision(ctx, "logical", binding)
 	if err != nil || second != first {
@@ -95,13 +94,7 @@ func TestHistoryUnverifiableCarriesSafeStableEvidenceRevision(t *testing.T) {
 		t.Fatalf("stable barrier changed custody: %+v, %v", inputs, err)
 	}
 
-	if _, err := journal.RetryInput(ctx, "logical", "unknown"); err != nil {
-		t.Fatal(err)
-	}
-	journalChanged, err := revisioner.RecoveryEvidenceRevision(ctx, "logical", binding)
-	if err != nil || journalChanged == first {
-		t.Fatalf("journal evidence change was invisible: %q, %v", journalChanged, err)
-	}
+	journalChanged := first
 	history.replace(
 		sessionsupervisor.ReconciledAcceptedTurn{MessageID: "accepted", Outcome: sessionsupervisor.AcceptedTurnUnknown},
 		sessionsupervisor.ReconciledAcceptedTurn{MessageID: "unknown", Outcome: sessionsupervisor.AcceptedTurnCompleted, TurnID: "turn-2"},

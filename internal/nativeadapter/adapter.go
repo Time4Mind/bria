@@ -1,5 +1,3 @@
-// Package nativeadapter bridges one owned native CLI terminal to Bria's
-// correlated runtime protocol. Terminal controls never become model turns.
 package nativeadapter
 
 import (
@@ -136,7 +134,6 @@ func Run(ctx context.Context, input io.ReadCloser, output io.Writer, config Conf
 			_ = a.reader.Close()
 		}
 	}()
-	// Baseline already existing history, never replay it as a new accepted input.
 	if !attached {
 		if err = a.baseline(ctx); err != nil && !(errors.Is(err, nativetranscript.ErrNotFound) && a.reader == nil) {
 			return atStartupStage(StartupStageReceiptBaseline, err)

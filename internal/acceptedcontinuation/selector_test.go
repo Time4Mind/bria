@@ -39,7 +39,7 @@ func TestSelectorKeepsAcceptedObservationWithoutPendingSuccessor(t *testing.T) {
 	}
 }
 
-func TestSelectorKeepsUnknownHandoffBarrierBeforePendingInput(t *testing.T) {
+func TestSelectorYieldsReplayFencedUnknownToNewerPendingInput(t *testing.T) {
 	ctx, selector, journal, session, prior := selectorFixture(t, "unknown")
 	if _, _, err := journal.EnqueueInput(ctx, "s", "pending", []byte("new")); err != nil {
 		t.Fatal(err)
@@ -49,8 +49,8 @@ func TestSelectorKeepsUnknownHandoffBarrierBeforePendingInput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !required {
-		t.Fatal("unknown provider hand-off lost its recovery barrier")
+	if required {
+		t.Fatal("replay-fenced unknown blocked a newer pending input")
 	}
 }
 

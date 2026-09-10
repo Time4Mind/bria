@@ -9,6 +9,7 @@ import (
 
 	"bria/internal/app"
 	"bria/internal/domain"
+	"bria/internal/providerattachport"
 	"bria/internal/sessionsupervisor"
 )
 
@@ -149,6 +150,20 @@ func TestUnavailableOrClosedNativeTerminalNeverFallsBackToStart(t *testing.T) {
 				t.Fatalf("unavailable terminal replaced or reported alive: result=%+v err=%v starts=%d", result, err, len(runtime.requests))
 			}
 		})
+	}
+}
+
+func TestProvenUnavailableNativeTerminalArchivesInsteadOfAwaitingForever(t *testing.T) {
+	ready := readySession(t, "proven-unavailable-attach")
+	prior, _ := ready.Binding()
+	next := prior
+	next.Generation++
+	store := &memoryStore{session: ready}
+	runtime := &attachRuntime{binding: next, err: providerattachport.ErrTerminalUnavailable}
+	supervisor := newSupervisorWithReconciler(t, store, waitFunc(func(context.Context, domain.SessionID, domain.ProviderBinding) error { return nil }), runtime, 1, nil, &fakeReconciler{})
+	result, err := supervisor.Watch(context.Background(), ready.ID(), prior)
+	if err != nil || !result.Archived || result.AwaitingRecovery || result.Recovered || store.session.Status() != domain.SessionArchived || len(runtime.requests) != 0 {
+		t.Fatalf("proven unavailable terminal remained recoverable: result=%+v status=%s err=%v starts=%d", result, store.session.Status(), err, len(runtime.requests))
 	}
 }
 

@@ -36,6 +36,16 @@ func TestStartupDiagnosticRetainsOnlyAllowlistedStageAndClass(t *testing.T) {
 	}
 }
 
+func TestStartupDiagnosticRetainsTerminalUnavailableClass(t *testing.T) {
+	d := &startupDiagnostic{}
+	_, _ = d.Write([]byte("bria-native-startup:open_terminal:terminal_unavailable\n"))
+	d.finish()
+	err := d.wrap(errors.New("startup failed"))
+	if got := StartupFailureClass(err); got != "terminal_unavailable" {
+		t.Fatalf("failure class = %q, want terminal_unavailable", got)
+	}
+}
+
 func TestStartupDiagnosticRejectsUnknownStage(t *testing.T) {
 	d := &startupDiagnostic{}
 	_, _ = d.Write([]byte("bria-native-startup:private_stage:adapter_failed\n"))

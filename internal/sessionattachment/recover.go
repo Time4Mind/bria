@@ -18,6 +18,22 @@ func Recover(ctx context.Context, awaiting domain.Session, prior domain.Provider
 		Workdir: awaiting.Workdir(), Mode: providerattachport.SessionStartResume, PriorBinding: &prior}
 	binding, err := options.Attacher.Attach(ctx, request)
 	if err != nil {
+		if errors.Is(err, providerattachport.ErrTerminalUnavailable) {
+			at := options.Now().UTC()
+			closing, closeErr := awaiting.BeginClose(at)
+			if closeErr != nil {
+				return result, errors.Join(ErrReconciliationRequired, closeErr)
+			}
+			archived, archiveErr := options.Archive(closing, at)
+			if archiveErr != nil {
+				return result, archiveErr
+			}
+			if replaceErr := options.Store.Replace(ctx, awaiting, archived); replaceErr != nil {
+				return options.Conflict(ctx, awaiting, replaceErr)
+			}
+			result.Session, result.AwaitingRecovery, result.Archived = archived, false, true
+			return result, nil
+		}
 		return result, errors.Join(ErrReconciliationRequired, fmt.Errorf("attach existing terminal: %w", err))
 	}
 	keep := false

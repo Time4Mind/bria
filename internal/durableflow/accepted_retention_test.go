@@ -156,7 +156,7 @@ func TestRecoveryUncertainAcceptedAndPreacceptanceRemainDistinct(t *testing.T) {
 				if err != nil || len(inputs) != 2 || inputs[0].Phase != wantPhase || inputs[1].Phase != messagejournal.InputPending {
 					t.Fatalf("recovery changed custody: %#v %v", inputs, err)
 				}
-				if ready, err := f.RootInputReady(ctx, "s", "b", 2); ready != accepted || err != nil {
+				if ready, err := f.RootInputReady(ctx, "s", "b", 2); !ready || err != nil {
 					t.Fatalf("recovery admission mismatch: %v %v", ready, err)
 				}
 				resolver = acceptedResolverFunc(func(_ context.Context, in durableflow.AcceptedInput) (durableflow.AcceptedResolutionResult, error) {

@@ -39,13 +39,11 @@ func (s Selector) Required(ctx context.Context, session domain.Session, prior do
 	}
 	byMessage := make(map[string]messagejournal.Input, len(inputs))
 	var latestAccepted uint64
-	hardBarrier := false
 	for _, input := range inputs {
 		byMessage[input.MessageID] = input
 		if input.Phase == messagejournal.InputAccepted && input.Sequence > latestAccepted {
 			latestAccepted = input.Sequence
 		}
-		hardBarrier = hardBarrier || input.Phase == messagejournal.InputUnknown || input.Phase == messagejournal.InputFailed
 	}
 	seen := make(map[string]bool, len(reconciliation.Turns))
 	for _, turn := range reconciliation.Turns {
@@ -64,14 +62,13 @@ func (s Selector) Required(ctx context.Context, session domain.Session, prior do
 		case messagejournal.InputCompleted, messagejournal.InputTerminalFailed:
 			continue
 		case messagejournal.InputUnknown:
-			hardBarrier = true
+			if input.Sequence > latestAccepted {
+				latestAccepted = input.Sequence
+			}
 		case messagejournal.InputAccepted:
 		default:
 			return false, errors.New("accepted continuation input has no acceptance custody")
 		}
-	}
-	if hardBarrier {
-		return true, nil
 	}
 	if latestAccepted == 0 {
 		return false, nil

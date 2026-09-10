@@ -71,6 +71,10 @@ func FailureClass(err error) string {
 			return failure.class
 		}
 	}
+	var classified interface{ NativeStartupFailureClass() string }
+	if errors.As(err, &classified) && classified.NativeStartupFailureClass() == "terminal_unavailable" {
+		return "terminal_unavailable"
+	}
 	if errors.Is(err, context.DeadlineExceeded) {
 		return "readiness_timeout"
 	}

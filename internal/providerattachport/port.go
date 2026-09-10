@@ -9,6 +9,11 @@ import (
 	"strings"
 )
 
+// ErrTerminalUnavailable proves that the exact persisted native terminal no
+// longer exists. Temporary adapter, authentication and protocol failures must
+// not be wrapped with this sentinel.
+var ErrTerminalUnavailable = errors.New("exact native terminal is unavailable")
+
 // SessionStartMode distinguishes creation of a provider session from exact
 // continuation of an already identified provider session.
 type SessionStartMode string

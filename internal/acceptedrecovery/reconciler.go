@@ -36,6 +36,9 @@ func (reconciler AcceptedTurnReconciler) ReconcileAcceptedTurns(ctx context.Cont
 	results, err := reconciler.Flow.ReconcileAcceptedInputs(ctx, string(sessionID), resolver)
 	receipt := sessionsupervisor.AcceptedTurnReconciliation{Turns: make([]sessionsupervisor.ReconciledAcceptedTurn, 0, len(results))}
 	for _, result := range results {
+		if resolver.turnIDs[result.MessageID] == "\x00" {
+			continue
+		}
 		outcome := sessionsupervisor.AcceptedTurnUnknown
 		switch result.Resolution {
 		case durableflow.AcceptedCompleted:
@@ -55,7 +58,6 @@ func (reconciler AcceptedTurnReconciler) ReconcileAcceptedTurns(ctx context.Cont
 	}
 	return receipt, err
 }
-
 func (reconciler AcceptedTurnReconciler) RecoveryEvidenceRevision(ctx context.Context, sessionID domain.SessionID, binding domain.ProviderBinding) (string, error) {
 	return evidence.Revision(ctx, reconciler.Flow, reconciler.Histories[binding.Provider], sessionID, binding)
 }
@@ -64,11 +66,10 @@ type acceptedInputHistoryResolver struct {
 	history   sessionsupervisor.AcceptedTurnReconciler
 	sessionID domain.SessionID
 	binding   domain.ProviderBinding
-	loaded    bool
+	err       error
 	outcomes  map[string]sessionsupervisor.AcceptedTurnOutcome
 	turnIDs   map[string]string
 	sequences map[string]uint64
-	err       error
 	finals    AcceptedFinalRestorer
 }
 
@@ -86,6 +87,10 @@ func (resolver *acceptedInputHistoryResolver) ResolveAccepted(ctx context.Contex
 	}
 	outcome, found := resolver.outcomes[input.MessageID]
 	if !found {
+		if input.PreviouslyUnknown {
+			resolver.turnIDs[input.MessageID] = "\x00"
+			return result, nil
+		}
 		return result, fmt.Errorf("%w: message %q is absent", errAcceptedTurnHistoryUnverifiable, input.MessageID)
 	}
 	if input.PreviouslyFailed && outcome != sessionsupervisor.AcceptedTurnFailed {
@@ -110,12 +115,10 @@ func (resolver *acceptedInputHistoryResolver) ResolveAccepted(ctx context.Contex
 	}
 	return result, nil
 }
-
 func (resolver *acceptedInputHistoryResolver) load(ctx context.Context) {
-	if resolver.loaded {
+	if resolver.outcomes != nil || resolver.err != nil {
 		return
 	}
-	resolver.loaded = true
 	if resolver.history == nil {
 		resolver.err = errAcceptedTurnHistoryUnverifiable
 		return
@@ -142,6 +145,3 @@ func (resolver *acceptedInputHistoryResolver) load(ctx context.Context) {
 		}
 	}
 }
-
-var _ sessionsupervisor.AcceptedTurnReconciler = AcceptedTurnReconciler{}
-var _ durableflow.AcceptedInputResolver = (*acceptedInputHistoryResolver)(nil)
