@@ -27,7 +27,7 @@
 | A39-6 | Исключить тупик initial start | verified_focused | 3 попытки одной durable identity; persisted `starting` нормализуется без запуска, retained non-empty unbound session пропускает generic startup и автоматически восстанавливается live через config-aware starter; cancellation после binding ограждена bounded finalization context |
 | A39-7 | Остановить бесконечный recovery loop | verified_focused | Автоматический per-session/per-lifecycle backoff 1/2/4/8/16/20 min, далее 20 min; reset при смене binding/lifecycle или успехе; одна correlated запись на фактическую ошибку |
 | A39-8 | Проверить Telegram active/list после failure | verified_focused | Public regressions: starting видна сразу; retained awaiting остаётся активной до auto-recovery; доказанно пустая удаляется; поздний failure не перезаписывает новый выбор пользователя |
-| A39-9 | Полный выпуск и live postflight | release_in_progress | Свежий `VERSION=20260910-session-recovery make check-full` PASS; exact manifest, commit/push, exact-SHA CI, install/restart и live postflight выполняются |
+| A39-9 | Полный выпуск и live postflight | complete | Runtime `1240d77`; оба exact-SHA CI PASS; `20260910-session-recovery` установлен, PID 20745 running/sole lock; hashes, config/settings и population сохранены; `ab396f5b...` автоматически recovered в Ready с binding |
 | A39-10 | Сохранить architecture boundaries | verified | Поведение вынесено в `initialstartretry`, `nativestartupdiagnostic`, `recoverybackoff`; новые edges и минимальные budgets зарегистрированы; `make check-architecture` PASS |
 | A39-11 | Устранить обнаруженную full-gate PID race | verified_focused | `sessionruntime` helper публиковал PID через truncate/write, reader видел пустой файл; заменено на temp+rename для трёх PID receipts, regression 100/100 PASS |
 
@@ -67,3 +67,25 @@
   проверки отсутствовал; Bria не перезапускалась.
 - Интервал между физическим нажатием кнопки в Telegram и `ingress.received`:
   callback update не содержит измеряемого client-click timestamp.
+
+## Release receipt
+
+Runtime commit `1240d771ce34740cab059d15f7223ca8a8a626c2` находится в
+`origin/main`. Полный локальный
+`VERSION=20260910-session-recovery make check-full` прошёл. Exact-SHA Stage 1
+run `34463753241` и Platform run `34463753299` завершились успешно, включая
+полный race suite и native macOS/Ubuntu checks.
+
+Версия `20260910-session-recovery` установлена; `previous` указывает на
+`20260910-ci-acceleration`. Хэши установленной тройки: Bria
+`b1866c92...41575`, Codex adapter `1e293178...f7eb`, Claude adapter
+`8c4ce502...aa92`. После restart `gui/501/com.time4mind.bria.v2` работает с
+PID 20745, и только этот PID держит `.state.json.lock`; config check и Telegram
+identity прошли.
+
+Postflight 2026-09-10 13:07 MSK: сохранены 8 сессий, 8 карточек, 555 записей
+истории, 13 journal sessions и 27 inputs; config/settings hashes не изменились.
+Проблемная `ab396f5b...` без ручного вмешательства перешла из unbound
+`awaiting_recovery` в `ready` с binding. После `telegram.flow_ready` свежих
+critical events нет. Новый пользовательский Telegram input не отправлялся;
+интервал client-click -> ingress по-прежнему не измеряется.

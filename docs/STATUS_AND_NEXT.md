@@ -12,9 +12,12 @@
 > [SESSION_CREATION_RECOVERY_DIAGNOSIS_TODO.md](SESSION_CREATION_RECOVERY_DIAGNOSIS_TODO.md).
 > Initial retry, config-aware live recovery для `starting`/unbound awaiting,
 > lifecycle backoff, safe session-correlated startup logs, native cleanup и UI
-> selection regressions реализованы. Public RED/GREEN, focused race, architecture
-> gate и свежий полный `VERSION=20260910-session-recovery make check-full` PASS;
-> выполняется standing release sequence.
+> selection regressions выпущены. Runtime `1240d77`, полный локальный gate и оба
+> exact-SHA CI PASS. Установлен `20260910-session-recovery`, PID 20745
+> running/sole lock; hashes и пользовательские данные сохранены. Проблемная
+> `ab396f5b...` автоматически перешла из unbound awaiting в Ready с binding,
+> свежих critical events после `telegram.flow_ready` нет. Ручной новый Telegram
+> input не отправлялся; click-to-ingress по-прежнему не измеряется.
 
 > Текущий запрос A38: ускорить полный выпуск Bria без сокращения runtime/race/
 > platform/policy проверок. Fail-closed release-journal routing, Go cache и
