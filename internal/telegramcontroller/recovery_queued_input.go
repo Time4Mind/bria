@@ -20,5 +20,10 @@ func (c *Controller) queueRecoveryInput(ctx context.Context, update coordinator.
 	if err := telegramturnhelpers.AcceptInput(ctx, c.durableInput, id, messageID, input, c.preparation.Payload(ctx, input.Text)); err != nil {
 		return c.cardDecision(ctx, id, "Не удалось сохранить запрос. Он не отправлен CLI.")
 	}
-	return c.cardDecision(ctx, id, "")
+	// The input is already durably owned by the recovery worker. Rendering an
+	// awaiting-recovery card here would attach the legacy controller keyboard to
+	// a message update; the signed runtime rejects that keyboard and the same
+	// Telegram update then poisons every restart. Advance the ingress checkpoint
+	// without another projection. The recovery worker publishes the current card.
+	return coordinator.Decision{Kind: coordinator.DecisionSkip}, nil
 }

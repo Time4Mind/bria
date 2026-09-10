@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 
@@ -216,6 +217,27 @@ func TestUnknownHandlerEffectAdvancesOnlyAfterDurableRecoveryControl(t *testing.
 	}
 	if checkpoint.Outbound == nil || checkpoint.Outbound.OperationID != "recovery:20" || checkpoint.Outbound.Phase != coordinator.OutboundEnqueued {
 		t.Fatalf("recovery prompt outbound = %#v", checkpoint.Outbound)
+	}
+}
+
+func TestMessageHandlerFailureNeverUsesCallbackRecovery(t *testing.T) {
+	store := newMemoryStoreWith(coordinator.Checkpoint{Initialized: true, NextUpdateID: 20})
+	update := coordinator.Update{
+		ID: 20, Kind: coordinator.UpdateMessage, ActorID: 2,
+		ConversationID: 7, ConversationKind: "private", Text: "ordinary message",
+	}
+	source := &fakeSource{batches: [][]coordinator.Update{{update}}, pollErr: context.Canceled}
+	handler := &recoveryHandler{unknown: update.ID}
+
+	err := newLoop(t, source, store, handler, &fakeDurableSender{}, &fakeReadiness{}).Run(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "handle update 20") {
+		t.Fatalf("Run() error = %v, want original message-handler failure", err)
+	}
+	if handler.recoveryCalls != 0 {
+		t.Fatalf("callback recovery calls = %d, want 0 for a message update", handler.recoveryCalls)
+	}
+	if checkpoint := store.checkpoint(); checkpoint.NextUpdateID != 20 || checkpoint.Recovery != nil {
+		t.Fatalf("checkpoint mutated by callback recovery for message: %#v", checkpoint)
 	}
 }
 

@@ -438,7 +438,7 @@ func (loop *Loop) handleUpdate(
 	}
 	decision, err := loop.handler.Handle(ctx, update)
 	if err != nil {
-		if recovery, ok := loop.handler.(UnknownRecoveryHandler); ok {
+		if recovery, ok := loop.handler.(UnknownRecoveryHandler); ok && update.Kind == UpdateCallback {
 			control, prompt, recoveryErr := recovery.PrepareUnknownRecovery(ctx, update)
 			if recoveryErr != nil {
 				return StoredCheckpoint{}, fmt.Errorf("prepare recovery for update %d: %w", update.ID, recoveryErr)
