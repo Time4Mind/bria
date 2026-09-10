@@ -230,3 +230,30 @@ The focused four-package suite and ten repeated race runs pass. The combined
 exact source passed `VERSION=20260910-rich-back-navigation make check-full`,
 including all-package tests/race, policy, architecture, vet, packaging and the
 executable-trio acceptance. Commit, exact-SHA CI and installation are pending.
+
+## Combined A37+A38 release receipt
+
+Runtime commit `72e6c0a4225671f783180e6bb27576aa5234c4af` is present at
+`origin/main`. Stage 1 run `34440984408` and Platform matrix run `34440984426`
+both passed for that exact SHA. The installed release is
+`20260910-rich-back-navigation`; `previous` points to
+`20260910-status-formatting`. Installed SHA-256 is `17e40626...25bda` for Bria,
+`f9e24dbe...a46ec` for the Codex adapter and `54203c53...cdab3` for the Claude
+adapter, exactly matching the locally checked executable trio.
+
+Postflight at 2026-09-10 08:32 Europe/Moscow found launchd `running`, PID 12399
+and that sole process holding `.state.json.lock`. Configuration and state
+compatibility checks and Telegram identity passed. Seven sessions, seven cards,
+553 card-history entries, 12 journal sessions and 26 inputs were preserved;
+config and settings hashes remained unchanged. The new structured run emitted
+`telegram.flow_ready`, recovered one live session and recorded one
+`recovery_unknown`; no fresh critical event was emitted. The latter is a bounded
+existing-session recovery outcome, not an error in this callback release, but its
+user-visible effect was not exercised here.
+
+No Telegram input or synthetic callback was sent during deployment. A card whose
+keyboard was signed before this release must be rendered once by ordinary
+navigation before its `Ноды` button carries the new exact return target; this
+does not require creating a new provider session. After that render, both the
+return flow and persisted final-page Rich quote appearance remain for the
+owner's live visual acceptance.
