@@ -2,11 +2,12 @@
 
 > Текущий запрос A38: ускорить полный выпуск Bria без сокращения runtime/race/
 > platform/policy проверок. Fail-closed release-journal routing, Go cache и
-> параллельный Stage 1 реализованы локально по
-> [CI_ACCELERATION_TODO.md](CI_ACCELERATION_TODO.md). RED/GREEN, scripts,
-> packaging, non-race gate и actionlint PASS; финальные full gate/review ещё идут.
-> Product runtime, config, state и secrets не меняются. После полного gate -
-> автоматический push, exact-SHA CI и перезапуск только Bria с postflight.
+> параллельный Stage 1 выпущены по
+> [CI_ACCELERATION_TODO.md](CI_ACCELERATION_TODO.md). Source `cfc093e`, полный
+> local gate и оба exact-SHA CI PASS; Stage 1 сократился с 4:01-4:25 до 2:31.
+> Установлен `20260910-ci-acceleration`, PID36052 running/sole lock; hashes,
+> config/settings и 7 сессий/7 карточек/553 history сохранены. Этот docs-only
+> receipt проверяет лёгкий маршрут; повторный deploy не нужен.
 
 > Объединённый выпуск A35+A36 установлен. Status после первого клика
 > автоматически публикует свежую квоту; Ноды/Статус теперь сохраняют подпись
