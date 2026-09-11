@@ -60,7 +60,6 @@ func testSignedSettingsCallback(t *testing.T, name, label string, wireID callbac
 	}{
 		{"owner", 8, 42, 99, telegrampipeline.ErrNotOwner},
 		{"chat", 7, 41, 99, telegrampipeline.ErrNotPrivate},
-		{"stale carrier", 7, 42, 100, telegrampipeline.ErrStaleCallback},
 		{"valid", 7, 42, 99, nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

@@ -66,9 +66,13 @@ func TestAcceptCallbackDiagnosticReplayAndExactRecovery(t *testing.T) {
 		t.Fatalf("initial acceptance = %+v, %v", accepted, err)
 	}
 	want := callbackdiagnostic.Details{Code: "presentation_replayed", Action: "page_next", SessionID: string(sessionID), TokenID: presentation.TokenIDs[0], PresentationID: string(sessionID), Target: 2}
-	for _, replay := range []coordinator.Update{u, func() coordinator.Update { v := u; v.ID++; v.CallbackQueryID = "other"; return v }()} {
-		_, err = telegrampipeline.AcceptCallback(context.Background(), replay, 7, 42, cards{card: card()}, registry, presenter)
-		assertDiagnosticError(t, err, telegrampipeline.ErrReplayedCallback, "Telegram callback was already used", want)
+	_, err = telegrampipeline.AcceptCallback(context.Background(), u, 7, 42, cards{card: card()}, registry, presenter)
+	assertDiagnosticError(t, err, telegrampipeline.ErrReplayedCallback, "Telegram callback was already used", want)
+	distinct := u
+	distinct.ID++
+	distinct.CallbackQueryID = "other"
+	if repeated, repeatErr := telegrampipeline.AcceptCallback(context.Background(), distinct, 7, 42, cards{card: card()}, registry, presenter); repeatErr != nil || repeated.Action != telegramui.ActionPageNext {
+		t.Fatalf("distinct rapid navigation callback = %+v, %v", repeated, repeatErr)
 	}
 	recovered, err := telegrampipeline.AcceptCallbackForDurableOperation(context.Background(), u, 7, 42, cards{card: card()}, registry, presenter)
 	if err != nil || recovered != accepted {

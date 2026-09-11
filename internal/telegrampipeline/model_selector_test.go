@@ -53,8 +53,8 @@ func TestGlobalModelPickerAcceptsOnlyCurrentSignedPresentation(t *testing.T) {
 			t.Fatalf("replay error=%v", err)
 		}
 		update.SourceMessageID++
-		if _, err := telegrampipeline.AcceptCallback(context.Background(), update, 7, 42, nil, registry, presenter); !errors.Is(err, telegrampipeline.ErrStaleCallback) {
-			t.Fatalf("foreign carrier error=%v", err)
+		if _, err := telegrampipeline.AcceptCallback(context.Background(), update, 7, 42, nil, registry, presenter); !errors.Is(err, telegrampipeline.ErrReplayedCallback) {
+			t.Fatalf("same-chat message-id alias error=%v", err)
 		}
 		// A replacement keyboard invalidates the previous signed token even
 		// when the user taps on the same carrier message.

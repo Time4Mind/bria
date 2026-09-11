@@ -1,5 +1,19 @@
 # Handoff: статус и следующий план
 
+> Текущий запрос A48 - ускорить callback-проекции, восстановить page/follow
+> flow, скрыть пустую New из `Фон`, добавить rename ноды и `hh:mm:ss`, исправить
+> default auto-name и живой-terminal recovery. Автонейминг теперь требует от
+> дешёвой модели только ASCII Latin (`A-Z`, `a-z`, цифры) и fail-closed отклоняет
+> любой ответ с кириллицей или пунктуацией; валидное имя применяется до финала
+> primary turn. Локально также закрыты repeatable callbacks, bounded ledgers,
+> один inventory read для New/browser, durable page plan без write из
+> `ProjectCurrent`, rollback-compatible activity sidecar и safe recovery cutoff.
+> `VERSION=20260911-ui-latency-session-metadata make check-full` GREEN, включая
+> architecture, global race и executable trio. Далее - финальный independent
+> review, exact manifest, commit/push, exact-SHA CI, install/restart
+> `gui/501/com.time4mind.bria.v2` и safe live postflight. Полный договор и
+> evidence: [UI_LATENCY_AND_SESSION_METADATA_TODO.md](UI_LATENCY_AND_SESSION_METADATA_TODO.md).
+
 > Текущий запрос A47 - исправить открытые дефекты A46, production document
 > ingress, немедленные archive/default Starting transitions и подтверждённый
 > показ очищенного prompt до запуска основной модели. Первый выпущенный SHA

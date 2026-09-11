@@ -84,3 +84,17 @@ func (p ProviderPreferences) RenameNode(ctx context.Context, nodeID domain.Compu
 	}
 	return errors.New("не удалось сохранить имя ноды из-за конфликта конфигурации")
 }
+
+func (p ProviderPreferences) NodeName(ctx context.Context, nodeID domain.ComputerID) (string, error) {
+	if p.Store == nil {
+		return "", errors.New("provider configuration store is required")
+	}
+	snapshot, err := p.Store.Current(ctx)
+	if err != nil {
+		return "", err
+	}
+	if snapshot.Config.Computer == nil || domain.ComputerID(snapshot.Config.Computer.ID) != nodeID {
+		return "", errors.New("нода не найдена в локальной конфигурации")
+	}
+	return snapshot.Config.Computer.Name, nil
+}

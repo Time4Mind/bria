@@ -1,6 +1,7 @@
 package telegramsessions
 
 import (
+	"context"
 	"errors"
 	"path/filepath"
 	"strconv"
@@ -9,6 +10,28 @@ import (
 
 	"bria/internal/domain"
 )
+
+type Lister interface {
+	List(context.Context) ([]domain.Session, error)
+}
+
+func AvailableStoreName(ctx context.Context, sessions Lister, computerID domain.ComputerID, workdir string) (string, error) {
+	values, err := sessions.List(ctx)
+	if err != nil {
+		return "", err
+	}
+	return AvailableName(values, computerID, workdir)
+}
+
+func RowSizes(count int) []int {
+	result := make([]int, 0, (count+2)/3)
+	for count > 0 {
+		size := min(count, 3)
+		result = append(result, size)
+		count -= size
+	}
+	return result
+}
 
 func Labels(sessions []domain.Session, computerID domain.ComputerID) map[domain.SessionID]string {
 	result, used := make(map[domain.SessionID]string), make(map[string]struct{})

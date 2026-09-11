@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 	"unicode/utf8"
 
 	"bria/internal/domain"
@@ -54,6 +55,9 @@ type Card struct {
 	// LastPresentationOperation is assigned by receipt finalization, not by
 	// semantic history or pagination updates.
 	LastPresentationOperation string `json:"last_presentation_operation,omitempty"`
+	// LastEventUnixNano is the wall-clock time of the last visible transcript
+	// mutation. Navigation and carrier bookkeeping do not change it.
+	LastEventUnixNano int64 `json:"-"`
 
 	Page            Page     `json:"page"`
 	OptionsExpanded bool     `json:"options_expanded"`
@@ -72,6 +76,22 @@ type Card struct {
 	// PendingFinalOperations fences routine edits until each exact final has
 	// committed its new carrier. Missing legacy state does not invent custody.
 	PendingFinalOperations []string `json:"pending_final_operations,omitempty"`
+}
+
+// TouchEvent records a strictly increasing visible-event timestamp even if the
+// wall clock has coarse resolution or moves backwards slightly.
+func (c *Card) TouchEvent(at time.Time) {
+	if c == nil {
+		return
+	}
+	next := at.UTC().UnixNano()
+	if next <= c.LastEventUnixNano {
+		if c.LastEventUnixNano == 1<<63-1 {
+			return
+		}
+		next = c.LastEventUnixNano + 1
+	}
+	c.LastEventUnixNano = next
 }
 
 // PendingFinalsAfter returns an independent copy excluding only the exact
@@ -189,6 +209,9 @@ func (s State) Validate() error {
 			len(operation) > maxAnchor+6 || !utf8.ValidString(operation) ||
 			strings.ContainsAny(operation, "\x00\r\n") {
 			return errors.New("last presentation operation is invalid")
+		}
+		if card.LastEventUnixNano < 0 {
+			return errors.New("last card event time is invalid")
 		}
 		if len(card.History) > 512 {
 			return fmt.Errorf("card %q history is too long", id)

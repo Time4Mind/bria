@@ -7,6 +7,7 @@ import (
 	"bria/internal/cardhistory"
 	"bria/internal/domain"
 	"bria/internal/telegramstate"
+	"time"
 )
 
 // RestoreAcceptedFinalForSession saves only while the exact session still owns
@@ -23,8 +24,12 @@ func (store *SessionStore) RestoreAcceptedFinalForSession(ctx context.Context, e
 		if !ok {
 			return ErrSessionNotFound
 		}
+		beforeHistory, beforePending := len(card.History), len(card.PendingFinalOperations)
 		if err := cardhistory.RestoreFinal(&card, messageID, final); err != nil {
 			return err
+		}
+		if len(card.History) != beforeHistory || len(card.PendingFinalOperations) != beforePending {
+			card.TouchEvent(time.Now())
 		}
 		return state.SetCard(card)
 	})

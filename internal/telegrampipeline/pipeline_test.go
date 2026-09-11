@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -161,6 +162,118 @@ func TestAcceptCallbackClaimsCurrentPresentationOnceAndRejectsStaleButtons(t *te
 	stale.CallbackQueryID = "query-3"
 	if _, err := telegrampipeline.AcceptCallback(context.Background(), stale, 7, 42, cards{card: card()}, registry, presenter); !errors.Is(err, telegrampipeline.ErrStaleCallback) {
 		t.Fatalf("stale presentation error = %v, want ErrStaleCallback", err)
+	}
+}
+
+func TestAcceptCallbackKeepsRapidSafeNavigationFromVisibleKeyboard(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0).UTC()
+	codec, err := callbacktoken.New(bytes.Repeat([]byte{0x42}, 32), bytes.NewReader(bytes.Repeat([]byte{0x24}, 256)), func() time.Time { return now })
+	if err != nil {
+		t.Fatal(err)
+	}
+	presenter, err := telegrambridge.NewPresenter(codec, func() time.Time { return now }, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	presented, err := presenter.PresentKeyboardWithManifest(string(sessionID), nil, telegramui.CardKeyboard{Rows: []telegramui.ButtonRow{{
+		{Action: telegramui.ActionPagePrevious, Target: telegramui.ButtonTarget{Page: 2}},
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "callback-registry.json")
+	registry, err := telegrampipeline.OpenFileCallbackRegistry(path, func() time.Time { return now })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.Replace(context.Background(), telegrampipeline.CallbackPresentation{
+		SessionID: sessionID, Carrier: card().Carrier, TokenIDs: presented.TokenIDs, ExpiresAt: presented.ExpiresAt,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	registry, err = telegrampipeline.OpenFileCallbackRegistry(path, func() time.Time { return now })
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := update(7, 42, 99)
+	first.ID, first.CallbackQueryID = 201, "query-201"
+	first.Text = presented.Markup.InlineKeyboard[0][0].CallbackData
+	if _, err := telegrampipeline.AcceptCallbackForDurableOperation(context.Background(), first, 7, 42, cards{card: card()}, registry, presenter); err != nil {
+		t.Fatalf("first navigation tap: %v", err)
+	}
+	replacement, err := presenter.PresentKeyboardWithManifest(string(sessionID), nil, telegramui.CardKeyboard{Rows: []telegramui.ButtonRow{{
+		{Action: telegramui.ActionPagePrevious, Target: telegramui.ButtonTarget{Page: 1}},
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.Replace(context.Background(), telegrampipeline.CallbackPresentation{
+		SessionID: sessionID, Carrier: card().Carrier, TokenIDs: replacement.TokenIDs, ExpiresAt: replacement.ExpiresAt,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	second := first
+	second.ID, second.CallbackQueryID = 202, "query-202"
+	accepted, err := telegrampipeline.AcceptCallbackForDurableOperation(context.Background(), second, 7, 42, cards{card: card()}, registry, presenter)
+	if err != nil || accepted.Action != telegramui.ActionPagePrevious {
+		t.Fatalf("second rapid navigation tap = %#v, %v", accepted, err)
+	}
+}
+
+func TestAcceptCallbackKeepsRapidSessionSelectionAcrossCarrierOwnerChange(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0).UTC()
+	codec, err := callbacktoken.New(bytes.Repeat([]byte{0x43}, 32), bytes.NewReader(bytes.Repeat([]byte{0x25}, 256)), func() time.Time { return now })
+	if err != nil {
+		t.Fatal(err)
+	}
+	presenter, err := telegrambridge.NewPresenter(codec, func() time.Time { return now }, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner := domain.SessionID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+	target := domain.SessionID("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
+	carrier := telegramstate.Carrier{ChatID: 42, MessageID: 99}
+	presented, err := presenter.PresentKeyboardWithManifest(string(owner), []string{string(target)}, telegramui.CardKeyboard{Rows: []telegramui.ButtonRow{{
+		{Action: telegramui.ActionSelectSession, Target: telegramui.ButtonTarget{SessionSlot: 1}},
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "callback-registry.json")
+	registry, err := telegrampipeline.OpenFileCallbackRegistry(path, func() time.Time { return now })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.Replace(context.Background(), telegrampipeline.CallbackPresentation{SessionID: owner, Carrier: carrier, TokenIDs: presented.TokenIDs, ExpiresAt: presented.ExpiresAt}); err != nil {
+		t.Fatal(err)
+	}
+	registry, err = telegrampipeline.OpenFileCallbackRegistry(path, func() time.Time { return now })
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := update(7, 42, 99)
+	first.ID, first.CallbackQueryID, first.Text = 211, "query-211", presented.Markup.InlineKeyboard[0][0].CallbackData
+	cards := cardMap{
+		owner:  {SessionID: owner, Carrier: carrier, Page: telegramstate.Page{Current: 1, Total: 1, FollowLatest: true}},
+		target: {SessionID: target, Carrier: carrier, Page: telegramstate.Page{Current: 1, Total: 1, FollowLatest: true}},
+	}
+	if _, err := telegrampipeline.AcceptCallbackForDurableOperation(context.Background(), first, 7, 42, cards, registry, presenter); err != nil {
+		t.Fatalf("first session tap: %v", err)
+	}
+	replacement, err := presenter.PresentKeyboardWithManifest(string(target), []string{string(owner)}, telegramui.CardKeyboard{Rows: []telegramui.ButtonRow{{
+		{Action: telegramui.ActionSelectSession, Target: telegramui.ButtonTarget{SessionSlot: 1}},
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.Replace(context.Background(), telegrampipeline.CallbackPresentation{SessionID: target, Carrier: carrier, TokenIDs: replacement.TokenIDs, ExpiresAt: replacement.ExpiresAt}); err != nil {
+		t.Fatal(err)
+	}
+	second := first
+	second.ID, second.CallbackQueryID = 212, "query-212"
+	accepted, err := telegrampipeline.AcceptCallbackForDurableOperation(context.Background(), second, 7, 42, cards, registry, presenter)
+	if err != nil || accepted.Action != telegramui.ActionSelectSession || accepted.SessionID != target {
+		t.Fatalf("second rapid session tap = %#v, %v", accepted, err)
 	}
 }
 

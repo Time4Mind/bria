@@ -2,21 +2,19 @@ package telegrampipeline
 
 import (
 	"bria/internal/callbackdiagnostic"
+	"bria/internal/callbackregistry"
 	"bria/internal/coordinator"
 	"bria/internal/domain"
 	"bria/internal/telegrambridge"
 	"bria/internal/telegramrecovery"
-	"bria/internal/telegramrecovery/statusrecovery"
 	"bria/internal/telegramstate"
 	"bria/internal/telegramui"
 	"context"
 	"errors"
 	"fmt"
-	"reflect"
 	"strconv"
 	"sync"
 	"time"
-	"unicode/utf8"
 )
 
 var (
@@ -28,67 +26,23 @@ var (
 type CallbackDecoder interface {
 	DecodeCallbackWithMetadata(string) (telegrambridge.DecodedCallback, error)
 }
-type CallbackPresentation struct {
-	SessionID            domain.SessionID
-	Carrier              telegramstate.Carrier
-	TokenIDs             []string
-	ExpiresAt            time.Time
-	InteractionRequestID string
-	OutboundOperationID  string
-	OutboundUpdateID     int64
-	Recovery             *CallbackRecoveryBinding
-	AcceptedTurnRecovery *AcceptedTurnRecoveryBinding
-	StatusRecovery       *StatusRecoveryBinding
-	ArtifactRetry        *ArtifactRetryBinding
-}
-type CallbackRecoveryBinding struct {
-	OperationID string
-	UpdateID    int64
-	SessionID   domain.SessionID
-	Carrier     telegramstate.Carrier
-	Phase       string
-}
-type AcceptedTurnRecoveryBinding = telegramrecovery.AcceptedTurnBinding
-type StatusRecoveryBinding = statusrecovery.Binding
-type ArtifactRetryBinding = telegrambridge.ArtifactRetryBinding
-type CallbackClaim struct {
-	SessionID       domain.SessionID
-	Carrier         telegramstate.Carrier
-	TokenID         string
-	ExpiresAt       time.Time
-	UpdateID        int64
-	CallbackQueryID string
-}
-type CallbackClaimResult struct {
-	Outcome               ClaimOutcome
-	PresentationSessionID domain.SessionID
-	InteractionRequestID  string
-	OutboundOperationID   string
-	OutboundUpdateID      int64
-	Recovery              *CallbackRecoveryBinding
-	AcceptedTurnRecovery  *AcceptedTurnRecoveryBinding
-	StatusRecovery        *StatusRecoveryBinding
-	ArtifactRetry         *ArtifactRetryBinding
-	// Retired means the callback came from a presentation persisted by a
-	// previous Bria process. It remains valid after restart, but its carrier
-	// may no longer be the currently stored card carrier.
-	Retired bool
-}
-type ClaimOutcome string
+type CallbackPresentation = callbackregistry.Presentation
+type CallbackRecoveryBinding = callbackregistry.RecoveryBinding
+type AcceptedTurnRecoveryBinding = callbackregistry.AcceptedTurnRecoveryBinding
+type StatusRecoveryBinding = callbackregistry.StatusRecoveryBinding
+type ArtifactRetryBinding = callbackregistry.ArtifactRetryBinding
+type CallbackClaim = callbackregistry.Claim
+type CallbackClaimResult = callbackregistry.ClaimResult
+type ClaimOutcome = callbackregistry.Outcome
 
 const (
-	ClaimAccepted  ClaimOutcome = "accepted"
-	ClaimRecovered ClaimOutcome = "recovered"
-	ClaimStale     ClaimOutcome = "stale"
-	ClaimReplayed  ClaimOutcome = "replayed"
+	ClaimAccepted  = callbackregistry.Accepted
+	ClaimRecovered = callbackregistry.Recovered
+	ClaimStale     = callbackregistry.Stale
+	ClaimReplayed  = callbackregistry.Replayed
 )
 
-type CallbackRegistry interface {
-	Replace(context.Context, CallbackPresentation) error
-	Current(context.Context, domain.SessionID) (CallbackPresentation, bool, error)
-	Claim(context.Context, CallbackClaim) (CallbackClaimResult, error)
-	InvalidateCarrier(context.Context, telegramstate.Carrier) error
-}
+type CallbackRegistry = callbackregistry.Registry
 
 func BindPresentation(
 	ctx context.Context,
@@ -203,6 +157,7 @@ func acceptCallback(
 		ExpiresAt:       decoded.ExpiresAt,
 		UpdateID:        update.ID,
 		CallbackQueryID: update.CallbackQueryID,
+		Repeatable:      repeatableVisibleAction(decoded.Callback.Action),
 	}
 	claimResult, err := registry.Claim(ctx, claim)
 	details.PresentationID, details.Retired = string(claimResult.PresentationSessionID), claimResult.Retired
@@ -320,6 +275,18 @@ func acceptCallback(
 		Target:               decoded.Callback.Target,
 		InteractionRequestID: claimResult.InteractionRequestID,
 	}, nil
+}
+
+func repeatableVisibleAction(action telegramui.Action) bool {
+	switch action {
+	case telegramui.ActionPagePrevious, telegramui.ActionPageLatest, telegramui.ActionPageNext,
+		telegramui.ActionSelectSession,
+		telegramui.ActionCreatePrevious, telegramui.ActionCreateFirst, telegramui.ActionCreateNext,
+		telegramui.ActionMenuArchive:
+		return true
+	default:
+		return false
+	}
 }
 func validateCallbackOrigin(update coordinator.Update, ownerUserID, ownerPrivateChatID int64) error {
 	if ownerUserID <= 0 || ownerPrivateChatID <= 0 {
@@ -840,163 +807,27 @@ type MemoryJournal struct {
 	mu         sync.Mutex
 	operations map[string]Operation
 }
-type memoryPresentation struct {
-	presentation CallbackPresentation
-	available    map[string]struct{}
-	claimed      map[string]callbackClaimIdentity
-}
-type callbackClaimIdentity struct {
-	UpdateID        int64
-	CallbackQueryID string
-}
-type MemoryCallbackRegistry struct {
-	mu            sync.Mutex
-	now           func() time.Time
-	presentations map[domain.SessionID]memoryPresentation
-}
-
-func NewMemoryCallbackRegistry(now func() time.Time) *MemoryCallbackRegistry {
-	if now == nil {
-		now = time.Now
-	}
-	return &MemoryCallbackRegistry{
-		now:           now,
-		presentations: make(map[domain.SessionID]memoryPresentation),
-	}
-}
-func (registry *MemoryCallbackRegistry) Replace(ctx context.Context, presentation CallbackPresentation) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	if registry == nil || registry.now == nil {
-		return errors.New("callback registry is required")
-	}
-	if err := validateCallbackPresentation(presentation, registry.now()); err != nil {
-		return err
-	}
-	available := make(map[string]struct{}, len(presentation.TokenIDs))
-	for _, tokenID := range presentation.TokenIDs {
-		available[tokenID] = struct{}{}
-	}
-	copyPresentation := presentation
-	copyPresentation.TokenIDs = append([]string(nil), presentation.TokenIDs...)
-	copyPresentation.Recovery = cloneCallbackRecoveryBinding(presentation.Recovery)
-	copyPresentation.AcceptedTurnRecovery = cloneAcceptedTurnRecoveryBinding(presentation.AcceptedTurnRecovery)
-	copyPresentation.StatusRecovery = cloneStatusRecoveryBinding(presentation.StatusRecovery)
-	registry.mu.Lock()
-	defer registry.mu.Unlock()
-	if previous, exists := registry.presentations[presentation.SessionID]; exists && reflect.DeepEqual(previous.available, available) {
-		previous.presentation.TokenIDs = copyPresentation.TokenIDs
-		if reflect.DeepEqual(previous.presentation, copyPresentation) {
-			return nil // Exact receipt replay must not reset claimed tokens.
-		}
-	}
-	for sessionID, candidate := range registry.presentations {
-		if sessionID != presentation.SessionID && candidate.presentation.Carrier == presentation.Carrier {
-			delete(registry.presentations, sessionID)
-		}
-	}
-	registry.presentations[presentation.SessionID] = memoryPresentation{
-		presentation: copyPresentation,
-		available:    available,
-		claimed:      make(map[string]callbackClaimIdentity),
-	}
-	return nil
-}
-func (registry *MemoryCallbackRegistry) Current(ctx context.Context, sessionID domain.SessionID) (CallbackPresentation, bool, error) {
-	if err := ctx.Err(); err != nil {
-		return CallbackPresentation{}, false, err
-	}
-	if registry == nil || registry.now == nil || sessionID == "" {
-		return CallbackPresentation{}, false, errors.New("callback registry and presentation identity are required")
-	}
-	registry.mu.Lock()
-	defer registry.mu.Unlock()
-	current, found := registry.presentations[sessionID]
-	if !found || !current.presentation.ExpiresAt.After(registry.now()) {
-		return CallbackPresentation{}, false, nil
-	}
-	result := current.presentation
-	result.TokenIDs = append([]string(nil), current.presentation.TokenIDs...)
-	result.Recovery = cloneCallbackRecoveryBinding(current.presentation.Recovery)
-	result.AcceptedTurnRecovery = cloneAcceptedTurnRecoveryBinding(current.presentation.AcceptedTurnRecovery)
-	result.StatusRecovery = cloneStatusRecoveryBinding(current.presentation.StatusRecovery)
-	result.ArtifactRetry = cloneArtifactRetryBinding(current.presentation.ArtifactRetry)
-	return result, true, nil
-}
-func (registry *MemoryCallbackRegistry) Claim(ctx context.Context, claim CallbackClaim) (CallbackClaimResult, error) {
-	if err := ctx.Err(); err != nil {
-		return CallbackClaimResult{}, err
-	}
-	if registry == nil || registry.now == nil {
-		return CallbackClaimResult{}, errors.New("callback registry is required")
-	}
-	if err := validateCallbackClaim(claim); err != nil {
-		return CallbackClaimResult{}, err
-	}
-	registry.mu.Lock()
-	defer registry.mu.Unlock()
-	var ownerSessionID domain.SessionID
-	var current memoryPresentation
-	for sessionID, candidate := range registry.presentations {
-		if candidate.presentation.Carrier != claim.Carrier ||
-			candidate.presentation.ExpiresAt != claim.ExpiresAt || !candidate.presentation.ExpiresAt.After(registry.now()) {
-			continue
-		}
-		if _, ok := candidate.available[claim.TokenID]; !ok {
-			continue
-		}
-		ownerSessionID = sessionID
-		current = candidate
-		break
-	}
-	if ownerSessionID == "" {
-		return CallbackClaimResult{Outcome: ClaimStale}, nil
-	}
-	if identity, used := current.claimed[claim.TokenID]; used {
-		if identity.UpdateID == claim.UpdateID && identity.CallbackQueryID == claim.CallbackQueryID {
-			return callbackClaimResult(ClaimRecovered, ownerSessionID, current.presentation), nil
-		}
-		return callbackClaimResult(ClaimReplayed, ownerSessionID, current.presentation), nil
-	}
-	current.claimed[claim.TokenID] = callbackClaimIdentity{UpdateID: claim.UpdateID, CallbackQueryID: claim.CallbackQueryID}
-	registry.presentations[ownerSessionID] = current
-	return callbackClaimResult(ClaimAccepted, ownerSessionID, current.presentation), nil
-}
-func callbackClaimResult(outcome ClaimOutcome, ownerSessionID domain.SessionID, presentation CallbackPresentation) CallbackClaimResult {
-	return CallbackClaimResult{
-		Outcome: outcome, PresentationSessionID: ownerSessionID,
-		InteractionRequestID: presentation.InteractionRequestID,
-		OutboundOperationID:  presentation.OutboundOperationID, OutboundUpdateID: presentation.OutboundUpdateID,
-		Recovery:             cloneCallbackRecoveryBinding(presentation.Recovery),
-		AcceptedTurnRecovery: cloneAcceptedTurnRecoveryBinding(presentation.AcceptedTurnRecovery),
-		StatusRecovery:       cloneStatusRecoveryBinding(presentation.StatusRecovery),
-		ArtifactRetry:        cloneArtifactRetryBinding(presentation.ArtifactRetry),
-	}
-}
 
 const (
-	CallbackEffectUnknownPhase      = "effect_unknown"
-	CallbackEffectRetryUnknownPhase = "effect_retry_unknown"
-	CallbackSendUnknownPhase        = "send_unknown"
+	CallbackEffectUnknownPhase      = callbackregistry.EffectUnknownPhase
+	CallbackEffectRetryUnknownPhase = callbackregistry.EffectRetryUnknownPhase
+	CallbackSendUnknownPhase        = callbackregistry.SendUnknownPhase
 )
 
 func validCallbackRecoveryBinding(binding *CallbackRecoveryBinding) bool {
-	return binding != nil && binding.OperationID != "" && len(binding.OperationID) <= 256 && utf8.ValidString(binding.OperationID) && binding.UpdateID > 0 &&
-		binding.SessionID != "" && binding.Carrier.ChatID > 0 && binding.Carrier.MessageID > 0 &&
-		(binding.Phase == CallbackEffectUnknownPhase || binding.Phase == CallbackEffectRetryUnknownPhase || binding.Phase == CallbackSendUnknownPhase)
+	return callbackregistry.ValidRecovery(binding)
 }
 func cloneCallbackRecoveryBinding(binding *CallbackRecoveryBinding) *CallbackRecoveryBinding {
 	return cloneBinding(binding)
 }
 func validAcceptedTurnRecoveryBinding(binding *AcceptedTurnRecoveryBinding) bool {
-	return telegramrecovery.ValidAcceptedTurnBinding(binding)
+	return callbackregistry.ValidAccepted(binding)
 }
 func cloneAcceptedTurnRecoveryBinding(binding *AcceptedTurnRecoveryBinding) *AcceptedTurnRecoveryBinding {
 	return cloneBinding(binding)
 }
 func validStatusRecoveryBinding(binding *StatusRecoveryBinding) bool {
-	return binding != nil && statusrecovery.Valid(*binding)
+	return callbackregistry.ValidStatus(binding)
 }
 func cloneStatusRecoveryBinding(binding *StatusRecoveryBinding) *StatusRecoveryBinding {
 	return cloneBinding(binding)
@@ -1008,21 +839,11 @@ func cloneBinding[T any](binding *T) *T {
 	clone := *binding
 	return &clone
 }
-func (registry *MemoryCallbackRegistry) InvalidateCarrier(ctx context.Context, carrier telegramstate.Carrier) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	if registry == nil || carrier.ChatID <= 0 || carrier.MessageID <= 0 {
-		return errors.New("callback registry and carrier are required")
-	}
-	registry.mu.Lock()
-	defer registry.mu.Unlock()
-	for sessionID, candidate := range registry.presentations {
-		if candidate.presentation.Carrier == carrier {
-			delete(registry.presentations, sessionID)
-		}
-	}
-	return nil
+
+type MemoryCallbackRegistry = callbackregistry.Memory
+
+func NewMemoryCallbackRegistry(now func() time.Time) *MemoryCallbackRegistry {
+	return callbackregistry.NewMemory(now)
 }
 func NewMemoryJournal() *MemoryJournal { return &MemoryJournal{operations: make(map[string]Operation)} }
 func (j *MemoryJournal) Load(ctx context.Context, id string) (Operation, bool, error) {

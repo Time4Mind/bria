@@ -15,12 +15,15 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+
+	"bria/internal/telegramopsretention"
 )
 
 const (
-	Version = 1
-	maxSize = 16 << 20
-	maxList = 100
+	Version                    = 1
+	maxSize                    = 16 << 20
+	maxList                    = 100
+	maxFinalizedHistoryRecords = 256
 )
 
 func StatusSequence(operationID string) (uint64, error) {
@@ -375,29 +378,13 @@ func cloneSnapshot(state Snapshot) Snapshot {
 	return clone
 }
 
-// compactFinalized removes recovery payloads that are no longer used after a
-// durable operation has committed. Active and uncertain operations retain
-// their complete payload, while old committed records keep the identity and
-// receipt needed for bounded replay checks.
 func compactFinalized(state Snapshot) Snapshot {
-	for _, records := range []map[string]json.RawMessage{state.Operations, state.Statuses} {
-		for id, raw := range records {
-			if rawPhase(raw) != "committed" {
-				continue
-			}
-			var record map[string]json.RawMessage
-			if json.Unmarshal(raw, &record) != nil {
-				continue
-			}
-			delete(record, "prepared")
-			compacted, err := json.Marshal(record)
-			if err == nil {
-				records[id] = compacted
-			}
-		}
-	}
+	telegramopsretention.Compact(telegramopsretention.Snapshot{
+		Operations: state.Operations, Statuses: state.Statuses, Acknowledgements: state.Acknowledgements,
+	}, maxFinalizedHistoryRecords)
 	return state
 }
+
 func validateSnapshot(state Snapshot) error {
 	if state.Version != Version || state.Operations == nil {
 		return errors.New("Telegram operation store schema is invalid")

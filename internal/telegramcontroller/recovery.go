@@ -84,8 +84,7 @@ func (c *Controller) resumeOrRecover(ctx context.Context, id domain.SessionID) (
 			updated := !c.closed
 			if updated {
 				c.live[id] = recovered
-				c.page[id] = 0
-				c.followLatest[id] = true
+				c.pages.ResetFollow(id)
 				c.ensureWorkerLocked(id)
 			}
 			c.mu.Unlock()

@@ -16,8 +16,10 @@ import (
 	"time"
 
 	"bria/internal/archiveimport"
+	"bria/internal/cardactivity"
 	"bria/internal/cardeventhistory"
 	"bria/internal/domain"
+	"bria/internal/sessionlabel"
 	"bria/internal/statejson"
 	"bria/internal/telegramhistory"
 	"bria/internal/telegramstate"
@@ -129,7 +131,7 @@ func (store *SessionStore) PutStartingIfAbsent(
 		)
 	}
 	if session.Name() != "" {
-		name := availableSessionName(store.byIntent, "", session.Name())
+		name := sessionlabel.Unique(store.byIntent, "", session.Name())
 		snapshot := session.Snapshot()
 		snapshot.Name = name
 		var nameErr error
@@ -162,31 +164,6 @@ func (store *SessionStore) PutStartingIfAbsent(
 	return session, true, nil
 }
 
-func availableSessionName(sessions map[domain.IntentID]domain.Session, excluded domain.SessionID, requested string) string {
-	used := make(map[string]struct{}, len(sessions))
-	for _, session := range sessions {
-		if session.ID() != excluded && session.Name() != "" {
-			used[strings.ToLower(session.Name())] = struct{}{}
-		}
-	}
-	for ordinal := 1; ordinal < 10000; ordinal++ {
-		suffix := ""
-		if ordinal > 1 {
-			suffix = fmt.Sprintf("%d", ordinal)
-		}
-		runes := []rune(requested)
-		limit := domain.MaxSessionNameRunes - len([]rune(suffix))
-		if len(runes) > limit {
-			runes = runes[:limit]
-		}
-		candidate := strings.TrimSpace(string(runes)) + suffix
-		if _, exists := used[strings.ToLower(candidate)]; !exists {
-			return candidate
-		}
-	}
-	return requested
-}
-
 // RenameSession atomically assigns the best available short name while
 // preserving every lifecycle field of the logical session.
 func (store *SessionStore) RenameSession(ctx context.Context, id domain.SessionID, requested string, source domain.SessionNameSource) (domain.Session, error) {
@@ -203,7 +180,7 @@ func (store *SessionStore) RenameSession(ctx context.Context, id domain.SessionI
 		return domain.Session{}, ErrSessionNotFound
 	}
 	current := store.byIntent[intent]
-	name := availableSessionName(store.byIntent, id, requested)
+	name := sessionlabel.Unique(store.byIntent, id, requested)
 	next, err := current.Rename(name, source)
 	if err != nil {
 		return domain.Session{}, fmt.Errorf("validate session name: %w", err)
@@ -722,7 +699,11 @@ func (store *SessionStore) SetCardPrompt(ctx context.Context, sessionID domain.S
 		card.EmptyCloseEligible = false
 		for index, key := range card.HistoryKeys {
 			if key == messageID {
+				if card.History[index] == item {
+					return nil
+				}
 				card.History[index] = item
+				card.TouchEvent(time.Now())
 				return state.SetCard(card)
 			}
 		}
@@ -731,6 +712,7 @@ func (store *SessionStore) SetCardPrompt(ctx context.Context, sessionID domain.S
 			card.HistoryKeys = make([]string, len(card.History))
 		}
 		card.HistoryKeys[len(card.HistoryKeys)-1] = messageID
+		card.TouchEvent(time.Now())
 		return state.SetCard(card)
 	})
 }
@@ -1029,6 +1011,9 @@ func readSessionFile(
 	}
 	ui := persisted.TelegramUI
 	if ui != nil {
+		if err := cardactivity.Apply(path, ui); err != nil {
+			return nil, nil, nil, nil, fmt.Errorf("load card activity: %w", err)
+		}
 		if err := ui.Validate(); err != nil {
 			return nil, nil, nil, nil, fmt.Errorf("validate Telegram UI state: %w", err)
 		}
@@ -1058,7 +1043,7 @@ func writeSessionFile(
 		Version:     sessionStoreFormatVersion,
 		Sessions:    records,
 		Coordinator: cloneCoordinatorRecord(checkpoint),
-		TelegramUI:  cloneUI(telegramUI),
+		TelegramUI:  cardactivity.MainState(telegramUI),
 	}, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode session store: %w", err)
@@ -1093,6 +1078,9 @@ func writeSessionFile(
 		return fmt.Errorf("close session store candidate: %w", err)
 	}
 	temporaryOpen = false
+	if err := cardactivity.Save(path, telegramUI); err != nil {
+		return fmt.Errorf("persist card activity: %w", err)
+	}
 	if err := os.Rename(temporaryPath, path); err != nil {
 		return fmt.Errorf("replace session store: %w", err)
 	}
@@ -1108,14 +1096,6 @@ func writeSessionFile(
 		return fmt.Errorf("close session store directory: %w", err)
 	}
 	return nil
-}
-
-func cloneUI(source *telegramstate.State) *telegramstate.State {
-	if source == nil {
-		return nil
-	}
-	clone := source.Clone()
-	return &clone
 }
 
 func cloneCoordinatorRecord(source *coordinatorRecord) *coordinatorRecord {

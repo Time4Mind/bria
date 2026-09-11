@@ -17,6 +17,9 @@ type TypedTranscriptStore interface {
 	AppendCardTypedHistory(context.Context, domain.SessionID, string, string) error
 	LoadCardTranscript(context.Context, domain.SessionID, bool) ([]cardtranscript.Block, error)
 }
+type TypedTranscriptSnapshotStore interface {
+	LoadCardTranscriptSnapshot(context.Context, domain.SessionID, bool) (cardtranscript.Snapshot, error)
+}
 type TypedTranscriptInserter interface {
 	InsertCardTypedHistoryAfterPrompt(context.Context, domain.SessionID, string, string, string) error
 }

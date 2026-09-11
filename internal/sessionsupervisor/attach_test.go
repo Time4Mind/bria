@@ -58,6 +58,22 @@ func (reconciler orderedRecoveryReconciler) ReconcileAcceptedTurns(context.Conte
 	return sessionsupervisor.AcceptedTurnReconciliation{}, nil
 }
 
+type stableUnknownReceiptError struct{ revision string }
+
+func (err stableUnknownReceiptError) Error() string { return "accepted turn history is still unknown" }
+func (err stableUnknownReceiptError) StableRecoveryBarrierRevision() string {
+	return err.revision
+}
+
+type stableUnknownReconciler struct{}
+
+func (stableUnknownReconciler) ReconcileAcceptedTurns(context.Context, domain.SessionID, domain.ProviderBinding) (sessionsupervisor.AcceptedTurnReconciliation, error) {
+	return sessionsupervisor.AcceptedTurnReconciliation{Turns: []sessionsupervisor.ReconciledAcceptedTurn{
+		{MessageID: "accepted-one", TurnID: "shared-turn", Outcome: sessionsupervisor.AcceptedTurnUnknown},
+		{MessageID: "accepted-two", TurnID: "shared-turn", Outcome: sessionsupervisor.AcceptedTurnUnknown},
+	}}, stableUnknownReceiptError{revision: "native-receipts-v1"}
+}
+
 func TestAttachedRecoveryCommitsCapturedInputsBeforePublishingReady(t *testing.T) {
 	for _, commitErr := range []error{nil, errors.New("synthetic recovery commit failure")} {
 		t.Run(fmt.Sprint(commitErr), func(t *testing.T) {
@@ -217,6 +233,106 @@ func TestPersistedTotalFailureSkipsOldAcceptedTurnWithoutContinuation(t *testing
 	inputs, err := journal.Inputs(ctx, string(awaiting.ID()))
 	if err != nil || len(inputs) != 1 || inputs[0].Phase != messagejournal.InputSkipped {
 		t.Fatalf("old accepted input was not skipped: %+v, %v", inputs, err)
+	}
+}
+
+func TestAttachedTotalFailureCommitsStableUnknownReceiptsAndPublishesReady(t *testing.T) {
+	ctx := context.Background()
+	journal, err := messagejournal.Open(filepath.Join(t.TempDir(), "journal.json"), messagejournal.DefaultLimits())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, messageID := range []string{"accepted-one", "accepted-two", "preacceptance-unknown"} {
+		if _, _, err = journal.EnqueueInput(ctx, "stable-unknown-recovery", messageID, []byte("private")); err != nil {
+			t.Fatal(err)
+		}
+		if _, err = journal.LeaseNextInput(ctx, "stable-unknown-recovery", messageID+"-worker", time.Unix(1, 0), time.Minute); err != nil {
+			t.Fatal(err)
+		}
+		if messageID == "preacceptance-unknown" {
+			if _, err = journal.MarkInputDeliveryUnknown(ctx, "stable-unknown-recovery", messageID, messageID+"-worker"); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
+		if _, err = journal.MarkInputAccepted(ctx, "stable-unknown-recovery", messageID, messageID+"-worker"); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	ready := readySession(t, "stable-unknown-recovery")
+	snapshot := ready.Snapshot()
+	snapshot.Binding.Generation = 4
+	ready, err = domain.RestoreSession(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	running, err := ready.StartWork(ready.StateChangedAt().Add(time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	prior, _ := running.Binding()
+	next := prior
+	next.Generation++
+	store := &memoryStore{session: running}
+	runtime := &attachRuntime{binding: next}
+	continued := false
+	supervisor, err := sessionsupervisor.New(store, waitFunc(func(context.Context, domain.SessionID, domain.ProviderBinding) error { return nil }), runtime, sessionsupervisor.Options{
+		MaxRestartAttempts: 1, WaitBeforeRetry: func(context.Context, int) error { return nil }, Now: time.Now,
+		AcceptedTurns: stableUnknownReconciler{},
+		ContinueAcceptedTurns: func(context.Context, domain.Session, domain.ProviderBinding, sessionsupervisor.AcceptedTurnReconciliation) error {
+			continued = true
+			return nil
+		},
+		InputRecovery: journal,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := supervisor.Watch(ctx, running.ID(), prior)
+	if err != nil || !result.Recovered || result.AwaitingRecovery || continued || store.session.Status() != domain.SessionReady {
+		t.Fatalf("stable unknown recovery = %+v err=%v continued=%t status=%s", result, err, continued, store.session.Status())
+	}
+	binding, bound := store.session.Binding()
+	if !bound || binding.Generation != 5 || !runtime.attached || runtime.detached || len(runtime.requests) != 0 || len(runtime.aborted) != 0 {
+		t.Fatalf("live terminal was not reattached exactly once: binding=%+v bound=%t attached=%t detached=%t starts=%d aborts=%d", binding, bound, runtime.attached, runtime.detached, len(runtime.requests), len(runtime.aborted))
+	}
+	inputs, err := journal.Inputs(ctx, string(running.ID()))
+	if err != nil || len(inputs) != 3 {
+		t.Fatalf("recovered inputs = %+v, %v", inputs, err)
+	}
+	for _, input := range inputs {
+		if input.Phase != messagejournal.InputSkipped {
+			t.Fatalf("captured input %q phase=%s, want skipped", input.MessageID, input.Phase)
+		}
+	}
+	open, err := journal.InputRecoveryOpen(ctx, string(running.ID()))
+	if err != nil || open {
+		t.Fatalf("recovery cutoff remained open: open=%t err=%v", open, err)
+	}
+}
+
+func TestAttachedStableUnknownWithoutDurableCutoffRemainsBlocked(t *testing.T) {
+	ready := readySession(t, "stable-unknown-without-cutoff")
+	running, err := ready.StartWork(ready.StateChangedAt().Add(time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	prior, _ := running.Binding()
+	next := prior
+	next.Generation++
+	store := &memoryStore{session: running}
+	runtime := &attachRuntime{binding: next}
+	supervisor, err := sessionsupervisor.New(store, waitFunc(func(context.Context, domain.SessionID, domain.ProviderBinding) error { return nil }), runtime, sessionsupervisor.Options{
+		MaxRestartAttempts: 1, WaitBeforeRetry: func(context.Context, int) error { return nil }, Now: time.Now,
+		AcceptedTurns: stableUnknownReconciler{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := supervisor.Watch(context.Background(), running.ID(), prior)
+	if !errors.Is(err, sessionsupervisor.ErrReconciliationRequired) || result.Recovered || !result.AwaitingRecovery || store.session.Status() != domain.SessionAwaitingRecovery || !runtime.detached {
+		t.Fatalf("uncaptured stable unknown escaped fail-closed recovery: result=%+v err=%v status=%s detached=%t", result, err, store.session.Status(), runtime.detached)
 	}
 }
 

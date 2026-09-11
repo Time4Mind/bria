@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"testing"
 
@@ -66,6 +67,73 @@ func TestFileStoreCompactsOnlyCommittedRecoveryPayloads(t *testing.T) {
 	}
 	if !bytes.Contains(snapshot.Operations["status:43"], []byte(`"prepared"`)) {
 		t.Fatalf("uncertain operation lost recovery payload: %s", snapshot.Operations["status:43"])
+	}
+}
+
+func TestFileStoreBoundsFinalizedHistoryWithoutDroppingRecoveryState(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "operations.json")
+	store, err := telegramops.OpenFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+
+	// A coupled unknown status still needs its same-ID committed callback receipt
+	// after restart. Active callback and acknowledgement records are never history.
+	if err := store.Insert(ctx, telegramops.Callbacks, "status:1", json.RawMessage(`{"id":"status:1","update_id":1,"phase":"committed","receipt":11}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Insert(ctx, telegramops.Statuses, "status:1", json.RawMessage(`{"id":"status:1","sequence":1,"phase":"send_unknown"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Insert(ctx, telegramops.Callbacks, "status:2", json.RawMessage(`{"id":"status:2","update_id":2,"phase":"effect_unknown"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Insert(ctx, telegramops.Acknowledgements, "status:3", json.RawMessage(`{"operation_id":"status:3","callback_query_id":"query-3","phase":"pending"}`)); err != nil {
+		t.Fatal(err)
+	}
+
+	for sequence := 1000; sequence < 1300; sequence++ {
+		id := fmt.Sprintf("status:%d", sequence)
+		if err := store.Insert(ctx, telegramops.Callbacks, id, json.RawMessage(fmt.Sprintf(`{"id":%q,"update_id":%d,"phase":"committed","receipt":%d}`, id, sequence, sequence))); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.Insert(ctx, telegramops.Statuses, id, json.RawMessage(fmt.Sprintf(`{"id":%q,"sequence":%d,"phase":"committed","receipt":%d}`, id, sequence, sequence))); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.Insert(ctx, telegramops.Acknowledgements, id, json.RawMessage(fmt.Sprintf(`{"operation_id":%q,"callback_query_id":%q,"phase":"confirmed"}`, id, "query"))); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	reopened, err := telegramops.OpenFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := reopened.Snapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.Operations) > 258 || len(snapshot.Statuses) > 257 || len(snapshot.Acknowledgements) > 257 {
+		t.Fatalf("unbounded finalized history: callbacks=%d statuses=%d acknowledgements=%d", len(snapshot.Operations), len(snapshot.Statuses), len(snapshot.Acknowledgements))
+	}
+	for namespace, id := range map[telegramops.Namespace]string{
+		telegramops.Callbacks:        "status:2",
+		telegramops.Statuses:         "status:1",
+		telegramops.Acknowledgements: "status:3",
+	} {
+		if _, found, err := reopened.Load(ctx, namespace, id); err != nil || !found {
+			t.Fatalf("active %s record %q = found %t, err %v", namespace, id, found, err)
+		}
+	}
+	if _, found, err := reopened.Load(ctx, telegramops.Callbacks, "status:1"); err != nil || !found {
+		t.Fatalf("coupled committed callback = found %t, err %v", found, err)
+	}
+	if _, found, err := reopened.Load(ctx, telegramops.Callbacks, "status:1000"); err != nil || found {
+		t.Fatalf("old finalized callback = found %t, err %v", found, err)
+	}
+	if _, found, err := reopened.Load(ctx, telegramops.Callbacks, "status:1299"); err != nil || !found {
+		t.Fatalf("recent finalized callback = found %t, err %v", found, err)
 	}
 }
 

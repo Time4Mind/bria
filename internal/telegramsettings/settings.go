@@ -4,10 +4,38 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"bria/internal/domain"
+	"bria/internal/sessioncreation"
 	"bria/internal/settingsport"
 )
+
+// NormalizeNodeName returns one safe config and Telegram display value.
+func NormalizeNodeName(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	invalid := func(character rune) bool {
+		return unicode.IsControl(character) || unicode.Is(unicode.Zl, character) || unicode.Is(unicode.Zp, character)
+	}
+	if value == "" || !utf8.ValidString(value) || utf8.RuneCountInString(value) > 64 || len(value) > 128 || strings.IndexFunc(value, invalid) >= 0 {
+		return "", errors.New("имя должно содержать от 1 до 64 печатных символов")
+	}
+	return value, nil
+}
+
+func ValidateNodeName(value string, current domain.ComputerID, nodes []sessioncreation.Computer) (string, error) {
+	name, err := NormalizeNodeName(value)
+	if err != nil {
+		return "", err
+	}
+	for _, node := range nodes {
+		if node.ID != current && strings.EqualFold(strings.TrimSpace(node.Name), name) {
+			return "", errors.New("имя уже используется другой нодой")
+		}
+	}
+	return name, nil
+}
 
 func Apply(ctx context.Context, preferences settingsport.Preferences, providers settingsport.ProviderPreferences, action string) error {
 	if action == "settings_provider_codex" || action == "settings_provider_claude" {

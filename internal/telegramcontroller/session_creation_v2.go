@@ -94,6 +94,23 @@ func (controller *Controller) beginNewSessionV2(ctx context.Context, updateID in
 	return controller.advanceCreateV2(ctx, snapshot, updateID)
 }
 
+// openNewSessionV2 validates the live creation inventory once, then either
+// resumes the open draft or starts a fresh one from that same snapshot.
+func (controller *Controller) openNewSessionV2(ctx context.Context, updateID int64) (SemanticActionResult, error) {
+	computers, defaults, err := controller.creationStateV2(ctx)
+	if err != nil {
+		return SemanticActionResult{}, err
+	}
+	if snapshot, open := controller.createFlow.CurrentV2(computers, defaults); open {
+		return controller.advanceCreateV2(ctx, snapshot, 0)
+	}
+	if len(computers) == 0 {
+		controller.cancelCreateDraft()
+		return controller.nodeListSemanticResult(ctx)
+	}
+	return controller.advanceCreateV2(ctx, controller.createFlow.BeginV2(computers, defaults), updateID)
+}
+
 func (controller *Controller) currentCreateDraftSurfaceV2(ctx context.Context) (*SemanticSurface, error) {
 	snapshot, open, err := controller.currentCreateSnapshotV2(ctx)
 	if err != nil {
@@ -197,7 +214,7 @@ func (controller *Controller) advanceCreateV2(ctx context.Context, snapshot sess
 				if err := controller.createFlow.SetDirectoryListing(home, directories); err != nil {
 					return SemanticActionResult{}, err
 				}
-				snapshot, _, _ = controller.currentCreateSnapshotV2(ctx)
+				snapshot = controller.createFlow.Page(0, false)
 				return SemanticActionResult{Surface: renderCreateSurfaceV2(snapshot)}, nil
 			}
 		}
@@ -208,7 +225,7 @@ func (controller *Controller) advanceCreateV2(ctx context.Context, snapshot sess
 		if err := controller.createFlow.SetDirectoryListing("", roots); err != nil {
 			return SemanticActionResult{}, err
 		}
-		snapshot, _, _ = controller.currentCreateSnapshotV2(ctx)
+		snapshot = controller.createFlow.Page(0, false)
 	}
 	if snapshot.Step == sessioncreation.StepReady && updateID > 0 {
 		return controller.confirmCreateDraftV2(ctx, updateID)
@@ -370,7 +387,7 @@ func (controller *Controller) handleCreateChoiceV2(ctx context.Context, action S
 		} else if err := controller.createFlow.SetDirectoryListing(directory.Path, children); err != nil {
 			return SemanticActionResult{}, err
 		}
-		next, _, _ := controller.currentCreateSnapshotV2(ctx)
+		next := controller.createFlow.Page(0, false)
 		return SemanticActionResult{Surface: renderCreateSurfaceV2(next)}, nil
 	case sessioncreation.StepRecommendation:
 		recommendation, err := controller.createFlow.RecommendationChoice(action.Choice)

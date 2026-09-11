@@ -146,6 +146,15 @@ func (c *Controller) currentNativeSurface(id domain.SessionID) (SemanticActionRe
 func (c *Controller) restoreNativeSurface(id domain.SessionID) (SemanticActionResult, bool) {
 	if current, err := c.sessions.Load(c.rootContext, id); err != nil || current.Status() == domain.SessionAwaitingRecovery {
 		return SemanticActionResult{}, false
+	} else {
+		return c.restoreNativeSurfaceForSession(current)
+	}
+}
+
+func (c *Controller) restoreNativeSurfaceForSession(current domain.Session) (SemanticActionResult, bool) {
+	id := current.ID()
+	if current.Status() == domain.SessionAwaitingRecovery {
+		return SemanticActionResult{}, false
 	}
 	c.mu.Lock()
 	snapshot, ok := c.nativeSnapshots[id]

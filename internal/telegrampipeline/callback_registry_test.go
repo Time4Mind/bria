@@ -2,7 +2,9 @@ package telegrampipeline_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -97,6 +99,47 @@ func TestFileCallbackRegistryPersistsClaimsAndLatestPresentation(t *testing.T) {
 	}
 }
 
+func TestFileCallbackRegistryStoresRetiredTokensWithoutQuadraticPresentationCopies(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0).UTC()
+	path := filepath.Join(t.TempDir(), "callback-registry.json")
+	registry, err := telegrampipeline.OpenFileCallbackRegistry(path, func() time.Time { return now })
+	if err != nil {
+		t.Fatal(err)
+	}
+	tokens := make([]string, 40)
+	for index := range tokens {
+		tokens[index] = fmt.Sprintf("token-%02d", index)
+	}
+	presentation := telegrampipeline.CallbackPresentation{SessionID: sessionID, Carrier: card().Carrier, TokenIDs: tokens, ExpiresAt: now.Add(time.Minute)}
+	if err := registry.Replace(context.Background(), presentation); err != nil {
+		t.Fatal(err)
+	}
+	presentation.TokenIDs = []string{"replacement"}
+	if err := registry.Replace(context.Background(), presentation); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var state struct {
+		Retired map[string]struct {
+			Tokens map[string]bool `json:"tokens"`
+		} `json:"retired"`
+	}
+	if err := json.Unmarshal(data, &state); err != nil {
+		t.Fatal(err)
+	}
+	if len(state.Retired) != len(tokens) {
+		t.Fatalf("retired tokens = %d, want %d", len(state.Retired), len(tokens))
+	}
+	for token, retired := range state.Retired {
+		if len(retired.Tokens) != 1 {
+			t.Fatalf("retired %q duplicated %d-token presentation", token, len(retired.Tokens))
+		}
+	}
+}
+
 func TestFileCallbackRegistryInvalidatesExactCarrierDurably(t *testing.T) {
 	now := time.Unix(1_800_000_000, 0).UTC()
 	path := filepath.Join(t.TempDir(), "callback-registry.json")
@@ -106,9 +149,14 @@ func TestFileCallbackRegistryInvalidatesExactCarrierDurably(t *testing.T) {
 	}
 	presentation := telegrampipeline.CallbackPresentation{
 		SessionID: "123e4567-e89b-12d3-a456-426614174000", Carrier: telegramstate.Carrier{ChatID: 42, MessageID: 99},
-		TokenIDs: []string{"terminal-token"}, ExpiresAt: now.Add(time.Minute), InteractionRequestID: "request-1",
+		TokenIDs: []string{"terminal-token"}, ExpiresAt: now.Add(time.Minute),
 	}
 	if err := registry.Replace(context.Background(), presentation); err != nil {
+		t.Fatal(err)
+	}
+	replacement := presentation
+	replacement.TokenIDs = []string{"replacement-token"}
+	if err := registry.Replace(context.Background(), replacement); err != nil {
 		t.Fatal(err)
 	}
 	if err := registry.InvalidateCarrier(context.Background(), presentation.Carrier); err != nil {
@@ -120,7 +168,7 @@ func TestFileCallbackRegistryInvalidatesExactCarrierDurably(t *testing.T) {
 	}
 	result, err := reopened.Claim(context.Background(), telegrampipeline.CallbackClaim{
 		SessionID: presentation.SessionID, Carrier: presentation.Carrier, TokenID: "terminal-token",
-		ExpiresAt: presentation.ExpiresAt, UpdateID: 1, CallbackQueryID: "query",
+		ExpiresAt: presentation.ExpiresAt, UpdateID: 1, CallbackQueryID: "query", Repeatable: true,
 	})
 	if err != nil || result.Outcome != telegrampipeline.ClaimStale {
 		t.Fatalf("claim after durable invalidation = %#v, %v", result, err)

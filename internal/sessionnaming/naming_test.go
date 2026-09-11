@@ -3,6 +3,7 @@ package sessionnaming_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"bria/internal/domain"
@@ -60,7 +61,7 @@ func directoryNamedSession(t *testing.T, id, name string) domain.Session {
 
 func TestCheapGeneratorUsesBoundedIsolatedPrompt(t *testing.T) {
 	generator := sessionnaming.CheapGenerator{Processor: processorFunc(func(_ context.Context, request promptpreprocess.Request) (promptpreprocess.Result, error) {
-		if request.Text != "почини кнопку" || request.Instruction == "" {
+		if request.Text != "почини кнопку" || !strings.Contains(request.Instruction, "A-Z") || !strings.Contains(request.Instruction, "латини") {
 			t.Fatalf("request = %#v", request)
 		}
 		return promptpreprocess.Result{Text: "`Menu button`"}, nil
@@ -71,12 +72,30 @@ func TestCheapGeneratorUsesBoundedIsolatedPrompt(t *testing.T) {
 	}
 }
 
-func TestNormalizeRequiresShortEnglishLabel(t *testing.T) {
+func TestNormalizeRequiresLatinLettersAndBoundsLabel(t *testing.T) {
 	if got := sessionnaming.Normalize("  Fix menu buttons  "); got != "Fix menu" {
 		t.Fatalf("Normalize() = %q", got)
 	}
 	if got := sessionnaming.Normalize("Исправление меню"); got != "" {
-		t.Fatalf("Normalize() accepted non-English label %q", got)
+		t.Fatalf("Normalize() accepted Cyrillic label %q", got)
+	}
+	if got := sessionnaming.Normalize("Кнопка/меню"); got != "" {
+		t.Fatalf("Normalize() accepted punctuation in %q", got)
+	}
+	if got := sessionnaming.Normalize("Fast name Кириллица"); got != "" {
+		t.Fatalf("Normalize() accepted trailing Cyrillic in %q", got)
+	}
+	if got := sessionnaming.Normalize("Fast name!"); got != "" {
+		t.Fatalf("Normalize() accepted punctuation in %q", got)
+	}
+}
+
+func TestCheapGeneratorRejectsCyrillicOutput(t *testing.T) {
+	generator := sessionnaming.CheapGenerator{Processor: processorFunc(func(context.Context, promptpreprocess.Request) (promptpreprocess.Result, error) {
+		return promptpreprocess.Result{Text: "Кнопка меню"}, nil
+	})}
+	if name, err := generator.Generate(context.Background(), "local", "session-1", "message-1", "почини кнопку"); err == nil || name != "" {
+		t.Fatalf("Generate() = (%q, %v), want rejected Cyrillic output", name, err)
 	}
 }
 
@@ -202,4 +221,32 @@ func TestServiceReportsSuccessfulLateRename(t *testing.T) {
 	default:
 		t.Fatal("successful late rename did not request refresh")
 	}
+}
+
+func TestServiceAppliesGeneratedNameBeforePrimaryTurnFinishes(t *testing.T) {
+	starting := directoryNamedSession(t, "session-early-refresh", "default")
+	store := &nameStore{session: starting}
+	refreshed := make(chan domain.SessionID, 1)
+	service, err := sessionnaming.New(store, func(context.Context) (bool, error) { return true, nil }, sessionnaming.CheapGenerator{Processor: processorFunc(func(context.Context, promptpreprocess.Request) (promptpreprocess.Result, error) {
+		return promptpreprocess.Result{Text: "Fast name"}, nil
+	})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	finishPrimaryTurn := service.BeginWithRefresh(context.Background(), starting, "message-1", "prompt", func(id domain.SessionID) { refreshed <- id })
+	if err := service.Wait(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if store.session.Name() != "Fast name" || store.session.NameSource() != domain.SessionNameModel {
+		t.Fatalf("name before primary completion = %q/%q", store.session.Name(), store.session.NameSource())
+	}
+	select {
+	case id := <-refreshed:
+		if id != starting.ID() {
+			t.Fatalf("refreshed session = %s", id)
+		}
+	default:
+		t.Fatal("rename did not refresh before primary completion")
+	}
+	finishPrimaryTurn("")
 }

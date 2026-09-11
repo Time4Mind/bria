@@ -88,7 +88,7 @@ func TestNavigationFollowJoinedLatestAndPinnedGrowth(t *testing.T) {
 			if pinned {
 				f.click(telegramui.ActionPagePrevious)
 			}
-			before := f.wire.last().Text
+			before := sessionPageBody(f.wire.last().Text)
 			state, err := f.store.LoadTelegramUI(f.ctx)
 			if err != nil {
 				t.Fatal(err)
@@ -99,7 +99,7 @@ func TestNavigationFollowJoinedLatestAndPinnedGrowth(t *testing.T) {
 			}
 			f.append("commentary", strings.Repeat("new growing line\n", 300)+"GROWTH_TAIL")
 			f.deliver(telegramcontroller.NotificationPromptStatus, "growth")
-			got := f.wire.last().Text
+			got := sessionPageBody(f.wire.last().Text)
 			if pinned && got != before {
 				t.Fatal("earlier page changed during growth")
 			}
@@ -116,6 +116,14 @@ func TestNavigationFollowJoinedLatestAndPinnedGrowth(t *testing.T) {
 			}
 		})
 	}
+}
+
+func sessionPageBody(text string) string {
+	const separator = "─────  \n"
+	if _, body, found := strings.Cut(text, separator); found {
+		return body
+	}
+	return text
 }
 
 func TestNavigationFollowJoinedEveryInputStartsLatestCarrierAndFreezesPrevious(t *testing.T) {

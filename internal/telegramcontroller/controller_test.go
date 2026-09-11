@@ -2106,7 +2106,7 @@ func TestSemanticCardActionsAlwaysUseExplicitSessionTarget(t *testing.T) {
 		{Kind: telegramcontroller.SemanticScreen, SessionID: second.ID()},
 	} {
 		result, err := controller.HandleSemanticAction(context.Background(), action)
-		if err != nil || result.Decision.Kind != coordinator.DecisionStatus || !strings.Contains(result.Decision.Status.Text, string(second.ID())) || result.Card == nil || result.Card.SessionID != second.ID() {
+		if err != nil || result.Card == nil || result.Card.SessionID != second.ID() {
 			t.Fatalf("HandleSemanticAction(%q) = (%#v, %v), want typed second session card", action.Kind, result, err)
 		}
 	}
@@ -2114,7 +2114,7 @@ func TestSemanticCardActionsAlwaysUseExplicitSessionTarget(t *testing.T) {
 		t.Fatal("semantic screen action did not toggle global screen setting")
 	}
 	result, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticSelect, SessionID: second.ID()})
-	if err != nil || !strings.Contains(result.Decision.Status.Text, string(second.ID())) || result.Card == nil || !result.Card.MakeActive || activeStore.saved[len(activeStore.saved)-1] != second.ID() {
+	if err != nil || result.Card == nil || !result.Card.MakeActive || activeStore.saved[len(activeStore.saved)-1] != second.ID() {
 		t.Fatalf("semantic select = (%#v, %v), saved=%#v", result, err, activeStore.saved)
 	}
 }

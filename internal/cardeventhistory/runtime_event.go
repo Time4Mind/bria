@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"time"
 	"unicode/utf8"
 
 	"bria/internal/domain"
@@ -30,6 +31,7 @@ func Append(ctx context.Context, store Store, id domain.SessionID, item, kind st
 		}
 		card.EmptyCloseEligible = false
 		telegramhistory.Append(&card, item, kind)
+		card.TouchEvent(time.Now())
 		return state.SetCard(card)
 	})
 }
@@ -46,6 +48,7 @@ func InsertTyped(ctx context.Context, store Store, id domain.SessionID, promptID
 		if err := telegramhistory.InsertAfterPrompt(&card, promptID, item, kind); err != nil {
 			return err
 		}
+		card.TouchEvent(time.Now())
 		return state.SetCard(card)
 	})
 }
@@ -56,10 +59,14 @@ func Insert(ctx context.Context, store Store, id domain.SessionID, promptID, eve
 		if !ok {
 			return ErrCardUnavailable
 		}
+		before := len(card.History)
 		if err := InsertRuntimeEvent(&card, promptID, eventID, item, kind); err != nil {
 			return err
 		}
 		card.EmptyCloseEligible = false
+		if len(card.History) != before {
+			card.TouchEvent(time.Now())
+		}
 		return state.SetCard(card)
 	})
 }

@@ -1,6 +1,7 @@
 package telegrampipeline
 
 import (
+	"bria/internal/callbackregistry"
 	"bria/internal/domain"
 	"bria/internal/telegramstate"
 	"context"
@@ -51,7 +52,6 @@ type FileCallbackRegistry struct {
 	now           func() time.Time
 	syncDirectory func(string) error
 	state         fileCallbackRegistryState
-	retainRetired bool // process-local: true only when reopened from disk
 }
 
 func OpenFileCallbackRegistry(path string, now func() time.Time) (*FileCallbackRegistry, error) {
@@ -95,7 +95,6 @@ func OpenFileCallbackRegistry(path string, now func() time.Time) (*FileCallbackR
 	if err := validateFileCallbackRegistryState(registry.state); err != nil {
 		return nil, fmt.Errorf("validate callback registry: %w", err)
 	}
-	registry.retainRetired = true
 	return registry, nil
 }
 func (registry *FileCallbackRegistry) Replace(ctx context.Context, presentation CallbackPresentation) error {
@@ -105,35 +104,22 @@ func (registry *FileCallbackRegistry) Replace(ctx context.Context, presentation 
 	if registry == nil || registry.now == nil {
 		return errors.New("callback registry is required")
 	}
-	if err := validateCallbackPresentation(presentation, registry.now()); err != nil {
+	if err := callbackregistry.ValidatePresentation(presentation, registry.now()); err != nil {
 		return err
 	}
 	registry.mu.Lock()
 	defer registry.mu.Unlock()
 	next := cloneFileCallbackRegistryState(registry.state)
-	if registry.retainRetired {
-		if previous, exists := next.Presentations[presentation.SessionID]; exists && previous.Carrier == presentation.Carrier {
-			if next.Retired == nil {
-				next.Retired = make(map[string]fileCallbackPresentation)
-			}
-			for tokenID := range previous.Tokens {
-				next.Retired[tokenID] = cloneFileCallbackPresentation(previous)
-			}
-			// Keep the restart compatibility set bounded. Oldest ordering is not
-			// needed for correctness; deterministic truncation limits disk growth.
-			for tokenID := range next.Retired {
-				if len(next.Retired) <= 4096 {
-					break
-				}
-				delete(next.Retired, tokenID)
-			}
-		}
+	if previous, exists := next.Presentations[presentation.SessionID]; exists && previous.Carrier == presentation.Carrier {
+		retireFileCallbackPresentation(&next, previous)
 	}
 	for sessionID, candidate := range next.Presentations {
 		if sessionID != presentation.SessionID && candidate.Carrier == presentation.Carrier {
+			retireFileCallbackPresentation(&next, candidate)
 			delete(next.Presentations, sessionID)
 		}
 	}
+	trimRetiredCallbackPresentations(&next, registry.now())
 	tokens := make(map[string]bool, len(presentation.TokenIDs))
 	for _, tokenID := range presentation.TokenIDs {
 		tokens[tokenID] = false
@@ -201,7 +187,7 @@ func (registry *FileCallbackRegistry) Claim(ctx context.Context, claim CallbackC
 	if registry == nil || registry.now == nil {
 		return CallbackClaimResult{}, errors.New("callback registry is required")
 	}
-	if err := validateCallbackClaim(claim); err != nil {
+	if err := callbackregistry.ValidateClaim(claim); err != nil {
 		return CallbackClaimResult{}, err
 	}
 	registry.mu.Lock()
@@ -215,7 +201,7 @@ func (registry *FileCallbackRegistry) Claim(ctx context.Context, claim CallbackC
 	if !found {
 		ownerSessionID, presentation, found = findFileCallbackPresentationByToken(registry.state, claim, registry.now())
 	}
-	if !found {
+	if !found && claim.Repeatable {
 		ownerSessionID, presentation, found = findRetiredCallbackPresentation(registry.state, claim, registry.now())
 		retired = found
 	}
@@ -226,6 +212,11 @@ func (registry *FileCallbackRegistry) Claim(ctx context.Context, claim CallbackC
 		identity, known := presentation.Claims[claim.TokenID]
 		if known && identity.UpdateID == claim.UpdateID && identity.CallbackQueryID == claim.CallbackQueryID {
 			result := fileCallbackClaimResult(ClaimRecovered, ownerSessionID, presentation)
+			result.Retired = retired
+			return result, nil
+		}
+		if claim.Repeatable && repeatableFilePresentation(presentation) {
+			result := fileCallbackClaimResult(ClaimAccepted, ownerSessionID, presentation)
 			result.Retired = retired
 			return result, nil
 		}
@@ -255,6 +246,49 @@ func (registry *FileCallbackRegistry) Claim(ctx context.Context, claim CallbackC
 	result := fileCallbackClaimResult(ClaimAccepted, ownerSessionID, presentation)
 	result.Retired = retired
 	return result, nil
+}
+
+func retireFileCallbackPresentation(state *fileCallbackRegistryState, presentation fileCallbackPresentation) {
+	if state.Retired == nil {
+		state.Retired = make(map[string]fileCallbackPresentation)
+	}
+	for tokenID := range presentation.Tokens {
+		state.Retired[tokenID] = retiredTokenPresentation(tokenID, presentation)
+	}
+}
+
+func retiredTokenPresentation(tokenID string, presentation fileCallbackPresentation) fileCallbackPresentation {
+	retired := cloneFileCallbackPresentation(presentation)
+	retired.Tokens = map[string]bool{tokenID: presentation.Tokens[tokenID]}
+	retired.Claims = make(map[string]fileCallbackClaimIdentity)
+	if identity, ok := presentation.Claims[tokenID]; ok {
+		retired.Claims[tokenID] = identity
+	}
+	return retired
+}
+
+func trimRetiredCallbackPresentations(state *fileCallbackRegistryState, now time.Time) {
+	for tokenID, presentation := range state.Retired {
+		if !presentation.ExpiresAt.After(now) {
+			delete(state.Retired, tokenID)
+			continue
+		}
+		state.Retired[tokenID] = retiredTokenPresentation(tokenID, presentation)
+	}
+	// The set is a short overlap window for still-visible keyboards, not an
+	// audit log. Arbitrary truncation is safe because every retained entry has
+	// the same bounded expiry and only repeatable actions can consume it.
+	for tokenID := range state.Retired {
+		if len(state.Retired) <= 4096 {
+			break
+		}
+		delete(state.Retired, tokenID)
+	}
+}
+
+func repeatableFilePresentation(presentation fileCallbackPresentation) bool {
+	return presentation.InteractionRequestID == "" && presentation.OutboundOperationID == "" && presentation.Recovery == nil &&
+		presentation.AcceptedTurnRecovery == nil && presentation.StatusRecovery == nil && presentation.ArtifactRetry == nil
 }
 
 func findRetiredCallbackPresentation(state fileCallbackRegistryState, claim CallbackClaim, now time.Time) (domain.SessionID, fileCallbackPresentation, bool) {
@@ -335,6 +369,12 @@ func (registry *FileCallbackRegistry) InvalidateCarrier(ctx context.Context, car
 	for sessionID, presentation := range next.Presentations {
 		if presentation.Carrier == carrier {
 			delete(next.Presentations, sessionID)
+			changed = true
+		}
+	}
+	for tokenID, presentation := range next.Retired {
+		if presentation.Carrier == carrier {
+			delete(next.Retired, tokenID)
 			changed = true
 		}
 	}

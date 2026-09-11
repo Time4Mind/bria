@@ -54,12 +54,9 @@ func (controller *Controller) projectSettingsSurface(ctx context.Context, surfac
 		if current, snapshotErr := controller.settings.Snapshot(ctx); snapshotErr == nil {
 			nodeID := controller.currentNodeID()
 			nodeName := string(nodeID)
-			if nodes, inventoryErr := controller.nodeInventory(ctx); inventoryErr == nil {
-				for _, node := range nodes {
-					if node.ID == nodeID && strings.TrimSpace(node.Name) != "" {
-						nodeName = node.Name
-						break
-					}
+			if reader, ok := controller.providerPreferences.(settingsport.NodeNameReader); ok {
+				if currentName, nameErr := reader.NodeName(ctx, nodeID); nameErr == nil && strings.TrimSpace(currentName) != "" {
+					nodeName = currentName
 				}
 			}
 			provider := "не задан"
@@ -84,7 +81,7 @@ func (controller *Controller) projectSettingsSurface(ctx context.Context, surfac
 				telegramsettingsview.Field{Name: "Нода", Value: nodeName},
 				telegramsettingsview.Field{Name: "CLI по умолчанию", Value: provider},
 				telegramsettingsview.Field{Name: "Папка по умолчанию", Value: workdir})
-			if _, ok := controller.providerPreferences.(settingsport.NodeRenamer); ok {
+			if _, ok := controller.providerPreferences.(settingsport.NodeRenamer); ok && nodeID == controller.localComputerID {
 				surface.Rows = append(surface.Rows[:len(surface.Rows)-1], []telegramsettingsview.Button{{Label: "Переименовать ноду", Action: "settings_rename_node"}}, surface.Rows[len(surface.Rows)-1])
 			}
 			if hint := controller.StandbyError(nodeID); hint != "" {

@@ -5,7 +5,9 @@ import (
 	"bria/internal/domain"
 	"bria/internal/settingsport"
 	"bria/internal/telegramcontroller"
+	"bria/internal/telegramsessions"
 	"context"
+	"strings"
 	"testing"
 	"time"
 )
@@ -123,6 +125,39 @@ func TestAsyncStandbyPublishesBackgroundStartingSessionBeforeProviderReady(t *te
 	}
 	if !found {
 		t.Fatalf("Starting standby %s absent from buttons: %#v", pending.ID(), current.Card.SelectableSessionIDs)
+	}
+	if strings.Contains(current.Card.Footer, "default") || strings.Contains(current.Card.Footer, "фон") {
+		t.Fatalf("empty Starting standby leaked into background footer: %q", current.Card.Footer)
+	}
+	ready, err := pending.Ready(domain.ProviderBinding{Provider: pending.Provider(), SessionID: "standby-provider", Generation: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.Set(ready)
+	outcome <- telegramcontroller.SessionStartOutcome{Session: ready}
+	select {
+	case notification := <-notifications:
+		if notification.SessionID != active.ID() || notification.Kind != telegramcontroller.NotificationPromptStatus {
+			t.Fatalf("ready notification=%#v", notification)
+		}
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("ready standby did not request a card refresh")
+	}
+	current, err = controller.ProjectCurrent(ctx, active.ID())
+	if err != nil || current.Card == nil {
+		t.Fatalf("ProjectCurrent() for ready standby=(%#v, %v)", current, err)
+	}
+	if strings.Contains(current.Card.Footer, "default") || strings.Contains(current.Card.Footer, "фон") {
+		t.Fatalf("empty Ready standby leaked into background footer: %q", current.Card.Footer)
+	}
+	store.setEmpty(pending.ID(), false)
+	current, err = controller.ProjectCurrent(ctx, active.ID())
+	if err != nil || current.Card == nil {
+		t.Fatalf("ProjectCurrent() after context=(%#v, %v)", current, err)
+	}
+	pendingLabel := telegramsessions.Labels([]domain.Session{active, ready}, active.ComputerID())[ready.ID()]
+	if !strings.Contains(current.Card.Footer, "фон") || !strings.Contains(current.Card.Footer, pendingLabel) {
+		t.Fatalf("non-empty Starting standby absent from background footer: %q", current.Card.Footer)
 	}
 }
 

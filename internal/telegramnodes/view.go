@@ -10,6 +10,15 @@ type Button struct {
 	Choice int
 }
 
+func Name(id domain.ComputerID, nodes []sessioncreation.Computer) string {
+	for _, node := range nodes {
+		if node.ID == id && node.Name != "" {
+			return node.Name
+		}
+	}
+	return string(id)
+}
+
 func Menu(current domain.ComputerID, nodes []sessioncreation.Computer) [][]Button {
 	rows := make([][]Button, 0, len(nodes))
 	for index, node := range nodes {

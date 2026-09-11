@@ -63,7 +63,9 @@ func Recover(ctx context.Context, awaiting domain.Session, prior domain.Provider
 		return result, ErrReconciliationRequired
 	}
 	result.Reconciliation, err = options.AcceptedTurns.ReconcileAcceptedTurns(ctx, awaiting.ID(), prior)
-	if err != nil {
+	var stableBarrier interface{ StableRecoveryBarrierRevision() string }
+	capturedUnknown := options.CommitInputRecovery != nil && errors.As(err, &stableBarrier) && stableBarrier.StableRecoveryBarrierRevision() != ""
+	if err != nil && !capturedUnknown {
 		return result, errors.Join(ErrReconciliationRequired, err)
 	}
 	if err = ValidateReconciliation(result.Reconciliation); err != nil {
@@ -92,8 +94,6 @@ func Recover(ctx context.Context, awaiting domain.Session, prior domain.Provider
 		return result, ErrReconciliationRequired
 	}
 	if active && recovered.Status() == domain.SessionClosing {
-		// A detached close did not prove idle. Retain its intent while the exact
-		// accepted turn is observed; only terminal completion may close the CLI.
 		snapshot := recovered.Snapshot()
 		snapshot.Status = domain.SessionClosingAfterWork
 		recovered, err = domain.RestoreSession(snapshot)

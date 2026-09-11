@@ -1903,7 +1903,7 @@ func TestArchitectureCheckerExtendsStorageAndRecoveryRuntimeEdges(t *testing.T) 
 	}{
 		{
 			path:    "internal/storage",
-			imports: []string{"internal/cardeventhistory", "internal/statejson", "internal/archiveimport", "internal/cardhistory", "internal/cardtranscript", "internal/coordinator", "internal/domain", "internal/telegramhistory", "internal/telegramstate"},
+			imports: []string{"internal/cardactivity", "internal/cardeventhistory", "internal/statejson", "internal/archiveimport", "internal/cardhistory", "internal/cardtranscript", "internal/coordinator", "internal/domain", "internal/sessionlabel", "internal/telegramhistory", "internal/telegramstate"},
 		},
 		{
 			path:    "internal/recoveryruntime",
@@ -1951,7 +1951,7 @@ func TestArchitectureCheckerRegistersSettingsAndProviderInputPolicies(t *testing
 		{
 			path:           "internal/telegramsettings",
 			responsibility: "apply Telegram settings through neutral preferences ports",
-			imports:        []string{"internal/domain", "internal/settingsport"},
+			imports:        []string{"internal/domain", "internal/sessioncreation", "internal/settingsport"},
 			limit:          200,
 		},
 		{

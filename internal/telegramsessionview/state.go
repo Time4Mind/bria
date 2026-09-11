@@ -1,7 +1,22 @@
 // Package telegramsessionview formats committed lifecycle state without I/O.
 package telegramsessionview
 
-import "bria/internal/domain"
+import (
+	"fmt"
+	"time"
+
+	"bria/internal/domain"
+)
+
+var moscowTime = time.FixedZone("MSK", 3*60*60)
+
+func Header(label, nodeName string, provider domain.Provider, stateText string, lastEventUnixNano int64) string {
+	header := fmt.Sprintf("%s · %s · %s · %s", label, nodeName, provider, stateText)
+	if lastEventUnixNano > 0 {
+		header += " · " + time.Unix(0, lastEventUnixNano).In(moscowTime).Format("15:04:05")
+	}
+	return header + "\n\n─────  \n"
+}
 
 // RecoveryNotice leaves automatic recovery to the lifecycle worker. The state
 // badge remains truthful; the card must not demand an owner's repair action.

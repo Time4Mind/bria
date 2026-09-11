@@ -16,10 +16,17 @@ func (store *SessionStore) AppendCardTypedHistory(ctx context.Context, id domain
 }
 
 func (store *SessionStore) LoadCardTranscript(ctx context.Context, id domain.SessionID, showTechnical bool) ([]cardtranscript.Block, error) {
+	snapshot, err := store.LoadCardTranscriptSnapshot(ctx, id, showTechnical)
+	return snapshot.Blocks, err
+}
+
+func (store *SessionStore) LoadCardTranscriptSnapshot(ctx context.Context, id domain.SessionID, showTechnical bool) (cardtranscript.Snapshot, error) {
 	state, err := store.LoadTelegramUI(ctx)
 	card, ok := state.Card(id)
 	if err != nil || !ok {
-		return nil, err
+		return cardtranscript.Snapshot{}, err
 	}
-	return cardhistory.Blocks(card, showTechnical), nil
+	return cardtranscript.Snapshot{
+		Blocks: cardhistory.Blocks(card, showTechnical), LastEventUnixNano: card.LastEventUnixNano,
+	}, nil
 }

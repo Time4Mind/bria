@@ -46,6 +46,7 @@ type creationEnvironmentStub struct {
 	availableErr   error
 	availableSeq   []error
 	availableCalls int
+	browseCalls    int
 }
 
 func localCreationEnvironment(t *testing.T, root string, capabilities ...sessioncreation.ProviderCapability) sessioncreation.Environment {
@@ -96,11 +97,50 @@ func (environment *creationEnvironmentStub) Roots(_ context.Context, computerID 
 	return append([]sessioncreation.Directory(nil), environment.roots[computerID]...), nil
 }
 func (environment *creationEnvironmentStub) Browse(_ context.Context, _ domain.ComputerID, path string) ([]sessioncreation.Directory, error) {
+	environment.browseCalls++
 	children, ok := environment.children[path]
 	if !ok {
 		return nil, sessioncreation.ErrUnavailablePath
 	}
 	return append([]sessioncreation.Directory(nil), children...), nil
+}
+
+func TestSessionCreationV2ReadsInventoryOnceForNewAndDirectoryChoice(t *testing.T) {
+	environment := &creationEnvironmentStub{
+		computers: []sessioncreation.Computer{{
+			ID: "local", Name: "Local",
+			Capabilities: []sessioncreation.ProviderCapability{{Provider: domain.ProviderCodex, Installed: true, Enabled: true}},
+		}},
+		roots: map[domain.ComputerID][]sessioncreation.Directory{
+			"local": {{Name: "/work", Path: "/work"}},
+		},
+		children: map[string][]sessioncreation.Directory{
+			"/work":       {{Name: "child", Path: "/work/child"}},
+			"/work/child": {},
+		},
+	}
+	controller := newController(t, nil, &memorySessions{}, nil, nil, telegramcontroller.Options{CreationEnvironment: environment})
+	t.Cleanup(func() { _ = controller.Close(context.Background()) })
+	environment.availableCalls = 0
+	environment.browseCalls = 0
+
+	opened, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticMenuNew, UpdateID: 1})
+	if err != nil || opened.Surface == nil {
+		t.Fatalf("open New = (%#v, %v)", opened, err)
+	}
+	if environment.availableCalls != 1 || environment.browseCalls != 1 {
+		t.Fatalf("open New reads = inventory:%d browse:%d, want 1/1", environment.availableCalls, environment.browseCalls)
+	}
+
+	environment.availableCalls = 0
+	environment.browseCalls = 0
+	opened, err = controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticCreateChoice, Choice: 1, UpdateID: 2})
+	if err != nil || opened.Surface == nil || !strings.Contains(opened.Surface.Text, "/work/child") {
+		t.Fatalf("open child = (%#v, %v)", opened, err)
+	}
+	if environment.availableCalls != 1 || environment.browseCalls != 1 {
+		t.Fatalf("open child reads = inventory:%d browse:%d, want 1/1", environment.availableCalls, environment.browseCalls)
+	}
 }
 func (environment *creationEnvironmentStub) CreateChild(context.Context, domain.ComputerID, string, string) (string, error) {
 	return "", errors.New("unexpected create child")

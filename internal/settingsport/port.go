@@ -93,6 +93,11 @@ type NodeRenamer interface {
 	RenameNode(context.Context, domain.ComputerID, string) error
 }
 
+// NodeNameReader returns the persisted display name used by the renamer.
+type NodeNameReader interface {
+	NodeName(context.Context, domain.ComputerID) (string, error)
+}
+
 type ProviderPreference struct {
 	Provider   domain.Provider
 	Enabled    bool

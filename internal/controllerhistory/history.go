@@ -115,27 +115,44 @@ func (h *History) Append(ctx context.Context, id domain.SessionID, messageID str
 // Filter a projection copy before pagination. Settings changes can reveal old
 // tool entries again without reconstructing history or resubmitting a turn.
 func (h *History) Display(ctx context.Context, id domain.SessionID, history []string) ([]cardtranscript.Block, error) {
+	blocks, _, err := h.DisplayWithActivity(ctx, id, history)
+	return blocks, err
+}
+
+func (h *History) DisplayWithActivity(ctx context.Context, id domain.SessionID, history []string) ([]cardtranscript.Block, int64, error) {
 	show, lines, commandLines := true, 10, 10
 	if h.Settings != nil {
 		settings, err := h.Settings.Snapshot(ctx)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		show = settings.ShowTechnicalActions
 		lines = settings.TechnicalOutputLines
 		commandLines = settings.TechnicalCommandLines
 	}
+	if store, ok := h.Store.(telegramcontrolport.TypedTranscriptSnapshotStore); ok {
+		snapshot, err := store.LoadCardTranscriptSnapshot(ctx, id, show)
+		if err != nil {
+			return nil, 0, err
+		}
+		blocks := append([]cardtranscript.Block(nil), snapshot.Blocks...)
+		for i := range blocks {
+			blocks[i].ToolLines = lines
+			blocks[i].CommandLines = commandLines
+		}
+		return cardtranscript.RenderBlocks(blocks), snapshot.LastEventUnixNano, nil
+	}
 	if store, ok := h.Store.(telegramcontrolport.TypedTranscriptStore); ok {
 		blocks, err := store.LoadCardTranscript(ctx, id, show)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		blocks = append([]cardtranscript.Block(nil), blocks...)
 		for i := range blocks {
 			blocks[i].ToolLines = lines
 			blocks[i].CommandLines = commandLines
 		}
-		return cardtranscript.RenderBlocks(blocks), nil
+		return cardtranscript.RenderBlocks(blocks), 0, nil
 	}
 	if store, ok := h.Store.(telegramcontrolport.DisplayHistoryStore); ok {
 		texts, err := store.LoadCardDisplayHistory(ctx, id, show)
@@ -143,7 +160,7 @@ func (h *History) Display(ctx context.Context, id domain.SessionID, history []st
 		for i, text := range texts {
 			blocks[i] = cardtranscript.Block{Text: text}
 		}
-		return blocks, err
+		return blocks, 0, err
 	}
 	h.Mu.Lock()
 	defer h.Mu.Unlock()
@@ -161,5 +178,5 @@ func (h *History) Display(ctx context.Context, id domain.SessionID, history []st
 		}
 		blocks = append(blocks, cardtranscript.Block{Kind: kind, Text: text, ToolLines: lines, CommandLines: commandLines})
 	}
-	return cardtranscript.RenderBlocks(blocks), nil
+	return cardtranscript.RenderBlocks(blocks), 0, nil
 }

@@ -57,7 +57,6 @@ type NotificationFailure = telegramcontrolport.NotificationFailure
 type OutputFailureRecorder = telegramcontrolport.OutputFailureRecorder
 type ActiveSessionStore = telegramcontrolport.ActiveSessionStore
 type CardCarrierStore = telegramcontrolport.CardCarrierStore
-type CardPageStore = telegramcontrolport.CardPageStore
 type CardHistoryStore = telegramcontrolport.CardHistoryStore
 type CardPromptStore = telegramcontrolport.CardPromptStore
 type ActiveSessionLoader = telegramcontrolport.ActiveSessionLoader
@@ -319,17 +318,18 @@ func (controller *Controller) handleSemanticAction(ctx context.Context, action S
 	var decision coordinator.Decision
 	var err error
 	makeActive := false
+	navigationAction := ""
 	switch action.Kind {
 	case SemanticNativeKey:
 		return controller.nativeKey(ctx, action)
 	case SemanticModelMenu, SemanticModelChoice, SemanticEffortMenu, SemanticEffortChoice:
 		return controller.modelNotice(action.SessionID, "Старый выбор модели больше не используется. Отправь /model в CLI."), nil
 	case SemanticPagePrevious:
-		decision, err = controller.cardDecision(ctx, action.SessionID, "pg:prev")
+		navigationAction = "pg:prev"
 	case SemanticPageLatest:
-		decision, err = controller.cardDecision(ctx, action.SessionID, "pg:jump")
+		navigationAction = "pg:jump"
 	case SemanticPageNext:
-		decision, err = controller.cardDecision(ctx, action.SessionID, "pg:next")
+		navigationAction = "pg:next"
 	case SemanticStop:
 		decision = controller.stopSession(ctx, action.SessionID)
 	case SemanticClose:
@@ -367,7 +367,6 @@ func (controller *Controller) handleSemanticAction(ctx context.Context, action S
 			controller.mu.Lock()
 			delete(controller.closeConfirmation, action.SessionID)
 			controller.mu.Unlock()
-			decision, err = controller.cardDecision(ctx, action.SessionID, "")
 			makeActive = true
 			break
 		}
@@ -383,7 +382,6 @@ func (controller *Controller) handleSemanticAction(ctx context.Context, action S
 		controller.mu.Lock()
 		controller.optionsExpanded[action.SessionID] = !controller.optionsExpanded[action.SessionID]
 		controller.mu.Unlock()
-		decision, err = controller.cardDecision(ctx, action.SessionID, "")
 	case SemanticScreen:
 		if controller.settings == nil {
 			return SemanticActionResult{}, errors.New("screen settings are not configured")
@@ -391,23 +389,20 @@ func (controller *Controller) handleSemanticAction(ctx context.Context, action S
 		if err := controller.settings.ToggleScreen(ctx); err != nil {
 			return SemanticActionResult{}, fmt.Errorf("toggle global screen setting: %w", err)
 		}
-		decision, err = controller.cardDecision(ctx, action.SessionID, "")
 	case SemanticSelect:
 		controller.clearNodeBack()
-		decision, err = controller.use(ctx, action.SessionID)
-		if err == nil {
-			selected, loadErr := controller.sessions.Load(ctx, action.SessionID)
-			if loadErr != nil {
-				return SemanticActionResult{}, fmt.Errorf("reload selected session: %w", loadErr)
-			}
-			if !telegramsessions.Viewable(selected.Status()) {
-				return controller.sessionListSemanticResult(ctx)
-			}
-			if native, ok := controller.restoreNativeSurface(action.SessionID); ok {
-				return native, nil
-			}
+		selected, activated, selectErr := controller.selectSession(ctx, action.SessionID)
+		if selectErr != nil {
+			return SemanticActionResult{}, selectErr
 		}
-		makeActive = true
+		if !telegramsessions.Viewable(selected.Status()) {
+			return controller.sessionListSemanticResult(ctx)
+		}
+		if native, ok := controller.restoreNativeSurfaceForSession(selected); ok {
+			return native, nil
+		}
+		card, cardErr := controller.semanticCardForSession(ctx, selected, activated, "")
+		return SemanticActionResult{Card: &card}, cardErr
 	case SemanticResume:
 		decision, err = controller.resumeOrRecover(ctx, action.SessionID)
 		makeActive = true
@@ -417,7 +412,7 @@ func (controller *Controller) handleSemanticAction(ctx context.Context, action S
 	if err != nil {
 		return SemanticActionResult{}, err
 	}
-	card, err := controller.semanticCard(ctx, action.SessionID, makeActive)
+	card, err := controller.semanticCardWithNavigation(ctx, action.SessionID, makeActive, navigationAction)
 	if err != nil {
 		return SemanticActionResult{}, err
 	}
@@ -451,12 +446,7 @@ func (controller *Controller) handleGlobalSemanticAction(ctx context.Context, ac
 		return controller.selectNodeSemantic(ctx, action.Choice)
 	case SemanticMenuNew:
 		controller.setCreationPreferenceMode("")
-		if snapshot, open, err := controller.currentCreateSnapshotV2(ctx); err != nil {
-			return SemanticActionResult{}, err
-		} else if open {
-			return controller.advanceCreateV2(ctx, snapshot, 0)
-		}
-		return controller.beginNewSessionV2(ctx, action.UpdateID)
+		return controller.openNewSessionV2(ctx, action.UpdateID)
 	case SemanticCreateSelectCodex, SemanticCreateSelectClaude:
 		provider := domain.ProviderCodex
 		if action.Kind == SemanticCreateSelectClaude {
@@ -568,13 +558,18 @@ func (controller *Controller) handleGlobalSemanticAction(ctx context.Context, ac
 		controller.mu.Unlock()
 		return controller.projectSettingsSurface(ctx, telegramsettingsview.PreprocessingInstructionEditor(instruction, action.Choice), 0, nil)
 	case SemanticSettingsRenameNode:
-		if _, ok := controller.providerPreferences.(settingsport.NodeRenamer); !ok {
+		reader, ok := controller.providerPreferences.(settingsport.NodeNameReader)
+		if _, renameOK := controller.providerPreferences.(settingsport.NodeRenamer); !ok || !renameOK || controller.currentNodeID() != controller.localComputerID {
 			return SemanticActionResult{}, errors.New("переименование ноды не настроено")
+		}
+		name, err := reader.NodeName(ctx, controller.currentNodeID())
+		if err != nil {
+			return SemanticActionResult{}, fmt.Errorf("прочитать имя ноды: %w", err)
 		}
 		controller.mu.Lock()
 		controller.nodeRenamePending = true
 		controller.mu.Unlock()
-		return SemanticActionResult{Surface: &SemanticSurface{Text: "Отправьте новое имя ноды одним текстовым сообщением (до 64 символов).", Rows: [][]SemanticButton{{{Label: "Отмена", Action: SemanticMenuSettings}}}}}, nil
+		return SemanticActionResult{Surface: &SemanticSurface{Text: "Переименование ноды\n\nТекущее имя:\n" + name + "\n\nОтправьте новое имя одним текстовым сообщением (до 64 символов).", Rows: [][]SemanticButton{{{Label: "Отмена", Action: SemanticSettingsCategory, Choice: int(telegramsettingsview.CategoryCreation)}}}}}, nil
 	case SemanticSettingsPreprocessing, SemanticSettingsPreprocessingDisabled, SemanticSettingsPreprocessingShared,
 		SemanticSettingsPreprocessingPerSession, SemanticSettingsPreprocessingReset:
 		if err := telegramsettings.Apply(ctx, controller.settings, controller.scopedProviderPreferences(), string(action.Kind)); err != nil {
@@ -952,9 +947,7 @@ type Controller struct {
 	created                         map[domain.SessionID]createdProcess
 	history                         map[domain.SessionID][]string
 	transcriptKinds                 map[domain.SessionID]map[int]string
-	page                            map[domain.SessionID]int
-	followLatest                    map[domain.SessionID]bool
-	pageAnchor                      map[domain.SessionID]string
+	pages                           *cardpageselection.Memory
 	optionsExpanded                 map[domain.SessionID]bool
 	closeConfirmation               map[domain.SessionID]bool
 	deliveryFailures                map[domain.SessionID]NotificationFailure
@@ -1086,9 +1079,7 @@ func New(
 		workers:             make(map[domain.SessionID]*sessionWorker),
 		created:             make(map[domain.SessionID]createdProcess),
 		history:             make(map[domain.SessionID][]string),
-		page:                make(map[domain.SessionID]int),
-		followLatest:        make(map[domain.SessionID]bool),
-		pageAnchor:          make(map[domain.SessionID]string),
+		pages:               cardpageselection.NewMemory(),
 		finalWrites:         make(map[domain.SessionID]int),
 		optionsExpanded:     make(map[domain.SessionID]bool),
 		closeConfirmation:   make(map[domain.SessionID]bool),
@@ -1362,17 +1353,25 @@ func (controller *Controller) consumeNodeRename(ctx context.Context, update coor
 	if update.MediaKind != "" || update.Caption != "" || strings.TrimSpace(update.Text) == "" {
 		return controller.status("Имя ноды должно быть непустым текстовым сообщением."), true, nil
 	}
+	nodes, err := controller.nodeInventory(ctx)
+	if err != nil {
+		return controller.status("Не удалось переименовать ноду: не удалось проверить имена нод"), true, nil
+	}
+	name, err := telegramsettings.ValidateNodeName(update.Text, controller.currentNodeID(), nodes)
+	if err != nil {
+		return controller.status("Не удалось переименовать ноду: " + err.Error()), true, nil
+	}
 	renamer, ok := controller.providerPreferences.(settingsport.NodeRenamer)
 	if !ok {
 		return coordinator.Decision{}, true, errors.New("переименование ноды не настроено")
 	}
-	if err := renamer.RenameNode(ctx, controller.currentNodeID(), strings.TrimSpace(update.Text)); err != nil {
+	if err := renamer.RenameNode(ctx, controller.currentNodeID(), name); err != nil {
 		return controller.status("Не удалось переименовать ноду: " + err.Error()), true, nil
 	}
 	controller.mu.Lock()
 	controller.nodeRenamePending = false
 	controller.mu.Unlock()
-	return controller.status("Имя ноды сохранено."), true, nil
+	return controller.status("Имя ноды сохранено: " + name), true, nil
 }
 
 func (controller *Controller) handleCallback(ctx context.Context, update coordinator.Update) (coordinator.Decision, error) {
@@ -1551,12 +1550,13 @@ func (controller *Controller) cardDecision(ctx context.Context, sessionID domain
 	controller.mu.Lock()
 	items := append([]string(nil), controller.history[sessionID]...)
 	controller.mu.Unlock()
-	if len(items) == 0 {
+	_, snapshotStore := controller.uiState.(telegramcontrolport.TypedTranscriptSnapshotStore)
+	if len(items) == 0 && !snapshotStore {
 		if historyStore, ok := controller.uiState.(CardHistoryStore); ok {
 			items, _ = historyStore.LoadCardHistory(ctx, sessionID)
 		}
 	}
-	blocks, err := controller.displayHistory(ctx, sessionID, items)
+	blocks, _, err := controller.historyConsumer().DisplayWithActivity(ctx, sessionID, items)
 	if err != nil {
 		return coordinator.Decision{}, err
 	}
@@ -1565,21 +1565,15 @@ func (controller *Controller) cardDecision(ctx context.Context, sessionID domain
 		return coordinator.Decision{}, err
 	}
 	pages := cardtranscript.Paginate(blocks, pageLimit)
-	controller.mu.Lock()
-	fallback := cardpageselection.View{Page: controller.page[sessionID], Pages: max(controller.page[sessionID], len(pages)), Anchor: controller.pageAnchor[sessionID], FollowLatest: controller.followLatest[sessionID]}
-	controller.mu.Unlock()
+	fallback := controller.pages.Load(sessionID)
+	fallback.Pages = max(fallback.Page, len(pages))
 	view, err := cardpageselection.Select(ctx, controller.uiState, sessionID, fallback, pages, action)
 	if err != nil {
 		return coordinator.Decision{}, err
 	}
-	if pager, ok := controller.uiState.(CardPageStore); ok {
-		if err := pager.SetCardPage(ctx, sessionID, view.Page, view.Pages, view.Anchor, view.FollowLatest); err != nil {
-			return coordinator.Decision{}, err
-		}
+	if err := controller.commitCardPage(ctx, sessionID, view); err != nil {
+		return coordinator.Decision{}, err
 	}
-	controller.mu.Lock()
-	controller.page[sessionID], controller.followLatest[sessionID], controller.pageAnchor[sessionID] = view.Page, view.FollowLatest, view.Anchor
-	controller.mu.Unlock()
 	page := view.Page
 	stateText := string(session.Status())
 	if session.Status() == domain.SessionReady {
@@ -1629,25 +1623,33 @@ func (controller *Controller) cardDecision(ctx context.Context, sessionID domain
 	return coordinator.Decision{Kind: coordinator.DecisionStatus, Status: coordinator.Status{ConversationID: controller.ownerPrivateChatID, Text: header + pages[page-1].Content}, Keyboard: &keyboard}, nil
 }
 func (controller *Controller) semanticCard(ctx context.Context, sessionID domain.SessionID, makeActive bool) (SemanticCard, error) {
+	return controller.semanticCardWithNavigation(ctx, sessionID, makeActive, "")
+}
+
+func (controller *Controller) semanticCardWithNavigation(ctx context.Context, sessionID domain.SessionID, makeActive bool, navigationAction string) (SemanticCard, error) {
 	session, err := controller.sessions.Load(ctx, sessionID)
 	if err != nil {
 		return SemanticCard{}, fmt.Errorf("load semantic card session: %w", err)
 	}
+	return controller.semanticCardForSession(ctx, session, makeActive, navigationAction)
+}
+
+func (controller *Controller) semanticCardForSession(ctx context.Context, session domain.Session, makeActive bool, navigationAction string) (SemanticCard, error) {
+	sessionID := session.ID()
 	controller.mu.Lock()
 	items := append([]string(nil), controller.history[sessionID]...)
-	page := controller.page[sessionID]
-	followLatest := controller.followLatest[sessionID]
-	anchor := controller.pageAnchor[sessionID]
+	pageView := controller.pages.Load(sessionID)
 	optionsExpanded := controller.optionsExpanded[sessionID]
 	closeConfirmation := controller.closeConfirmation[sessionID]
 	recoveryBusy := controller.recovering[sessionID]
 	controller.mu.Unlock()
-	if len(items) == 0 {
+	_, snapshotStore := controller.uiState.(telegramcontrolport.TypedTranscriptSnapshotStore)
+	if len(items) == 0 && !snapshotStore {
 		if historyStore, ok := controller.uiState.(CardHistoryStore); ok {
 			items, _ = historyStore.LoadCardHistory(ctx, sessionID)
 		}
 	}
-	blocks, err := controller.displayHistory(ctx, sessionID, items)
+	blocks, lastEventUnixNano, err := controller.historyConsumer().DisplayWithActivity(ctx, sessionID, items)
 	if err != nil {
 		return SemanticCard{}, err
 	}
@@ -1656,9 +1658,15 @@ func (controller *Controller) semanticCard(ctx context.Context, sessionID domain
 		return SemanticCard{}, err
 	}
 	pages := cardtranscript.Paginate(blocks, pageLimit)
-	view, err := cardpageselection.Select(ctx, controller.uiState, sessionID, cardpageselection.View{Page: page, Pages: max(page, len(pages)), Anchor: anchor, FollowLatest: followLatest}, pages, "")
+	pageView.Pages = max(pageView.Page, len(pages))
+	view, err := cardpageselection.Select(ctx, controller.uiState, sessionID, pageView, pages, navigationAction)
 	if err != nil {
 		return SemanticCard{}, err
+	}
+	if navigationAction != "" {
+		if err := controller.commitCardPage(ctx, sessionID, view); err != nil {
+			return SemanticCard{}, err
+		}
 	}
 	sessions, err := controller.sessions.List(ctx)
 	if err != nil {
@@ -1667,9 +1675,11 @@ func (controller *Controller) semanticCard(ctx context.Context, sessionID domain
 	sort.Slice(sessions, func(i, j int) bool { return sessions[i].ID() < sessions[j].ID() })
 	selectable := make([]domain.SessionID, 0, len(sessions))
 	labelsByID := telegramsessions.Labels(sessions, session.ComputerID())
+	emptyStandby := make(map[domain.SessionID]bool)
 	for _, candidate := range sessions {
 		if label := controller.standbyLabel(ctx, candidate); label != "" {
 			labelsByID[candidate.ID()] = label
+			emptyStandby[candidate.ID()] = true
 		}
 	}
 	selectableLabels := make([]string, 0, len(sessions))
@@ -1682,21 +1692,14 @@ func (controller *Controller) semanticCard(ctx context.Context, sessionID domain
 		label := labelsByID[candidate.ID()]
 		if candidate.ID() == sessionID {
 			label = "✓ " + label
-		} else if len(background) < 5 {
-			background = append(background, fmt.Sprintf("%s %s · %s", sessionStatusGlyph(candidate.Status()), label, sessionStateText(candidate.Status())))
+		} else if !emptyStandby[candidate.ID()] && len(background) < 5 {
+			background = append(background, fmt.Sprintf("%s %s · %s", telegramsessionview.StatusGlyph(candidate.Status()), label, telegramsessionview.StateText(candidate.Status())))
 		}
 		selectableLabels = append(selectableLabels, label)
 	}
-	rowSizes := make([]int, 0, (len(selectable)+2)/3)
-	for remaining := len(selectable); remaining > 0; remaining -= 3 {
-		size := remaining
-		if size > 3 {
-			size = 3
-		}
-		rowSizes = append(rowSizes, size)
-	}
+	rowSizes := telegramsessions.RowSizes(len(selectable))
 	working := session.Status() == domain.SessionRunning || session.Status() == domain.SessionStopping || session.Status() == domain.SessionClosingAfterWork
-	stateText := sessionStateText(session.Status())
+	stateText := telegramsessionview.StateText(session.Status())
 	controller.hydrateNativeModel(ctx, session)
 	controller.mu.Lock()
 	nativeModel := controller.nativeSnapshots[sessionID].Model
@@ -1706,12 +1709,7 @@ func (controller *Controller) semanticCard(ctx context.Context, sessionID domain
 	}
 	nodeName := string(session.ComputerID())
 	if nodes, inventoryErr := controller.nodeInventory(ctx); inventoryErr == nil {
-		for _, node := range nodes {
-			if node.ID == session.ComputerID() && node.Name != "" {
-				nodeName = node.Name
-				break
-			}
-		}
+		nodeName = telegramnodes.Name(session.ComputerID(), nodes)
 	}
 	footer := ""
 	if len(background) > 0 {
@@ -1720,7 +1718,7 @@ func (controller *Controller) semanticCard(ctx context.Context, sessionID domain
 	card := SemanticCard{
 		SessionID: sessionID,
 		Effect:    SemanticEditSameCarrier,
-		Header:    fmt.Sprintf("%s · %s · %s · %s\n\n─────  \n", labelsByID[sessionID], nodeName, session.Provider(), stateText),
+		Header:    telegramsessionview.Header(labelsByID[sessionID], nodeName, session.Provider(), stateText, lastEventUnixNano),
 		Footer:    footer,
 		Pages:     pages,
 		View:      SemanticPageView{Page: view.Page, Pages: view.Pages, Anchor: view.Anchor, FollowLatest: view.FollowLatest},
@@ -1761,20 +1759,14 @@ func (controller *Controller) semanticCard(ctx context.Context, sessionID domain
 	return card, nil
 }
 
-func sessionStateText(status domain.SessionStatus) string {
-	return telegramsessionview.StateText(status)
-}
-func sessionStatusGlyph(status domain.SessionStatus) string {
-	return telegramsessionview.StatusGlyph(status)
+func (controller *Controller) commitCardPage(ctx context.Context, sessionID domain.SessionID, view cardpageselection.View) error {
+	if err := cardpageselection.Persist(ctx, controller.uiState, sessionID, view); err != nil {
+		return err
+	}
+	controller.pages.Store(sessionID, view)
+	return nil
 }
 
-func (controller *Controller) availableSessionName(ctx context.Context, computerID domain.ComputerID, workdir string) (string, error) {
-	sessions, err := controller.sessions.List(ctx)
-	if err != nil {
-		return "", fmt.Errorf("list sessions for display name: %w", err)
-	}
-	return telegramsessions.AvailableName(sessions, computerID, workdir)
-}
 func (controller *Controller) cardPageLimit(ctx context.Context) (int, error) {
 	const defaultLimit = 64
 	if controller.settings == nil {
@@ -2301,9 +2293,9 @@ func (controller *Controller) create(
 	if !enabled {
 		return coordinator.Decision{}, errProviderUnavailable
 	}
-	name, err := controller.availableSessionName(ctx, computerID, workdir)
+	name, err := telegramsessions.AvailableStoreName(ctx, controller.sessions, computerID, workdir)
 	if err != nil {
-		return coordinator.Decision{}, err
+		return coordinator.Decision{}, fmt.Errorf("list sessions for display name: %w", err)
 	}
 	if controller.asyncCreator != nil {
 		return controller.createAsync(ctx, updateID, computerID, provider, workdir, name)

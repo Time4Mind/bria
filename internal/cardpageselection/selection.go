@@ -3,6 +3,7 @@ package cardpageselection
 
 import (
 	"context"
+	"sync"
 
 	"bria/internal/cardtranscript"
 	"bria/internal/domain"
@@ -13,6 +14,43 @@ type View struct {
 	Page, Pages  int
 	Anchor       string
 	FollowLatest bool
+}
+
+// Memory keeps the controller's transport-independent page-plan cache.
+type Memory struct {
+	mu    sync.Mutex
+	views map[domain.SessionID]View
+}
+
+func NewMemory() *Memory {
+	return &Memory{views: make(map[domain.SessionID]View)}
+}
+
+func (memory *Memory) Load(id domain.SessionID) View {
+	memory.mu.Lock()
+	defer memory.mu.Unlock()
+	return memory.views[id]
+}
+
+func (memory *Memory) Store(id domain.SessionID, view View) {
+	memory.mu.Lock()
+	defer memory.mu.Unlock()
+	memory.views[id] = view
+}
+
+func (memory *Memory) ResetFollow(id domain.SessionID) {
+	memory.Store(id, View{FollowLatest: true})
+}
+
+// Persist writes a resolved page plan when the supplied store supports it.
+func Persist(ctx context.Context, store any, id domain.SessionID, view View) error {
+	writer, ok := store.(interface {
+		SetCardPage(context.Context, domain.SessionID, int, int, string, bool) error
+	})
+	if !ok {
+		return nil
+	}
+	return writer.SetCardPage(ctx, id, view.Page, view.Pages, view.Anchor, view.FollowLatest)
 }
 
 // Load reads the optional primitive store boundary without changing state.

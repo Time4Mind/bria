@@ -71,6 +71,9 @@ func TestProviderPreferencesCompatibilityRenamesOnlyLocalDisplayName(t *testing.
 	if !reflect.DeepEqual(got.Config, want) {
 		t.Fatal("rename changed configuration beyond the local display name")
 	}
+	if name, err := prefs.NodeName(ctx, "local"); err != nil || name != "Рабочий компьютер" {
+		t.Fatalf("persisted node name readback = %q, %v", name, err)
+	}
 	capabilities, err := prefs.Snapshot(ctx)
 	if err != nil || !reflect.DeepEqual(capabilities, []settingsport.ProviderPreference{
 		{Provider: domain.ProviderCodex, Enabled: true, Configured: true},
@@ -83,11 +86,15 @@ func TestProviderPreferencesCompatibilityRenamesOnlyLocalDisplayName(t *testing.
 		t.Fatal(err)
 	}
 	for _, invalid := range []struct{ node, name string }{
-		{"other", "New name"}, {"local", " \t "}, {"local", strings.Repeat("я", 65)},
+		{"other", "New name"}, {"local", " \t "}, {"local", "line one\nline two"},
+		{"local", strings.Repeat("я", 65)}, {"local", strings.Repeat("🙂", 33)},
 	} {
 		if err := prefs.RenameNode(ctx, domain.ComputerID(invalid.node), invalid.name); err == nil {
 			t.Fatal("invalid rename accepted")
 		}
+	}
+	if _, err := prefs.NodeName(ctx, "other"); err == nil {
+		t.Fatal("foreign node name readback accepted")
 	}
 	if err := prefs.ToggleProvider(ctx, domain.ProviderClaude); err == nil {
 		t.Fatal("unconfigured provider enabled")

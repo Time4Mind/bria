@@ -1859,6 +1859,11 @@ var packagePolicies = map[string]packagePolicy{
 		allowedImports:     []string{"internal/domain", "internal/providerattachport"},
 		maxProductionLines: 300,
 	},
+	"internal/sessionlabel": {
+		responsibility:     "derive collision-free persisted session labels without I/O",
+		allowedImports:     []string{"internal/domain"},
+		maxProductionLines: 75,
+	},
 	"internal/terminalbinding": {
 		responsibility:     "persist exact native terminal identity and exclusive observer ownership",
 		allowedImports:     []string{"internal/instancelock"},
@@ -1893,6 +1898,11 @@ var packagePolicies = map[string]packagePolicy{
 		responsibility:     "render bounded structured session transcript blocks for Telegram cards",
 		allowedImports:     []string{"internal/assistanttext", "internal/markdownliteral", "internal/tooltext"},
 		maxProductionLines: 550,
+	},
+	"internal/cardactivity": {
+		responsibility:     "persist rollback-compatible fingerprinted per-card activity timestamps",
+		allowedImports:     []string{"internal/domain", "internal/telegramstate"},
+		maxProductionLines: 200,
 	},
 	"internal/promptpreprocesscommand": {
 		responsibility:     "run isolated one-shot prompt rewriting through the cheapest enabled local provider",
@@ -2035,9 +2045,10 @@ var packagePolicies = map[string]packagePolicy{
 	"internal/storage": {
 		responsibility: "persist coordinator and session state, typed technical history, model preferences, atomic proven-empty deletion and exact finalization receipts",
 		allowedImports: []string{
+			"internal/cardactivity",
 			"internal/cardeventhistory",
 			"internal/statejson",
-			"internal/archiveimport", "internal/cardhistory", "internal/cardtranscript", "internal/coordinator", "internal/domain", "internal/telegramhistory", "internal/telegramstate",
+			"internal/archiveimport", "internal/cardhistory", "internal/cardtranscript", "internal/coordinator", "internal/domain", "internal/sessionlabel", "internal/telegramhistory", "internal/telegramstate",
 		},
 		maxProductionLines: 1900,
 	},
@@ -2161,7 +2172,12 @@ var packagePolicies = map[string]packagePolicy{
 	},
 	"internal/telegramops": {
 		responsibility:     "persist a bounded atomic opaque Telegram operation ledger",
+		allowedImports:     []string{"internal/telegramopsretention"},
 		maxProductionLines: 500,
+	},
+	"internal/telegramopsretention": {
+		responsibility:     "compact and retention-bound finalized opaque Telegram ledger records",
+		maxProductionLines: 150,
 	},
 	"internal/telegramrecovery": {
 		responsibility:     "project owner-visible warnings and actions for unknown callback outcomes",
@@ -2171,7 +2187,7 @@ var packagePolicies = map[string]packagePolicy{
 	"internal/telegrampipeline": {
 		responsibility: "persist, inspect, and execute Telegram callback/update pipeline including signed archive pages and session-bound native keys",
 		allowedImports: []string{
-			"internal/callbackdiagnostic", "internal/coordinator", "internal/domain", "internal/telegrambridge",
+			"internal/callbackdiagnostic", "internal/callbackregistry", "internal/coordinator", "internal/domain", "internal/telegrambridge",
 			"internal/telegramrecovery", "internal/telegramrecovery/statusrecovery", "internal/telegramstate", "internal/telegramui",
 		},
 		maxProductionLines: 1800,
@@ -2179,6 +2195,13 @@ var packagePolicies = map[string]packagePolicy{
 	"internal/callbackdiagnostic": {
 		responsibility:     "carry typed callback rejection metadata without changing error semantics",
 		maxProductionLines: 180,
+	},
+	"internal/callbackregistry": {
+		responsibility: "define callback presentation custody and an in-memory contract implementation",
+		allowedImports: []string{
+			"internal/domain", "internal/telegrambridge", "internal/telegramrecovery", "internal/telegramrecovery/statusrecovery", "internal/telegramstate",
+		},
+		maxProductionLines: 500,
 	},
 	"internal/telegramtrace": {
 		responsibility:     "build and encode correlated payload-free Telegram flow diagnostics",
@@ -2210,7 +2233,7 @@ var packagePolicies = map[string]packagePolicy{
 	},
 	"internal/telegramsettings": {
 		responsibility:     "apply Telegram settings through neutral preferences ports",
-		allowedImports:     []string{"internal/domain", "internal/settingsport"},
+		allowedImports:     []string{"internal/domain", "internal/sessioncreation", "internal/settingsport"},
 		maxProductionLines: 200,
 	},
 	"internal/telegramsettingsview": {
