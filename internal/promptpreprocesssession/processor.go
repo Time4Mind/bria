@@ -34,6 +34,7 @@ var _ promptpreprocess.ModeController = (*Processor)(nil)
 
 type LifecycleObservation struct {
 	State         string
+	MessageID     string
 	Provider      domain.Provider
 	Model         string
 	Duration      time.Duration
@@ -79,7 +80,7 @@ func (processor *Processor) Process(ctx context.Context, request promptpreproces
 		state, category = "failed", "provider"
 	}
 	processor.observe(context.WithoutCancel(ctx), LifecycleObservation{
-		State: state, Provider: result.Provider, Model: result.Model,
+		State: state, MessageID: request.MessageID, Provider: result.Provider, Model: result.Model,
 		Duration: time.Since(started), ErrorCategory: category,
 	})
 	if result.Completion != nil {

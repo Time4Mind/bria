@@ -10,7 +10,7 @@
 | P1 | Технические действия | Типизированные tool-события фильтруются перед пагинацией, полная история сохраняется. Повторное включение возвращает записи. Старые записи без типа не угадываются по тексту. [Проверки](../internal/telegramcontroller/technical_history_test.go). |
 | P1 | Фото Claude | Проверенные JPEG/PNG/GIF/WebP передаются native CLI как приватная readonly-копия с расширением; очистка при close/error/cancel. Неподдержанные файлы явно отклоняются, политика документов не расширена. [Валидация](../internal/nativeattachment/photo.go), [передача](../internal/nativeadapter/attachments.go). |
 | P1 | Имя CLI | Имя точной provider-сессии приходит в completion: Claude custom-title приоритетнее ai-title; Codex использует ограниченный кэшируемый индекс. Позднее имя подхватывается при следующем completion; при отсутствии сохраняется существующий fallback. [Источник](../internal/nativetranscript/title.go). |
-| P2 | Фоновые вопросы | Настройка управляет отдельным уведомлением с кнопкой открытия сессии. По умолчанию выключена, прежнее сохранённое значение сохраняется. Structured Claude AskUserQuestion не смешивается с разрешениями. Финалы обязательны. [Политика](../internal/telegramcompletioncomposition/question_policy.go). |
+| P2 | Фоновые вопросы | Настройка управляет отдельным уведомлением с кнопкой открытия сессии. По умолчанию выключена, прежнее сохранённое значение сохраняется. Structured Claude AskUserQuestion не смешивается с разрешениями. Финалы обязательны. [Политика](../internal/telegramcompletionpolicy/question.go). |
 
 Компонентные тесты проверяют эти контракты. Live-проверка Claude через MTProto
 успешно выполнила read-only `pwd` в `/root/bria` и вернула `BRIA_NATIVE_OK`.

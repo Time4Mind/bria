@@ -71,12 +71,55 @@ func TestNativeReceiptRebindsCarrierWithoutChangingTimelineOrActiveSession(t *te
 	}
 	card.Carrier.MessageID = 99
 	card.CarrierRevision = 2
+	card.CarrierOperation = prepared.OperationID
 	card.LastPresentationOperation = prepared.OperationID
 	if got, _ := state.Card(id); !reflect.DeepEqual(got, card) || state.ActiveSession != active {
 		t.Fatalf("carrier commit changed semantic state: %#v active=%q", got, state.ActiveSession)
 	}
 	if err := finalizePrepared(ctx, registry, store, prepared, 99); err != nil {
 		t.Fatalf("receipt replay not idempotent: %v", err)
+	}
+}
+
+func TestRecoveredOlderStatusReceiptCannotRollbackNewerSameCarrierProjection(t *testing.T) {
+	ctx := context.Background()
+	now := time.Unix(1_800_000_000, 0)
+	presenter := nativeCarrierPresenter(t)
+	registry := telegrampipeline.NewMemoryCallbackRegistry(func() time.Time { return now })
+	store := telegramstate.NewMemoryStore()
+	const id = domain.SessionID("123e4567-e89b-12d3-a456-426614174000")
+	if err := store.Update(ctx, func(state *telegramstate.State) error {
+		state.ActiveSession = id
+		return state.SetCard(telegramstate.Card{SessionID: id, Carrier: telegramstate.Carrier{ChatID: 42, MessageID: 77},
+			CarrierOperation: "status:71", LastPresentationOperation: "operation:old",
+			Page: telegramstate.Page{Current: 1, Total: 2}})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	prepare := func(operation, expected string, page int, expanded bool) Prepared {
+		prepared, err := PrepareCardRefresh(operation, id, 42, 77, telegramui.CardProjectionInput{
+			Pages: []telegramui.ContentPage{{Content: "one"}, {Content: "two"}},
+			View:  telegramui.PageView{Page: page, Pages: 2},
+		}, "", expanded, nil, presenter)
+		if err != nil {
+			t.Fatal(err)
+		}
+		revision := uint64(1)
+		prepared.Card.ExpectedCarrierRevision = &revision
+		prepared.Card.ExpectedPresentationOperation = &expected
+		return prepared
+	}
+	first := prepare("telegram-update:71:prompt-status:preprocessed", "operation:old", 1, false)
+	second := prepare("telegram-update:71:prompt-status:accepted", first.OperationID, 2, true)
+	for _, prepared := range []Prepared{first, second, first} {
+		if err := finalizePrepared(ctx, registry, store, prepared, 77); err != nil {
+			t.Fatal(err)
+		}
+	}
+	state, _ := store.Load(ctx)
+	card, _ := state.Card(id)
+	if card.LastPresentationOperation != second.OperationID || card.Page.Current != 2 || !card.OptionsExpanded {
+		t.Fatalf("older receipt rolled projection back: %+v", card)
 	}
 }
 
@@ -96,7 +139,7 @@ func TestNativeSurfaceRejectsMalformedAndCrossSessionBindings(t *testing.T) {
 		t.Fatal("mixed native+interaction binding accepted")
 	}
 	state := telegramstate.New()
-	if err := commitNativeCarrier(&state, id, telegramstate.Carrier{ChatID: 42, MessageID: 99}); err == nil {
+	if err := telegramstate.CommitNativeCarrier(&state, id, telegramstate.Carrier{ChatID: 42, MessageID: 99}, "operation:native"); err == nil {
 		t.Fatal("receipt invented a deleted session")
 	}
 }

@@ -16,6 +16,10 @@ import (
 
 const testSessionID = "9f4b7d2e-4d26-4a57-a8f0-80d39bf1e6c4"
 
+type inputReferencer func(string) string
+
+func (f inputReferencer) InputRef(operation string) string { return f(operation) }
+
 func TestTerminalSpanWritesSuccessWithMonotonicDurationAndSafeMetrics(t *testing.T) {
 	log, err := safelog.Open(safelog.Options{Directory: t.TempDir()})
 	if err != nil {
@@ -76,6 +80,35 @@ func TestTerminalSpanWritesSuccessWithMonotonicDurationAndSafeMetrics(t *testing
 		if got := record.Fields[key]; got != want {
 			t.Errorf("%s = %q, want %q", key, got, want)
 		}
+	}
+}
+
+func TestTerminalSpanCarriesSharedInputReference(t *testing.T) {
+	log, err := safelog.Open(safelog.Options{Directory: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const ref = "c_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	recorder, err := observability.New(log, inputReferencer(func(operation string) string {
+		if operation != "telegram-update:71" {
+			t.Fatalf("operation = %q", operation)
+		}
+		return ref
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope, _ := observability.NewScope(testSessionID)
+	span, err := recorder.Start(scope, "provider.codex.submit", "telegram-update:71")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := span.Success(observability.Measurements{}); err != nil {
+		t.Fatal(err)
+	}
+	records, _ := log.Read(safelog.Service)
+	if len(records) != 1 || records[0].Fields["input_ref"] != ref {
+		t.Fatalf("terminal input ref = %#v", records)
 	}
 }
 

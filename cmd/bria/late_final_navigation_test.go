@@ -137,7 +137,7 @@ func TestLatePreparedFinalCannotStealNewlySelectedSession(t *testing.T) {
 	if !strings.Contains(bCard.Text, "B_ORIGINAL_PROMPT") {
 		t.Fatal("signed B selection did not deliver B")
 	}
-	before := len(f.wire.snapshot())
+	before := f.wire.snapshot()
 	gate.release <- struct{}{}
 	select {
 	case r := <-done:
@@ -148,11 +148,8 @@ func TestLatePreparedFinalCannotStealNewlySelectedSession(t *testing.T) {
 		t.Fatal("late A final did not finish")
 	}
 	packets := f.wire.snapshot()
-	if len(packets) != before+1 {
-		t.Fatal("late A final did not emit exactly one new card")
-	}
-	final := packets[before]
-	if final.Method != "sendRichMessage" || final.ID == oldA.ID || final.ID == bCard.ID || !strings.Contains(final.Text, "A_FINAL_BEGIN") || strings.Contains(final.Text, "A_FINAL_END") {
+	final := requireRetireThenNewRichCard(t, packets, len(before), oldA.ID)
+	if final.ID == oldA.ID || final.ID == bCard.ID || !strings.Contains(final.Text, "A_FINAL_BEGIN") || strings.Contains(final.Text, "A_FINAL_END") {
 		t.Fatalf("late final edited old carrier or selected wrong content: %+v", final)
 	}
 	// Reread durable storage: A's receipt must not restore A as active.

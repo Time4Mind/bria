@@ -8,6 +8,7 @@ import (
 	"bria/internal/domain"
 	"bria/internal/telegram"
 	"bria/internal/telegrambridge"
+	"bria/internal/telegramcardretirement"
 	"bria/internal/telegramops"
 	"bria/internal/telegrampipeline"
 	"bria/internal/telegramrecovery"
@@ -80,17 +81,18 @@ type TerminalOutput struct {
 	Text string
 }
 type CardOutput struct {
-	ExpectedCarrierRevision *uint64 `json:",omitempty"`
-	ExpectedCarrierAbsent   bool    `json:",omitempty"`
-	FinalOperationID        string  `json:",omitempty"`
-	ScreenEligible          bool
-	SessionID               domain.SessionID
-	Header                  string
-	Footer                  string
-	Projection              telegramui.CarrierProjection
-	OptionsExpanded         bool
-	SelectableSessionIDs    []domain.SessionID
-	MakeActive              bool
+	ExpectedCarrierRevision       *uint64 `json:",omitempty"`
+	ExpectedPresentationOperation *string `json:",omitempty"`
+	ExpectedCarrierAbsent         bool    `json:",omitempty"`
+	FinalOperationID              string  `json:",omitempty"`
+	ScreenEligible                bool
+	SessionID                     domain.SessionID
+	Header                        string
+	Footer                        string
+	Projection                    telegramui.CarrierProjection
+	OptionsExpanded               bool
+	SelectableSessionIDs          []domain.SessionID
+	MakeActive                    bool
 }
 type TransportSender interface {
 	coordinator.Sender
@@ -100,6 +102,19 @@ type TransportSender interface {
 type InlineKeyboardDeactivator interface {
 	DeactivateInlineKeyboard(context.Context, string, int64, int64) error
 }
+
+func (sender *Sender) retirePreviousCard(ctx context.Context, operationID string, prepared Prepared) error {
+	if prepared.CardRetirement == nil {
+		return nil
+	}
+	deactivator, ok := sender.base.(InlineKeyboardDeactivator)
+	if !ok {
+		return errors.New("Telegram transport cannot retire a previous inline keyboard")
+	}
+	return telegramcardretirement.Execute(ctx, sender.uiState, deactivator, sender.registry, operationID,
+		prepared.Status.ConversationID, prepared.Card.SessionID, !prepared.Edit && prepared.Surface == nil && !prepared.Terminal, prepared.CardRetirement)
+}
+
 type CallbackAcknowledger interface {
 	AcknowledgeCallback(context.Context, string, string)
 }
@@ -302,7 +317,7 @@ func (handler *Handler) Handle(ctx context.Context, update coordinator.Update) (
 				return coordinator.Decision{}, err
 			}
 			stageStarted = time.Now()
-			decision, err := handler.prepareMessageResult(update, result)
+			decision, err := handler.prepareMessageResult(ctx, update, result)
 			handler.trace(ctx, completedTrace("projection.message", operationID, update, "", "", stageStarted, err))
 			return decision, err
 		}
@@ -487,7 +502,7 @@ func (handler *Handler) resumeOperation(ctx context.Context, update coordinator.
 		if operation.Prepared == nil {
 			return coordinator.Decision{}, errors.New("prepared callback operation has no output")
 		}
-		if !operation.Prepared.Terminal && !presentationCurrentlyValid(handler.presenter, operation.Prepared.Presentation) {
+		if !operation.Prepared.Terminal && !handler.presenter.PresentationCurrentlyValid(operation.Prepared.Presentation) {
 			var refreshed Prepared
 			var err error
 			if operation.Prepared.Surface != nil {
@@ -498,8 +513,9 @@ func (handler *Handler) resumeOperation(ctx context.Context, update coordinator.
 			if err != nil {
 				return coordinator.Decision{}, fmt.Errorf("refresh expired callback presentation: %w", err)
 			}
-			refreshed.PreviousActiveCarrier = clonePointer(operation.Prepared.PreviousActiveCarrier)
-			refreshed.PreviousActiveSessionID = operation.Prepared.PreviousActiveSessionID
+			refreshed.PreviousActiveSessionID, refreshed.PreviousActiveCarrier = operation.Prepared.PreviousActiveSessionID, clonePointer(operation.Prepared.PreviousActiveCarrier)
+			refreshed.CardRetirementCaptured = operation.Prepared.CardRetirementCaptured
+			refreshed.CardRetirement = clonePointer(operation.Prepared.CardRetirement)
 			refreshedOperation := operation
 			refreshedOperation.Prepared = &refreshed
 			changed, err := handler.operations.CompareAndSwap(ctx, operation.ID, CallbackPrepared, refreshedOperation)
@@ -542,7 +558,7 @@ func (handler *Handler) resumeOperation(ctx context.Context, update coordinator.
 		return coordinator.Decision{}, errors.New("callback operation has unsupported phase")
 	}
 }
-func (handler *Handler) prepareMessageResult(update coordinator.Update, result MessageResult) (coordinator.Decision, error) {
+func (handler *Handler) prepareMessageResult(ctx context.Context, update coordinator.Update, result MessageResult) (coordinator.Decision, error) {
 	if result.Card == nil && result.Surface == nil {
 		if result.Decision.Keyboard != nil {
 			return coordinator.Decision{}, errors.New("unsigned Telegram keyboard rejected")
@@ -563,29 +579,14 @@ func (handler *Handler) prepareMessageResult(update coordinator.Update, result M
 	if err != nil {
 		return coordinator.Decision{}, err
 	}
+	prepared, err = CapturePreviousCarrier(ctx, handler.uiState, prepared, nil)
+	if err != nil {
+		return coordinator.Decision{}, err
+	}
 	if err := handler.pending.register(prepared); err != nil {
 		return coordinator.Decision{}, err
 	}
 	return decisionFromPrepared(prepared), nil
-}
-func presentationCurrentlyValid(presenter *telegrambridge.Presenter, presentation telegrambridge.KeyboardPresentation) bool {
-	if presenter == nil || len(presentation.TokenIDs) == 0 {
-		return false
-	}
-	index := 0
-	for _, row := range presentation.Markup.InlineKeyboard {
-		for _, button := range row {
-			if index >= len(presentation.TokenIDs) {
-				return false
-			}
-			decoded, err := presenter.DecodeCallbackWithMetadata(button.CallbackData)
-			if err != nil || decoded.TokenID != presentation.TokenIDs[index] || decoded.ExpiresAt != presentation.ExpiresAt {
-				return false
-			}
-			index++
-		}
-	}
-	return index == len(presentation.TokenIDs)
 }
 func decisionFromPrepared(prepared Prepared) coordinator.Decision {
 	return coordinator.Decision{Kind: coordinator.DecisionStatus, Status: prepared.Status, Keyboard: prepared.Keyboard}
@@ -628,8 +629,10 @@ type Prepared struct {
 	// PreviousActiveCarrier is set only when a background-final notification
 	// selects its completed session. Its keyboard is removed before the
 	// notification carrier is edited into the new active card.
-	PreviousActiveSessionID domain.SessionID       `json:",omitempty"`
-	PreviousActiveCarrier   *telegramstate.Carrier `json:",omitempty"`
+	PreviousActiveSessionID domain.SessionID             `json:",omitempty"`
+	PreviousActiveCarrier   *telegramstate.Carrier       `json:",omitempty"`
+	CardRetirementCaptured  bool                         `json:",omitempty"`
+	CardRetirement          *telegramcardretirement.Plan `json:",omitempty"`
 	Edit                    bool
 	Terminal                bool
 }
@@ -639,6 +642,7 @@ func PrepareCompletion(
 	sessionID domain.SessionID,
 	conversationID int64,
 	active bool,
+	sessionName string,
 	input telegramui.CardProjectionInput,
 	optionsExpanded bool,
 	selectableSessionIDs []domain.SessionID,
@@ -659,7 +663,7 @@ func PrepareCompletion(
 		MakeActive:           active,
 	}
 	if !active {
-		notification, err := presenter.PresentBackgroundCompletion(string(sessionID))
+		notification, err := presenter.PresentBackgroundCompletion(string(sessionID), sessionName)
 		if err != nil {
 			return Prepared{}, err
 		}
@@ -1053,6 +1057,21 @@ func (sender *Sender) deliverStatusOperation(ctx context.Context, operation Stat
 	default:
 		return coordinator.Receipt{}, fmt.Errorf("durable status is not deliverable from phase %s", current.Phase)
 	}
+	operation, settled, err := sender.captureLegacyRetirement(ctx, operation)
+	if err != nil {
+		return coordinator.Receipt{}, err
+	}
+	if settled {
+		return coordinator.Receipt{MessageID: operation.Receipt}, nil
+	}
+	if operation.Prepared != nil {
+		if err := sender.retirePreviousCard(ctx, operation.ID, *operation.Prepared); err != nil {
+			if errors.Is(err, telegramcardretirement.ErrStale) {
+				return sender.supersedeStaleRetirement(ctx, operation)
+			}
+			return coordinator.Receipt{}, err
+		}
+	}
 	unknown := operation
 	unknown.Phase = StatusSendUnknown
 	fenceStarted := time.Now()
@@ -1065,6 +1084,7 @@ func (sender *Sender) deliverStatusOperation(ctx context.Context, operation Stat
 		return coordinator.Receipt{}, errors.New("durable status phase changed before send")
 	}
 	if operation.Prepared != nil {
+		sender.pending.remove(operation.ID)
 		if err := sender.pending.register(*operation.Prepared); err != nil {
 			return coordinator.Receipt{}, err
 		}
@@ -1072,9 +1092,9 @@ func (sender *Sender) deliverStatusOperation(ctx context.Context, operation Stat
 	var receipt coordinator.Receipt
 	if operation.Prepared != nil {
 		if operation.Edit {
-			receipt, err = sender.sendPrepared(ctx, operation.ID, operation.Status, operation.Keyboard, true)
+			receipt, err = sender.sendPrepared(ctx, operation.ID, operation.Status, operation.Keyboard, true, true)
 		} else {
-			receipt, err = sender.sendPrepared(ctx, operation.ID, operation.Status, operation.Keyboard, false)
+			receipt, err = sender.sendPrepared(ctx, operation.ID, operation.Status, operation.Keyboard, false, true)
 		}
 	} else if operation.Edit {
 		receipt, err = sender.base.EditStatusWithKeyboard(ctx, operation.ID, operation.Status, operation.Keyboard)
@@ -1167,7 +1187,7 @@ func (sender *Sender) ResolveStatusReceipt(ctx context.Context, operationID stri
 	if err != nil || !found {
 		return coordinator.Receipt{}, false, err
 	}
-	if operation.Phase != StatusReceiptConfirmed && operation.Phase != StatusCommitted {
+	if operation.Phase != StatusReceiptConfirmed && operation.Phase != StatusCommitted && operation.Phase != StatusSuperseded {
 		return coordinator.Receipt{}, false, nil
 	}
 	if operation.Receipt <= 0 {
@@ -1252,14 +1272,14 @@ func (sender *Sender) SendStatusWithKeyboard(ctx context.Context, operationID st
 		unlock := sender.lockPreparedDelivery(&prepared)
 		defer unlock()
 	}
-	return sender.sendPrepared(ctx, operationID, status, keyboard, false)
+	return sender.sendPrepared(ctx, operationID, status, keyboard, false, false)
 }
 func (sender *Sender) EditStatusWithKeyboard(ctx context.Context, operationID string, status coordinator.Status, keyboard *coordinator.KeyboardMarkup) (coordinator.Receipt, error) {
 	if prepared, found := sender.pending.peek(operationID); found {
 		unlock := sender.lockPreparedDelivery(&prepared)
 		defer unlock()
 	}
-	return sender.sendPrepared(ctx, operationID, status, keyboard, true)
+	return sender.sendPrepared(ctx, operationID, status, keyboard, true, false)
 }
 
 func (sender *Sender) lockPreparedDelivery(prepared *Prepared) func() {
@@ -1323,7 +1343,7 @@ func (sender *Sender) EditCurrentGlobalSurface(
 	if err := sender.pending.register(prepared); err != nil {
 		return false, err
 	}
-	if _, err := sender.sendPrepared(ctx, operationID, prepared.Status, prepared.Keyboard, true); err != nil {
+	if _, err := sender.sendPrepared(ctx, operationID, prepared.Status, prepared.Keyboard, true, false); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -1355,6 +1375,7 @@ func (sender *Sender) sendPrepared(
 	status coordinator.Status,
 	keyboard *coordinator.KeyboardMarkup,
 	edit bool,
+	retirementDone bool,
 ) (coordinator.Receipt, error) {
 	prepared, found := sender.pending.peek(operationID)
 	operation, durable, loadErr := sender.operations.Load(ctx, operationID)
@@ -1435,6 +1456,11 @@ func (sender *Sender) sendPrepared(
 		card, found := state.Card(prepared.Card.SessionID)
 		if !found || card.Carrier != carrier || card.CarrierRevision != *prepared.Card.ExpectedCarrierRevision {
 			return coordinator.Receipt{}, carddeliveryguard.ErrNotCurrent
+		}
+	}
+	if !retirementDone {
+		if err := sender.retirePreviousCard(ctx, operationID, prepared); err != nil {
+			return coordinator.Receipt{}, err
 		}
 	}
 	if prepared.PreviousActiveCarrier != nil {
@@ -1699,12 +1725,16 @@ func finalizePreparedWithCallbackPolicy(
 			}
 			return nil
 		}
+		if expectedOperation := prepared.Card.ExpectedPresentationOperation; expectedOperation != nil &&
+			exists && current.LastPresentationOperation != *expectedOperation && current.LastPresentationOperation != prepared.OperationID {
+			return nil
+		}
 		if !replay && prepared.Card.SessionID != "" {
-			if err := commitCard(state, prepared.Card, carrier); err != nil {
+			if err := commitCard(state, prepared.Card, carrier, prepared.OperationID); err != nil {
 				return err
 			}
 		} else if !replay && id != "" {
-			if err := commitNativeCarrier(state, id, carrier); err != nil {
+			if err := telegramstate.CommitNativeCarrier(state, id, carrier, prepared.OperationID); err != nil {
 				return err
 			}
 		}
@@ -1732,7 +1762,7 @@ func finalizePreparedWithCallbackPolicy(
 	}
 	return nil
 }
-func commitCard(state *telegramstate.State, output CardOutput, carrier telegramstate.Carrier) error {
+func commitCard(state *telegramstate.State, output CardOutput, carrier telegramstate.Carrier, operation string) error {
 	projected := output.Projection.Card
 	// Preserve semantic history; replace only transport projection fields.
 	want, exists := state.Card(output.SessionID)
@@ -1744,6 +1774,9 @@ func commitCard(state *telegramstate.State, output CardOutput, carrier telegrams
 		}
 	}
 	want.PendingFinalOperations = want.PendingFinalsAfter(output.FinalOperationID)
+	if want.Carrier != carrier || want.CarrierOperation == "" {
+		want.CarrierOperation = operation
+	}
 	want.Carrier, want.OptionsExpanded = carrier, output.OptionsExpanded
 	want.Page = telegramstate.Page{Current: projected.View.Page, Total: projected.View.Pages, Anchor: projected.View.Anchor, FollowLatest: projected.View.FollowLatest}
 	if output.MakeActive && output.FinalOperationID == "" {
@@ -1885,6 +1918,7 @@ func clonePrepared(prepared Prepared) Prepared {
 	clone.Presentation.StatusRecovery = clonePointer(prepared.Presentation.StatusRecovery)
 	clone.Presentation.ArtifactRetry = clonePointer(prepared.Presentation.ArtifactRetry)
 	clone.PreviousActiveCarrier = clonePointer(prepared.PreviousActiveCarrier)
+	clone.CardRetirement = clonePointer(prepared.CardRetirement)
 	clone.Card = cloneCardOutput(prepared.Card)
 	if prepared.Surface != nil {
 		surface := cloneSurfaceOutput(*prepared.Surface)
@@ -1926,6 +1960,7 @@ func clonePointer[T any](value *T) *T {
 func cloneCardOutput(output CardOutput) CardOutput {
 	clone := output
 	clone.ExpectedCarrierRevision = clonePointer(output.ExpectedCarrierRevision)
+	clone.ExpectedPresentationOperation = clonePointer(output.ExpectedPresentationOperation)
 	clone.SelectableSessionIDs = append([]domain.SessionID(nil), output.SelectableSessionIDs...)
 	clone.Projection = telegramui.CloneCarrierProjection(output.Projection)
 	return clone

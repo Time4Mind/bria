@@ -120,7 +120,7 @@ func TestCardCommitsKeepProviderOrderAndVisibleFinal(t *testing.T) {
 					op := fmt.Sprintf("event-%d-commit-%d", i, commit)
 					var prepared telegramflow.Prepared
 					if step.kind == "final" {
-						prepared, err = telegramflow.PrepareCompletion(op, flowSessionID, 42, true, input, false, nil, presenter)
+						prepared, err = telegramflow.PrepareCompletion(op, flowSessionID, 42, true, "", input, false, nil, presenter)
 					} else {
 						prepared, err = telegramflow.PrepareCardRefresh(op, flowSessionID, 42, 99, input, "", false, nil, presenter)
 					}

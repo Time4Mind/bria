@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"bria/internal/app"
+	"bria/internal/controllertelemetry"
 	"bria/internal/coordinator"
 	"bria/internal/domain"
 	"bria/internal/sessioncreation"
@@ -19,6 +20,12 @@ import (
 	"bria/internal/telegramcontroller"
 	"bria/internal/telegramsettingsview"
 )
+
+type controllerObserverFunc func(controllertelemetry.Event)
+
+func (f controllerObserverFunc) ObserveControllerEvent(_ context.Context, event controllertelemetry.Event) {
+	f(event)
+}
 
 const (
 	ownerID = int64(42)
@@ -1060,6 +1067,44 @@ func TestVoiceShowsQueuedCardStateBeforeRecognitionCompletes(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("voice handling did not finish")
+	}
+}
+
+func TestVoicePreparationEmitsCorrelatedBoundedTiming(t *testing.T) {
+	ready := readySession(t, "77777777-7777-4777-9777-777777777777", domain.ProviderCodex, t.TempDir(), "provider-7", 1)
+	events := make(chan controllertelemetry.Event, 2)
+	controller := newController(t, nil, &memorySessions{byID: map[domain.SessionID]domain.Session{ready.ID(): ready}}, nil, nil,
+		telegramcontroller.Options{
+			Recovered: []domain.Session{ready},
+			InputPreparer: inputPreparerFunc(func(context.Context, telegramcontroller.IncomingInput) (string, error) {
+				time.Sleep(15 * time.Millisecond)
+				return "recognized", nil
+			}),
+			DurableInput: durableInputFunc(func(_ context.Context, input telegramcontroller.SessionInput) (telegramcontroller.InputReceipt, error) {
+				return telegramcontroller.InputReceipt{Inserted: true, SessionID: input.SessionID, MessageID: input.MessageID, Sequence: 1}, nil
+			}),
+			ControllerObserver: controllerObserverFunc(func(event controllertelemetry.Event) { events <- event }),
+		})
+	t.Cleanup(func() { _ = controller.Close(context.Background()) })
+	mustStatus(t, controller, message(48, "/use "+string(ready.ID())))
+	voice := message(49, "")
+	voice.MediaKind, voice.MediaFileID, voice.MediaDownloadAllowed = "voice", "voice-file", true
+	mustStatus(t, controller, voice)
+	deadline := time.After(time.Second)
+	for {
+		select {
+		case event := <-events:
+			if event.Stage != controllertelemetry.VoicePreparation {
+				continue
+			}
+			if event.Outcome != controllertelemetry.Prepared || event.SessionID != string(ready.ID()) ||
+				event.OperationID != "telegram-update:49" || event.Duration < 15*time.Millisecond {
+				t.Fatalf("voice timing event = %+v", event)
+			}
+			return
+		case <-deadline:
+			t.Fatal("voice preparation timing was not observed")
+		}
 	}
 }
 

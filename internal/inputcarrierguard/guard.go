@@ -1,5 +1,4 @@
-// Package inputcarrierguard waits for the Telegram carrier created by one
-// durable user input without mutating session or transport state.
+// Package inputcarrierguard waits for one durable input's Telegram carrier.
 package inputcarrierguard
 
 import (
@@ -17,44 +16,69 @@ const waitLimit = 10 * time.Second
 type Store interface {
 	Load(context.Context) (telegramstate.State, error)
 }
+type Outcome string
 
-// Await prevents an input status from editing the previous Telegram message
-// while the input's new carrier is still being sent. A newer presentation
-// supersedes the status without transport.
-func Await(ctx context.Context, store Store, sessionID domain.SessionID, operationID string, stored telegramstate.Card) (telegramstate.Card, bool, error) {
+const (
+	OutcomeUnscoped   Outcome = "unscoped"
+	OutcomeMatched    Outcome = "matched"
+	OutcomeSuperseded Outcome = "superseded"
+	OutcomeTimeout    Outcome = "timeout"
+)
+
+type Result struct {
+	Card    telegramstate.Card
+	Ready   bool
+	Outcome Outcome
+}
+
+func Await(ctx context.Context, store Store, sessionID domain.SessionID, operationID string, stored telegramstate.Card) (Result, error) {
+	return await(ctx, store, sessionID, operationID, stored, waitLimit, 10*time.Millisecond)
+}
+
+func await(ctx context.Context, store Store, sessionID domain.SessionID, operationID string, stored telegramstate.Card, limit, poll time.Duration) (Result, error) {
 	expected, matched := presentationOperation(operationID)
-	if !matched || stored.LastPresentationOperation == expected {
-		return stored, true, nil
+	if !matched {
+		return Result{Card: stored, Ready: true, Outcome: OutcomeUnscoped}, nil
+	}
+	if sameInputCarrier(stored.CarrierOwner(), expected) {
+		return Result{Card: stored, Ready: true, Outcome: OutcomeMatched}, nil
 	}
 	initialRevision := stored.CarrierRevision
-	ticker := time.NewTicker(10 * time.Millisecond)
+	ticker := time.NewTicker(poll)
 	defer ticker.Stop()
-	timer := time.NewTimer(waitLimit)
+	timer := time.NewTimer(limit)
 	defer timer.Stop()
 	for {
 		select {
 		case <-ctx.Done():
-			return telegramstate.Card{}, false, ctx.Err()
+			return Result{}, ctx.Err()
 		case <-timer.C:
-			return stored, false, nil
+			return Result{Card: stored, Outcome: OutcomeTimeout}, nil
 		case <-ticker.C:
 			state, err := store.Load(ctx)
 			if err != nil {
-				return telegramstate.Card{}, false, err
+				return Result{}, err
 			}
 			current, ok := state.Card(sessionID)
 			if !ok || current.Carrier.ChatID <= 0 || current.Carrier.MessageID <= 0 {
-				return telegramstate.Card{}, false, nil
+				return Result{Card: current, Outcome: OutcomeSuperseded}, nil
 			}
-			if current.LastPresentationOperation == expected {
-				return current, true, nil
+			if sameInputCarrier(current.CarrierOwner(), expected) {
+				return Result{Card: current, Ready: true, Outcome: OutcomeMatched}, nil
 			}
 			if current.CarrierRevision > initialRevision {
-				return current, false, nil
+				return Result{Card: current, Outcome: OutcomeSuperseded}, nil
 			}
-			stored = current
 		}
 	}
+}
+
+func sameInputCarrier(operation, expected string) bool {
+	if operation == expected {
+		return true
+	}
+	canonical, matched := presentationOperation(operation)
+	return matched && canonical == expected
 }
 
 func presentationOperation(operationID string) (string, bool) {

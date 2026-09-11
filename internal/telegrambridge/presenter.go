@@ -11,6 +11,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 	"unicode/utf8"
 )
@@ -415,7 +416,11 @@ func (presenter *Presenter) presentationFromMarkup(logicalSessionID, interaction
 	return result, nil
 }
 
-func (presenter *Presenter) PresentBackgroundCompletion(logicalSessionID string) (PresentedNotification, error) {
+func (presenter *Presenter) PresentBackgroundCompletion(logicalSessionID, sessionName string) (PresentedNotification, error) {
+	sessionName = strings.TrimSpace(sessionName)
+	if sessionName == "" {
+		return PresentedNotification{}, errors.New("background completion session name is required")
+	}
 	presentation, err := presenter.PresentKeyboardWithManifest(
 		logicalSessionID,
 		[]string{logicalSessionID},
@@ -429,7 +434,7 @@ func (presenter *Presenter) PresentBackgroundCompletion(logicalSessionID string)
 	}
 	presentation.Markup.InlineKeyboard[0][0].Text = "Открыть"
 	return PresentedNotification{
-		Text:                 "Фоновая сессия завершена.",
+		Text:                 fmt.Sprintf("Фоновая сессия «%s» завершена.", sessionName),
 		KeyboardPresentation: presentation,
 	}, nil
 }
@@ -460,6 +465,26 @@ func (presenter *Presenter) DecodeCallbackWithMetadata(callbackData string) (Dec
 		TokenID:   callbackTokenID(callbackData),
 		ExpiresAt: fields.ExpiresAt,
 	}, nil
+}
+
+func (presenter *Presenter) PresentationCurrentlyValid(presentation KeyboardPresentation) bool {
+	if presenter == nil || len(presentation.TokenIDs) == 0 {
+		return false
+	}
+	index := 0
+	for _, row := range presentation.Markup.InlineKeyboard {
+		for _, button := range row {
+			if index >= len(presentation.TokenIDs) {
+				return false
+			}
+			decoded, err := presenter.DecodeCallbackWithMetadata(button.CallbackData)
+			if err != nil || decoded.TokenID != presentation.TokenIDs[index] || decoded.ExpiresAt != presentation.ExpiresAt {
+				return false
+			}
+			index++
+		}
+	}
+	return index == len(presentation.TokenIDs)
 }
 func callbackTokenID(callbackData string) string {
 	digest := sha256.Sum256([]byte(callbackData))

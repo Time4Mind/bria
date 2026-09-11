@@ -4,8 +4,6 @@ import (
 	"errors"
 
 	"bria/internal/callbacktoken"
-	"bria/internal/domain"
-	"bria/internal/telegramstate"
 	"bria/internal/telegramui"
 )
 
@@ -37,17 +35,4 @@ func validateNativeSurface(surface SurfaceOutput) error {
 		return errors.New("native carrier requires exact native controls")
 	}
 	return nil
-}
-
-func commitNativeCarrier(state *telegramstate.State, id domain.SessionID, carrier telegramstate.Carrier) error {
-	if carrier.ChatID <= 0 || carrier.MessageID <= 0 {
-		return errors.New("native carrier receipt must be confirmed")
-	}
-	card, ok := state.Card(id)
-	if !ok {
-		return errors.New("native carrier session no longer exists")
-	}
-	// Preserve history, pagination and active selection; only rebind the carrier.
-	card.Carrier = carrier
-	return state.SetCard(card)
 }

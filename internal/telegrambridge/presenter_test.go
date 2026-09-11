@@ -669,11 +669,11 @@ func TestPresenterBuildsOneCompactBackgroundCompletionWithoutFinal(t *testing.T)
 
 	now := time.Unix(1_800_000_000, 0).UTC()
 	presenter := mustPresenter(t, mustCallbackCodec(t, func() time.Time { return now }), func() time.Time { return now }, time.Minute)
-	notification, err := presenter.PresentBackgroundCompletion(testLogicalSessionID)
+	notification, err := presenter.PresentBackgroundCompletion(testLogicalSessionID, "workdir9")
 	if err != nil {
 		t.Fatalf("PresentBackgroundCompletion() error = %v", err)
 	}
-	if got, want := notification.Text, "Фоновая сессия завершена."; got != want {
+	if got, want := notification.Text, "Фоновая сессия «workdir9» завершена."; got != want {
 		t.Fatalf("notification text = %q, want %q", got, want)
 	}
 	if strings.Contains(notification.Text, "SECRET FINAL") {
@@ -692,6 +692,14 @@ func TestPresenterBuildsOneCompactBackgroundCompletionWithoutFinal(t *testing.T)
 	}
 	if len(notification.TokenIDs) != 1 || notification.TokenIDs[0] == "" {
 		t.Fatalf("notification manifest = %#v", notification.TokenIDs)
+	}
+}
+
+func TestPresenterRejectsBackgroundCompletionWithoutSessionName(t *testing.T) {
+	t.Parallel()
+	presenter := mustPresenter(t, mustCallbackCodec(t, time.Now), time.Now, time.Minute)
+	if _, err := presenter.PresentBackgroundCompletion(testLogicalSessionID, "  "); err == nil {
+		t.Fatal("missing session name must not produce a generic background completion")
 	}
 }
 

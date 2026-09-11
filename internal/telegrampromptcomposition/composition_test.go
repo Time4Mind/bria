@@ -15,6 +15,7 @@ import (
 	"bria/internal/telegramcontroller"
 	"bria/internal/telegramflow"
 	"bria/internal/telegramnotify"
+	"bria/internal/telegrampipeline"
 	"bria/internal/telegramstate"
 )
 
@@ -62,6 +63,37 @@ func (stub controllerStub) ProjectCurrent(context.Context, domain.SessionID) (te
 type senderStub struct {
 	prepared telegramflow.Prepared
 	status   coordinator.Status
+}
+
+type promptTraceObserver struct{ events []telegramflow.TraceEvent }
+
+func (observer *promptTraceObserver) ObserveTelegramFlow(_ context.Context, event telegramflow.TraceEvent) {
+	observer.events = append(observer.events, event)
+}
+
+type promptFlowMessageExecutor struct{}
+
+func (promptFlowMessageExecutor) HandleMessage(context.Context, coordinator.Update) (telegramflow.MessageResult, error) {
+	return telegramflow.MessageResult{}, nil
+}
+
+type promptFlowCallbackExecutor struct{}
+
+func (promptFlowCallbackExecutor) HandleCallback(context.Context, telegrampipeline.CallbackPlan) (telegramflow.CallbackResult, error) {
+	return telegramflow.CallbackResult{}, nil
+}
+
+type promptFlowTransport struct{ edits int }
+
+func (*promptFlowTransport) SendStatus(context.Context, string, coordinator.Status) (coordinator.Receipt, error) {
+	return coordinator.Receipt{MessageID: 77}, nil
+}
+func (*promptFlowTransport) SendStatusWithKeyboard(context.Context, string, coordinator.Status, *coordinator.KeyboardMarkup) (coordinator.Receipt, error) {
+	return coordinator.Receipt{MessageID: 77}, nil
+}
+func (transport *promptFlowTransport) EditStatusWithKeyboard(_ context.Context, _ string, status coordinator.Status, _ *coordinator.KeyboardMarkup) (coordinator.Receipt, error) {
+	transport.edits++
+	return coordinator.Receipt{MessageID: status.SourceMessageID}, nil
 }
 
 type observedSender struct {
@@ -243,6 +275,80 @@ func TestDelivererEditsActiveCardWithInCardMarker(t *testing.T) {
 	}
 	if queued.status.Text != "" {
 		t.Fatal("canceled native edit mutated the menu")
+	}
+}
+
+func TestDelivererImmediatelyRefreshesConsecutiveStatusForSameInputCarrier(t *testing.T) {
+	now := time.Date(2026, 9, 11, 18, 0, 0, 0, time.UTC)
+	codec, err := callbacktoken.New(bytes.Repeat([]byte{8}, 32), bytes.NewReader(make([]byte, 4096)), func() time.Time { return now })
+	if err != nil {
+		t.Fatal(err)
+	}
+	presenter, err := telegrambridge.NewPresenter(codec, func() time.Time { return now }, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const sessionID = domain.SessionID("00000000-0000-4000-8000-000000000071")
+	card := telegramcontroller.SemanticCard{
+		SessionID: sessionID, Effect: telegramcontroller.SemanticEditSameCarrier, Header: "Сессия test\n",
+		Pages: []telegramcontroller.SemanticContentPage{{Content: "🙋‍♂ Обработанный запрос", Anchors: []string{"prompt"}}},
+		View:  telegramcontroller.SemanticPageView{Page: 1, Pages: 1, Anchor: "prompt", FollowLatest: true},
+	}
+	state := telegramstate.NewMemoryStore()
+	if err := state.Update(context.Background(), func(current *telegramstate.State) error {
+		current.ActiveSession = sessionID
+		return current.SetCard(telegramstate.Card{
+			SessionID: sessionID, Carrier: telegramstate.Carrier{ChatID: 42, MessageID: 77},
+			CarrierRevision: 1, CarrierOperation: "status:71", LastPresentationOperation: "status:71",
+			Page: telegramstate.Page{Current: 1, Total: 1, FollowLatest: true},
+		})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	transport := &promptFlowTransport{}
+	_, sender, err := telegramflow.New(telegramflow.Config{
+		OwnerUserID: 7, OwnerPrivateChatID: 42, Presenter: presenter,
+		CallbackRegistry: telegrampipeline.NewMemoryCallbackRegistry(func() time.Time { return now }), UIState: state,
+		MessageUI: promptFlowMessageExecutor{}, Callbacks: promptFlowCallbackExecutor{},
+		Operations: telegramflow.NewMemoryCallbackOperationStore(), Sender: transport,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	trace := &promptTraceObserver{}
+	deliverer := Deliverer{Controller: controllerStub{card: card}, Cards: state, Presenter: presenter, Sender: sender, Observer: trace}
+	operations := []string{
+		"telegram-update:71:prompt-status:🙋‍♂:card",
+		"telegram-update:71:prompt-status:preprocessed",
+		"telegram-update:71:prompt-status:👨‍💻",
+	}
+	for index, operationID := range operations {
+		if index == 1 {
+			if updateErr := state.Update(context.Background(), func(current *telegramstate.State) error {
+				stored, _ := current.Card(sessionID)
+				stored.LastPresentationOperation = "callback:same-carrier-navigation"
+				return current.SetCard(stored)
+			}); updateErr != nil {
+				t.Fatal(updateErr)
+			}
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+		receipt, deliverErr := deliverer.Deliver(ctx, telegramcontroller.Notification{
+			OperationID: operationID, ConversationID: 42, SessionID: sessionID,
+			Kind: telegramcontroller.NotificationPromptStatus, Text: "🙋‍♂",
+		}, operationID)
+		cancel()
+		if deliverErr != nil || receipt.State != telegramnotify.DeliveryConfirmed || receipt.Suppressed || transport.edits != index+1 {
+			t.Fatalf("status %d = (%#v, edits %d, %v), want immediate edit", index, receipt, transport.edits, deliverErr)
+		}
+		stored, loadErr := state.Load(context.Background())
+		current, ok := stored.Card(sessionID)
+		if loadErr != nil || !ok || current.Carrier.MessageID != 77 || current.CarrierOperation != "status:71" || current.LastPresentationOperation != operationID {
+			t.Fatalf("status %d durable card = (%+v, %v)", index, current, loadErr)
+		}
+	}
+	if len(trace.events) != len(operations) || trace.events[2].Stage != "prompt.carrier_guard" || trace.events[2].Result != "matched" || trace.events[2].OperationID == "" {
+		t.Fatalf("carrier guard trace = %#v", trace.events)
 	}
 }
 

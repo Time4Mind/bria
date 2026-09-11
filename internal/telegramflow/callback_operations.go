@@ -13,7 +13,8 @@ import (
 	"reflect"
 	"sort"
 	"strings"
-	"sync"
+
+	"bria/internal/telegramcallbackack"
 )
 
 const (
@@ -54,6 +55,7 @@ const (
 	StatusSendUnknown      StatusOperationPhase = "send_unknown"
 	StatusReceiptConfirmed StatusOperationPhase = "receipt_confirmed"
 	StatusCommitted        StatusOperationPhase = "committed"
+	StatusSuperseded       StatusOperationPhase = "superseded"
 )
 
 type StatusOperation struct {
@@ -89,10 +91,9 @@ type CallbackOperationStore interface {
 	CompareAndSwapStatus(context.Context, string, StatusOperationPhase, StatusOperation) (bool, error)
 }
 type FileCallbackOperationStore struct {
+	*telegramcallbackack.Adapter
 	raw           *telegramops.FileStore
 	syncDirectory func(string) error
-	ackMu         sync.Mutex
-	freshAcks     map[string]bool
 }
 
 func OpenFileCallbackOperationStore(path string) (*FileCallbackOperationStore, error) {
@@ -100,7 +101,8 @@ func OpenFileCallbackOperationStore(path string) (*FileCallbackOperationStore, e
 	if err != nil {
 		return nil, fmt.Errorf("open callback operation store: %w", err)
 	}
-	store := &FileCallbackOperationStore{raw: raw, freshAcks: make(map[string]bool)}
+	store := &FileCallbackOperationStore{raw: raw}
+	store.Adapter = telegramcallbackack.NewAdapter(store.backend)
 	snapshot, err := raw.Snapshot(context.Background())
 	if err != nil {
 		return nil, err
@@ -112,13 +114,14 @@ func OpenFileCallbackOperationStore(path string) (*FileCallbackOperationStore, e
 }
 
 type MemoryCallbackOperationStore struct {
-	raw       telegramops.Store
-	ackMu     sync.Mutex
-	freshAcks map[string]bool
+	*telegramcallbackack.Adapter
+	raw telegramops.Store
 }
 
 func NewMemoryCallbackOperationStore() *MemoryCallbackOperationStore {
-	return &MemoryCallbackOperationStore{raw: telegramops.NewMemory(), freshAcks: make(map[string]bool)}
+	store := &MemoryCallbackOperationStore{raw: telegramops.NewMemory()}
+	store.Adapter = telegramcallbackack.NewAdapter(store.backend)
+	return store
 }
 func (store *FileCallbackOperationStore) backend() telegramops.Store {
 	if store == nil {
@@ -363,8 +366,8 @@ func swapStatus(ctx context.Context, backend telegramops.Store, id string, old S
 		return false, err
 	}
 	if !sameStatusOperationIdentity(current, next) ||
-		(old != StatusReceiptConfirmed || next.Phase != StatusCommitted) &&
-			!reflect.DeepEqual(current.Prepared, next.Prepared) {
+		(old != StatusReceiptConfirmed || next.Phase != StatusCommitted) && (old != StatusQueued || next.Phase != StatusSuperseded) &&
+			!reflect.DeepEqual(current.Prepared, next.Prepared) && !retirementCaptureUpgrade(current.Prepared, next.Prepared, old, next.Phase) {
 		return false, errors.New("status operation immutable identity changed")
 	}
 	raw, _ := json.Marshal(next)
@@ -396,7 +399,7 @@ func validCallbackOperationTransition(old, next CallbackOperationPhase) bool {
 func validStatusTransition(old, next StatusOperationPhase) bool {
 	switch old {
 	case StatusQueued:
-		return next == StatusSendUnknown
+		return next == StatusQueued || next == StatusSendUnknown || next == StatusSuperseded
 	case StatusSendUnknown:
 		return next == StatusQueued || next == StatusReceiptConfirmed
 	case StatusReceiptConfirmed:
@@ -465,14 +468,31 @@ func validateStatusOperation(operation StatusOperation) error {
 		if operation.Receipt != 0 {
 			return errors.New("unconfirmed status contains receipt")
 		}
-	case StatusReceiptConfirmed, StatusCommitted:
+	case StatusReceiptConfirmed:
 		if operation.Receipt <= 0 {
 			return errors.New("confirmed status requires receipt")
+		}
+	case StatusCommitted:
+		if operation.Receipt <= 0 || operation.Prepared != nil {
+			return errors.New("committed status requires receipt without prepared output")
+		}
+	case StatusSuperseded:
+		if operation.Receipt <= 0 || operation.Prepared != nil || operation.Recovery != nil {
+			return errors.New("superseded status requires a terminal receipt")
 		}
 	default:
 		return errors.New("status operation phase is invalid")
 	}
 	return nil
+}
+
+func retirementCaptureUpgrade(current, next *Prepared, old, phase StatusOperationPhase) bool {
+	if old != StatusQueued || phase != StatusQueued || current == nil || next == nil || current.CardRetirementCaptured || !next.CardRetirementCaptured {
+		return false
+	}
+	left, right := clonePrepared(*current), clonePrepared(*next)
+	left.CardRetirementCaptured, left.CardRetirement = right.CardRetirementCaptured, clonePointer(right.CardRetirement)
+	return reflect.DeepEqual(left, right)
 }
 func sameCallbackOperationIdentity(left, right CallbackOperation) bool {
 	return left.ID == right.ID && left.UpdateID == right.UpdateID && left.CallbackQueryID == right.CallbackQueryID && left.CallbackDigest == right.CallbackDigest && reflect.DeepEqual(left.Plan, right.Plan)
@@ -525,11 +545,7 @@ func validateRawSnapshot(snapshot telegramops.Snapshot) error {
 		}
 	}
 	for _, raw := range snapshot.Acknowledgements {
-		var acknowledgement CallbackAcknowledgement
-		if err := decodeStrict(raw, &acknowledgement); err != nil {
-			return err
-		}
-		if err := validateCallbackAcknowledgement(acknowledgement); err != nil {
+		if _, err := telegramcallbackack.Decode(raw); err != nil {
 			return err
 		}
 	}

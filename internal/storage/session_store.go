@@ -637,7 +637,6 @@ func (store *SessionStore) ClearNodeActiveSession(ctx context.Context, nodeID do
 	})
 }
 
-// SetCardCarrier durably records the Telegram message carrying a session card.
 func (store *SessionStore) SetCardCarrier(ctx context.Context, sessionID domain.SessionID, chatID, messageID int64) error {
 	if sessionID == "" || chatID <= 0 || messageID <= 0 {
 		return errors.New("session and positive card carrier identifiers are required")
@@ -647,7 +646,11 @@ func (store *SessionStore) SetCardCarrier(ctx context.Context, sessionID domain.
 		if !ok {
 			card = telegramstate.Card{SessionID: sessionID, Page: telegramstate.Page{Current: 1, Total: 1, FollowLatest: true}}
 		}
-		card.Carrier = telegramstate.Carrier{ChatID: chatID, MessageID: messageID}
+		next := telegramstate.Carrier{ChatID: chatID, MessageID: messageID}
+		if card.Carrier != next {
+			card.CarrierOperation = ""
+		}
+		card.Carrier = next
 		return state.SetCard(card)
 	})
 }

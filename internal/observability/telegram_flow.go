@@ -73,6 +73,13 @@ func (observer *TelegramFlowObserver) ObserveTelegramFlow(_ context.Context, eve
 	}
 }
 
+func (observer *TelegramFlowObserver) InputRef(operation string) string {
+	if observer == nil {
+		return ""
+	}
+	return telegramtrace.Record(telegramtrace.Event{OperationID: operation}, observer.key[:], 0).Fields["input_ref"]
+}
+
 func (observer *TelegramFlowObserver) Close() {
 	if observer == nil {
 		return

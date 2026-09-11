@@ -43,7 +43,7 @@ func TestLateFinalCommitPreservesNewerActiveSelection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	prepared, err := telegramflow.PrepareCompletion("A:final", flowSessionID, 42, true, telegramui.CardProjectionInput{
+	prepared, err := telegramflow.PrepareCompletion("A:final", flowSessionID, 42, true, "", telegramui.CardProjectionInput{
 		Pages: []telegramui.ContentPage{{Content: "answer", Anchors: []string{"answer"}, FinalStart: true}},
 		View:  telegramui.PageView{Page: 1, Pages: 1, Anchor: "answer"}}, false, nil, presenter)
 	if err != nil {
@@ -104,7 +104,7 @@ func TestFinalCarrierCommitClearsOnlyItsExactPendingOperation(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			prepared, err := telegramflow.PrepareCompletion("A:final", flowSessionID, 42, true, telegramui.CardProjectionInput{
+			prepared, err := telegramflow.PrepareCompletion("A:final", flowSessionID, 42, true, "", telegramui.CardProjectionInput{
 				Pages: []telegramui.ContentPage{{Content: "answer", Anchors: []string{"answer"}, FinalStart: true}},
 				View:  telegramui.PageView{Page: 1, Pages: 1, Anchor: "answer", FollowLatest: true}}, false, nil, presenter)
 			if err != nil {

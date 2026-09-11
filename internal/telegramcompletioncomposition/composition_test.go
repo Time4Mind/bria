@@ -166,10 +166,17 @@ func TestCompletionDelivererSeparatesActiveCardAndBackgroundNotice(t *testing.T)
 		t.Fatal(err)
 	}
 	card := telegramcontroller.SemanticCard{
-		SessionID: "00000000-0000-4000-8000-000000000001", Effect: telegramcontroller.SemanticEditSameCarrier,
+		SessionID: "00000000-0000-4000-8000-000000000001", SessionName: "workdir9", Effect: telegramcontroller.SemanticEditSameCarrier,
 		Header: "⚠️ Архивировать сессию test?", Pages: []telegramcontroller.SemanticContentPage{{Content: "", Anchors: []string{"close-confirmation"}}},
 		View:              telegramcontroller.SemanticPageView{Page: 1, Pages: 1, Anchor: "close-confirmation", FollowLatest: true},
 		CloseConfirmation: true,
+	}
+	store := telegramstate.NewMemoryStore()
+	if err := store.Update(context.Background(), func(state *telegramstate.State) error {
+		state.ActiveSession = card.SessionID
+		return state.SetCard(telegramstate.Card{SessionID: card.SessionID, Carrier: telegramstate.Carrier{ChatID: 42, MessageID: 55}, Page: telegramstate.Page{Current: 1, Total: 1}})
+	}); err != nil {
+		t.Fatal(err)
 	}
 	for _, test := range []struct {
 		name   string
@@ -180,13 +187,16 @@ func TestCompletionDelivererSeparatesActiveCardAndBackgroundNotice(t *testing.T)
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			sender := &completionSenderStub{}
-			deliverer := CompletionDeliverer{Controller: completionControllerStub{card: card, active: test.active}, Presenter: presenter, Sender: sender, ConversationID: 42}
+			deliverer := CompletionDeliverer{Controller: completionControllerStub{card: card, active: test.active}, Presenter: presenter, Sender: sender, Cards: store, ConversationID: 42}
 			receipt, err := deliverer.Deliver(context.Background(), telegramcontroller.Notification{
 				OperationID: "completion:" + test.name, ConversationID: 42, SessionID: card.SessionID,
 				Kind: telegramcontroller.NotificationFinal, Text: "FULL FINAL",
 			}, "completion:"+test.name)
 			if err != nil || receipt.State != "confirmed" || receipt.Parts[0].MessageID != 77 {
 				t.Fatalf("Deliver() = (%#v, %v)", receipt, err)
+			}
+			if sender.prepared.CardRetirement == nil || sender.prepared.CardRetirement.Carrier.MessageID != 55 {
+				t.Fatalf("completion did not capture previous card: %#v", sender.prepared)
 			}
 			if test.active {
 				if strings.Contains(sender.status.Text, "FULL FINAL") || !strings.Contains(sender.status.Text, "Архивировать сессию") || !sender.prepared.Card.MakeActive {
@@ -196,9 +206,29 @@ func TestCompletionDelivererSeparatesActiveCardAndBackgroundNotice(t *testing.T)
 				if len(keyboard.Rows) != 1 || keyboard.Rows[0][0].Label != "Архивировать" || keyboard.Rows[0][1].Label != "Отмена" {
 					t.Fatalf("active completion keyboard is not compact: %#v", keyboard)
 				}
-			} else if strings.Contains(sender.status.Text, "FULL FINAL") || sender.status.Text != "Фоновая сессия завершена." || sender.prepared.Card.MakeActive {
+			} else if strings.Contains(sender.status.Text, "FULL FINAL") || sender.status.Text != "Фоновая сессия «workdir9» завершена." || sender.prepared.Card.MakeActive {
 				t.Fatalf("background completion leaked final = %#v / %#v", sender.status, sender.prepared.Card)
 			}
 		})
+	}
+}
+
+func TestCompletionDelivererDoesNotSendGenericBackgroundNoticeWithoutName(t *testing.T) {
+	sessionID := domain.SessionID("00000000-0000-4000-8000-000000000001")
+	sender := &completionSenderStub{}
+	deliverer := CompletionDeliverer{
+		Controller: completionControllerStub{card: telegramcontroller.SemanticCard{
+			SessionID: sessionID, Pages: []telegramcontroller.SemanticContentPage{{Content: "final", Anchors: []string{"final"}}},
+			View: telegramcontroller.SemanticPageView{Page: 1, Pages: 1, Anchor: "final", FollowLatest: true},
+		}},
+		Presenter: &telegrambridge.Presenter{}, Sender: sender, ConversationID: 42,
+	}
+	if _, err := deliverer.Deliver(context.Background(), telegramcontroller.Notification{
+		OperationID: "completion:missing-name", ConversationID: 42, SessionID: sessionID, Kind: telegramcontroller.NotificationFinal,
+	}, "completion:missing-name"); err == nil {
+		t.Fatal("missing session name must fail before a generic background notice is sent")
+	}
+	if sender.status.Text != "" || sender.prepared.OperationID != "" {
+		t.Fatalf("sender was called for missing name: %#v", sender)
 	}
 }

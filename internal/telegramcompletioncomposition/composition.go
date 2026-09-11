@@ -13,6 +13,7 @@ import (
 	"bria/internal/domain"
 	"bria/internal/settingsport"
 	"bria/internal/telegrambridge"
+	"bria/internal/telegramcompletionpolicy"
 	"bria/internal/telegramcontroller"
 	"bria/internal/telegramflow"
 	"bria/internal/telegramnotify"
@@ -92,6 +93,10 @@ type PreparedSender interface {
 	EditStatusWithKeyboard(context.Context, string, coordinator.Status, *coordinator.KeyboardMarkup) (coordinator.Receipt, error)
 }
 
+type DurablePreparedSender interface {
+	DeliverCompletionPrepared(context.Context, uint64, telegramflow.Prepared) (coordinator.Receipt, error)
+}
+
 type CardStore = carddeliveryguard.Store
 
 type CompletionDeliverer struct {
@@ -109,11 +114,10 @@ func (deliverer CompletionDeliverer) Deliver(ctx context.Context, notification t
 		!stateNotification(notification.Kind) || notification.SessionID == "" || operationID == "" {
 		return receipt, errors.New("completion delivery identity is invalid")
 	}
-	var storedState telegramstate.State
-	question := notification.Kind == telegramcontroller.NotificationQuestion
+	storedState, question := telegramstate.State{}, notification.Kind == telegramcontroller.NotificationQuestion
 	if question {
 		var allowed bool
-		storedState, allowed, err = deliverer.questionPolicy(ctx, notification.SessionID)
+		storedState, allowed, err = telegramcompletionpolicy.Question(ctx, deliverer.Cards, deliverer.Preferences, notification.SessionID)
 		if err != nil {
 			return receipt, err
 		}
@@ -205,9 +209,10 @@ func (deliverer CompletionDeliverer) Deliver(ctx context.Context, notification t
 		revision := stored.CarrierRevision
 		prepared.Card.ExpectedCarrierRevision = &revision
 	} else {
-		prepared, err = telegramflow.PrepareCompletion(operationID, card.SessionID, deliverer.ConversationID, active,
+		prepared, err = telegramflow.PrepareCompletion(operationID, card.SessionID, deliverer.ConversationID, active, card.SessionName,
 			input, card.OptionsExpanded, card.SelectableSessionIDs, deliverer.Presenter)
 	}
+	prepared, err = telegramflow.CapturePreviousCarrier(ctx, deliverer.Cards, prepared, err)
 	if err != nil {
 		return receipt, err
 	}
@@ -224,6 +229,19 @@ func (deliverer CompletionDeliverer) Deliver(ctx context.Context, notification t
 	carrier := telegramstate.Carrier{ChatID: prepared.Status.ConversationID, MessageID: prepared.Status.SourceMessageID}
 	if err = carddeliveryguard.CheckEdit(ctx, deliverer.Cards, card.SessionID, carrier, prepared.Edit); err != nil {
 		return receipt, err
+	}
+	if notification.Sequence > 0 {
+		durable, ok := deliverer.Sender.(DurablePreparedSender)
+		if !ok {
+			return receipt, errors.New("durable completion Telegram sender is required")
+		}
+		telegramReceipt, deliveryErr := durable.DeliverCompletionPrepared(ctx, notification.Sequence, prepared)
+		if deliveryErr != nil {
+			return receipt, deliveryErr
+		}
+		receipt.State = telegramnotify.DeliveryConfirmed
+		receipt.Parts = []telegramnotify.PartReceipt{{PartID: operationID + ":1/1", MessageID: telegramReceipt.MessageID}}
+		return receipt, nil
 	}
 	if err := deliverer.Sender.Register(prepared); err != nil {
 		return receipt, err

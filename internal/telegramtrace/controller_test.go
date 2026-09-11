@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"bria/internal/controllertelemetry"
 	"bria/internal/safelog"
@@ -24,7 +25,7 @@ func TestControllerFrozenVocabularySurvivesPhysicalJSONL(t *testing.T) {
 	}{
 		{controllertelemetry.StageUnknown, "unknown"}, {controllertelemetry.ArchiveOutcome, "session.archive_outcome"},
 		{controllertelemetry.FallbackChoice, "selection.fallback"}, {controllertelemetry.SelectionPersist, "selection.persist"},
-		{controllertelemetry.ProjectedTarget, "selection.project"}, {255, "unknown"},
+		{controllertelemetry.ProjectedTarget, "selection.project"}, {controllertelemetry.VoicePreparation, "voice.preparation"}, {255, "unknown"},
 	}
 	outcomes := []struct {
 		value controllertelemetry.Outcome
@@ -35,7 +36,7 @@ func TestControllerFrozenVocabularySurvivesPhysicalJSONL(t *testing.T) {
 		{controllertelemetry.Selected, "selected"}, {controllertelemetry.Cleared, "cleared"},
 		{controllertelemetry.Preserved, "preserved"}, {controllertelemetry.Persisted, "persisted"},
 		{controllertelemetry.Projected, "projected"}, {controllertelemetry.Skipped, "skipped"},
-		{controllertelemetry.Failed, "failed"}, {255, "unknown"},
+		{controllertelemetry.Failed, "failed"}, {controllertelemetry.Prepared, "prepared"}, {255, "unknown"},
 	}
 	reasons := []struct {
 		value controllertelemetry.Reason
@@ -51,12 +52,14 @@ func TestControllerFrozenVocabularySurvivesPhysicalJSONL(t *testing.T) {
 		{controllertelemetry.InvalidCloseResult, "invalid_close_result"}, {controllertelemetry.LoadFailed, "load_failed"},
 		{controllertelemetry.ListFailed, "list_failed"}, {controllertelemetry.PersistFailed, "persist_failed"},
 		{controllertelemetry.ProjectionFailed, "projection_failed"}, {controllertelemetry.StoreUnavailable, "store_unavailable"},
-		{controllertelemetry.Cancelled, "cancelled"}, {controllertelemetry.DeadlineExceeded, "deadline_exceeded"}, {255, "unknown"},
+		{controllertelemetry.Cancelled, "cancelled"}, {controllertelemetry.DeadlineExceeded, "deadline_exceeded"},
+		{controllertelemetry.InputRejected, "input_rejected"}, {255, "unknown"},
 	}
 	for i, reason := range reasons {
 		event := telegramtrace.Controller(controllertelemetry.Event{
 			Stage: stages[i%len(stages)].value, Reason: reason.value, Outcome: outcomes[i%len(outcomes)].value,
-			SessionID: "private-payload /secret/file token=secret", TargetSessionID: "private-payload /secret/file token=secret",
+			OperationID: "private-payload /secret/file token=secret", SessionID: "private-payload /secret/file token=secret",
+			TargetSessionID: "private-payload /secret/file token=secret", Duration: 17 * time.Millisecond,
 		})
 		if err := logger.Write(telegramtrace.Record(event, bytes.Repeat([]byte{42}, 32), uint64(i+1))); err != nil {
 			t.Fatal(err)
@@ -82,7 +85,7 @@ func TestControllerFrozenVocabularySurvivesPhysicalJSONL(t *testing.T) {
 		}
 		for field, expected := range map[string]string{
 			"stage": stages[i%len(stages)].wire, "selection_reason": reasons[i].wire,
-			"selection_outcome": outcomes[i%len(outcomes)].wire,
+			"selection_outcome": outcomes[i%len(outcomes)].wire, "duration_ms": "17",
 		} {
 			if row.Fields[field] != expected {
 				t.Errorf("row %d %s=%q want %q", i, field, row.Fields[field], expected)

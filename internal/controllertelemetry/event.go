@@ -21,6 +21,7 @@ const (
 	ProviderFailure
 	FinalSave
 	NativeApproval
+	VoicePreparation
 )
 
 const (
@@ -42,6 +43,7 @@ const (
 	ApprovalConfirmed
 	ApprovalStale
 	ApprovalUncertain
+	Prepared
 )
 
 const (
@@ -75,6 +77,7 @@ const (
 	NativeTranscriptMalformed
 	NativeTranscriptBindingInvalid
 	GenericProviderFailure
+	InputRejected
 )
 
 // Event contains facts observed at a controller boundary, not delivery receipts.
@@ -96,11 +99,11 @@ type Event struct {
 	ProviderSessionID   string
 	ApprovalFingerprint string
 	Generation          uint64
+	Duration            time.Duration
 	CandidatesKnown     bool
 	CandidateCount      uint64
 }
 
-// Observer must be non-blocking and must not affect controller success/failure.
 type Observer interface {
 	ObserveControllerEvent(context.Context, Event)
 }
@@ -118,15 +121,15 @@ func Operation(ctx context.Context) string {
 	return value
 }
 
-var stages = [...]string{"unknown", "session.archive_outcome", "selection.fallback", "selection.persist", "selection.project", "session.recovery_outcome", "session.provider_failure", "session.final_save", "native.approval"}
-var outcomes = [...]string{"unknown", "scheduled", "archived", "deleted", "selected", "cleared", "preserved", "persisted", "projected", "skipped", "failed", "recovered", "awaiting_recovery", "recovery_unknown", "recovery_exhausted", "confirmed", "stale", "uncertain"}
+var stages = [...]string{"unknown", "session.archive_outcome", "selection.fallback", "selection.persist", "selection.project", "session.recovery_outcome", "session.provider_failure", "session.final_save", "native.approval", "voice.preparation"}
+var outcomes = [...]string{"unknown", "scheduled", "archived", "deleted", "selected", "cleared", "preserved", "persisted", "projected", "skipped", "failed", "recovered", "awaiting_recovery", "recovery_unknown", "recovery_exhausted", "confirmed", "stale", "uncertain", "prepared"}
 var reasons = [...]string{
 	"unknown", "immediate_close", "scheduled_close", "manual_selection", "recent_selectable", "durable_selectable",
 	"no_selectable", "newer_selection", "other_node", "stale_selection", "session_card", "session_list", "native_surface",
 	"close_failed", "invalid_close_result", "load_failed", "list_failed", "persist_failed", "projection_failed",
 	"store_unavailable", "cancelled", "deadline_exceeded",
 	"startup_recovery", "live_recovery", "manual_recovery",
-	"native_transcript_record_too_large", "native_transcript_read_limit", "native_transcript_malformed", "native_transcript_binding_invalid", "provider_failure",
+	"native_transcript_record_too_large", "native_transcript_read_limit", "native_transcript_malformed", "native_transcript_binding_invalid", "provider_failure", "input_rejected",
 }
 
 // RuntimeFailureReason accepts only exact runtime classes, never error text.

@@ -13,7 +13,7 @@ func TestCardRenderModeStaysRichAcrossTableAndNonTablePages(t *testing.T) {
 		view := telegramui.PageView{Page: 1, Pages: 1}
 		input := telegramui.CardProjectionInput{Pages: []telegramui.ContentPage{{Content: body, Anchors: []string{"answer"}}}, View: view, Keyboard: telegramui.CardKeyboardInput{View: view}}
 		presenter := newPresenter(t, time.Now())
-		final, err := telegramflow.PrepareCompletion("rich-final", flowSessionID, 42, true, input, false, nil, presenter)
+		final, err := telegramflow.PrepareCompletion("rich-final", flowSessionID, 42, true, "", input, false, nil, presenter)
 		if err != nil {
 			t.Fatal(err)
 		}

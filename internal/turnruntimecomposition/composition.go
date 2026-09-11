@@ -33,6 +33,7 @@ type Options struct {
 	Sessions      *storage.SessionStore
 	Runtime       sessionruntime.Submitter
 	Logger        *safelog.Logger
+	InputRefs     observability.InputReferencer
 }
 
 // Bundle is the controller-facing turn path. Its callback methods retain
@@ -80,7 +81,7 @@ func Open(options Options) (*Bundle, error) {
 		bundle.InputPreparer, bundle.Attachments = p4.InputPreparer, p4.Attachments
 		bundle.RuntimeEvents, bundle.Finals = p4.RuntimeEvents, p4.Finals
 	}
-	bundle.Submitter = observeSubmitter(bundle.Submitter, options.Logger, options.Sessions)
+	bundle.Submitter = observeSubmitter(bundle.Submitter, options.Logger, options.Sessions, options.InputRefs)
 	return bundle, nil
 }
 
@@ -120,11 +121,11 @@ func (resolver sessionStoreProviderResolver) ProviderForSession(ctx context.Cont
 // observeSubmitter never changes the provider result. It selects the prepared
 // wrapper before the ordinary runtime wrapper so P4 attachment capability is
 // retained through the controller boundary.
-func observeSubmitter(submitter sessionruntime.Submitter, logger *safelog.Logger, sessions *storage.SessionStore) sessionruntime.Submitter {
+func observeSubmitter(submitter sessionruntime.Submitter, logger *safelog.Logger, sessions *storage.SessionStore, inputRefs observability.InputReferencer) sessionruntime.Submitter {
 	if submitter == nil {
 		return nil
 	}
-	recorder, err := observability.New(logger)
+	recorder, err := observability.New(logger, inputRefs)
 	if err != nil {
 		return submitter
 	}

@@ -86,7 +86,7 @@ func TestQuestionPolicyOffOptInAndActiveVisibility(t *testing.T) {
 			}); err != nil {
 				t.Fatal(err)
 			}
-			card := telegramcontroller.SemanticCard{SessionID: id, Header: "Session", Pages: []telegramcontroller.SemanticContentPage{{Content: "existing context and question", Anchors: []string{"latest"}}}, View: telegramcontroller.SemanticPageView{Page: 1, Pages: 1, Anchor: "latest", FollowLatest: true}, SelectableSessionIDs: []domain.SessionID{id}, SessionRowSizes: []int{1}}
+			card := telegramcontroller.SemanticCard{SessionID: id, SessionName: "question-session", Header: "Session", Pages: []telegramcontroller.SemanticContentPage{{Content: "existing context and question", Anchors: []string{"latest"}}}, View: telegramcontroller.SemanticPageView{Page: 1, Pages: 1, Anchor: "latest", FollowLatest: true}, SelectableSessionIDs: []domain.SessionID{id}, SessionRowSizes: []int{1}}
 			sender := &completionSenderStub{}
 			deliverer := CompletionDeliverer{Controller: visibleQuestionController{completionControllerStub: completionControllerStub{card: card, active: test.active}, visible: test.visible}, Presenter: presenter, Sender: sender, Cards: store, Preferences: settingscomposition.Preferences{Store: preferences}, ConversationID: 42}
 			receipt, err := deliverer.Deliver(ctx, telegramcontroller.Notification{Kind: telegramcontroller.NotificationQuestion, SessionID: id, Text: "RAW PRIVATE QUESTION"}, "question:1")

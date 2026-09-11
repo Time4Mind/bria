@@ -78,6 +78,43 @@ func TestCarrierRevisionOverflowRejectsWithoutMutation(t *testing.T) {
 	}
 }
 
+func TestCarrierOperationChangesOnlyWithPhysicalCarrierAndSurvivesReopen(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "cards.json")
+	store, err := telegramstate.OpenFileStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Update(ctx, func(state *telegramstate.State) error {
+		*state = validState()
+		card, _ := state.Card("session-1")
+		card.CarrierOperation = "status:71"
+		return state.SetCard(card)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Update(ctx, func(state *telegramstate.State) error {
+		card, _ := state.Card("session-1")
+		card.LastPresentationOperation = "callback:same-carrier"
+		card.CarrierOperation = "callback:must-not-steal-owner"
+		return state.SetCard(card)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	store, err = telegramstate.OpenFileStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := store.Load(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	card, _ := state.Card("session-1")
+	if card.CarrierOperation != "status:71" || card.LastPresentationOperation != "callback:same-carrier" {
+		t.Fatalf("carrier owner changed on edit or reopen: %+v", card)
+	}
+}
+
 func TestPresentationOperationValidationRejectsWithoutMutation(t *testing.T) {
 	for _, operation := range []string{" leading", "trailing ", "bad\x00id", "bad\nid", string([]byte{255}), strings.Repeat("x", 1031)} {
 		state := validState()

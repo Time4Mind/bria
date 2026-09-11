@@ -49,7 +49,7 @@ func TestPreparedOldEditIsSuppressedAfterNewCarrierCommit(t *testing.T) {
 	}
 	input.Pages[0] = telegramui.ContentPage{Content: "new", Anchors: []string{"new"}}
 	input.View.Anchor = "new"
-	newCard, err := telegramflow.PrepareCompletion("new-send", flowSessionID, 42, true, input, false, nil, presenter)
+	newCard, err := telegramflow.PrepareCompletion("new-send", flowSessionID, 42, true, "", input, false, nil, presenter)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -350,7 +350,7 @@ func testLateOldEdit(t *testing.T, disk, final, aba bool) {
 	}
 	input.Pages[0] = telegramui.ContentPage{Content: "new voice card", Anchors: []string{"new"}}
 	input.View.Anchor = "new"
-	newCard, err := telegramflow.PrepareCompletion("new-send", flowSessionID, 42, true, input, false, nil, presenter)
+	newCard, err := telegramflow.PrepareCompletion("new-send", flowSessionID, 42, true, "", input, false, nil, presenter)
 	if err != nil {
 		t.Fatal(err)
 	}

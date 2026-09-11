@@ -67,8 +67,8 @@ func ProjectPageNavigation(input CardProjectionInput, action Action) (CarrierPro
 	return CarrierProjection{Effect: EffectEditSameCarrier, Card: card}, nil
 }
 
-// ProjectActiveFinal requests exactly one new carrier, opens the final start,
-// and explicitly retains the previously pinned card without editing it.
+// ProjectActiveFinal requests exactly one new carrier and opens the final start.
+// The previous card keeps its page text; delivery separately retires its actions.
 func ProjectActiveFinal(input CardProjectionInput) (CarrierProjection, error) {
 	view, err := completionPageView(input)
 	if err != nil {

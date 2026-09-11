@@ -583,7 +583,7 @@ var traceRefPattern = regexp.MustCompile(`^c_[0-9a-f]{64}$`)
 func telegramStructuredField(key, value string) (string, bool) {
 	valid := false
 	switch key {
-	case "callback_ref", "card_ref", "expected_card_ref", "session_ref", "presentation_ref", "run_ref",
+	case "callback_ref", "card_ref", "expected_card_ref", "session_ref", "presentation_ref", "run_ref", "input_ref",
 		"node_ref", "previous_session_ref", "target_session_ref", "parent_operation_ref",
 		"provider_session_ref", "approval_ref":
 		valid = traceRefPattern.MatchString(value)

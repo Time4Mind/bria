@@ -813,12 +813,23 @@ func TestSessionStorePersistsActiveCardCarrier(t *testing.T) {
 	if err := store.SetCardCarrier(context.Background(), session.ID(), 449692402, 12345); err != nil {
 		t.Fatal(err)
 	}
+	if err := store.UpdateTelegramUI(context.Background(), func(state *telegramstate.State) error {
+		card, _ := state.Card(session.ID())
+		card.CarrierOperation = "status:old"
+		state.Cards[session.ID()] = card
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetCardCarrier(context.Background(), session.ID(), 449692402, 12346); err != nil {
+		t.Fatal(err)
+	}
 	state, err := store.LoadTelegramUI(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
 	card, ok := state.Card(session.ID())
-	if !ok || card.Carrier != (telegramstate.Carrier{ChatID: 449692402, MessageID: 12345}) {
+	if !ok || card.Carrier != (telegramstate.Carrier{ChatID: 449692402, MessageID: 12346}) || card.CarrierOperation != "" {
 		t.Fatalf("card carrier = %#v, found=%v", card.Carrier, ok)
 	}
 }

@@ -143,11 +143,8 @@ func TestNavigationFollowJoinedEveryInputStartsLatestCarrierAndFreezesPrevious(t
 
 	f.message("VISIBLE_NEW_INPUT")
 	afterInput := f.wire.snapshot()
-	if len(afterInput) != len(before)+1 {
-		t.Fatalf("new input mutations=%d, want one new carrier", len(afterInput)-len(before))
-	}
-	current := afterInput[len(afterInput)-1]
-	if current.Method != "sendRichMessage" || current.ID == old.ID || !strings.Contains(current.Text, "VISIBLE_NEW_INPUT") {
+	current := requireRetireThenNewRichCard(t, afterInput, len(before), old.ID)
+	if current.ID == old.ID || !strings.Contains(current.Text, "VISIBLE_NEW_INPUT") {
 		t.Fatalf("new input carrier = %+v", current)
 	}
 	state, err = f.store.LoadTelegramUI(f.ctx)
@@ -200,21 +197,18 @@ func TestNavigationFollowJoinedFinalNewCarrierStartsAnswer(t *testing.T) {
 				if err := f.store.Replace(f.ctx, session, ready); err != nil {
 					t.Fatal(err)
 				}
-				count := len(f.wire.snapshot())
+				before := f.wire.snapshot()
 				f.deliver(telegramcontroller.NotificationFinal, "exact-final")
 				packets := f.wire.snapshot()
-				if len(packets) != count+1 {
-					t.Fatal("final must create exactly one card")
-				}
-				got := packets[count]
-				if got.Method != "sendRichMessage" || got.ID == old.ID {
+				got := requireRetireThenNewRichCard(t, packets, len(before), old.ID)
+				if got.ID == old.ID {
 					t.Fatal("final reused the old carrier")
 				}
 				if !strings.Contains(got.Text, "FINAL_ANSWER_BEGIN") || long && strings.Contains(got.Text, "FINAL_ANSWER_END") {
 					t.Fatal("new final card does not open at the beginning of the answer")
 				}
-				// Exactly one send, to a distinct carrier, leaves the old HTTP
-				// message untouched: no edit or deletion was emitted.
+				// The old card keeps its text but loses its keyboard before the
+				// one distinct Rich card is sent.
 				state, err := f.store.LoadTelegramUI(f.ctx)
 				if err != nil {
 					t.Fatal(err)
@@ -232,6 +226,48 @@ type navigationFollowPacket struct {
 	ID                     int64
 	Method, Text, Keyboard string
 }
+
+func requireRetireThenNewRichCard(t *testing.T, packets []navigationFollowPacket, start int, retiredID int64) navigationFollowPacket {
+	t.Helper()
+	if start < 0 || start > len(packets) {
+		t.Fatalf("invalid Telegram packet start %d for %d packets", start, len(packets))
+	}
+	delta := packets[start:]
+	sendIndex, sends := -1, 0
+	for i, packet := range delta {
+		if packet.Method == "sendRichMessage" {
+			sendIndex, sends = i, sends+1
+		}
+	}
+	if sends != 1 {
+		t.Fatalf("new Rich cards = %d, want exactly one; mutations=%+v", sends, delta)
+	}
+	if sendIndex == 0 {
+		t.Fatalf("new Rich card was not preceded by keyboard retirement: %+v", delta)
+	}
+	retirement := delta[sendIndex-1]
+	if retirement.Method != "editMessageReplyMarkup" || retirement.ID != retiredID {
+		t.Fatalf("mutation before new Rich card = %+v, want keyboard retirement for %d", retirement, retiredID)
+	}
+	var keyboard struct {
+		InlineKeyboard []json.RawMessage `json:"inline_keyboard"`
+	}
+	if err := json.Unmarshal([]byte(retirement.Keyboard), &keyboard); err != nil || keyboard.InlineKeyboard == nil || len(keyboard.InlineKeyboard) != 0 {
+		t.Fatalf("retired keyboard = %q, want explicit empty inline keyboard", retirement.Keyboard)
+	}
+	return delta[sendIndex]
+}
+
+func countRichMessages(packets []navigationFollowPacket) int {
+	count := 0
+	for _, packet := range packets {
+		if packet.Method == "sendRichMessage" {
+			count++
+		}
+	}
+	return count
+}
+
 type navigationFollowHTTP struct {
 	mu      sync.Mutex
 	packets []navigationFollowPacket

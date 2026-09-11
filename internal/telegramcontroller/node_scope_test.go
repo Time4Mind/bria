@@ -361,6 +361,9 @@ func TestSessionButtonsUseUniqueTenCharacterDirectoryNamesAndMarkActive(t *testi
 	if err != nil || result.Card == nil {
 		t.Fatalf("card = %#v, err=%v", result, err)
 	}
+	if result.Card.SessionName != "longdirect" {
+		t.Fatalf("session name = %q, want workdir fallback", result.Card.SessionName)
+	}
 	want := []string{"✓ longdirect", "longdirec2"}
 	if len(result.Card.SelectableSessionLabels) != len(want) {
 		t.Fatalf("labels = %#v", result.Card.SelectableSessionLabels)
@@ -369,6 +372,20 @@ func TestSessionButtonsUseUniqueTenCharacterDirectoryNamesAndMarkActive(t *testi
 		if result.Card.SelectableSessionLabels[index] != want[index] {
 			t.Fatalf("label %d = %q, want %q", index, result.Card.SelectableSessionLabels[index], want[index])
 		}
+	}
+}
+
+func TestCompletionUsesLatestPersistedSessionName(t *testing.T) {
+	ready := readySession(t, "11111111-1111-4111-9111-111111111111", domain.ProviderCodex, "/work/original", "provider", 1)
+	sessions := newLockedSessions(ready)
+	controller := newController(t, nil, sessions, nil, nil, telegramcontroller.Options{Recovered: []domain.Session{ready}})
+	t.Cleanup(func() { _ = controller.Close(context.Background()) })
+	if _, err := sessions.RenameSession(context.Background(), ready.ID(), "Latest", domain.SessionNameModel); err != nil {
+		t.Fatal(err)
+	}
+	card, _, err := controller.ProjectCompletion(context.Background(), ready.ID())
+	if err != nil || card.SessionName != "Latest" {
+		t.Fatalf("completion session name = %q, err=%v", card.SessionName, err)
 	}
 }
 

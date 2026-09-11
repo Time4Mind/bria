@@ -186,7 +186,7 @@ func TestBackgroundFinalSelectionRetiresPreviousActiveCardBeforeOpeningCompleted
 	if err != nil {
 		t.Fatal(err)
 	}
-	background, err := telegramflow.PrepareCompletion("completion:background", backgroundID, 42, false, telegramui.CardProjectionInput{
+	background, err := telegramflow.PrepareCompletion("completion:background", backgroundID, 42, false, "background", telegramui.CardProjectionInput{
 		Pages: []telegramui.ContentPage{{Content: "background final", Anchors: []string{"final"}, FinalStart: true}},
 		View:  telegramui.PageView{Page: 1, Pages: 1, Anchor: "final", FollowLatest: true},
 	}, false, nil, presenter)
@@ -297,7 +297,7 @@ func TestRealControllerMaySelectBackgroundFinalBeforeItsTelegramEdit(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	background, err := telegramflow.PrepareCompletion("completion:real-background", backgroundID, 42, false,
+	background, err := telegramflow.PrepareCompletion("completion:real-background", backgroundID, 42, false, "background",
 		telegramui.CardProjectionInput{Pages: []telegramui.ContentPage{{Content: "background final", Anchors: []string{"final"}, FinalStart: true}}, View: telegramui.PageView{Page: 1, Pages: 1, Anchor: "final", FollowLatest: true}},
 		false, nil, presenter)
 	if err != nil {

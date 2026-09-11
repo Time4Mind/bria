@@ -111,6 +111,7 @@ const (
 
 type Notification struct {
 	OperationID    string
+	Sequence       uint64
 	ConversationID int64
 	SessionID      domain.SessionID
 	Kind           NotificationKind

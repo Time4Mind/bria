@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"path/filepath"
@@ -8,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"bria/internal/coordinator"
 	"bria/internal/durablecomposition"
 	"bria/internal/durableflow"
 	"bria/internal/messagejournal"
@@ -34,6 +36,17 @@ func (s *finalCardJSONSender) Register(p telegramflow.Prepared) error {
 	}
 	s.decoded = decoded
 	return s.Sender.Register(decoded)
+}
+
+func (s *finalCardJSONSender) DeliverCompletionPrepared(ctx context.Context, sequence uint64, p telegramflow.Prepared) (coordinator.Receipt, error) {
+	data, err := json.Marshal(p)
+	if err != nil {
+		return coordinator.Receipt{}, err
+	}
+	if err := json.Unmarshal(data, &s.decoded); err != nil {
+		return coordinator.Receipt{}, err
+	}
+	return s.Sender.DeliverCompletionPrepared(ctx, sequence, s.decoded)
 }
 
 func TestFinalCardDurableOutputReopenSkipsConfirmedDelivery(t *testing.T) {
@@ -81,17 +94,14 @@ func TestFinalCardDurableOutputReopenSkipsConfirmedDelivery(t *testing.T) {
 	if err != nil || len(outputs) != 1 || outputs[0].Phase != messagejournal.OutputPending {
 		t.Fatalf("pending final did not survive reopen: count=%d err=%v", len(outputs), err)
 	}
-	old, before := f.wire.last(), len(f.wire.snapshot())
+	old, before := f.wire.last(), f.wire.snapshot()
 	delivered, err := flow.DeliverNextOutput(f.ctx, string(f.id))
 	if err != nil || delivered.State != durableflow.DeliveryConfirmed || delivered.Sequence != accepted.Sequence || delivered.OperationID != notification.OperationID || delivered.SessionID != string(f.id) {
 		t.Fatalf("exact final delivery: state=%s err=%v", delivered.State, err)
 	}
 	packets := f.wire.snapshot()
-	if len(packets) != before+1 {
-		t.Fatal("final must emit exactly one new message")
-	}
-	last := packets[before]
-	if last.Method != "sendRichMessage" || last.ID == old.ID || !strings.Contains(last.Text, "REOPEN_FINAL_BEGIN") || strings.Contains(last.Text, "REOPEN_FINAL_END") {
+	last := requireRetireThenNewRichCard(t, packets, len(before), old.ID)
+	if last.ID == old.ID || !strings.Contains(last.Text, "REOPEN_FINAL_BEGIN") || strings.Contains(last.Text, "REOPEN_FINAL_END") {
 		t.Fatal("reopened final did not create a distinct card at the answer beginning")
 	}
 	projection := serialized.decoded.Card.Projection.Card
@@ -114,7 +124,7 @@ func TestFinalCardDurableOutputReopenSkipsConfirmedDelivery(t *testing.T) {
 	if _, err := flow.DeliverNextOutput(f.ctx, string(f.id)); !errors.Is(err, messagejournal.ErrNoAvailable) {
 		t.Fatalf("confirmed replay remained dispatchable: %v", err)
 	}
-	if len(f.wire.snapshot()) != before+1 {
+	if countRichMessages(f.wire.snapshot()) != countRichMessages(before)+1 {
 		t.Fatal("confirmed replay sent or edited a second card")
 	}
 	state, err := f.store.LoadTelegramUI(f.ctx)

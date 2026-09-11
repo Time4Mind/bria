@@ -906,6 +906,7 @@ type Controller struct {
 	sessions                        SessionStore
 	submitter                       sessionruntime.Submitter
 	acceptedObserver                AcceptedTurnObserver
+	controllerObserver              controllertelemetry.Observer
 	notifier                        Notifier
 	lifecycle                       Lifecycle
 	uiState                         ActiveSessionStore
@@ -1071,6 +1072,7 @@ func New(
 		attachments:         options.Attachments,
 		runtimeEvents:       options.RuntimeEvents,
 		acceptedObserver:    options.AcceptedObserver,
+		controllerObserver:  options.ControllerObserver,
 		finals:              options.Finals,
 		outputFailures:      options.OutputFailures,
 		closeDone:           make(chan struct{}),
@@ -1284,7 +1286,18 @@ func (controller *Controller) Handle(
 }
 
 func (controller *Controller) prepareAndEnqueueVoice(ctx context.Context, update coordinator.Update, sessionID domain.SessionID, messageID, promptText string) {
+	started := time.Now()
 	prepared, rejection := controller.preparation.Prepare(ctx, update)
+	if controller.controllerObserver != nil {
+		outcome, reason := controllertelemetry.Prepared, controllertelemetry.ReasonUnknown
+		if rejection != "" {
+			outcome, reason = controllertelemetry.Failed, controllertelemetry.InputRejected
+		}
+		controller.controllerObserver.ObserveControllerEvent(context.WithoutCancel(ctx), controllertelemetry.Event{
+			Time: time.Now().UTC(), Stage: controllertelemetry.VoicePreparation, Outcome: outcome, Reason: reason,
+			OperationID: messageID, SessionID: string(sessionID), Duration: time.Since(started),
+		})
+	}
 	if rejection != "" {
 		controller.setPromptState(ctx, sessionID, messageID, promptText, "🙅‍♂")
 		controller.notifyPromptCard(ctx, sessionID, messageID, "🙅‍♂")
@@ -1293,11 +1306,8 @@ func (controller *Controller) prepareAndEnqueueVoice(ctx context.Context, update
 	if strings.TrimSpace(prepared.Text) != "" {
 		promptText = prepared.Text
 		controller.setPromptState(ctx, sessionID, messageID, promptText, "🙋‍♂")
-		// Voice preparation runs outside the Telegram update handler.  Persisted
-		// prompt state alone is not enough: without an output event the carrier
-		// remains stale until the user re-enters the session menu.  Publish the
-		// recognized text immediately; durable input processing will publish the
-		// later preprocessing/provider states in order.
+		// Publish recognized text so the carrier does not wait for menu re-entry;
+		// durable input processing publishes later preprocessing/provider states.
 		controller.notifyPromptCard(ctx, sessionID, messageID, "🙋‍♂")
 	}
 	payload := controller.preparation.Payload(ctx, prepared.Text)
@@ -1712,13 +1722,14 @@ func (controller *Controller) semanticCardForSession(ctx context.Context, sessio
 		footer = "\n\n\u00a0\n\n─── фон ───  \n" + strings.Join(background, "  \n")
 	}
 	card := SemanticCard{
-		SessionID: sessionID,
-		Effect:    SemanticEditSameCarrier,
-		Header:    telegramsessionview.Header(labelsByID[sessionID], nodeName, session.Provider(), lastEventUnixNano, nativeModel),
-		Footer:    footer,
-		Pages:     pages,
-		View:      SemanticPageView{Page: view.Page, Pages: view.Pages, Anchor: view.Anchor, FollowLatest: view.FollowLatest},
-		Working:   working, Archived: session.Status() == domain.SessionArchived,
+		SessionID:   sessionID,
+		SessionName: labelsByID[sessionID],
+		Effect:      SemanticEditSameCarrier,
+		Header:      telegramsessionview.Header(labelsByID[sessionID], nodeName, session.Provider(), lastEventUnixNano, nativeModel),
+		Footer:      footer,
+		Pages:       pages,
+		View:        SemanticPageView{Page: view.Page, Pages: view.Pages, Anchor: view.Anchor, FollowLatest: view.FollowLatest},
+		Working:     working, Archived: session.Status() == domain.SessionArchived,
 		Recovery:        session.Status() == domain.SessionAwaitingRecovery,
 		OptionsExpanded: optionsExpanded, SelectableSessionIDs: selectable,
 		SelectableSessionLabels: selectableLabels, SessionRowSizes: rowSizes, MakeActive: makeActive,

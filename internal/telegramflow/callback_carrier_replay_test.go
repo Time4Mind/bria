@@ -91,7 +91,7 @@ func TestConfirmedCallbackReplayAfterRestartPreservesNewCarrier(t *testing.T) {
 		},
 		View: telegramui.PageView{Page: 3, Pages: 3, Anchor: "latest", FollowLatest: true},
 	}
-	newCard, err := telegramflow.PrepareCompletion("new-send", flowSessionID, 42, true, input, true, nil, presenter)
+	newCard, err := telegramflow.PrepareCompletion("new-send", flowSessionID, 42, true, "", input, true, nil, presenter)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -664,6 +665,13 @@ func TestRunAppliesEffectiveQueueLimitToController(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	polls := 0
+	var mutationsMu sync.Mutex
+	var mutations []string
+	recordMutation := func(method string) {
+		mutationsMu.Lock()
+		defer mutationsMu.Unlock()
+		mutations = append(mutations, method)
+	}
 	dependencies := testCommandDependencies(t, &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		defer cancelFlowOnFailure(t, cancel)
 		switch request.URL.Path {
@@ -671,12 +679,29 @@ func TestRunAppliesEffectiveQueueLimitToController(t *testing.T) {
 			return telegramResponse(`{"ok":true,"result":{"id":600,"is_bot":true,"first_name":"Bria","username":"my_bria_bot"}}`), nil
 		case "/bot123:queue-secret/sendRichMessage", "/bot123:queue-secret/editMessageText":
 			payload := decodeRichFlowBody(t, requestBody(t, request))
+			recordMutation(strings.TrimPrefix(request.URL.Path, "/bot123:queue-secret/"))
 			if request.URL.Path == "/bot123:queue-secret/editMessageText" && payload.MessageID != 40 {
 				return nil, flowFixtureError(t, "queue card carrier = %d, want 40", payload.MessageID)
 			}
 			if strings.Contains(payload.RichMessage.Markdown, "🙅‍♂") {
 				cancel()
 			}
+			return telegramResponse(`{"ok":true,"result":{"message_id":40,"from":{"id":600,"is_bot":true},"chat":{"id":42,"type":"private"},"text":"card"}}`), nil
+		case "/bot123:queue-secret/editMessageReplyMarkup":
+			var payload struct {
+				ChatID      telegram.ChatID               `json:"chat_id"`
+				MessageID   telegram.MessageID            `json:"message_id"`
+				ReplyMarkup telegram.InlineKeyboardMarkup `json:"reply_markup"`
+			}
+			decoder := json.NewDecoder(strings.NewReader(requestBody(t, request)))
+			decoder.DisallowUnknownFields()
+			if err := decoder.Decode(&payload); err != nil {
+				return nil, flowFixtureError(t, "decode queue keyboard retirement: %v", err)
+			}
+			if payload.ChatID != 42 || payload.MessageID != 40 || payload.ReplyMarkup.InlineKeyboard == nil || len(payload.ReplyMarkup.InlineKeyboard) != 0 {
+				return nil, flowFixtureError(t, "queue keyboard retirement = %#v", payload)
+			}
+			recordMutation("editMessageReplyMarkup")
 			return telegramResponse(`{"ok":true,"result":{"message_id":40,"from":{"id":600,"is_bot":true},"chat":{"id":42,"type":"private"},"text":"card"}}`), nil
 		case "/bot123:queue-secret/getUpdates":
 			polls++
@@ -727,6 +752,21 @@ func TestRunAppliesEffectiveQueueLimitToController(t *testing.T) {
 	history, err := state.LoadCardHistory(context.Background(), sessions[0].ID())
 	if err != nil || !containsHistoryItem(history, "🙅‍♂ second") {
 		t.Fatalf("queue-limit card history = %#v, err=%v", history, err)
+	}
+	mutationsMu.Lock()
+	defer mutationsMu.Unlock()
+	richCards := 0
+	for i, method := range mutations {
+		if method != "sendRichMessage" {
+			continue
+		}
+		richCards++
+		if richCards > 1 && (i == 0 || mutations[i-1] != "editMessageReplyMarkup") {
+			t.Fatalf("new Rich card was not immediately preceded by old-keyboard retirement: %v", mutations)
+		}
+	}
+	if richCards < 2 {
+		t.Fatalf("Rich cards = %d, want initial card and at least one replacement: %v", richCards, mutations)
 	}
 }
 

@@ -249,10 +249,11 @@ func TestFinalPublicationProducerCancelsBeforePhysicalWriteAndReleasesOnlyVisibl
 				t.Fatalf("final delivery: %+v %v", delivered, err)
 			}
 			packets := f.wire.snapshot()
-			if len(packets) != before+1 || packets[before].Method != "sendRichMessage" || packets[before].ID == oldCarrier || name != "other-session" && !strings.Contains(packets[before].Text, "RETENTION_FINAL") {
+			finalCard := requireRetireThenNewRichCard(t, packets, before, oldCarrier)
+			if finalCard.ID == oldCarrier || name != "other-session" && !strings.Contains(finalCard.Text, "RETENTION_FINAL") {
 				t.Fatal("actual producer final did not use a new Rich carrier")
 			}
-			if name == "other-session" && packets[before].Text != "Фоновая сессия завершена." {
+			if name == "other-session" && finalCard.Text != "Фоновая сессия «synthetic» завершена." {
 				t.Fatal("A's completion changed existing background notification policy")
 			}
 			for _, p := range packets[:before] {
@@ -274,7 +275,7 @@ func TestFinalPublicationProducerCancelsBeforePhysicalWriteAndReleasesOnlyVisibl
 				t.Fatal(err)
 			}
 			card, _ = state.Card(ready.ID())
-			if len(card.PendingFinalOperations) != 0 || card.Carrier.MessageID != packets[before].ID {
+			if len(card.PendingFinalOperations) != 0 || card.Carrier.MessageID != finalCard.ID {
 				t.Fatal("new carrier commit did not clear exact durable final fence")
 			}
 		})

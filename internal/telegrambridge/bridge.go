@@ -329,6 +329,10 @@ func (sender *Sender) DeactivateInlineKeyboard(ctx context.Context, _ string, ch
 		Priority: telegram.MutationInteractive,
 	})
 	if err != nil {
+		var apiErr *telegram.APIError
+		if errors.As(err, &apiErr) && strings.Contains(strings.ToLower(apiErr.Description), "message is not modified") {
+			return nil
+		}
 		return fmt.Errorf("deactivate Telegram inline keyboard: %w", err)
 	}
 	if int64(message.Chat.ID) != chatID || int64(message.MessageID) != messageID {

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
-	"strconv"
 	"time"
 
 	"bria/internal/acceptedcontinuation"
@@ -21,7 +20,7 @@ import (
 	"bria/internal/messagejournal"
 	"bria/internal/nativerecoverycomposition"
 	"bria/internal/observability"
-	"bria/internal/promptpreprocess"
+	"bria/internal/preprocessinglog"
 	"bria/internal/promptpreprocesscommand"
 	"bria/internal/promptpreprocesssession"
 	"bria/internal/providermodels"
@@ -332,7 +331,7 @@ func runTelegramController(
 	}
 	promptPreprocessor, err := promptpreprocesssession.NewWithBindingStore(
 		promptCommandProcessor, filepath.Join(filepath.Dir(executable), "bria-codex-adapter"), satelliteBindings,
-		preprocessingSessionObserver{logger: safeLogger},
+		preprocessinglog.SessionObserver{Logger: safeLogger, Inputs: flowTrace},
 	)
 	if err != nil {
 		return fmt.Errorf("compose prompt preprocessing satellite manager: %w", err)
@@ -392,7 +391,7 @@ func runTelegramController(
 		}
 	}()
 	turnRuntime, err := turnruntimecomposition.Open(turnruntimecomposition.Options{
-		Configuration: configuration, Telegram: client, Settings: preferences, Sessions: state, Runtime: starter, Logger: safeLogger,
+		Configuration: configuration, Telegram: client, Settings: preferences, Sessions: state, Runtime: starter, Logger: safeLogger, InputRefs: flowTrace,
 	})
 	if err != nil {
 		return err
@@ -583,7 +582,7 @@ func runTelegramController(
 			Native:                nativeController,
 			Preprocessor:          promptPreprocessor,
 			SessionNamer:          sessionNamer,
-			PreprocessingObserver: preprocessingObserver{logger: safeLogger}, ControllerObserver: flowTrace,
+			PreprocessingObserver: preprocessinglog.Observer{Logger: safeLogger, Inputs: flowTrace}, ControllerObserver: flowTrace,
 			Stopper: turnStopper, ArchivedResumer: archivedResumer, Recoverer: sessionRecoverer, SessionCloser: satelliteCloser,
 			TurnLifecycle: turnLifecycle, DurableInput: inputCustody, DurableOutput: outputCustody,
 			InputPreparer: inputPreparer, AllowDocumentInput: allowProductionDocumentInput(inputPreparer),
@@ -704,7 +703,7 @@ func runTelegramController(
 		return fmt.Errorf("bind Telegram completion delivery: %w", err)
 	}
 	if err := notificationRouter.BindPromptStatuses(telegrampromptcomposition.Deliverer{
-		Controller: handler, Cards: telegramruntimecomposition.SessionTelegramUIStore{State: state}, Presenter: presenter, Sender: flowSender,
+		Controller: handler, Cards: telegramruntimecomposition.SessionTelegramUIStore{State: state}, Presenter: presenter, Sender: flowSender, Observer: flowTrace,
 	}); err != nil {
 		return fmt.Errorf("bind Telegram prompt status delivery: %w", err)
 	}
@@ -782,10 +781,6 @@ func allowProductionDocumentInput(preparer any) bool {
 	return preparer != nil
 }
 
-type preprocessingObserver struct{ logger *safelog.Logger }
-
-type preprocessingSessionObserver struct{ logger *safelog.Logger }
-
 func mapSatellitePreprocessingMode(mode settings.SatellitePreprocessingMode) promptpreprocesssession.Mode {
 	switch mode {
 	case settings.SatellitePreprocessingDisabled:
@@ -809,40 +804,6 @@ func recordPreprocessingSatelliteLifecycle(logger *safelog.Logger, action string
 		Class: safelog.Service, Type: "prompt.preprocessing_satellite_lifecycle", EntityID: string(id),
 		Result: result, ErrorCategory: category, Error: detail,
 		Fields: map[string]string{"action": action},
-	})
-}
-
-func (observer preprocessingSessionObserver) ObservePreprocessingSession(_ context.Context, observation promptpreprocesssession.LifecycleObservation) error {
-	if observer.logger == nil {
-		return errors.New("safe logger is required")
-	}
-	return observer.logger.Write(safelog.Event{
-		Class: safelog.Service, Type: "prompt.preprocessing_session", ErrorCategory: observation.ErrorCategory,
-		Fields: map[string]string{
-			"state": observation.State, "provider": string(observation.Provider), "model": observation.Model,
-			"duration_ms": strconv.FormatInt(max(0, observation.Duration.Milliseconds()), 10),
-		},
-	})
-}
-
-func (observer preprocessingObserver) ObservePreprocessing(_ context.Context, observation promptpreprocess.Observation) error {
-	if observer.logger == nil {
-		return errors.New("safe logger is required")
-	}
-	eventType, result, category := "prompt.preprocessing_failed", "fallback_original", observation.Category
-	if observation.Stage == promptpreprocess.StageComplete && observation.Category == promptpreprocess.CategorySuccess {
-		eventType, result, category = "prompt.preprocessing_completed", "processed", ""
-	} else if observation.Stage == promptpreprocess.StageCache {
-		eventType, result, category = "prompt.preprocessing_cached", observation.Category, ""
-	}
-	return observer.logger.Write(safelog.Event{
-		Class: safelog.Service, Type: eventType, EntityID: string(observation.SessionID),
-		Result: result, ErrorCategory: category, Error: observation.Error,
-		Fields: map[string]string{
-			"computer_id": string(observation.ComputerID), "session_id": string(observation.SessionID),
-			"message_id": observation.MessageID, "provider": string(observation.Provider), "model": observation.Model,
-			"stage": observation.Stage, "attempt": strconv.Itoa(observation.Attempts), "model_evidence": observation.ModelEvidence,
-		},
 	})
 }
 

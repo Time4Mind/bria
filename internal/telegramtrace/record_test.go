@@ -92,6 +92,26 @@ func TestRecordPersistsPrivateCorrelatedIdentities(t *testing.T) {
 	}
 }
 
+func TestInputReferenceIsSharedAcrossVoiceStages(t *testing.T) {
+	key := bytes.Repeat([]byte{9}, 32)
+	operations := []string{"status:71", "telegram-update:71", "telegram-update:71:prompt-status:preprocessed"}
+	want := ""
+	for _, operation := range operations {
+		got := telegramtrace.Record(telegramtrace.Event{OperationID: operation}, key, 1).Fields["input_ref"]
+		if got == "" {
+			t.Fatalf("input ref missing for %q", operation)
+		}
+		if want == "" {
+			want = got
+		} else if got != want {
+			t.Fatalf("input refs differ: %q != %q", got, want)
+		}
+	}
+	if got := telegramtrace.Record(telegramtrace.Event{OperationID: "telegram-update:72"}, key, 1).Fields["input_ref"]; got == want {
+		t.Fatal("different Telegram input reused correlation")
+	}
+}
+
 func TestRecordTargetIsIndependentOfRenderedPage(t *testing.T) {
 	event := telegramtrace.Event{Action: telegramui.ActionMenuNodes, Target: 3, Page: 1, Pages: 5, HasPage: true}
 	record := telegramtrace.Record(event, []byte("test-only-key"), 1)

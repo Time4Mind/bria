@@ -25,6 +25,9 @@ func Record(event Event, key []byte, sequence uint64) safelog.Event {
 		"stage": event.Stage, "duration_ms": strconv.FormatInt(event.Duration.Milliseconds(), 10),
 		"sequence": strconv.FormatUint(sequence, 10), "run_ref": ref("run", "process"),
 	}
+	if input := inputOperation(event.OperationID); input != "" {
+		fields["input_ref"] = ref("input", input)
+	}
 	if event.hasControllerEvent {
 		controllerFields(fields, event.controllerEvent, ref)
 	}
@@ -81,4 +84,24 @@ func Record(event Event, key []byte, sequence uint64) safelog.Event {
 		Class: safelog.Detailed, Type: "telegram.flow_stage", EntityID: ref("operation", event.OperationID),
 		Time: event.Time, Result: event.Result, ErrorCategory: category, Error: redacted, Fields: fields,
 	}
+}
+
+func inputOperation(operation string) string {
+	var value string
+	switch {
+	case strings.HasPrefix(operation, "status:"):
+		value = strings.TrimPrefix(operation, "status:")
+	case strings.HasPrefix(operation, "telegram-update:"):
+		value = strings.TrimPrefix(operation, "telegram-update:")
+		if end := strings.IndexByte(value, ':'); end >= 0 {
+			value = value[:end]
+		}
+	default:
+		return ""
+	}
+	parsed, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || parsed <= 0 || strconv.FormatInt(parsed, 10) != value {
+		return ""
+	}
+	return "telegram-update:" + value
 }

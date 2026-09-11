@@ -8,17 +8,24 @@ import (
 	"testing"
 
 	"bria/internal/domain"
+	"bria/internal/preprocessinglog"
 	"bria/internal/promptpreprocess"
 	"bria/internal/promptpreprocesssession"
 	"bria/internal/safelog"
 )
+
+type preprocessingInputReferencer func(string) string
+
+func (f preprocessingInputReferencer) InputRef(operation string) string { return f(operation) }
+
+const preprocessingRef = "c_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 
 func TestPreprocessingObserverPersistsIdentityWithoutPrompt(t *testing.T) {
 	logger, err := safelog.Open(safelog.Options{Directory: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}
-	observer := preprocessingObserver{logger: logger}
+	observer := preprocessinglog.Observer{Logger: logger, Inputs: preprocessingInputReferencer(func(string) string { return preprocessingRef })}
 	if err := observer.ObservePreprocessing(context.Background(), promptpreprocess.Observation{
 		ComputerID: "local", SessionID: domain.SessionID("session-a"), MessageID: "message-a",
 		Provider: domain.ProviderCodex, Model: "cheap", Stage: "invoke", Category: "timeout",
@@ -31,14 +38,14 @@ func TestPreprocessingObserverPersistsIdentityWithoutPrompt(t *testing.T) {
 		t.Fatalf("events = (%#v, %v)", events, err)
 	}
 	event := events[0]
-	if event.Type != "prompt.preprocessing_failed" || event.EntityID != "session-a" || event.Fields["message_id"] != "message-a" || event.Fields["attempt"] != "1" || event.Fields["model"] != "cheap" || event.Fields["stage"] != "invoke" || event.ErrorCategory != "timeout" {
+	if event.Type != "prompt.preprocessing_failed" || event.EntityID != "" || event.Fields["input_ref"] != preprocessingRef || event.Fields["attempt"] != "1" || event.Fields["model"] != "cheap" || event.Fields["stage"] != "invoke" || event.ErrorCategory != "timeout" {
 		t.Fatalf("event = %#v", event)
 	}
 	encoded := event.Error + event.EntityID
 	for key, value := range event.Fields {
 		encoded += key + value
 	}
-	if strings.Contains(encoded, "private prompt") {
+	if strings.Contains(encoded, "private prompt") || strings.Contains(encoded, "session-a") || strings.Contains(encoded, "message-a") {
 		t.Fatal("prompt leaked into preprocessing observation")
 	}
 }
@@ -49,10 +56,10 @@ func TestPreprocessingSessionObserverPersistsSafeLifecycleOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	observer := preprocessingSessionObserver{logger: logger}
+	observer := preprocessinglog.SessionObserver{Logger: logger, Inputs: preprocessingInputReferencer(func(string) string { return preprocessingRef })}
 	for _, observation := range []promptpreprocesssession.LifecycleObservation{
 		{State: "start_failed", Provider: domain.ProviderCodex, Model: "gpt-5.6-luna", ErrorCategory: "thread_not_found"},
-		{State: "replacement_ready", Provider: domain.ProviderCodex, Model: "gpt-5.6-luna"},
+		{State: "responded", MessageID: "telegram-update:71", Provider: domain.ProviderCodex, Model: "gpt-5.6-luna"},
 	} {
 		if err := observer.ObservePreprocessingSession(context.Background(), observation); err != nil {
 			t.Fatal(err)
@@ -63,7 +70,7 @@ func TestPreprocessingSessionObserverPersistsSafeLifecycleOnly(t *testing.T) {
 		t.Fatalf("events = (%#v, %v)", events, err)
 	}
 	if events[0].Type != "prompt.preprocessing_session" || events[0].Fields["state"] != "start_failed" || events[0].ErrorCategory != "thread_not_found" ||
-		events[1].Fields["state"] != "replacement_ready" || events[1].ErrorCategory != "" || events[1].Fields["model"] != "gpt-5.6-luna" || events[1].Fields["duration_ms"] != "0" {
+		events[1].Fields["state"] != "responded" || events[1].Fields["input_ref"] != preprocessingRef || events[1].ErrorCategory != "" || events[1].Fields["model"] != "gpt-5.6-luna" || events[1].Fields["duration_ms"] != "0" {
 		t.Fatalf("events = %#v", events)
 	}
 	raw, err := os.ReadFile(filepath.Join(logDir, "service.jsonl"))
@@ -82,7 +89,7 @@ func TestPreprocessingObserverDistinguishesConfirmedRunFromCache(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	observer := preprocessingObserver{logger: logger}
+	observer := preprocessinglog.Observer{Logger: logger}
 	request := promptpreprocess.Request{ComputerID: "local", SessionID: "session-a", MessageID: "message-a", Text: "private prompt"}
 	for _, observation := range []promptpreprocess.Observation{
 		promptpreprocess.SuccessObservation(request, promptpreprocess.Result{Provider: domain.ProviderCodex, Model: "gpt-5.6-luna", ModelEvidence: "codex_cli_header"}),

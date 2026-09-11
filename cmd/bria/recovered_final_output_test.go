@@ -134,7 +134,8 @@ func TestRecoveredFinalReconciliationReopenUsesNormalOutputDispatcher(t *testing
 	}
 	runRecoveredOutputDispatcher(t, ctx, flow, store, journal, id, message+":final")
 	packets := wire.snapshot()
-	if len(packets) != 1 || packets[0].Method != "sendRichMessage" || packets[0].ID == 91 || !strings.Contains(packets[0].Text, "RECOVERED_FINAL_BEGIN") || strings.Contains(packets[0].Text, "RECOVERED_FINAL_END") {
+	finalCard := requireRetireThenNewRichCard(t, packets, 0, 91)
+	if finalCard.ID == 91 || !strings.Contains(finalCard.Text, "RECOVERED_FINAL_BEGIN") || strings.Contains(finalCard.Text, "RECOVERED_FINAL_END") {
 		t.Fatal("normal dispatcher did not publish one new card at recovered answer start")
 	}
 	store, err = storage.OpenSessionStore(statePath)
@@ -146,7 +147,7 @@ func TestRecoveredFinalReconciliationReopenUsesNormalOutputDispatcher(t *testing
 		t.Fatal(err)
 	}
 	card, _ = state.Card(id)
-	if len(card.PendingFinalOperations) != 0 || card.Carrier.MessageID != packets[0].ID {
+	if len(card.PendingFinalOperations) != 0 || card.Carrier.MessageID != finalCard.ID {
 		t.Fatal("normal dispatch did not commit new carrier and clear exact fence")
 	}
 	journal, err = messagejournal.Open(journalPath, messagejournal.DefaultLimits())
@@ -164,7 +165,7 @@ func TestRecoveredFinalReconciliationReopenUsesNormalOutputDispatcher(t *testing
 	if _, err := flow.DeliverNextOutput(ctx, string(id)); !errors.Is(err, messagejournal.ErrNoAvailable) {
 		t.Fatalf("confirmed recovered output became dispatchable: %v", err)
 	}
-	if len(wire.snapshot()) != 1 {
+	if countRichMessages(wire.snapshot()) != 1 {
 		t.Fatal("reopen replayed recovered final")
 	}
 }

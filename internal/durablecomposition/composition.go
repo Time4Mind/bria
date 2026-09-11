@@ -181,7 +181,7 @@ func (sender TelegramOutputSender) Deliver(ctx context.Context, output durablefl
 	default:
 		return result, errors.New("durable Telegram notification kind is unsupported")
 	}
-	receipt, deliverErr := sender.Deliverer.Deliver(ctx, telegramcontroller.Notification{OperationID: output.OperationID, ConversationID: sender.OwnerPrivateChatID, SessionID: domain.SessionID(output.SessionID), Kind: kind, Text: string(output.Payload)}, output.OperationID)
+	receipt, deliverErr := sender.Deliverer.Deliver(ctx, telegramcontroller.Notification{OperationID: output.OperationID, Sequence: output.Sequence, ConversationID: sender.OwnerPrivateChatID, SessionID: domain.SessionID(output.SessionID), Kind: kind, Text: string(output.Payload)}, output.OperationID)
 	if receipt.OperationID != output.OperationID {
 		return result, errors.Join(deliverErr, errors.New("Telegram delivery receipt identity mismatch"))
 	}

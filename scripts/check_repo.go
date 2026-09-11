@@ -1814,9 +1814,14 @@ var packagePolicies = map[string]packagePolicy{
 		responsibility: "route durable session output into active cards or policy-controlled background notifications",
 		allowedImports: []string{
 			"internal/carddeliveryguard", "internal/coordinator", "internal/domain", "internal/telegrambridge", "internal/telegramcontroller",
-			"internal/settingsport", "internal/telegramflow", "internal/telegramnotify", "internal/telegramstate", "internal/telegramui",
+			"internal/settingsport", "internal/telegramcompletionpolicy", "internal/telegramflow", "internal/telegramnotify", "internal/telegramstate", "internal/telegramui",
 		},
 		maxProductionLines: 275,
+	},
+	"internal/telegramcompletionpolicy": {
+		responsibility:     "evaluate active and background completion-notification visibility",
+		allowedImports:     []string{"internal/carddeliveryguard", "internal/domain", "internal/settingsport", "internal/telegramstate"},
+		maxProductionLines: 50,
 	},
 	"internal/telegrampromptcomposition": {
 		responsibility: "refresh active prompt and native-screen cards with visibility-scoped cancellation",
@@ -1945,6 +1950,21 @@ var packagePolicies = map[string]packagePolicy{
 		allowedImports:     []string{"internal/domain", "internal/observability", "internal/sessionruntime", "internal/turnprocessing"},
 		maxProductionLines: 250,
 	},
+	"internal/preprocessinglog": {
+		responsibility:     "record payload-free prompt preprocessing lifecycle with shared input correlation",
+		allowedImports:     []string{"internal/observability", "internal/promptpreprocess", "internal/promptpreprocesssession", "internal/safelog"},
+		maxProductionLines: 100,
+	},
+	"internal/telegramcardretirement": {
+		responsibility:     "retire the exact previous session-card keyboard before a replacement carrier is sent",
+		allowedImports:     []string{"internal/domain", "internal/telegramstate"},
+		maxProductionLines: 100,
+	},
+	"internal/telegramcallbackack": {
+		responsibility:     "persist one-shot callback acknowledgements independently from card delivery",
+		allowedImports:     []string{"internal/telegrambridge", "internal/telegramops"},
+		maxProductionLines: 200,
+	},
 	"internal/safelog": {
 		responsibility:     "write redacted retention-bounded operational logs",
 		allowedImports:     []string{"internal/callbackdiagnostic", "internal/controllertelemetry"},
@@ -1954,7 +1974,7 @@ var packagePolicies = map[string]packagePolicy{
 		responsibility: "compose the single-computer Bria process and bind post-commit status refresh delivery",
 		allowedImports: []string{
 			"internal/providermodels",
-			"internal/acceptedcontinuation", "internal/app", "internal/authcomposition", "internal/callbacktoken", "internal/claudestore", "internal/config", "internal/coordinator", "internal/domain", "internal/durablecomposition", "internal/durableflow", "internal/interactioncomposition", "internal/messagejournal", "internal/nativerecoverycomposition", "internal/observability", "internal/processenv", "internal/promptpreprocess", "internal/promptpreprocesscommand", "internal/promptpreprocesssession", "internal/providerquota", "internal/recoverycomposition", "internal/recoveryruntime", "internal/runtimefactory", "internal/safelog", "internal/screenproduction", "internal/sessioncreation", "internal/sessiondeliverygate", "internal/sessionexpiry", "internal/sessionid", "internal/sessionnaming", "internal/sessionruntime", "internal/sessionsupervisor", "internal/settings", "internal/settingscomposition", "internal/storage", "internal/supervisioncomposition", "internal/telegram", "internal/telegrambridge", "internal/telegramcompletioncomposition", "internal/telegramcontroller", "internal/telegramflow", "internal/telegramnotify", "internal/telegrampipeline", "internal/telegrampromptcomposition", "internal/telegramrecoverycomposition", "internal/telegramruntimecomposition", "internal/turnruntimecomposition", "internal/workdir",
+			"internal/acceptedcontinuation", "internal/app", "internal/authcomposition", "internal/callbacktoken", "internal/claudestore", "internal/config", "internal/coordinator", "internal/domain", "internal/durablecomposition", "internal/durableflow", "internal/interactioncomposition", "internal/messagejournal", "internal/nativerecoverycomposition", "internal/observability", "internal/preprocessinglog", "internal/processenv", "internal/promptpreprocesscommand", "internal/promptpreprocesssession", "internal/providerquota", "internal/recoverycomposition", "internal/recoveryruntime", "internal/runtimefactory", "internal/safelog", "internal/screenproduction", "internal/sessioncreation", "internal/sessiondeliverygate", "internal/sessionexpiry", "internal/sessionid", "internal/sessionnaming", "internal/sessionruntime", "internal/sessionsupervisor", "internal/settings", "internal/settingscomposition", "internal/storage", "internal/supervisioncomposition", "internal/telegram", "internal/telegrambridge", "internal/telegramcompletioncomposition", "internal/telegramcontroller", "internal/telegramflow", "internal/telegramnotify", "internal/telegrampipeline", "internal/telegrampromptcomposition", "internal/telegramrecoverycomposition", "internal/telegramruntimecomposition", "internal/turnruntimecomposition", "internal/workdir",
 		},
 		maxProductionLines: 1250,
 	},
@@ -2143,7 +2163,7 @@ var packagePolicies = map[string]packagePolicy{
 	"internal/telegramflow": {
 		responsibility: "join Telegram callback, presentation, current-global-surface fencing, durable card boundaries, and crash-safe coupled receipts",
 		allowedImports: []string{
-			"internal/callbackdiagnostic", "internal/callbacktoken", "internal/carddeliveryguard", "internal/coordinator", "internal/domain", "internal/telegram", "internal/telegrambridge", "internal/telegramtrace",
+			"internal/callbackdiagnostic", "internal/callbacktoken", "internal/carddeliveryguard", "internal/coordinator", "internal/domain", "internal/telegram", "internal/telegrambridge", "internal/telegramcallbackack", "internal/telegramcardretirement", "internal/telegramtrace",
 			"internal/telegramops", "internal/telegrampipeline", "internal/telegramrecovery", "internal/telegramrecovery/statusrecovery", "internal/telegramstate", "internal/telegramui",
 		},
 		maxProductionLines: 2900,

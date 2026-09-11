@@ -22,11 +22,11 @@ func TestRestoredSplitFinalOpensWholeAnswerStartOnRichWire(t *testing.T) {
 		if err := f.store.RestoreAcceptedFinal(f.ctx, f.id, "restored-request", answer); err != nil {
 			t.Fatal(err)
 		}
-		old, count := f.wire.last(), len(f.wire.snapshot())
+		old, before := f.wire.last(), f.wire.snapshot()
 		f.deliver(telegramcontroller.NotificationFinal, "restored-request:final")
 		packets := f.wire.snapshot()
-		if len(packets) != count+1 || packets[count].ID == old.ID || packets[count].Method != "sendRichMessage" ||
-			!strings.Contains(packets[count].Text, "RESTORED_ANSWER_BEGIN") || strings.Contains(packets[count].Text, "RESTORED_ANSWER_END") {
+		finalCard := requireRetireThenNewRichCard(t, packets, len(before), old.ID)
+		if finalCard.ID == old.ID || !strings.Contains(finalCard.Text, "RESTORED_ANSWER_BEGIN") || strings.Contains(finalCard.Text, "RESTORED_ANSWER_END") {
 			t.Fatal("restored final did not send one distinct card opening the complete answer's start")
 		}
 		state, err := f.store.LoadTelegramUI(f.ctx)
@@ -79,11 +79,11 @@ func TestQueuedFinalCardsPublishTheirOwnAnswerAndClearOnlyTheirFence(t *testing.
 		}
 	}
 	for index, request := range []string{"queued-A", "queued-B"} {
-		old, count := f.wire.last(), len(f.wire.snapshot())
+		old, before := f.wire.last(), f.wire.snapshot()
 		f.deliver(telegramcontroller.NotificationFinal, request+":final")
 		packets := f.wire.snapshot()
-		if len(packets) != count+1 || packets[count].ID == old.ID || packets[count].Method != "sendRichMessage" ||
-			!strings.Contains(packets[count].Text, request+"_BEGIN") || strings.Contains(packets[count].Text, request+"_END") {
+		finalCard := requireRetireThenNewRichCard(t, packets, len(before), old.ID)
+		if finalCard.ID == old.ID || !strings.Contains(finalCard.Text, request+"_BEGIN") || strings.Contains(finalCard.Text, request+"_END") {
 			t.Fatal("queued final did not publish its own beginning on a new carrier")
 		}
 		state, err := f.store.LoadTelegramUI(f.ctx)

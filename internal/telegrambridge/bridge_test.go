@@ -418,6 +418,19 @@ func TestSenderDeactivatesOnlyTheExactPreviousCarrierKeyboard(t *testing.T) {
 	}
 }
 
+func TestSenderTreatsAlreadyDeactivatedKeyboardAsSuccess(t *testing.T) {
+	client := mustTelegramClient(t, func(*http.Request) (*http.Response, error) {
+		return response(http.StatusBadRequest, `{"ok":false,"error_code":400,"description":"Bad Request: message is not modified"}`), nil
+	})
+	sender, err := telegrambridge.NewSender(client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sender.DeactivateInlineKeyboard(context.Background(), "retire:501", 42, 501); err != nil {
+		t.Fatalf("idempotent keyboard retirement: %v", err)
+	}
+}
+
 func TestSenderNormalizesProviderCodeForRichRendering(t *testing.T) {
 	t.Parallel()
 

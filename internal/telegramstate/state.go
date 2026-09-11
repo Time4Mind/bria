@@ -51,6 +51,9 @@ type Card struct {
 	// CarrierRevision fences delayed edits even when navigation returns to an
 	// earlier carrier. Legacy cards start at zero; SetCard owns increments.
 	CarrierRevision uint64 `json:"carrier_revision,omitempty"`
+	// CarrierOperation owns the physical carrier and is immutable across edits.
+	// Legacy cards omit it until the next confirmed carrier replacement.
+	CarrierOperation string `json:"carrier_operation,omitempty"`
 
 	// LastPresentationOperation is assigned by receipt finalization, not by
 	// semantic history or pagination updates.
@@ -76,6 +79,14 @@ type Card struct {
 	// PendingFinalOperations fences routine edits until each exact final has
 	// committed its new carrier. Missing legacy state does not invent custody.
 	PendingFinalOperations []string `json:"pending_final_operations,omitempty"`
+}
+
+// CarrierOwner returns persisted ownership or the legacy presentation fallback.
+func (c Card) CarrierOwner() string {
+	if c.CarrierOperation != "" {
+		return c.CarrierOperation
+	}
+	return c.LastPresentationOperation
 }
 
 // TouchEvent records a strictly increasing visible-event timestamp even if the
@@ -205,10 +216,11 @@ func (s State) Validate() error {
 		if err := card.Carrier.validate(); err != nil {
 			return fmt.Errorf("card %q carrier: %w", id, err)
 		}
-		if operation := card.LastPresentationOperation; strings.TrimSpace(operation) != operation ||
-			len(operation) > maxAnchor+6 || !utf8.ValidString(operation) ||
-			strings.ContainsAny(operation, "\x00\r\n") {
-			return errors.New("last presentation operation is invalid")
+		for _, operation := range []string{card.CarrierOperation, card.LastPresentationOperation} {
+			if strings.TrimSpace(operation) != operation || len(operation) > maxAnchor+6 ||
+				!utf8.ValidString(operation) || strings.ContainsAny(operation, "\x00\r\n") {
+				return errors.New("presentation operation is invalid")
+			}
 		}
 		if card.LastEventUnixNano < 0 {
 			return errors.New("last card event time is invalid")
@@ -312,6 +324,8 @@ func (s *State) SetCard(card Card) error {
 			return errors.New("card carrier revision exhausted")
 		}
 		card.CarrierRevision++
+	} else if previous.CarrierOperation != "" {
+		card.CarrierOperation = previous.CarrierOperation
 	}
 	if err := (State{Version: s.Version, Cards: map[domain.SessionID]Card{card.SessionID: card}}).Validate(); err != nil {
 		return err

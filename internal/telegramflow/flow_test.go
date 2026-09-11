@@ -1077,7 +1077,7 @@ func TestFlowDoesNotBindOrCommitWhenCarrierWriteHasNoReceipt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	prepared, err := telegramflow.PrepareCompletion("completion:1", flowSessionID, 42, true, telegramui.CardProjectionInput{
+	prepared, err := telegramflow.PrepareCompletion("completion:1", flowSessionID, 42, true, "", telegramui.CardProjectionInput{
 		Pages: []telegramui.ContentPage{{Content: "final", Anchors: []string{"final"}}},
 		View:  telegramui.PageView{Page: 1, Pages: 1, Anchor: "final", FollowLatest: true},
 	}, false, nil, presenter)
@@ -1106,18 +1106,18 @@ func TestPrepareCompletionSeparatesActiveFinalAndBackgroundNotification(t *testi
 		Pages: []telegramui.ContentPage{{Content: "before", Anchors: []string{"before"}}, {Content: "SECRET FINAL", Anchors: []string{"final"}}},
 		View:  telegramui.PageView{Page: 1, Pages: 2, Anchor: "before"},
 	}
-	active, err := telegramflow.PrepareCompletion("completion:active", flowSessionID, 42, true, input, false, nil, presenter)
+	active, err := telegramflow.PrepareCompletion("completion:active", flowSessionID, 42, true, "", input, false, nil, presenter)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if active.Status.Text != "SECRET FINAL" || active.Status.SourceMessageID != 0 || active.Keyboard == nil {
 		t.Fatalf("active completion = %#v", active)
 	}
-	background, err := telegramflow.PrepareCompletion("completion:background", flowSessionID, 42, false, input, false, nil, presenter)
+	background, err := telegramflow.PrepareCompletion("completion:background", flowSessionID, 42, false, "workdir9", input, false, nil, presenter)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if background.Status.Text != "Фоновая сессия завершена." || background.Status.SourceMessageID != 0 || background.Keyboard == nil {
+	if background.Status.Text != "Фоновая сессия «workdir9» завершена." || background.Status.SourceMessageID != 0 || background.Keyboard == nil {
 		t.Fatalf("background completion = %#v", background)
 	}
 	if background.Status.Text == "SECRET FINAL" || len(*background.Keyboard) != 1 || len((*background.Keyboard)[0]) != 1 {
@@ -1154,7 +1154,7 @@ func TestBackgroundCompletionBindsOnlyConfirmedNotificationCarrierAndKeepsActive
 	if err != nil {
 		t.Fatal(err)
 	}
-	prepared, err := telegramflow.PrepareCompletion("completion:background:1", flowSessionID, 42, false, telegramui.CardProjectionInput{
+	prepared, err := telegramflow.PrepareCompletion("completion:background:1", flowSessionID, 42, false, "workdir9", telegramui.CardProjectionInput{
 		Pages: []telegramui.ContentPage{{Content: "SECRET FINAL", Anchors: []string{"final"}}},
 		View:  telegramui.PageView{Page: 1, Pages: 1, Anchor: "final", FollowLatest: true},
 	}, false, nil, presenter)

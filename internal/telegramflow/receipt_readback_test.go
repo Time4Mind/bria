@@ -45,7 +45,7 @@ func TestKnownReceiptSurvivesConcurrentHistoryOrNewerPublication(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			prepared, err := telegramflow.PrepareCompletion("new-card", flowSessionID, 42, true, telegramui.CardProjectionInput{Pages: []telegramui.ContentPage{{Content: "answer", Anchors: []string{"answer"}}}, View: telegramui.PageView{Page: 1, Pages: 1, Anchor: "answer"}}, false, nil, presenter)
+			prepared, err := telegramflow.PrepareCompletion("new-card", flowSessionID, 42, true, "", telegramui.CardProjectionInput{Pages: []telegramui.ContentPage{{Content: "answer", Anchors: []string{"answer"}}}, View: telegramui.PageView{Page: 1, Pages: 1, Anchor: "answer"}}, false, nil, presenter)
 			if err != nil {
 				t.Fatal(err)
 			}

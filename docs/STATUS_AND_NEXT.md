@@ -1,5 +1,23 @@
 # Handoff: статус и следующий план
 
+> Текущий запрос A49 - убрать задержку голосового preprocessing относительно
+> ccbot. Live update `783532007` доказал: Luna завершила работу за `3356 ms`,
+> но primary Codex получил запрос на `19.271 s` позже. Recognized-card и
+> preprocessed receipts были suppressed: последовательные статусы одного input
+> перестают совпадать с carrier после первого edit и дважды проходят 10-second
+> guard. Реализован persisted owner физического carrier: same-input status не
+> зависит от последнего edit, legacy state читается через fail-closed fallback.
+> Добавлены HMAC-only timings `voice.preparation` и `prompt.carrier_guard`.
+> Replacement-card теперь сначала очищает keyboard прежнего exact carrier и
+> инвалидирует его callbacks; revision fence закрывает ABA, legacy replay без
+> доказуемой цели не трогает новую карточку, а superseded final освобождает
+> exact pending custody. Два независимых review завершены APPROVE. Фоновое
+> уведомление содержит display name завершившейся сессии. RED/GREEN,
+> focused/race, architecture, policy, supply-chain и финальный полный
+> `make check-full` GREEN; впереди exact-SHA CI, deploy и новый live voice
+> sample. Договор:
+> [VOICE_PREPROCESSING_CARRIER_LATENCY_TODO.md](VOICE_PREPROCESSING_CARRIER_LATENCY_TODO.md).
+
 > Текущий запрос A48 - ускорить callback-проекции, восстановить page/follow
 > flow, скрыть пустую New из `Фон`, добавить rename ноды и `hh:mm:ss`, исправить
 > default auto-name и живой-terminal recovery. Автонейминг теперь требует от

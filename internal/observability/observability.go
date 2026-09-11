@@ -27,9 +27,7 @@ var (
 var safeLabel = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$`)
 var uuidV4 = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
 
-// Scope holds an opaque high-entropy session identifier. NewScope only accepts
-// canonical RFC4122 v4 UUIDs, whose source must use cryptographic randomness.
-// Never use a Telegram chat, user, message, provider, or filesystem ID here.
+// Scope holds an opaque cryptographically-random RFC4122 v4 session ID.
 type Scope struct {
 	sessionID string
 }
@@ -86,15 +84,21 @@ func Count(value uint64) *uint64 { return &value }
 // Recorder starts spans and emits at most one terminal event per span.
 type Recorder struct {
 	logger *safelog.Logger
+	inputs InputReferencer
 }
 
-// New creates the production instrumentation API. safelog exclusively owns
-// UTC timestamps, redaction, retention, and persistence caps.
-func New(logger *safelog.Logger) (*Recorder, error) {
+type InputReferencer interface{ InputRef(string) string }
+
+// New creates the production instrumentation API; safelog owns persistence.
+func New(logger *safelog.Logger, inputs ...InputReferencer) (*Recorder, error) {
 	if logger == nil {
 		return nil, ErrInvalidLogger
 	}
-	return &Recorder{logger: logger}, nil
+	recorder := &Recorder{logger: logger}
+	if len(inputs) > 0 {
+		recorder.inputs = inputs[0]
+	}
+	return recorder, nil
 }
 
 // Span measures elapsed duration with time.Since. When its start value came
@@ -104,6 +108,7 @@ type Span struct {
 	logger      *safelog.Logger
 	operation   string
 	correlation string
+	inputRef    string
 	started     time.Time
 	mu          sync.Mutex
 	terminal    bool
@@ -121,7 +126,11 @@ func (recorder *Recorder) Start(scope Scope, stage, occurrenceID string) (*Span,
 	if err != nil {
 		return nil, err
 	}
-	return &Span{logger: recorder.logger, operation: stage, correlation: correlation, started: time.Now()}, nil
+	inputRef := ""
+	if recorder.inputs != nil {
+		inputRef = recorder.inputs.InputRef(occurrenceID)
+	}
+	return &Span{logger: recorder.logger, operation: stage, correlation: correlation, inputRef: inputRef, started: time.Now()}, nil
 }
 
 // Success writes the single success terminal event.
@@ -151,6 +160,9 @@ func (span *Span) finish(result, errorCategory string, measurements Measurements
 	}
 	fields["duration_ms"] = strconv.FormatInt(elapsed.Milliseconds(), 10)
 	fields["operation"] = span.operation
+	if span.inputRef != "" {
+		fields["input_ref"] = span.inputRef
+	}
 	span.mu.Lock()
 	defer span.mu.Unlock()
 	if span.terminal {

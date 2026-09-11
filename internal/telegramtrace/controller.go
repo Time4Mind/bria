@@ -11,7 +11,7 @@ import (
 func Controller(event controllertelemetry.Event) Event {
 	return Event{
 		Stage: event.Stage.String(), OperationID: event.OperationID,
-		SessionID: event.SessionID, Time: event.Time, Result: event.Outcome.String(),
+		SessionID: event.SessionID, Time: event.Time, Result: event.Outcome.String(), Duration: event.Duration,
 		controllerEvent: event, hasControllerEvent: true,
 	}
 }
