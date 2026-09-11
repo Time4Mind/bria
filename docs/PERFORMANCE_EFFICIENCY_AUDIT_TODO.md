@@ -30,11 +30,11 @@
 
 | ID | Зона | Owner и границы | Stop criterion | Статус |
 |---|---|---|---|---|
-| A50.1 | Live idle/work baseline | read-only agent; launchd/process/log evidence | CPU/RSS/threads/FDs и stacks измерены отдельно для Bria и children | verified before; after pending |
+| A50.1 | Live idle/work baseline | read-only agent; launchd/process/log evidence | CPU/RSS/threads/FDs и stacks измерены отдельно для Bria и children | verified before/after |
 | A50.2 | Timers, polling, retries, I/O | read-only agent; source inventory | все recurring loops ранжированы по частоте и стоимости, названы простые кандидаты | verified |
 | A50.3 | Allocation/concurrency seams | read-only agent; tests/benchmarks/architecture | найдены измеримые hot paths и безопасные regression seams | verified |
 | A50.4 | Synthesis and simple fixes | integration owner; непересекающиеся файлы назначаются после RCA | причина доказана before/after, концептуальные развилки отделены | local verified |
-| A50.R | Release | integration owner | full gate, exact-SHA CI, verified install и postflight | full gate GREEN; release pending |
+| A50.R | Release | integration owner | full gate, exact-SHA CI, verified install и postflight | verified for source commit; final docs-only SHA pending |
 
 ## Гипотезы первого прохода
 
@@ -113,3 +113,32 @@ median `112 ms`, p95 `214 ms`. Это end-to-end этапы с сетевым Te
    потерю последних `100-250 ms` detailed telemetry при hard crash.
 4. Directory activity можно считать lazy при открытии browser вместо полного
    рекурсивного scan каждые две минуты; это меняет freshness сортировки.
+
+## Live after и первый release receipt
+
+Source commit `62b5a47b4cde7108d7783bdecb38f1f4306da1ba` прошёл Stage 1 run
+`34650980034` и Platform build matrix `34650980010`, оба `success`. Signed
+release `20260912-performance-efficiency` установлен, postflight GREEN; service
+перешёл `runs 15 -> 16`, PID `80188 -> 99061`.
+
+После стабилизации пять последовательных ненулевых точек parent CPU дали
+`12.2/13.8/12.7/13.7/17.0%`, среднее `13.9%`. От baseline `46.7%` это снижение
+на `70.3%`. Parent RSS после restart был `45-47 MiB`; это не выдаётся за
+доказанное memory-улучшение, поскольку чистый restart сам меняет resident set.
+
+Для пяти native adapters три after-среза дали суммарно `5.6/6.4/6.3% CPU`,
+среднее `6.1%`. От baseline `8.9%` это снижение на `31.5%`. Оставшаяся нагрузка
+соответствует неизменённому `150 ms` tmux liveness polling и вынесена в решение
+Артёма.
+
+Message journal, settings и preprocessing satellite hashes до/после restart
+совпали. Основной state ожидаемо изменился при recovery projections. После
+старта нет service/critical errors; шесть bounded `navigation_suppressed` с
+категорией `cancelled` относятся к отмене устаревших startup projections и не
+повторяются. Старые строки `unknown callback recovery identity` в `bria.log`
+не являются текущей ошибкой: файл не менялся с 2026-09-11 19:23:16 МСК.
+
+Рабочая CPU-нагрузка live не измерялась: в окно after-профиля не было
+естественного пользовательского запроса, а synthetic Telegram input исключён
+договором. Исторические safe timings и component regression seams приведены
+выше; новый live work sample остаётся наблюдением, а не блокером выпуска.
