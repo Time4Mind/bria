@@ -1,9 +1,12 @@
 package telegram
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
+
+	"bria/internal/telegramtransport"
 )
 
 const officialAPIHost = "api.telegram.org"
@@ -44,10 +47,13 @@ func (client *productionHTTPClient) Do(request *http.Request) (*http.Response, e
 	}
 	if request != nil && request.Context() != nil {
 		if contextErr := request.Context().Err(); contextErr != nil {
-			return nil, fmt.Errorf("Telegram production HTTP request: %w", contextErr)
+			if errors.Is(contextErr, context.Canceled) {
+				return nil, fmt.Errorf("Telegram production HTTP request: %w", contextErr)
+			}
+			return nil, fmt.Errorf("%w: %w", ErrTransient, telegramtransport.NewFailure("production HTTP", classifyTransportFailure(request.Context(), err)))
 		}
 	}
-	return nil, errors.New("Telegram production HTTP request failed")
+	return nil, fmt.Errorf("%w: %w", ErrTransient, telegramtransport.NewFailure("production HTTP", classifyTransportFailure(request.Context(), err)))
 }
 
 type officialRoundTripper struct {

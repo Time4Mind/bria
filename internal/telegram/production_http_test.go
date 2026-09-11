@@ -1,9 +1,14 @@
 package telegram
 
 import (
+	"context"
+	"crypto/tls"
+	"errors"
 	"io"
+	"net"
 	"net/http"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -104,6 +109,44 @@ func TestNewProductionHTTPClientBuildsHardenedClient(t *testing.T) {
 	}
 	if direct.Proxy != nil {
 		t.Fatal("production transport honors HTTPS_PROXY; want direct connection")
+	}
+}
+
+func TestProductionHTTPClientPreservesOnlySafeTransportClass(t *testing.T) {
+	const privateDetail = "private-network-detail"
+	tests := []struct {
+		name  string
+		cause error
+		want  TransportFailureClass
+	}{
+		{name: "dns", cause: &net.DNSError{Err: privateDetail, Name: "private.invalid"}, want: TransportFailureDNS},
+		{name: "connect", cause: &net.OpError{Op: "dial", Net: "tcp", Err: errors.New(privateDetail)}, want: TransportFailureConnect},
+		{name: "tls", cause: tls.RecordHeaderError{Msg: privateDetail}, want: TransportFailureTLS},
+		{name: "reset", cause: syscall.ECONNRESET, want: TransportFailureReset},
+		{name: "timeout", cause: context.DeadlineExceeded, want: TransportFailureTimeout},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			client := newProductionHTTPClient(roundTripFunc(func(*http.Request) (*http.Response, error) {
+				return nil, test.cause
+			}))
+			request, err := http.NewRequest(http.MethodPost, "https://api.telegram.org/bot-secret/getMe", strings.NewReader(`{}`))
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = client.Do(request)
+			if err == nil {
+				t.Fatal("production request error = nil")
+			}
+			class, ok := TransportFailureClassOf(err)
+			if !ok || class != test.want {
+				t.Fatalf("transport class = %q, %v; want %q, true", class, ok, test.want)
+			}
+			if strings.Contains(err.Error(), privateDetail) || strings.Contains(err.Error(), "bot-secret") || strings.Contains(err.Error(), "private.invalid") {
+				t.Fatalf("production request error exposed private detail: %v", err)
+			}
+		})
 	}
 }
 

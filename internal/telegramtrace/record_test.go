@@ -2,7 +2,11 @@ package telegramtrace_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
+	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -11,9 +15,16 @@ import (
 	"time"
 
 	"bria/internal/safelog"
+	"bria/internal/telegram"
 	"bria/internal/telegramtrace"
 	"bria/internal/telegramui"
 )
+
+type traceHTTPClientFunc func(*http.Request) (*http.Response, error)
+
+func (function traceHTTPClientFunc) Do(request *http.Request) (*http.Response, error) {
+	return function(request)
+}
 
 func TestRecordPersistsPrivateCorrelatedIdentities(t *testing.T) {
 	key := bytes.Repeat([]byte{42}, 32)
@@ -200,5 +211,45 @@ func TestRecordUnknownReasonFailsClosedInPhysicalJSON(t *testing.T) {
 	}
 	if bytes.Contains(raw, []byte("private_payload_marker")) || bytes.Contains(raw, []byte("secret_failure_text")) {
 		t.Fatal("raw reason/error leaked")
+	}
+}
+
+func TestTransportFailureClassReachesPhysicalFlowLogWithoutRawError(t *testing.T) {
+	const privateDetail = "private-dns-detail"
+	client, err := telegram.NewClient("123:test-secret", traceHTTPClientFunc(func(*http.Request) (*http.Response, error) {
+		return nil, &net.DNSError{Err: privateDetail, Name: "private.invalid"}
+	}), telegram.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, requestErr := client.GetMe(context.Background())
+	if requestErr == nil || !errors.Is(requestErr, telegram.ErrTransient) {
+		t.Fatalf("GetMe error = %v, want transient transport failure", requestErr)
+	}
+
+	dir := t.TempDir()
+	logger, err := safelog.Open(safelog.Options{Directory: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	record := telegramtrace.Record(telegramtrace.Event{
+		Stage: "transport.send", OperationID: "status:1", Result: "failed",
+		Error: requestErr.Error(), Reason: telegramtrace.Reason(requestErr), Time: time.Now(),
+	}, []byte("test-only-key"), 1)
+	if err := logger.Write(record); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := logger.Read(safelog.Detailed)
+	if err != nil || len(rows) != 1 || rows[0].ErrorCategory != "transport_dns" || rows[0].Fields["reason"] != "transport_dns" {
+		t.Fatalf("physical flow rows = (%#v, %v), want transport_dns", rows, err)
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, "detailed.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{privateDetail, "private.invalid", "test-secret"} {
+		if bytes.Contains(raw, []byte(forbidden)) {
+			t.Fatalf("physical flow log exposed private detail %q", forbidden)
+		}
 	}
 }

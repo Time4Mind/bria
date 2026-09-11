@@ -31,6 +31,7 @@ import (
 	"bria/internal/safelog"
 	"bria/internal/screenproduction"
 	"bria/internal/sessioncreation"
+	"bria/internal/sessiondeliverygate"
 	"bria/internal/sessionexpiry"
 	"bria/internal/sessionid"
 	"bria/internal/sessionnaming"
@@ -369,7 +370,7 @@ func runTelegramController(
 	outputWake := make(chan domain.SessionID, 256)
 	inputCustody := durablecomposition.InputCustody{Flow: flow, Wake: inputWake}
 	outputCustody := durablecomposition.OutputCustody{
-		Flow: flow, Wake: outputWake, OwnerPrivateChatID: configuration.PrivateChatID,
+		Flow: flow, Reader: journal, Wake: outputWake, OwnerPrivateChatID: configuration.PrivateChatID,
 	}
 	checkpoints := state.CoordinatorCheckpoints()
 	runtimeEnvironment := append([]string(nil), dependencies.Environment()...)
@@ -562,6 +563,7 @@ func runTelegramController(
 	creationEnvironment.Start(ctx)
 	defer creationEnvironment.Close()
 	var transportSender *telegrambridge.Sender
+	deliveryGate := &sessiondeliverygate.Gate{}
 	nativeController, _ := starter.(sessionruntime.NativeController)
 	handler, err := telegramcontroller.New(
 		configuration.OwnerUserID,
@@ -584,10 +586,12 @@ func runTelegramController(
 			PreprocessingObserver: preprocessingObserver{logger: safeLogger}, ControllerObserver: flowTrace,
 			Stopper: turnStopper, ArchivedResumer: archivedResumer, Recoverer: sessionRecoverer, SessionCloser: satelliteCloser,
 			TurnLifecycle: turnLifecycle, DurableInput: inputCustody, DurableOutput: outputCustody,
-			InputPreparer: inputPreparer, Attachments: attachments, RuntimeEvents: runtimeEvents, Finals: finals,
+			InputPreparer: inputPreparer, AllowDocumentInput: allowProductionDocumentInput(inputPreparer),
+			Attachments: attachments, RuntimeEvents: runtimeEvents, Finals: finals,
 			AcceptedObserver: acceptedObserver,
 			Interactions:     interactions.Flow(), Authorization: authorization,
-			Recovered: recovery.Sessions,
+			Recovered:           recovery.Sessions,
+			SessionDeliveryGate: deliveryGate,
 		},
 	)
 	if err != nil {
@@ -666,6 +670,7 @@ func runTelegramController(
 		UIState: telegramruntimecomposition.SessionTelegramUIStore{State: state}, MessageUI: controllerAdapter,
 		Callbacks: callbackExecutor, Operations: callbackOperations, Sender: transportSender, Observer: flowTrace,
 		OnCallbackCommitted: statusRefreshRelay.OnCallbackCommitted,
+		SessionDeliveryGate: deliveryGate,
 	})
 	if err != nil {
 		return fmt.Errorf("create signed Telegram flow: %w", err)
@@ -709,7 +714,15 @@ func runTelegramController(
 		if err != nil {
 			return fmt.Errorf("recover persisted sessions: %w", err)
 		}
-		for _, session := range recovery.Sessions {
+		currentSessions, listErr := state.List(ctx)
+		if listErr != nil {
+			return fmt.Errorf("list sessions after startup recovery: %w", listErr)
+		}
+		// The controller is composed before manager recovery so output consumers
+		// are ready for recovered finals. Synchronize every resulting lifecycle
+		// state, including background Starting/Resuming sessions that were not in
+		// the controller's initially empty Recovered option.
+		for _, session := range currentSessions {
 			handler.RefreshRecoveryCard(ctx, session.ID())
 		}
 	}
@@ -763,6 +776,10 @@ func runTelegramController(
 		return errors.Join(runErr, fmt.Errorf("persist safe controller failure: %w", logErr))
 	}
 	return runErr
+}
+
+func allowProductionDocumentInput(preparer any) bool {
+	return preparer != nil
 }
 
 type preprocessingObserver struct{ logger *safelog.Logger }

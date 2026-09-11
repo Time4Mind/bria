@@ -46,6 +46,8 @@ func (c *Controller) projectedEvent(ctx context.Context, source domain.SessionID
 }
 
 func (c *Controller) selectAfterClose(ctx context.Context, session domain.Session) (domain.SessionID, bool, error) {
+	unlockDelivery := c.lockSessionDelivery(session.ID())
+	defer unlockDelivery()
 	c.selectionMu.Lock()
 	defer c.selectionMu.Unlock()
 	c.mu.Lock()
@@ -63,4 +65,11 @@ func (c *Controller) selectAfterClose(ctx context.Context, session domain.Sessio
 		c.mu.Unlock()
 	}
 	return r.Active, foreground && previous == session.ID(), nil
+}
+
+func (c *Controller) lockSessionDelivery(sessionID domain.SessionID) func() {
+	if c.sessionDeliveryGate == nil {
+		return func() {}
+	}
+	return c.sessionDeliveryGate.Lock(sessionID)
 }

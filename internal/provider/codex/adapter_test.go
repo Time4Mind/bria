@@ -561,7 +561,11 @@ func TestRawCodexAppServerHelperProcess(t *testing.T) {
 		if readyPath == "" || os.WriteFile(readyPath, []byte("ready"), 0o600) != nil {
 			os.Exit(89)
 		}
-		select {}
+		// Keep a live timer so the helper cannot be mistaken for a Go runtime
+		// deadlock under a heavily parallel full-race run.
+		for {
+			time.Sleep(time.Hour)
+		}
 	}
 	runRawHelper()
 	os.Exit(0)

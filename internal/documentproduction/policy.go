@@ -37,14 +37,21 @@ func (policy TextDocumentPolicy) PrepareDocumentStructured(ctx context.Context, 
 	if policy.Attacher == nil {
 		return telegramcontroller.PreparedInput{}, mediaflow.ErrDocumentPolicy
 	}
-	if policy.Downloader == nil || policy.MaxBytes <= 0 || input.Kind != string(telegram.MediaDocument) || !input.DownloadPermitted || input.FileSize <= 0 || input.FileSize > policy.MaxBytes {
+	if policy.Downloader == nil || policy.MaxBytes <= 0 || input.Kind != string(telegram.MediaDocument) || !input.DownloadPermitted || input.FileSize < 0 || input.FileSize > policy.MaxBytes {
 		return telegramcontroller.PreparedInput{}, mediaflow.ErrMediaTooLarge
 	}
 	download, err := policy.Downloader.DownloadMedia(ctx, telegram.DownloadMediaRequest{Kind: telegram.MediaDocument, FileID: input.FileID, MaxBytes: policy.MaxBytes})
 	if err != nil {
 		return telegramcontroller.PreparedInput{}, err
 	}
-	if download.File.FileID != input.FileID || (input.FileUniqueID != "" && download.File.FileUniqueID != input.FileUniqueID) || int64(len(download.Content)) != input.FileSize || int64(len(download.Content)) > policy.MaxBytes {
+	actualSize := int64(len(download.Content))
+	if actualSize == 0 || actualSize > policy.MaxBytes || download.File.FileSize > policy.MaxBytes {
+		return telegramcontroller.PreparedInput{}, mediaflow.ErrMediaTooLarge
+	}
+	if download.File.FileID != input.FileID ||
+		(input.FileUniqueID != "" && download.File.FileUniqueID != input.FileUniqueID) ||
+		(input.FileSize > 0 && actualSize != input.FileSize) ||
+		(download.File.FileSize > 0 && actualSize != download.File.FileSize) {
 		return telegramcontroller.PreparedInput{}, mediaflow.ErrDownloadMismatch
 	}
 	ref, err := policy.Attacher.AttachPhoto(ctx, mediaflow.PhotoAttachment{FileID: input.FileID, FileUniqueID: input.FileUniqueID, MIMEType: "application/octet-stream", Content: download.Content})
@@ -52,5 +59,5 @@ func (policy TextDocumentPolicy) PrepareDocumentStructured(ctx context.Context, 
 		return telegramcontroller.PreparedInput{}, err
 	}
 	digest := sha256.Sum256(download.Content)
-	return telegramcontroller.PreparedInput{Attachments: []telegramcontroller.AttachmentRef{{Reference: ref, Size: input.FileSize, SHA256: hex.EncodeToString(digest[:])}}}, nil
+	return telegramcontroller.PreparedInput{Attachments: []telegramcontroller.AttachmentRef{{Reference: ref, Size: actualSize, SHA256: hex.EncodeToString(digest[:])}}}, nil
 }

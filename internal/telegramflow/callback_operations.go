@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"sort"
 	"strings"
 	"sync"
 )
@@ -83,6 +84,7 @@ type CallbackOperationStore interface {
 	LoadStatus(context.Context, string) (StatusOperation, bool, error)
 	EnqueueStatus(context.Context, StatusOperation) (StatusOperation, bool, error)
 	ListQueuedStatuses(context.Context, int) ([]StatusOperation, error)
+	ListCoupledStatuses(context.Context, int) ([]StatusOperation, error)
 	ListUnknownStatuses(context.Context, int) ([]StatusOperation, error)
 	CompareAndSwapStatus(context.Context, string, StatusOperationPhase, StatusOperation) (bool, error)
 }
@@ -265,11 +267,18 @@ func (store *FileCallbackOperationStore) EnqueueStatus(ctx context.Context, oper
 func (store *MemoryCallbackOperationStore) EnqueueStatus(ctx context.Context, operation StatusOperation) (StatusOperation, bool, error) {
 	return enqueueStatus(ctx, store.backend(), operation)
 }
-func listStatuses(ctx context.Context, backend telegramops.Store, limit int, phase StatusOperationPhase) ([]StatusOperation, error) {
+func listStatuses(ctx context.Context, backend telegramops.Store, limit int, phases ...StatusOperationPhase) ([]StatusOperation, error) {
 	if backend == nil || limit < 1 || limit > 100 {
 		return nil, errors.New("status operation list limit must be 1..100")
 	}
-	records, err := backend.List(ctx, telegramops.Statuses, []string{string(phase)}, limit)
+	if len(phases) == 0 {
+		return nil, errors.New("status operation phases are required")
+	}
+	wanted := make([]string, len(phases))
+	for index, phase := range phases {
+		wanted[index] = string(phase)
+	}
+	records, err := backend.List(ctx, telegramops.Statuses, wanted, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -283,10 +292,58 @@ func listStatuses(ctx context.Context, backend telegramops.Store, limit int, pha
 	return result, nil
 }
 func (store *FileCallbackOperationStore) ListQueuedStatuses(ctx context.Context, limit int) ([]StatusOperation, error) {
-	return listStatuses(ctx, store.backend(), limit, StatusQueued)
+	return listStatuses(ctx, store.backend(), limit, StatusQueued, StatusReceiptConfirmed)
 }
 func (store *MemoryCallbackOperationStore) ListQueuedStatuses(ctx context.Context, limit int) ([]StatusOperation, error) {
-	return listStatuses(ctx, store.backend(), limit, StatusQueued)
+	return listStatuses(ctx, store.backend(), limit, StatusQueued, StatusReceiptConfirmed)
+
+}
+func (store *FileCallbackOperationStore) ListCoupledStatuses(ctx context.Context, limit int) ([]StatusOperation, error) {
+	return listCoupledStatuses(ctx, store.backend(), limit)
+}
+func (store *MemoryCallbackOperationStore) ListCoupledStatuses(ctx context.Context, limit int) ([]StatusOperation, error) {
+	return listCoupledStatuses(ctx, store.backend(), limit)
+}
+
+func listCoupledStatuses(ctx context.Context, backend telegramops.Store, limit int) ([]StatusOperation, error) {
+	if backend == nil || limit < 1 || limit > 100 {
+		return nil, errors.New("coupled status operation limit must be 1..100")
+	}
+	snapshot, err := backend.Snapshot(ctx)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]StatusOperation, 0, limit)
+	for id, rawStatus := range snapshot.Statuses {
+		status, decodeErr := decodeStatusOperation(rawStatus)
+		if decodeErr != nil {
+			return nil, decodeErr
+		}
+		if status.Phase != StatusSendUnknown || status.Prepared == nil {
+			continue
+		}
+		rawCallback, exists := snapshot.Operations[id]
+		if !exists {
+			continue
+		}
+		callback, decodeErr := decodeCallbackOperation(rawCallback)
+		if decodeErr != nil {
+			return nil, decodeErr
+		}
+		if callback.Phase == CallbackReceiptConfirmed || callback.Phase == CallbackCommitted {
+			result = append(result, status)
+		}
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].Sequence == result[j].Sequence {
+			return result[i].ID < result[j].ID
+		}
+		return result[i].Sequence < result[j].Sequence
+	})
+	if len(result) > limit {
+		result = result[:limit]
+	}
+	return result, nil
 }
 func (store *FileCallbackOperationStore) ListUnknownStatuses(ctx context.Context, limit int) ([]StatusOperation, error) {
 	return listStatuses(ctx, store.backend(), limit, StatusSendUnknown)

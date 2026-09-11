@@ -63,3 +63,132 @@ func TestAsyncStandbySelectsStartingSessionBeforeProviderReady(t *testing.T) {
 		t.Fatal("early prompt missed pending active session")
 	}
 }
+
+func TestAsyncStandbyPublishesBackgroundStartingSessionBeforeProviderReady(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	active := readySession(t, "aaaaaaaa-aaaa-4aaa-9aaa-aaaaaaaaaaaa", domain.ProviderCodex, dir, "active-provider", 1)
+	store := &standbySessions{lockedSessions: newLockedSessions(active), empty: map[domain.SessionID]bool{}}
+	ui := &standbyActiveRecorder{standbySessions: store, selected: make(chan domain.SessionID, 8)}
+	prefs := &standbyPreferences{value: settingsport.Snapshot{StandbyEnabled: true, CardDetail: "standard", CardPageLimit: 64, DefaultProviders: map[domain.ComputerID]domain.Provider{"local": domain.ProviderCodex}, DefaultWorkdirs: map[domain.ComputerID]string{"local": dir}}}
+	outcome := make(chan telegramcontroller.SessionStartOutcome, 1)
+	starting := make(chan domain.Session, 1)
+	notifications := make(chan telegramcontroller.Notification, 8)
+	async := asyncCreatorFunc(func(_ context.Context, intent app.ConfirmedSessionIntent) (telegramcontroller.PendingSessionStart, error) {
+		session, err := domain.NewStartingSession("bbbbbbbb-bbbb-4bbb-9bbb-bbbbbbbbbbbb", intent.IntentID, intent.ComputerID, intent.Provider, intent.Workdir)
+		if err != nil {
+			return telegramcontroller.PendingSessionStart{}, err
+		}
+		store.Set(session)
+		store.setEmpty(session.ID(), true)
+		starting <- session
+		return telegramcontroller.PendingSessionStart{Session: session, Outcome: outcome}, nil
+	})
+	controller := newController(t, nil, store, nil, notifierFunc(func(_ context.Context, notification telegramcontroller.Notification) error {
+		notifications <- notification
+		return nil
+	}), telegramcontroller.Options{Settings: prefs, UIState: ui, AsyncCreator: async, Recovered: []domain.Session{active}})
+	t.Cleanup(func() { _ = controller.Close(ctx) })
+	if _, err := controller.HandleSemanticAction(ctx, telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticSelect, SessionID: active.ID()}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-ui.selected:
+	case <-time.After(time.Second):
+		t.Fatal("active session selection was not persisted")
+	}
+
+	controller.ScheduleStandby()
+	var pending domain.Session
+	select {
+	case pending = <-starting:
+	case <-time.After(time.Second):
+		t.Fatal("standby not started")
+	}
+	select {
+	case notification := <-notifications:
+		if notification.SessionID != active.ID() || notification.Kind != telegramcontroller.NotificationPromptStatus {
+			t.Fatalf("notification=%#v", notification)
+		}
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("background Starting standby did not request an immediate card refresh")
+	}
+	current, err := controller.ProjectCurrent(ctx, active.ID())
+	if err != nil || current.Card == nil {
+		t.Fatalf("ProjectCurrent()=(%#v, %v)", current, err)
+	}
+	found := false
+	for _, id := range current.Card.SelectableSessionIDs {
+		found = found || id == pending.ID()
+	}
+	if !found {
+		t.Fatalf("Starting standby %s absent from buttons: %#v", pending.ID(), current.Card.SelectableSessionIDs)
+	}
+}
+
+func TestAsyncStandbyStartingButtonSelectsFIFOWhileProviderStarts(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	active := readySession(t, "cccccccc-cccc-4ccc-9ccc-cccccccccccc", domain.ProviderCodex, dir, "active-provider", 1)
+	store := &standbySessions{lockedSessions: newLockedSessions(active), empty: map[domain.SessionID]bool{}}
+	ui := &standbyActiveRecorder{standbySessions: store, selected: make(chan domain.SessionID, 8)}
+	prefs := &standbyPreferences{value: settingsport.Snapshot{StandbyEnabled: true, CardDetail: "standard", CardPageLimit: 64, DefaultProviders: map[domain.ComputerID]domain.Provider{"local": domain.ProviderCodex}, DefaultWorkdirs: map[domain.ComputerID]string{"local": dir}}}
+	outcome := make(chan telegramcontroller.SessionStartOutcome, 1)
+	starting := make(chan domain.Session, 1)
+	accepted := make(chan telegramcontroller.SessionInput, 1)
+	async := asyncCreatorFunc(func(_ context.Context, intent app.ConfirmedSessionIntent) (telegramcontroller.PendingSessionStart, error) {
+		session, err := domain.NewStartingSession("dddddddd-dddd-4ddd-9ddd-dddddddddddd", intent.IntentID, intent.ComputerID, intent.Provider, intent.Workdir)
+		if err != nil {
+			return telegramcontroller.PendingSessionStart{}, err
+		}
+		store.Set(session)
+		store.setEmpty(session.ID(), true)
+		starting <- session
+		return telegramcontroller.PendingSessionStart{Session: session, Outcome: outcome}, nil
+	})
+	custody := durableInputFunc(func(_ context.Context, input telegramcontroller.SessionInput) (telegramcontroller.InputReceipt, error) {
+		accepted <- input
+		return telegramcontroller.InputReceipt{SessionID: input.SessionID, MessageID: input.MessageID, Sequence: 1}, nil
+	})
+	controller := newController(t, nil, store, nil, nil, telegramcontroller.Options{Settings: prefs, UIState: ui, AsyncCreator: async, DurableInput: custody, Recovered: []domain.Session{active}})
+	t.Cleanup(func() { _ = controller.Close(ctx) })
+	if _, err := controller.HandleSemanticAction(ctx, telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticSelect, SessionID: active.ID()}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-ui.selected:
+	case <-time.After(time.Second):
+		t.Fatal("active session selection was not persisted")
+	}
+	controller.ScheduleStandby()
+	var pending domain.Session
+	select {
+	case pending = <-starting:
+	case <-time.After(time.Second):
+		t.Fatal("standby not started")
+	}
+
+	selectedCard, err := controller.HandleSemanticAction(ctx, telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticSelect, SessionID: pending.ID()})
+	if err != nil || selectedCard.Card == nil || selectedCard.Card.SessionID != pending.ID() {
+		t.Fatalf("select Starting standby=(%#v, %v)", selectedCard, err)
+	}
+	select {
+	case selected := <-ui.selected:
+		if selected != pending.ID() {
+			t.Fatalf("selected=%s, want %s", selected, pending.ID())
+		}
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("Starting standby button did not persist selection")
+	}
+	if _, err := controller.Handle(ctx, message(202, "early FIFO prompt")); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case input := <-accepted:
+		if input.SessionID != pending.ID() || input.MessageID != "telegram-update:202" {
+			t.Fatalf("accepted input=%#v", input)
+		}
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("early prompt did not enter durable FIFO custody")
+	}
+}

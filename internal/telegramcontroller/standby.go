@@ -188,9 +188,12 @@ func (controller *Controller) ensureStandby(ctx context.Context, node domain.Com
 			// manually created session. Do not lose early prompts while CLI boots.
 			// Still consume the owned outcome if selection persistence fails.
 			selectionErr = controller.persistActive(ctx, pending.Session.ID())
-			if selectionErr == nil {
-				controller.refreshStandbyCard(ctx, node, pending.Session.ID(), "starting")
-			}
+		}
+		if selectionErr == nil {
+			// Starting is already durable. Publish it immediately even when an
+			// older session remains active, so that card gets the new button while
+			// provider startup continues in the background.
+			controller.refreshStandbyCard(ctx, node, pending.Session.ID(), "starting")
 		}
 		select {
 		case <-ctx.Done():

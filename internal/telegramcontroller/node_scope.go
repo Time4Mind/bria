@@ -19,18 +19,31 @@ func (controller *Controller) restoreNodeSelection(ctx context.Context) error {
 	}
 	if active != "" {
 		session, loadErr := controller.sessions.Load(ctx, active)
-		if loadErr != nil || (session.Status() != domain.SessionReady && session.Status() != domain.SessionRunning && session.Status() != domain.SessionStopping && session.Status() != domain.SessionAwaitingRecovery) {
+		if loadErr != nil || !restorableForegroundStatus(session.Status()) {
 			// Foreground viewing and input readiness are separate capabilities.
 			if clearErr := controller.nodes.RestoreActive(ctx, controller.nodes.Current(), ""); clearErr != nil {
 				return clearErr
 			}
 			active = ""
+		} else if acceptsDurableInput(session) {
+			// A process restart loses the ephemeral async-creation handle, but the
+			// persisted Starting/Resuming session must remain the FIFO target until
+			// supervision commits Ready and wakes its durable input.
+			controller.mu.Lock()
+			controller.pending[session.ID()] = session
+			controller.mu.Unlock()
 		}
 	}
 	controller.mu.Lock()
 	controller.active = active
 	controller.mu.Unlock()
 	return nil
+}
+
+func restorableForegroundStatus(status domain.SessionStatus) bool {
+	return status == domain.SessionStarting || status == domain.SessionResuming ||
+		status == domain.SessionReady || status == domain.SessionRunning ||
+		status == domain.SessionStopping || status == domain.SessionAwaitingRecovery
 }
 
 func (controller *Controller) nodeAvailable(ctx context.Context, nodeID domain.ComputerID) bool {
@@ -201,6 +214,10 @@ func (controller *Controller) ensureCurrentActive(ctx context.Context) (domain.S
 func (controller *Controller) setCurrentNodeActive(ctx context.Context, session domain.Session) error {
 	controller.selectionMu.Lock()
 	defer controller.selectionMu.Unlock()
+	return controller.setCurrentNodeActiveLocked(ctx, session)
+}
+
+func (controller *Controller) setCurrentNodeActiveLocked(ctx context.Context, session domain.Session) error {
 	if err := controller.nodes.SetActive(ctx, session); err != nil {
 		return err
 	}

@@ -397,6 +397,27 @@ func TestSenderReturnsOnlyPositiveTelegramReceipt(t *testing.T) {
 	}
 }
 
+func TestSenderDeactivatesOnlyTheExactPreviousCarrierKeyboard(t *testing.T) {
+	client := mustTelegramClient(t, func(request *http.Request) (*http.Response, error) {
+		if request.URL.Path != "/bot123:test/bootstrap/editMessageReplyMarkup" {
+			t.Fatalf("path=%q", request.URL.Path)
+		}
+		var body telegram.EditMessageReplyMarkupRequest
+		decodeJSON(t, request, &body)
+		if body.ChatID != 42 || body.MessageID != 501 || body.ReplyMarkup.InlineKeyboard == nil || len(body.ReplyMarkup.InlineKeyboard) != 0 {
+			t.Fatalf("body=%#v", body)
+		}
+		return response(http.StatusOK, `{"ok":true,"result":{"message_id":501,"from":{"id":600,"is_bot":true},"chat":{"id":42,"type":"private"},"text":"preserved"}}`), nil
+	})
+	sender, err := telegrambridge.NewSender(client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sender.DeactivateInlineKeyboard(context.Background(), "retire:501", 42, 501); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestSenderNormalizesProviderCodeForRichRendering(t *testing.T) {
 	t.Parallel()
 

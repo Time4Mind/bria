@@ -150,12 +150,18 @@ func TestSubmitWithCallbacksPreservesCallbacksAndRecordsFirstTimings(t *testing.
 func TestSubmitWithCallbacksRecordsFailureAndCancellationWithoutChangingError(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
+		result   sessionruntime.TurnResult
 		err      error
 		category string
-	}{{"failure", errors.New("provider private failure"), "provider_error"}, {"cancel", context.Canceled, "cancelled"}, {"callback", errors.New("callback private failure"), "provider_error"}} {
+	}{
+		{name: "failure", err: errors.New("provider private failure"), category: "provider_error"},
+		{name: "cancel", err: context.Canceled, category: "cancelled"},
+		{name: "interrupted", result: sessionruntime.TurnResult{TerminalStatus: sessionruntime.StatusInterrupted, ErrorCode: sessionruntime.ErrorInterrupted}, err: sessionruntime.ErrTurnFailed, category: "interrupted"},
+		{name: "callback", err: errors.New("callback private failure"), category: "provider_error"},
+	} {
 		t.Run(tc.name, func(t *testing.T) {
 			recorder, logger, _ := recorder(t)
-			base := &runtime{err: tc.err}
+			base := &runtime{result: tc.result, err: tc.err}
 			submitter, err := observabilitycomposition.New(base, recorder, codex)
 			if err != nil {
 				t.Fatal(err)

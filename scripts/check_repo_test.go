@@ -29,7 +29,7 @@ func TestNativeMigrationKeepsExactPackageBoundaries(t *testing.T) {
 		{"internal/nativecontrolport", []string{"internal/domain"}},
 		{"internal/nativeapprovalflow", []string{"internal/domain", "internal/nativeapproval", "internal/nativecontrolport"}},
 		{"internal/nativeterminal", []string{"internal/terminalbinding"}},
-		{"internal/nativetranscript", []string{"internal/nativejsonline", "internal/runtimeprotocol", "internal/tooltext"}},
+		{"internal/nativetranscript", []string{"internal/assistanttext", "internal/nativejsonline", "internal/runtimeprotocol", "internal/tooltext"}},
 	} {
 		policy, ok := packagePolicies[test.path]
 		if !ok || policy.responsibility == "" || policy.compositionRoot || strings.Join(policy.allowedImports, "\x00") != strings.Join(test.imports, "\x00") {
@@ -681,7 +681,7 @@ func TestArchitectureCheckerRegistersCurrentCompositionBoundaries(t *testing.T) 
 		{
 			path:           "internal/durablecomposition",
 			responsibility: "compose durable message custody, accepted-turn reconciliation and recovery finalization",
-			imports:        []string{"internal/turncontinuation", "internal/acceptedrecovery", "internal/domain", "internal/durableflow", "internal/durableinputbridge", "internal/messagejournal", "internal/sessionruntime", "internal/sessionsupervisor", "internal/telegramcontroller", "internal/telegramnotify", "internal/turnprocessing"},
+			imports:        []string{"internal/turncontinuation", "internal/acceptedrecovery", "internal/domain", "internal/durableflow", "internal/durableinputbridge", "internal/durableoutputwait", "internal/messagejournal", "internal/sessionruntime", "internal/sessionsupervisor", "internal/telegramcontroller", "internal/telegramnotify", "internal/turnprocessing"},
 			limit:          550,
 		},
 		{
@@ -731,7 +731,7 @@ func TestArchitectureCheckerRegistersCurrentCompositionBoundaries(t *testing.T) 
 			responsibility: "compose the single-computer Bria process and bind post-commit status refresh delivery",
 			imports: []string{
 				"internal/providermodels",
-				"internal/acceptedcontinuation", "internal/app", "internal/authcomposition", "internal/callbacktoken", "internal/claudestore", "internal/config", "internal/coordinator", "internal/domain", "internal/durablecomposition", "internal/durableflow", "internal/interactioncomposition", "internal/messagejournal", "internal/nativerecoverycomposition", "internal/observability", "internal/processenv", "internal/promptpreprocess", "internal/promptpreprocesscommand", "internal/promptpreprocesssession", "internal/providerquota", "internal/recoverycomposition", "internal/recoveryruntime", "internal/runtimefactory", "internal/safelog", "internal/screenproduction", "internal/sessioncreation", "internal/sessionexpiry", "internal/sessionid", "internal/sessionnaming", "internal/sessionruntime", "internal/sessionsupervisor", "internal/settings", "internal/settingscomposition", "internal/storage", "internal/supervisioncomposition", "internal/telegram", "internal/telegrambridge", "internal/telegramcompletioncomposition", "internal/telegramcontroller", "internal/telegramflow", "internal/telegramnotify", "internal/telegrampipeline", "internal/telegrampromptcomposition", "internal/telegramrecoverycomposition", "internal/telegramruntimecomposition", "internal/turnruntimecomposition", "internal/workdir",
+				"internal/acceptedcontinuation", "internal/app", "internal/authcomposition", "internal/callbacktoken", "internal/claudestore", "internal/config", "internal/coordinator", "internal/domain", "internal/durablecomposition", "internal/durableflow", "internal/interactioncomposition", "internal/messagejournal", "internal/nativerecoverycomposition", "internal/observability", "internal/processenv", "internal/promptpreprocess", "internal/promptpreprocesscommand", "internal/promptpreprocesssession", "internal/providerquota", "internal/recoverycomposition", "internal/recoveryruntime", "internal/runtimefactory", "internal/safelog", "internal/screenproduction", "internal/sessioncreation", "internal/sessiondeliverygate", "internal/sessionexpiry", "internal/sessionid", "internal/sessionnaming", "internal/sessionruntime", "internal/sessionsupervisor", "internal/settings", "internal/settingscomposition", "internal/storage", "internal/supervisioncomposition", "internal/telegram", "internal/telegrambridge", "internal/telegramcompletioncomposition", "internal/telegramcontroller", "internal/telegramflow", "internal/telegramnotify", "internal/telegrampipeline", "internal/telegrampromptcomposition", "internal/telegramrecoverycomposition", "internal/telegramruntimecomposition", "internal/turnruntimecomposition", "internal/workdir",
 			},
 			limit: 1250,
 		},
@@ -984,7 +984,7 @@ func TestArchitectureCheckerCapsCoherentCustodyResponsibilities(t *testing.T) {
 		{path: "internal/mediaflow", limit: 350},
 		{path: "internal/messagejournal", limit: 1700},
 		{path: "internal/sessionsupervisor", limit: 500},
-		{path: "internal/telegramflow", limit: 2650},
+		{path: "internal/telegramflow", limit: 2900},
 		{path: "internal/telegrampipeline", limit: 1800},
 		{path: "internal/sessionruntime", limit: 1850},
 		{path: "internal/orphanresume", limit: 150},
@@ -1004,6 +1004,7 @@ func TestArchitectureCheckerCapsCoherentCustodyResponsibilities(t *testing.T) {
 		{path: "internal/telegramrich", limit: 250},
 		{path: "internal/nativerender", limit: 550},
 		{path: "internal/nativescreencache", limit: 400},
+		{path: "internal/assistanttext", limit: 125},
 		{path: "internal/telegramturnhelpers", limit: 425},
 		{path: "internal/mediaproduction", limit: 800},
 		{path: "internal/screen", limit: 750},
@@ -1021,9 +1022,9 @@ func TestArchitectureCheckerCapsCoherentCustodyResponsibilities(t *testing.T) {
 		{path: "internal/promptpreprocesssession", limit: 750},
 		{path: "internal/storage", limit: 1900},
 		{path: "internal/statejson", limit: 100},
-		{path: "internal/telegram", limit: 1750},
+		{path: "internal/telegram", limit: 1800},
 		{path: "internal/telegramcompletioncomposition", limit: 275},
-		{path: "internal/telegramcontroller", limit: 5650},
+		{path: "internal/telegramcontroller", limit: 5800},
 		{path: "internal/finalpersist", limit: 200},
 		{path: "internal/turnadmission", limit: 120},
 		{path: "internal/telegramsemantic", limit: 200},
@@ -1670,6 +1671,27 @@ func TestArchitectureCheckerRegistersStableArtifactProductionDelivery(t *testing
 	}
 	if errors := checkGraph(packages); len(errors) != 0 {
 		t.Fatalf("checkGraph() errors = %v, want none", errors)
+	}
+}
+
+func TestArchitectureCheckerRegistersAssistantTextIsolation(t *testing.T) {
+	policy, ok := packagePolicies["internal/assistanttext"]
+	if !ok {
+		t.Fatal("assistanttext package policy is missing")
+	}
+	if policy.responsibility != "remove strictly validated service envelopes from assistant finals without I/O" || len(policy.allowedImports) != 0 || policy.maxProductionLines != 125 {
+		t.Fatalf("assistanttext policy = %#v", policy)
+	}
+	packages := []packageInfo{
+		testPackage("internal/assistanttext"),
+		testPackage("internal/nativetranscript", "internal/assistanttext", "internal/nativejsonline", "internal/runtimeprotocol", "internal/tooltext"),
+		testPackage("internal/cardtranscript", "internal/assistanttext", "internal/tooltext"),
+		testPackage("internal/nativejsonline"),
+		testPackage("internal/runtimeprotocol"),
+		testPackage("internal/tooltext"),
+	}
+	if problems := checkGraph(packages); len(problems) != 0 {
+		t.Fatalf("assistant text isolation graph errors = %v", problems)
 	}
 }
 

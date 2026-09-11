@@ -27,6 +27,7 @@ import (
 	"bria/internal/turnadmission"
 	"bria/internal/turncompletion"
 	"bria/internal/turncontinuation"
+	"bria/internal/turnfailure"
 	"bria/internal/turnfinalization"
 	"bria/internal/turnprocessing"
 	"context"
@@ -49,6 +50,7 @@ type SessionStartOutcome = telegramcontrolport.SessionStartOutcome
 type AsyncSessionCreator = telegramcontrolport.AsyncSessionCreator
 type SessionStore = telegramcontrolport.SessionStore
 type SessionNamer = telegramcontrolport.SessionNamer
+type RefreshingSessionNamer = telegramcontrolport.RefreshingSessionNamer
 type Notifier = telegramcontrolport.Notifier
 type DeliveryState = telegramcontrolport.DeliveryState
 type NotificationFailure = telegramcontrolport.NotificationFailure
@@ -394,6 +396,13 @@ func (controller *Controller) handleSemanticAction(ctx context.Context, action S
 		controller.clearNodeBack()
 		decision, err = controller.use(ctx, action.SessionID)
 		if err == nil {
+			selected, loadErr := controller.sessions.Load(ctx, action.SessionID)
+			if loadErr != nil {
+				return SemanticActionResult{}, fmt.Errorf("reload selected session: %w", loadErr)
+			}
+			if !telegramsessions.Viewable(selected.Status()) {
+				return controller.sessionListSemanticResult(ctx)
+			}
 			if native, ok := controller.restoreNativeSurface(action.SessionID); ok {
 				return native, nil
 			}
@@ -546,13 +555,18 @@ func (controller *Controller) handleGlobalSemanticAction(ctx context.Context, ac
 		if _, ok := controller.settings.(settingsport.PreprocessingPreferences); !ok {
 			return SemanticActionResult{}, errors.New("preprocessing settings are not configured")
 		}
+		current, err := controller.settings.Snapshot(ctx)
+		if err != nil {
+			return SemanticActionResult{}, fmt.Errorf("load current preprocessing instruction: %w", err)
+		}
+		instruction := strings.TrimSpace(current.PreprocessingInstruction)
+		if instruction == "" {
+			instruction = promptpreprocess.DefaultInstruction
+		}
 		controller.mu.Lock()
 		controller.preprocessingInstructionPending = true
 		controller.mu.Unlock()
-		return SemanticActionResult{Surface: &SemanticSurface{
-			Text: "Отправьте новую инструкцию препроцессинга одним текстовым сообщением.",
-			Rows: [][]SemanticButton{{{Label: "Отмена", Action: SemanticMenuSettings}}},
-		}}, nil
+		return controller.projectSettingsSurface(ctx, telegramsettingsview.PreprocessingInstructionEditor(instruction, action.Choice), 0, nil)
 	case SemanticSettingsRenameNode:
 		if _, ok := controller.providerPreferences.(settingsport.NodeRenamer); !ok {
 			return SemanticActionResult{}, errors.New("переименование ноды не настроено")
@@ -926,6 +940,7 @@ type Controller struct {
 	cancelRoot                      context.CancelFunc
 	mu                              sync.Mutex
 	selectionMu                     sync.Mutex
+	sessionDeliveryGate             telegramcontrolport.SessionDeliveryGate
 	closed                          bool
 	closeDone                       chan struct{}
 	closeErr                        error
@@ -1082,6 +1097,7 @@ func New(
 		runtimeTail:         make(map[domain.SessionID]map[string]int),
 		promptSessions:      make(map[string]domain.SessionID),
 		nodes:               nodes,
+		sessionDeliveryGate: options.SessionDeliveryGate,
 		createFlow:          sessioncreation.New(),
 		creationEnvironment: options.CreationEnvironment,
 		quotas:              options.Quotas,
@@ -1100,9 +1116,15 @@ func New(
 		},
 	}
 	for _, session := range options.Recovered {
-		if session.Status() == domain.SessionReady {
+		switch session.Status() {
+		case domain.SessionReady:
 			controller.live[session.ID()] = session
 			controller.ensureWorkerLocked(session.ID())
+		case domain.SessionStarting, domain.SessionResuming:
+			// Async creation/resume ownership is process-local, but its persisted
+			// FIFO target survives restart and remains selectable until recovery
+			// commits Ready.
+			controller.pending[session.ID()] = session
 		}
 	}
 	if err := controller.restoreNodeSelection(context.Background()); err != nil {
@@ -1971,6 +1993,23 @@ func (controller *Controller) DeliveryFailure(sessionID domain.SessionID) (Notif
 	return failure, ok
 }
 
+func (controller *Controller) refreshSessionName(renamed domain.SessionID) {
+	controller.mu.Lock()
+	active := controller.active
+	closed := controller.closed
+	controller.mu.Unlock()
+	if closed || active == "" {
+		return
+	}
+	controller.notify(context.WithoutCancel(controller.rootContext), Notification{
+		OperationID:    fmt.Sprintf("session-name:%s:%d", renamed, time.Now().UnixNano()),
+		ConversationID: controller.ownerPrivateChatID,
+		SessionID:      active,
+		Kind:           NotificationPromptStatus,
+		Text:           "session-name",
+	})
+}
+
 // notify confirms exact durable custody, or one direct transport attempt.
 // Final completion requires custody success; ambiguous enqueue is reconciled
 // by exact operation identity, never by replaying the provider request.
@@ -2362,26 +2401,44 @@ func (controller *Controller) use(
 	ctx context.Context,
 	sessionID domain.SessionID,
 ) (coordinator.Decision, error) {
-	session, err := controller.sessions.Load(ctx, sessionID)
+	session, selected, err := controller.selectSession(ctx, sessionID)
 	if err != nil {
-		return coordinator.Decision{}, fmt.Errorf("load selected session: %w", err)
+		return coordinator.Decision{}, err
 	}
-	if session.ComputerID() != controller.currentNodeID() {
-		return coordinator.Decision{}, errors.New("session does not belong to the selected node")
-	}
-	controller.mu.Lock()
-	_, usable := controller.usableLocked(session)
-	controller.mu.Unlock()
-	if !usable && session.Status() != domain.SessionAwaitingRecovery {
+	if !selected {
 		if session.Status() == domain.SessionReady {
 			return controller.cardDecision(ctx, sessionID, "")
 		}
 		return controller.status("Сессия " + string(sessionID) + " недоступна: " + string(session.Status()) + "."), nil
 	}
-	if err := controller.closeFlow.Selection(ctx, session, controller.nodes, func() error { return controller.persistActive(ctx, sessionID) }); err != nil {
-		return coordinator.Decision{}, fmt.Errorf("persist active Telegram session: %w", err)
-	}
 	return controller.cardDecision(ctx, sessionID, "")
+}
+
+func (controller *Controller) selectSession(ctx context.Context, sessionID domain.SessionID) (domain.Session, bool, error) {
+	unlockDelivery := controller.lockSessionDelivery(sessionID)
+	defer unlockDelivery()
+	controller.selectionMu.Lock()
+	defer controller.selectionMu.Unlock()
+	session, err := controller.sessions.Load(ctx, sessionID)
+	if err != nil {
+		return domain.Session{}, false, fmt.Errorf("load selected session: %w", err)
+	}
+	if session.ComputerID() != controller.currentNodeID() {
+		return session, false, errors.New("session does not belong to the selected node")
+	}
+	controller.mu.Lock()
+	_, usable := controller.usableLocked(session)
+	pending, pendingSelectable := controller.pending[sessionID]
+	pendingSelectable = pendingSelectable && acceptsDurableInput(pending) &&
+		sameSessionIdentity(pending, session)
+	controller.mu.Unlock()
+	if !usable && !pendingSelectable && session.Status() != domain.SessionAwaitingRecovery {
+		return session, false, nil
+	}
+	if err := controller.closeFlow.Selection(ctx, session, controller.nodes, func() error { return controller.setCurrentNodeActiveLocked(ctx, session) }); err != nil {
+		return session, false, fmt.Errorf("persist active Telegram session: %w", err)
+	}
+	return session, true, nil
 }
 func (controller *Controller) listSessions(ctx context.Context) (coordinator.Decision, error) {
 	sessions, err := controller.sessions.List(ctx)
@@ -2459,7 +2516,7 @@ func (controller *Controller) enqueueSession(ctx context.Context, updateID, sour
 		return coordinator.Decision{Kind: coordinator.DecisionSkip}
 	}
 	if controller.durableInput != nil {
-		if sessionID == "" || (!live || !usable) && (!isPending || !acceptsDurableInput(pending.Status())) {
+		if sessionID == "" || (!live || !usable) && (!isPending || !acceptsDurableInput(pending)) {
 			controller.setPromptState(ctx, sessionID, messageID, input.Text, "🙅‍♂")
 			return coordinator.Decision{Kind: coordinator.DecisionSkip}
 		}
@@ -2572,9 +2629,11 @@ func (controller *Controller) publishPromptState(ctx context.Context, sessionID 
 	return controller.publishProcessedPromptState(ctx, sessionID, messageID, text, emoji, false)
 }
 
-func (controller *Controller) publishPreprocessingState(ctx context.Context, sessionID domain.SessionID, messageID, text string, failed bool) {
-	controller.setProcessedPromptState(ctx, sessionID, messageID, text, "🙋‍♂", failed)
-	controller.notify(ctx, Notification{
+func (controller *Controller) publishPreprocessingState(ctx context.Context, sessionID domain.SessionID, messageID, text string, failed bool) bool {
+	if err := controller.setProcessedPromptState(ctx, sessionID, messageID, text, "🙋‍♂", failed); err != nil {
+		return false
+	}
+	return controller.notify(ctx, Notification{
 		OperationID:    messageID + ":prompt-status:preprocessed",
 		ConversationID: controller.ownerPrivateChatID,
 		SessionID:      sessionID,
@@ -2596,8 +2655,15 @@ func (controller *Controller) publishProcessedPromptState(ctx context.Context, s
 	})
 	return nil
 }
-func acceptsDurableInput(status domain.SessionStatus) bool {
-	return status == domain.SessionStarting || status == domain.SessionResuming
+func acceptsDurableInput(session domain.Session) bool {
+	if session.Status() == domain.SessionStarting || session.Status() == domain.SessionResuming {
+		return true
+	}
+	if session.Status() != domain.SessionAwaitingRecovery {
+		return false
+	}
+	target, recovering := session.RecoveryTarget()
+	return recovering && (target == domain.SessionStarting || target == domain.SessionResuming)
 }
 
 // ProcessDurableInput processes one exact leased journal input through the
@@ -2658,7 +2724,18 @@ func (controller *Controller) ProcessDurableInput(
 		_ = preprocessingCompletion.Accept(context.WithoutCancel(ctx))
 	}
 	if preprocessingEnabled {
-		controller.publishPreprocessingState(ctx, input.SessionID, input.MessageID, promptText, preprocessingFailed)
+		if !controller.publishPreprocessingState(ctx, input.SessionID, input.MessageID, promptText, preprocessingFailed) {
+			return receipt, turnprocessing.ErrInputDeferred
+		}
+		if controller.durableOutput != nil {
+			waiter, ok := controller.durableOutput.(telegramcontrolport.OutputDeliveryWaiter)
+			if !ok {
+				return receipt, turnprocessing.ErrInputDeferred
+			}
+			if err := waiter.WaitOutputDelivery(ctx, input.SessionID, input.MessageID+":prompt-status:preprocessed"); err != nil {
+				return receipt, turnprocessing.ErrInputDeferred
+			}
+		}
 	}
 	binding, hasBinding := session.Binding()
 	if len(input.Attachments) != 0 && (!hasBinding || strings.TrimSpace(binding.SessionID) == "") {
@@ -2888,7 +2965,11 @@ func (worker *sessionWorker) runTurnWithAcceptance(
 	}
 	var finishName func(string)
 	if worker.controller.sessionNamer != nil && turn.observedBinding == nil {
-		finishName = worker.controller.sessionNamer.Begin(worker.controller.rootContext, current, turn.messageID, turn.text)
+		if refreshing, ok := worker.controller.sessionNamer.(RefreshingSessionNamer); ok {
+			finishName = refreshing.BeginWithRefresh(worker.controller.rootContext, current, turn.messageID, turn.text, worker.controller.refreshSessionName)
+		} else {
+			finishName = worker.controller.sessionNamer.Begin(worker.controller.rootContext, current, turn.messageID, turn.text)
+		}
 	}
 	execution, err := worker.executeRequest(turnContext, turn, request, turnprocessing.Callbacks{
 		MarkInputAccepted: onAccepted,
@@ -2907,8 +2988,9 @@ func (worker *sessionWorker) runTurnWithAcceptance(
 		finalOwner = turn.messageID
 	}
 	terminalProven = result.TerminalStatus == sessionruntime.StatusCompleted || result.TerminalStatus == sessionruntime.StatusFailed || result.TerminalStatus == sessionruntime.StatusInterrupted
-	if err != nil {
-		worker.controller.closeFlow.Observe(controllertelemetry.WithOperation(context.WithoutCancel(ctx), turn.messageID), controllertelemetry.Event{Stage: controllertelemetry.ProviderFailure, Reason: controllertelemetry.RuntimeFailureReason(sessionruntime.RuntimeFailureClass(err)), Outcome: controllertelemetry.Failed, SessionID: string(worker.sessionID), NodeID: string(current.ComputerID())})
+	intentionalCancellation := worker.intentionalCancellation(activeTurn) || worker.controller.rootContext.Err() != nil
+	if turnfailure.IsProviderFailure(result, err, intentionalCancellation) {
+		worker.controller.closeFlow.Observe(controllertelemetry.WithOperation(context.WithoutCancel(ctx), turn.messageID), controllertelemetry.Event{Stage: controllertelemetry.ProviderFailure, Reason: turnfailure.Reason(err), Outcome: controllertelemetry.Failed, SessionID: string(worker.sessionID), NodeID: string(current.ComputerID())})
 	}
 	cancelTurn()
 	worker.clearActiveTurn(activeTurn)
@@ -3002,6 +3084,7 @@ func (worker *sessionWorker) runTurnWithAcceptance(
 	}
 	return DurableInputSucceeded, accepted
 }
+
 func (worker *sessionWorker) emitTurnEvent(messageID string, eventIndex int, event sessionruntime.TurnEvent) error {
 	if err := worker.controller.persistRuntimeEvent(worker.controller.rootContext, worker.sessionID, messageID, event); err != nil {
 		return err
@@ -3052,6 +3135,11 @@ func (worker *sessionWorker) clearActiveTurn(turn uint64) {
 		worker.activeCancel = nil
 		worker.stoppingTurn = 0
 	}
+}
+func (worker *sessionWorker) intentionalCancellation(turn uint64) bool {
+	worker.mu.Lock()
+	defer worker.mu.Unlock()
+	return worker.activeTurn == turn && worker.stoppingTurn == turn
 }
 func (worker *sessionWorker) hasActiveTurn() bool {
 	worker.mu.Lock()

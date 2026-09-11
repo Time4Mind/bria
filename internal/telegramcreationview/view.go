@@ -33,7 +33,7 @@ func Render(snapshot sessioncreation.Snapshot) Surface {
 			rows = append(rows, []Button{{Label: computer.Name, Action: "create_choice", Choice: index + 1}})
 		}
 	case sessioncreation.StepProvider:
-		lines = append(lines, "Выберите бэкенд.")
+		lines = append(lines, "Выберите CLI.")
 		for _, capability := range snapshot.Providers {
 			if !capability.Installed {
 				continue
@@ -48,7 +48,7 @@ func Render(snapshot sessioncreation.Snapshot) Surface {
 			rows = append(rows, []Button{{Label: label, Action: action}})
 		}
 	case sessioncreation.StepInstallRequired:
-		lines = append(lines, "На компьютере не установлен ни один бэкенд.")
+		lines = append(lines, "На компьютере не установлен ни один CLI-клиент.")
 		rows = append(rows, []Button{{Label: "Настройки", Action: "menu_settings"}})
 	case sessioncreation.StepDirectory:
 		if snapshot.CurrentDirectory == "" {

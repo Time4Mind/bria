@@ -52,6 +52,7 @@ func TestSafeCodeClosedAllowlist(t *testing.T) {
 		"presentation_missing", "presentation_replayed", "card_missing", "card_carrier_mismatch", "callback_origin_invalid",
 		"callback_binding_mismatch", "registry_failed", "card_load_failed", "operation_failed", "cancelled", "deadline_exceeded",
 		"card_commit_failed", "presentation_bind_failed", "provider_failure", "invalid_projection", "stale_presentation",
+		"transport_dns", "transport_connect", "transport_tls", "transport_reset", "transport_timeout", "transport_unknown",
 	} {
 		if got := callbackdiagnostic.SafeCode(code); got != code {
 			t.Errorf("SafeCode(%q) = %q", code, got)

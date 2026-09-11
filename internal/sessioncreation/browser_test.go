@@ -12,7 +12,7 @@ import (
 )
 
 func TestLocalBrowserListsRootsPagesDirectoriesAndCreatesChild(t *testing.T) {
-	root := t.TempDir()
+	root := canonicalBrowserTempDir(t)
 	if err := os.Mkdir(filepath.Join(root, "Beta"), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +55,7 @@ func TestLocalBrowserListsRootsPagesDirectoriesAndCreatesChild(t *testing.T) {
 }
 
 func TestLocalBrowserSortsDirectoriesByNewestRecursiveContent(t *testing.T) {
-	root := t.TempDir()
+	root := canonicalBrowserTempDir(t)
 	stale := filepath.Join(root, "alpha-stale")
 	recent := filepath.Join(root, "zulu-recent")
 	recentNested := filepath.Join(recent, "nested")
@@ -134,7 +134,7 @@ func mustUserHome(t *testing.T) string {
 }
 
 func TestLocalBrowserRejectsEscapeForeignComputerAndFileCollision(t *testing.T) {
-	root := t.TempDir()
+	root := canonicalBrowserTempDir(t)
 	browser, err := sessioncreation.NewLocalBrowser("local", []string{root})
 	if err != nil {
 		t.Fatal(err)
@@ -156,4 +156,13 @@ func TestLocalBrowserRejectsEscapeForeignComputerAndFileCollision(t *testing.T) 
 			t.Errorf("CreateChild(%q) error = %v", name, err)
 		}
 	}
+}
+
+func canonicalBrowserTempDir(t *testing.T) string {
+	t.Helper()
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return root
 }

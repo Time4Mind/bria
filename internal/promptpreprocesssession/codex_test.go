@@ -23,6 +23,10 @@ import (
 )
 
 func TestMain(m *testing.M) {
+	if os.Getenv("PREPROCESS_REPLACEMENT_ADAPTER_FIXTURE") == "1" {
+		runReplacementAdapterFixture()
+		os.Exit(0)
+	}
 	if os.Getenv("PREPROCESS_RESUME_ADAPTER_FIXTURE") == "1" {
 		runResumeAdapterFixture()
 		os.Exit(0)
@@ -55,6 +59,164 @@ func TestMain(m *testing.M) {
 		os.Exit(0)
 	}
 	os.Exit(m.Run())
+}
+
+func TestMissingThreadLifecycleReportsSafeReasonAndReplacementOutcome(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	commands, err := promptpreprocesscommand.New(testConfigStore(os.Args[0]), append(os.Environ(),
+		"PREPROCESS_REPLACEMENT_ADAPTER_FIXTURE=1", "BRIA_TEST_TELEGRAM_TOKEN=redacted"), "local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bindings, err := OpenFileBindingStore(filepath.Join(t.TempDir(), "satellites.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := BindingKey{Mode: ModeShared}
+	if err := bindings.Save(context.Background(), Binding{
+		Key: key, Desired: DesiredActive, ProviderSessionID: "missing-thread",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var observations []LifecycleObservation
+	observationCh := make(chan LifecycleObservation, 16)
+	processor, err := NewWithBindingStore(commands, os.Args[0], bindings, lifecycleObserverFunc(func(_ context.Context, observation LifecycleObservation) error {
+		observationCh <- observation
+		return nil
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer processor.Close(context.Background())
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	processor.Warmup(ctx)
+	for {
+		select {
+		case observation := <-observationCh:
+			observations = append(observations, observation)
+			if observation.State == "replacement_ready" {
+				goto ready
+			}
+		case <-ctx.Done():
+			t.Fatalf("public warmup timed out: %v; observations: %#v", ctx.Err(), observations)
+		}
+	}
+
+ready:
+	var missingReasons, ready, replacementReady int
+	for _, observation := range observations {
+		switch observation.State {
+		case "start_failed":
+			if observation.ErrorCategory == "thread_not_found" {
+				missingReasons++
+			}
+		case "ready":
+			ready++
+		case "replacement_ready":
+			replacementReady++
+		}
+		if strings.Contains(observation.ErrorCategory, "missing-thread") {
+			t.Fatalf("provider thread identity leaked into lifecycle observation: %#v", observation)
+		}
+	}
+	if missingReasons != 2 || ready != 1 || replacementReady != 1 {
+		t.Fatalf("lifecycle observations = %#v, want 2 safe missing reasons, ready and replacement_ready", observations)
+	}
+}
+
+func TestMissingCodexThreadWithClaudeConfiguredStillStartsFreshCodexReplacement(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	store := testConfigStore(os.Args[0])
+	store.snapshot.Config.Providers[string(domain.ProviderClaude)] = config.ProviderConfig{
+		Enabled: true, Command: &config.ProviderCommand{Exec: os.Args[0], Argv: []string{}},
+	}
+	commands, err := promptpreprocesscommand.New(store, append(os.Environ(),
+		"PREPROCESS_REPLACEMENT_ADAPTER_FIXTURE=1", "BRIA_TEST_TELEGRAM_TOKEN=redacted"), "local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bindings, err := OpenFileBindingStore(filepath.Join(t.TempDir(), "satellites.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := BindingKey{Mode: ModeShared}
+	if err := bindings.Save(context.Background(), Binding{
+		Key: key, Desired: DesiredActive, ProviderSessionID: "missing-thread",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	processor, err := NewWithBindingStore(commands, os.Args[0], bindings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer processor.Close(context.Background())
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := processor.manager.Warmup(ctx); err != nil {
+		t.Fatalf("warmup with Codex and Claude enabled = %v, want fresh Codex replacement", err)
+	}
+	binding, found, err := bindings.Load(context.Background(), key)
+	if err != nil || !found || binding.ProviderSessionID != "replacement-thread" {
+		t.Fatalf("replacement binding = (%#v, %v, %v), want replacement-thread", binding, found, err)
+	}
+}
+
+func TestMissingThreadLifecycleReportsFailedReplacementOutcome(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	commands, err := promptpreprocesscommand.New(testConfigStore(os.Args[0]), append(os.Environ(),
+		"PREPROCESS_REPLACEMENT_ADAPTER_FIXTURE=1", "PREPROCESS_REPLACEMENT_FRESH_FAIL=1",
+		"BRIA_TEST_TELEGRAM_TOKEN=redacted"), "local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bindings, err := OpenFileBindingStore(filepath.Join(t.TempDir(), "satellites.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := bindings.Save(context.Background(), Binding{
+		Key: BindingKey{Mode: ModeShared}, Desired: DesiredActive, ProviderSessionID: "missing-thread",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var observations []LifecycleObservation
+	observationCh := make(chan LifecycleObservation, 16)
+	processor, err := NewWithBindingStore(commands, os.Args[0], bindings, lifecycleObserverFunc(func(_ context.Context, observation LifecycleObservation) error {
+		observationCh <- observation
+		return nil
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer processor.Close(context.Background())
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	processor.Warmup(ctx)
+	for {
+		select {
+		case observation := <-observationCh:
+			observations = append(observations, observation)
+			if observation.State == "replacement_failed" {
+				goto failed
+			}
+		case <-ctx.Done():
+			t.Fatalf("public warmup timed out: %v; observations: %#v", ctx.Err(), observations)
+		}
+	}
+
+failed:
+	var replacementFailed int
+	for _, observation := range observations {
+		if observation.State == "replacement_failed" && observation.ErrorCategory == "provider" {
+			replacementFailed++
+		}
+	}
+	if replacementFailed != 1 {
+		t.Fatalf("lifecycle observations = %#v, want one replacement_failed/provider outcome", observations)
+	}
 }
 
 func TestCodexSessionIsReadyProcessesMultipleTurnsAndCloses(t *testing.T) {
@@ -446,6 +608,37 @@ func runResumeAdapterFixture() {
 		var request map[string]any
 		if json.Unmarshal(line, &request) != nil {
 			os.Exit(45)
+		}
+		if request["type"] == "close" {
+			return
+		}
+	}
+}
+
+func runReplacementAdapterFixture() {
+	encoder := json.NewEncoder(os.Stdout)
+	if os.Getenv("BRIA_PROVIDER_SESSION_ID") != "" {
+		_ = encoder.Encode(map[string]any{
+			"protocol": 1, "type": "startup_failed", "error_code": "thread_not_found",
+		})
+		return
+	}
+	if os.Getenv("PREPROCESS_REPLACEMENT_FRESH_FAIL") == "1" {
+		return
+	}
+	_ = encoder.Encode(map[string]any{
+		"protocol": 1, "type": "ready", "provider_session_id": "replacement-thread",
+		"readiness": "protocol", "authentication": "unknown",
+	})
+	reader := bufio.NewReader(os.Stdin)
+	for {
+		line, err := reader.ReadBytes('\n')
+		if err != nil {
+			return
+		}
+		var request map[string]any
+		if json.Unmarshal(line, &request) != nil {
+			return
 		}
 		if request["type"] == "close" {
 			return

@@ -126,6 +126,10 @@ func ValidateAction(action SemanticAction) error {
 			if action.Kind == SemanticSettingsCategory && action.Choice > int(telegramsettingsview.CategoryProviders) {
 				return errors.New("settings category is invalid")
 			}
+		} else if action.Kind == SemanticSettingsPreprocessingInstruction {
+			if action.Choice < 0 {
+				return errors.New("instruction page must not be negative")
+			}
 		} else if action.Kind == SemanticMenuArchive {
 			if action.Choice < 0 {
 				return errors.New("archive page must not be negative")

@@ -364,7 +364,7 @@ func TestManagerReplacesOnlyProvenMissingEmptySharedThread(t *testing.T) {
 	if first := receiveStart(t, starts); first.ResumeProviderSessionID != "empty-thread" {
 		t.Fatalf("first start = %#v, want exact resume", first)
 	}
-	if replacement := receiveStart(t, starts); replacement.ResumeProviderSessionID != "" {
+	if replacement := receiveStart(t, starts); replacement.ResumeProviderSessionID != "" || !replacement.Replacement {
 		t.Fatalf("replacement start = %#v, want fresh thread", replacement)
 	}
 	waitBinding(t, store, key, DesiredActive, "replacement-thread")

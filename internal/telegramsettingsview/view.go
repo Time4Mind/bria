@@ -33,6 +33,31 @@ type Surface struct {
 	Rows         [][]Button
 }
 
+func PreprocessingInstructionEditor(instruction string, choice int) Surface {
+	const pageBytes = 3600
+	pages := make([]string, 0, len(instruction)/pageBytes+1)
+	for len(instruction) > 0 {
+		end := min(len(instruction), pageBytes)
+		for end < len(instruction) && end > 0 && instruction[end]&0xc0 == 0x80 {
+			end--
+		}
+		pages, instruction = append(pages, instruction[:end]), instruction[end:]
+	}
+	page := min(max(choice-1, 0), len(pages)-1)
+	rows := [][]Button{{{Label: "Отмена", Action: "menu_settings"}}}
+	navigation := []Button{}
+	if page > 0 {
+		navigation = append(navigation, Button{Label: "Предыдущая", Action: "settings_preprocessing_instruction", Choice: page})
+	}
+	if page+1 < len(pages) {
+		navigation = append(navigation, Button{Label: "Следующая", Action: "settings_preprocessing_instruction", Choice: page + 2})
+	}
+	if len(navigation) > 0 {
+		rows = append([][]Button{navigation}, rows...)
+	}
+	return Surface{Text: fmt.Sprintf("Текущая инструкция (%d/%d):\n\n%s\n\nОтправьте новую инструкцию препроцессинга одним текстовым сообщением.", page+1, len(pages), pages[page]), Rows: rows}
+}
+
 func Render() Surface {
 	surface := table("Настройки", "Раздел", "Содержимое",
 		Field{"Содержимое карточки", "Детализация, страницы и технические действия"},
@@ -122,10 +147,8 @@ func RenderCategory(ctx context.Context, preferences settingsport.Preferences, p
 		text = "🛠 Создание сессии"
 		fields = []Field{{"Автоимя дешёвой моделью", state(current.SessionNamingEnabled, false)}}
 		if _, ok := preferences.(settingsport.CreationPreferences); ok {
-			fields = append(fields, Field{"Backend по умолчанию", defaultProviderValue(current.DefaultProviders)}, Field{"Папка по умолчанию", defaultWorkdirValue(current.DefaultWorkdirs)})
-			// Keep controls in the same order as the rendered key/value table;
-			// the directory default is the final setting before Back.
-			rows = onePerRow(Button{Label: "Автоимя", Action: "settings_session_naming"}, Button{Label: "Backend по умолчанию", Action: "settings_default_provider"}, Button{Label: "Сбросить значения по умолчанию", Action: "settings_clear_creation_defaults"})
+			fields = append(fields, Field{"CLI по умолчанию", defaultProviderValue(current.DefaultProviders)}, Field{"Папка по умолчанию", defaultWorkdirValue(current.DefaultWorkdirs)})
+			rows = onePerRow(Button{Label: "Автоимя", Action: "settings_session_naming"}, Button{Label: "CLI по умолчанию", Action: "settings_default_provider"}, Button{Label: "Сбросить значения по умолчанию", Action: "settings_clear_creation_defaults"})
 		}
 		fields = append(fields, Field{"Ожидающая сессия", state(current.StandbyEnabled, false)})
 		if _, ok := preferences.(settingsport.StandbyPreferences); ok {

@@ -334,7 +334,7 @@ func (scope *Scope) latest(ctx context.Context, nodeID domain.ComputerID) domain
 
 func selectableStatus(status domain.SessionStatus) bool {
 	switch status {
-	case domain.SessionReady, domain.SessionRunning, domain.SessionStopping:
+	case domain.SessionStarting, domain.SessionReady, domain.SessionRunning, domain.SessionStopping:
 		return true
 	default:
 		return false

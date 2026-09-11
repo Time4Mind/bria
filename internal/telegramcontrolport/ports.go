@@ -32,6 +32,10 @@ type SessionNamer interface {
 	Begin(context.Context, domain.Session, string, string) func(string)
 	Wait(context.Context) error
 }
+type RefreshingSessionNamer interface {
+	SessionNamer
+	BeginWithRefresh(context.Context, domain.Session, string, string, func(domain.SessionID)) func(string)
+}
 type Notifier interface {
 	Notify(context.Context, Notification) error
 }
@@ -127,6 +131,12 @@ type OutputReceipt struct {
 }
 type DurableOutputCustody interface {
 	AcceptOutput(context.Context, OutgoingNotification) (OutputReceipt, error)
+}
+type OutputDeliveryWaiter interface {
+	WaitOutputDelivery(context.Context, domain.SessionID, string) error
+}
+type SessionDeliveryGate interface {
+	Lock(domain.SessionID) func()
 }
 type AuthorizationStart struct {
 	OperationID      string

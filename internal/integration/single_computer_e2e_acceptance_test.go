@@ -198,7 +198,7 @@ func TestCloseAwaitingRecoveryAfterRestartArchivesWithoutTrackedProcess(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	root := t.TempDir()
+	root := canonicalSingleComputerTempDir(t)
 	workdir := filepath.Join(root, "workdir")
 	if err := os.Mkdir(workdir, 0o700); err != nil {
 		t.Fatal(err)
@@ -301,7 +301,7 @@ func TestSingleComputerSyntheticTelegramCreateSubmitCloseAndExactResume(t *testi
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 
-			root := t.TempDir()
+			root := canonicalSingleComputerTempDir(t)
 			workdir := filepath.Join(root, "workdir")
 			if err := os.Mkdir(workdir, 0o700); err != nil {
 				t.Fatalf("create workdir: %v", err)
@@ -476,7 +476,7 @@ func TestBusySessionCloseWaitsForAcceptedWorkThenPhysicallyArchives(t *testing.T
 		t.Fatalf("resolve integration test executable: %v", err)
 	}
 	const ownerID, chatID = int64(7001), int64(8002)
-	root := t.TempDir()
+	root := canonicalSingleComputerTempDir(t)
 	workdir := filepath.Join(root, "workdir")
 	if err := os.Mkdir(workdir, 0o700); err != nil {
 		t.Fatalf("create workdir: %v", err)
@@ -584,7 +584,7 @@ func TestUnexpectedPhysicalExitIsSupervisedIntoExactSameSession(t *testing.T) {
 		t.Run(string(provider), func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			root := t.TempDir()
+			root := canonicalSingleComputerTempDir(t)
 			workdir := filepath.Join(root, "workdir")
 			if err := os.Mkdir(workdir, 0o700); err != nil {
 				t.Fatalf("create workdir: %v", err)
@@ -672,6 +672,15 @@ func TestUnexpectedPhysicalExitIsSupervisedIntoExactSameSession(t *testing.T) {
 			}
 		})
 	}
+}
+
+func canonicalSingleComputerTempDir(t *testing.T) string {
+	t.Helper()
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("resolve temporary directory: %v", err)
+	}
+	return root
 }
 
 func waitForStatus(t *testing.T, path string, id domain.SessionID, status domain.SessionStatus, timeout time.Duration) {

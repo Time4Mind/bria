@@ -4,6 +4,7 @@ package telegram
 
 import (
 	"bria/internal/mutationscheduler"
+	"bria/internal/telegramtransport"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -182,6 +183,15 @@ type EditMessageTextRequest struct {
 	RichMessage *InputRichMessage     `json:"rich_message,omitempty"`
 	ReplyMarkup *InlineKeyboardMarkup `json:"reply_markup,omitempty"`
 	Priority    MutationPriority      `json:"-"`
+}
+
+// EditMessageReplyMarkupRequest changes only a message keyboard. An empty
+// InlineKeyboard removes every callback without rewriting the card text.
+type EditMessageReplyMarkupRequest struct {
+	ChatID      ChatID               `json:"chat_id"`
+	MessageID   MessageID            `json:"message_id"`
+	ReplyMarkup InlineKeyboardMarkup `json:"reply_markup"`
+	Priority    MutationPriority     `json:"-"`
 }
 
 type MessageEntity struct {
@@ -820,6 +830,38 @@ func (client *Client) EditMessageText(
 	return message, nil
 }
 
+func (client *Client) EditMessageReplyMarkup(
+	ctx context.Context,
+	request EditMessageReplyMarkupRequest,
+) (Message, error) {
+	if request.ChatID == 0 {
+		return Message{}, errors.New("Telegram reply-markup edit chat id is required")
+	}
+	if request.MessageID <= 0 {
+		return Message{}, errors.New("Telegram reply-markup edit message id is required")
+	}
+	if err := validateInlineKeyboard(&request.ReplyMarkup); err != nil {
+		return Message{}, fmt.Errorf("Telegram reply-markup edit: %w", err)
+	}
+	var message Message
+	for {
+		err := client.call(ctx, "editMessageReplyMarkup", request, &message)
+		if err == nil {
+			break
+		}
+		if errors.Is(err, ErrMutationSuperseded) || isMessageNotModified(err) {
+			return Message{MessageID: request.MessageID, Chat: Chat{ID: request.ChatID}}, nil
+		}
+		if client.scheduler == nil || !retryIdempotentMutation(ctx, err) {
+			return Message{}, err
+		}
+	}
+	if err := validateMessage(message); err != nil || message.Chat.ID != request.ChatID || message.MessageID != request.MessageID {
+		return Message{}, fmt.Errorf("normalize Telegram reply-markup edit: invalid receipt")
+	}
+	return message, nil
+}
+
 func (client *Client) AnswerCallbackQuery(
 	ctx context.Context,
 	request AnswerCallbackQueryRequest,
@@ -904,6 +946,21 @@ func RetryAfter(err error) (time.Duration, bool) {
 // later attempt. It never classifies authentication or polling conflicts.
 var ErrTransient = errors.New("transient Telegram failure")
 
+type TransportFailureClass = telegramtransport.Class
+
+const (
+	TransportFailureDNS     = telegramtransport.DNS
+	TransportFailureConnect = telegramtransport.Connect
+	TransportFailureTLS     = telegramtransport.TLS
+	TransportFailureReset   = telegramtransport.Reset
+	TransportFailureTimeout = telegramtransport.Timeout
+	TransportFailureUnknown = telegramtransport.Unknown
+)
+
+func TransportFailureClassOf(err error) (TransportFailureClass, bool) {
+	return telegramtransport.ClassOf(err)
+}
+
 // ErrAmbiguousResponse marks a malformed Bot API response. Reads fail closed;
 // only operation-specific idempotent mutation code may retry it.
 var ErrAmbiguousResponse = errors.New("ambiguous Telegram response")
@@ -950,6 +1007,8 @@ func mutationFor(method string, payload any) (Mutation, bool) {
 	case SendRichMessageRequest:
 		return Mutation{Method: method, ChatID: int64(request.ChatID), Priority: request.Priority}, true
 	case EditMessageTextRequest:
+		return Mutation{Method: method, ChatID: int64(request.ChatID), CardID: int64(request.MessageID), Priority: request.Priority}, true
+	case EditMessageReplyMarkupRequest:
 		return Mutation{Method: method, ChatID: int64(request.ChatID), CardID: int64(request.MessageID), Priority: request.Priority}, true
 	case AnswerCallbackQueryRequest:
 		return Mutation{Method: method, Priority: MutationInteractive}, true
@@ -1280,19 +1339,11 @@ func safeRequestError(
 	if ctxErr := callerContext.Err(); ctxErr != nil {
 		return fmt.Errorf("telegram %s request: %w", method, ctxErr)
 	}
-	if errors.Is(requestContext.Err(), context.DeadlineExceeded) ||
-		errors.Is(requestErr, context.DeadlineExceeded) {
-		return fmt.Errorf(
-			"%w: telegram %s request: %w",
-			ErrTransient,
-			method,
-			context.DeadlineExceeded,
-		)
-	}
-	if errors.Is(requestErr, context.Canceled) {
-		return fmt.Errorf("%w: telegram %s request failed", ErrTransient, method)
-	}
-	return fmt.Errorf("%w: telegram %s request failed", ErrTransient, method)
+	return fmt.Errorf("%w: %w", ErrTransient, telegramtransport.NewFailure(method, telegramtransport.Classify(requestContext, requestErr)))
+}
+
+func classifyTransportFailure(requestContext context.Context, requestErr error) TransportFailureClass {
+	return telegramtransport.Classify(requestContext, requestErr)
 }
 
 func transientProtocolError(method, detail string) error {
@@ -1301,7 +1352,7 @@ func transientProtocolError(method, detail string) error {
 
 func validateMutationResult(method string, result any) error {
 	switch method {
-	case "sendMessage", "editMessageText", "sendDocument", "sendPhoto":
+	case "sendMessage", "editMessageText", "editMessageReplyMarkup", "sendDocument", "sendPhoto":
 		message, ok := result.(*Message)
 		if !ok {
 			return errors.New("Telegram mutation result type is invalid")

@@ -147,7 +147,7 @@ func (submitter *Submitter) submit(ctx context.Context, sessionID domain.Session
 	if err == nil {
 		_ = span.Success(measurements)
 	} else {
-		_ = span.Failure(errorCategory(err), measurements)
+		_ = span.Failure(turnErrorCategory(result, err), measurements)
 	}
 	return result, err
 }
@@ -228,6 +228,13 @@ func errorCategory(err error) string {
 	default:
 		return "provider_error"
 	}
+}
+
+func turnErrorCategory(result sessionruntime.TurnResult, err error) string {
+	if result.TerminalStatus == sessionruntime.StatusInterrupted || result.ErrorCode == sessionruntime.ErrorInterrupted {
+		return "interrupted"
+	}
+	return errorCategory(err)
 }
 
 var _ sessionruntime.Submitter = (*Submitter)(nil)

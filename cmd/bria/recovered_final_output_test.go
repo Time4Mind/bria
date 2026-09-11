@@ -25,6 +25,7 @@ import (
 	"bria/internal/telegramcontroller"
 	"bria/internal/telegramflow"
 	"bria/internal/telegrampipeline"
+	"bria/internal/telegrampromptcomposition"
 	"bria/internal/telegramruntimecomposition"
 )
 
@@ -296,7 +297,8 @@ func TestNormalProducerEnqueueFailureRejoinsRecoveredFinalDispatcher(t *testing.
 	}
 	runRecoveredOutputDispatcher(t, ctx, flow, store, journal, id, message+":final")
 	packets := wire.snapshot()
-	if len(packets) != 1 || packets[0].Method != "sendRichMessage" || packets[0].ID == 91 || !strings.Contains(packets[0].Text, final) {
+	finalPackets := packetsContaining(packets, final)
+	if len(finalPackets) != 1 || finalPackets[0].Method != "sendRichMessage" || finalPackets[0].ID == 91 {
 		t.Fatal("normal failed final did not recover into one new card")
 	}
 	state, err := store.LoadTelegramUI(ctx)
@@ -304,12 +306,22 @@ func TestNormalProducerEnqueueFailureRejoinsRecoveredFinalDispatcher(t *testing.
 		t.Fatal(err)
 	}
 	card, _ := state.Card(id)
-	if len(card.PendingFinalOperations) != 0 || card.Carrier.MessageID != packets[0].ID || len(provider.calls) != 1 {
+	if len(card.PendingFinalOperations) != 0 || card.Carrier.MessageID != finalPackets[0].ID || len(provider.calls) != 1 {
 		t.Fatal("recovery lost final fence/carrier or replayed provider")
 	}
 }
 
-func recoveredFinalDispatcherFixture(t *testing.T, store *storage.SessionStore, session domain.Session) (telegramcompletioncomposition.CompletionDeliverer, *navigationFollowHTTP) {
+func packetsContaining(packets []navigationFollowPacket, text string) []navigationFollowPacket {
+	var filtered []navigationFollowPacket
+	for _, packet := range packets {
+		if strings.Contains(packet.Text, text) {
+			filtered = append(filtered, packet)
+		}
+	}
+	return filtered
+}
+
+func recoveredFinalDispatcherFixture(t *testing.T, store *storage.SessionStore, session domain.Session) (*telegramcompletioncomposition.Router, *navigationFollowHTTP) {
 	t.Helper()
 	c := archiveController(t, store, nil, telegramcontroller.Options{Recovered: []domain.Session{session}, UIState: store})
 	t.Cleanup(func() { _ = c.Close(context.Background()) })
@@ -337,5 +349,16 @@ func recoveredFinalDispatcherFixture(t *testing.T, store *storage.SessionStore, 
 	if err != nil {
 		t.Fatal(err)
 	}
-	return telegramcompletioncomposition.CompletionDeliverer{Controller: c, Cards: cards, Presenter: presenter, Sender: out, ConversationID: 42}, wire
+	completion := telegramcompletioncomposition.CompletionDeliverer{Controller: c, Cards: cards, Presenter: presenter, Sender: out, ConversationID: 42}
+	router, err := telegramcompletioncomposition.NewRouter(completion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := router.BindFinals(completion); err != nil {
+		t.Fatal(err)
+	}
+	if err := router.BindPromptStatuses(telegrampromptcomposition.Deliverer{Controller: c, Cards: cards, Presenter: presenter, Sender: out}); err != nil {
+		t.Fatal(err)
+	}
+	return router, wire
 }

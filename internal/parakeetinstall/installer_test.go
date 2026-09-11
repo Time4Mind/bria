@@ -36,7 +36,7 @@ func TestInstallCreatesVerifiedRuntimeModelAndWrapperAndIsIdempotent(t *testing.
 	}))
 	defer server.Close()
 
-	root := t.TempDir()
+	root := canonicalInstallerTempDir(t)
 	ffmpeg := filepath.Join(root, "ffmpeg")
 	if err := os.WriteFile(ffmpeg, []byte("ffmpeg"), 0o700); err != nil {
 		t.Fatal(err)
@@ -87,7 +87,7 @@ func TestInstallRejectsDigestMismatchWithoutActivatingArtifacts(t *testing.T) {
 	}))
 	defer server.Close()
 
-	root := t.TempDir()
+	root := canonicalInstallerTempDir(t)
 	ffmpeg := filepath.Join(root, "ffmpeg")
 	if err := os.WriteFile(ffmpeg, []byte("ffmpeg"), 0o700); err != nil {
 		t.Fatal(err)
@@ -118,7 +118,7 @@ func TestInstallRejectsArchiveEscape(t *testing.T) {
 		_, _ = response.Write(model)
 	}))
 	defer server.Close()
-	root := t.TempDir()
+	root := canonicalInstallerTempDir(t)
 	ffmpeg := filepath.Join(root, "ffmpeg")
 	if err := os.WriteFile(ffmpeg, []byte("ffmpeg"), 0o700); err != nil {
 		t.Fatal(err)
@@ -178,7 +178,7 @@ func TestEnsureFFmpegUsesSupportedPackageManagerThenRechecks(t *testing.T) {
 	}
 	// The returned path is validated against the real fixture, so point the
 	// final lookup at a temporary executable rather than the host ffmpeg.
-	root := t.TempDir()
+	root := canonicalInstallerTempDir(t)
 	fixture := filepath.Join(root, "ffmpeg")
 	if err := os.WriteFile(fixture, []byte("fixture"), 0o700); err != nil {
 		t.Fatal(err)
@@ -201,7 +201,7 @@ func TestEnsureFFmpegUsesSupportedPackageManagerThenRechecks(t *testing.T) {
 }
 
 func TestInstallRejectsSymlinkTargets(t *testing.T) {
-	root := t.TempDir()
+	root := canonicalInstallerTempDir(t)
 	realRuntime := filepath.Join(root, "real-runtime")
 	if err := os.Mkdir(realRuntime, 0o700); err != nil {
 		t.Fatal(err)
@@ -221,6 +221,15 @@ func TestInstallRejectsSymlinkTargets(t *testing.T) {
 type archiveEntry struct {
 	mode    int64
 	content string
+}
+
+func canonicalInstallerTempDir(t *testing.T) string {
+	t.Helper()
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return root
 }
 
 func runtimeArchive(t *testing.T, root string, entries map[string]archiveEntry) []byte {

@@ -13,15 +13,39 @@ import (
 	"bria/internal/app"
 	"bria/internal/domain"
 	"bria/internal/sessioncreation"
+	"bria/internal/sessionruntime"
 	"bria/internal/settingsport"
 	"bria/internal/telegramcontroller"
+	"bria/internal/telegramsettingsview"
 )
 
+type settingAwareSessionNamer struct {
+	settings *standbyPreferences
+	store    *lockedSessions
+	requests chan string
+}
+
+func (namer settingAwareSessionNamer) Begin(ctx context.Context, session domain.Session, _, text string) func(string) {
+	current, err := namer.settings.Snapshot(ctx)
+	if err != nil || !current.SessionNamingEnabled {
+		return nil
+	}
+	namer.requests <- text
+	return func(string) {
+		_, _ = namer.store.RenameSession(context.Background(), session.ID(), "Quick fix", domain.SessionNameModel)
+	}
+}
+
+func (settingAwareSessionNamer) Wait(context.Context) error { return nil }
+
 type creationEnvironmentStub struct {
-	computers  []sessioncreation.Computer
-	registered []sessioncreation.Computer
-	roots      map[domain.ComputerID][]sessioncreation.Directory
-	children   map[string][]sessioncreation.Directory
+	computers      []sessioncreation.Computer
+	registered     []sessioncreation.Computer
+	roots          map[domain.ComputerID][]sessioncreation.Directory
+	children       map[string][]sessioncreation.Directory
+	availableErr   error
+	availableSeq   []error
+	availableCalls int
 }
 
 func localCreationEnvironment(t *testing.T, root string, capabilities ...sessioncreation.ProviderCapability) sessioncreation.Environment {
@@ -35,7 +59,24 @@ func localCreationEnvironment(t *testing.T, root string, capabilities ...session
 	return environment
 }
 
+func canonicalTempDir(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	canonical, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return canonical
+}
+
 func (environment *creationEnvironmentStub) AvailableComputers(context.Context) ([]sessioncreation.Computer, error) {
+	environment.availableCalls++
+	if index := environment.availableCalls - 1; index < len(environment.availableSeq) && environment.availableSeq[index] != nil {
+		return nil, environment.availableSeq[index]
+	}
+	if environment.availableErr != nil {
+		return nil, environment.availableErr
+	}
 	return append([]sessioncreation.Computer(nil), environment.computers...), nil
 }
 func (environment *creationEnvironmentStub) RegisteredComputers(context.Context) ([]sessioncreation.Computer, error) {
@@ -187,7 +228,7 @@ func TestSessionCreationV2ActivatesInstalledBackendOnSelectedRemoteNode(t *testi
 }
 
 func TestSessionCreationV2BrowsesAndCreatesWithoutConfirmation(t *testing.T) {
-	root := t.TempDir()
+	root := canonicalTempDir(t)
 	environment, err := sessioncreation.NewLocalEnvironment("local", "Local", []string{root}, func(context.Context) ([]sessioncreation.ProviderCapability, error) {
 		return []sessioncreation.ProviderCapability{{Provider: domain.ProviderCodex, Installed: true, Enabled: true}}, nil
 	})
@@ -230,7 +271,7 @@ func TestSessionCreationV2BrowsesAndCreatesWithoutConfirmation(t *testing.T) {
 }
 
 func TestSessionCreationV2UsesValidPerComputerDefaults(t *testing.T) {
-	root := t.TempDir()
+	root := canonicalTempDir(t)
 	environment, err := sessioncreation.NewLocalEnvironment("local", "Local", []string{root}, func(context.Context) ([]sessioncreation.ProviderCapability, error) {
 		return []sessioncreation.ProviderCapability{
 			{Provider: domain.ProviderCodex, Installed: true, Enabled: true},
@@ -279,8 +320,11 @@ func TestSessionCreationV2EnablesInstalledBackendInline(t *testing.T) {
 	t.Cleanup(func() { _ = controller.Close(context.Background()) })
 
 	initial, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticMenuNew, UpdateID: 30})
-	if err != nil || initial.Surface == nil || !strings.Contains(initial.Surface.Text, "Выберите бэкенд") || !strings.Contains(initial.Surface.Rows[0][0].Label, "включить") {
+	if err != nil || initial.Surface == nil || !strings.Contains(initial.Surface.Text, "Выберите CLI") || strings.Contains(initial.Surface.Text, "бэкенд") || !strings.Contains(initial.Surface.Rows[0][0].Label, "включить") {
 		t.Fatalf("disabled provider choice = (%#v, %v)", initial, err)
+	}
+	if initial.Surface.Rows[0][0].Action != telegramcontroller.SemanticCreateSelectCodex {
+		t.Fatalf("Codex CLI action = %q, want %q", initial.Surface.Rows[0][0].Action, telegramcontroller.SemanticCreateSelectCodex)
 	}
 	next, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticCreateSelectCodex, UpdateID: 31})
 	if err != nil || next.Surface == nil || !strings.Contains(next.Surface.Text, "Папка: ") || !hasSemanticAction(next.Surface.Rows, telegramcontroller.SemanticCreatePick) || !providers.values[domain.ProviderCodex].Enabled {
@@ -297,13 +341,51 @@ func TestSessionCreationV2RoutesMissingBackendsToSettings(t *testing.T) {
 	t.Cleanup(func() { _ = controller.Close(context.Background()) })
 
 	result, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticMenuNew, UpdateID: 40})
-	if err != nil || result.Surface == nil || !strings.Contains(result.Surface.Text, "не установлен") || !hasSemanticAction(result.Surface.Rows, telegramcontroller.SemanticMenuSettings) {
+	if err != nil || result.Surface == nil || !strings.Contains(result.Surface.Text, "CLI") || strings.Contains(result.Surface.Text, "бэкенд") || !hasSemanticAction(result.Surface.Rows, telegramcontroller.SemanticMenuSettings) {
 		t.Fatalf("missing backend surface = (%#v, %v)", result, err)
 	}
 }
 
+func TestCLISettingsTapDegradesWhenProviderInventoryIsTemporarilyUnavailable(t *testing.T) {
+	environment := &creationEnvironmentStub{availableErr: errors.New("synthetic provider inventory failure")}
+	controller := newController(t, nil, &memorySessions{}, nil, nil, telegramcontroller.Options{
+		Settings: &testPreferences{}, CreationEnvironment: environment,
+	})
+	t.Cleanup(func() { _ = controller.Close(context.Background()) })
+	environment.availableCalls = 0
+
+	result, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{
+		Kind: telegramcontroller.SemanticSettingsCategory, Choice: int(telegramsettingsview.CategoryProviders),
+	})
+	if err != nil || result.Surface == nil || !strings.Contains(result.Surface.Text, "CLI") || !strings.Contains(result.Surface.Text, "временно недоступен") {
+		t.Fatalf("CLI settings fallback = (%#v, %v)", result, err)
+	}
+}
+
+func TestCLISettingsReadsLiveProviderInventoryOncePerScreen(t *testing.T) {
+	environment := &creationEnvironmentStub{
+		computers:    []sessioncreation.Computer{{ID: "local", Name: "Local", Capabilities: []sessioncreation.ProviderCapability{{Provider: domain.ProviderCodex, Installed: true, Enabled: true}}}},
+		availableSeq: []error{nil, errors.New("second inventory read must not happen")},
+	}
+	controller := newController(t, nil, &memorySessions{}, nil, nil, telegramcontroller.Options{
+		Settings: &testPreferences{}, CreationEnvironment: environment,
+	})
+	t.Cleanup(func() { _ = controller.Close(context.Background()) })
+	environment.availableCalls = 0
+
+	result, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{
+		Kind: telegramcontroller.SemanticSettingsCategory, Choice: int(telegramsettingsview.CategoryProviders),
+	})
+	if err != nil || result.Surface == nil || !strings.Contains(result.Surface.Text, "codex") {
+		t.Fatalf("CLI settings surface = (%#v, %v), text=%q calls=%d", result, err, result.Surface.Text, environment.availableCalls)
+	}
+	if environment.availableCalls != 1 {
+		t.Fatalf("provider inventory reads = %d, want 1", environment.availableCalls)
+	}
+}
+
 func TestSessionCreationV2CreatesChildAndKeepsBrowserOpen(t *testing.T) {
-	root := t.TempDir()
+	root := canonicalTempDir(t)
 	environment := localCreationEnvironment(t, root, sessioncreation.ProviderCapability{Provider: domain.ProviderCodex, Installed: true, Enabled: true})
 	controller := newController(t, nil, &memorySessions{}, nil, nil, telegramcontroller.Options{CreationEnvironment: environment})
 	t.Cleanup(func() { _ = controller.Close(context.Background()) })
@@ -320,7 +402,7 @@ func TestSessionCreationV2CreatesChildAndKeepsBrowserOpen(t *testing.T) {
 }
 
 func TestSessionCreationV2OpensHomeAndRestoresParentPageOnlyWithinFlow(t *testing.T) {
-	root := t.TempDir()
+	root := canonicalTempDir(t)
 	tie := time.Date(2026, 9, 5, 10, 0, 0, 0, time.UTC)
 	for index := 0; index < 10; index++ {
 		path := filepath.Join(root, fmt.Sprintf("dir-%02d", index))
@@ -375,7 +457,7 @@ func surfaceHasLabel(surface *telegramcontroller.SemanticSurface, label string) 
 }
 
 func TestSessionCreationV2OffersExactArchiveContinuation(t *testing.T) {
-	root := t.TempDir()
+	root := canonicalTempDir(t)
 	archived := archivedSession(t, "33333333-3333-4333-9333-333333333333", domain.ProviderCodex, root, "provider-archive", 1)
 	sessions := newLockedSessions(archived)
 	preferences := &testPreferences{settings: settingsport.Snapshot{
@@ -418,7 +500,7 @@ func TestSessionCreationV2OffersExactArchiveContinuation(t *testing.T) {
 }
 
 func TestSessionCreationDefaultsCanBeChosenAndClearedThroughSettings(t *testing.T) {
-	root := t.TempDir()
+	root := canonicalTempDir(t)
 	preferences := &testPreferences{}
 	environment := localCreationEnvironment(t, root,
 		sessioncreation.ProviderCapability{Provider: domain.ProviderCodex, Installed: true, Enabled: true},
@@ -428,12 +510,15 @@ func TestSessionCreationDefaultsCanBeChosenAndClearedThroughSettings(t *testing.
 	t.Cleanup(func() { _ = controller.Close(context.Background()) })
 
 	providerChoice, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticSettingsDefaultProvider, UpdateID: 70})
-	if err != nil || providerChoice.Surface == nil || !strings.Contains(providerChoice.Surface.Text, "Выберите бэкенд") {
+	if err != nil || providerChoice.Surface == nil || !strings.Contains(providerChoice.Surface.Text, "Выберите CLI") || strings.Contains(providerChoice.Surface.Text, "бэкенд") {
 		t.Fatalf("default provider choice = (%#v, %v)", providerChoice, err)
 	}
 	settingsSurface, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticCreateSelectClaude, UpdateID: 71})
-	if err != nil || settingsSurface.Surface == nil || !strings.Contains(settingsSurface.Surface.Text, "| CLI по умолчанию | Claude |") {
+	if err != nil || settingsSurface.Surface == nil || strings.Count(settingsSurface.Surface.Text, "| CLI по умолчанию | Claude |") != 1 || strings.Contains(settingsSurface.Surface.Text, "Backend по умолчанию") {
 		t.Fatalf("saved default provider = (%#v, %v)", settingsSurface, err)
+	}
+	if !hasSemanticButton(settingsSurface.Surface.Rows, "CLI по умолчанию", telegramcontroller.SemanticSettingsDefaultProvider) {
+		t.Fatalf("CLI default button route = %#v", settingsSurface.Surface.Rows)
 	}
 
 	directoryChoice, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticSettingsDefaultWorkdir, UpdateID: 72})
@@ -452,4 +537,96 @@ func TestSessionCreationDefaultsCanBeChosenAndClearedThroughSettings(t *testing.
 	if err != nil || len(persisted.DefaultProviders) != 0 || len(persisted.DefaultWorkdirs) != 0 {
 		t.Fatalf("cleared creation defaults = (%#v, %v)", persisted, err)
 	}
+}
+
+func TestAutomaticallyCreatedStandbyUsesTheSameFirstPromptNamingContract(t *testing.T) {
+	ctx := context.Background()
+	root := canonicalTempDir(t)
+	store := &standbySessions{lockedSessions: newLockedSessions(), empty: map[domain.SessionID]bool{}}
+	preferences := &standbyPreferences{value: settingsport.Snapshot{
+		StandbyEnabled: true, SessionNamingEnabled: true,
+		CardDetail: "standard", CardPageLimit: 64,
+		DefaultProviders: map[domain.ComputerID]domain.Provider{"local": domain.ProviderCodex},
+		DefaultWorkdirs:  map[domain.ComputerID]string{"local": root},
+	}}
+	created := make(chan domain.Session, 1)
+	creator := creatorFunc(func(_ context.Context, intent app.ConfirmedSessionIntent) (app.CreateSessionResult, error) {
+		session, err := domain.NewStartingSession("99999999-9999-4999-9999-999999999999", intent.IntentID, intent.ComputerID, intent.Provider, intent.Workdir)
+		if err != nil {
+			return app.CreateSessionResult{}, err
+		}
+		session, err = session.Rename(intent.Name, domain.SessionNameDirectory)
+		if err != nil {
+			return app.CreateSessionResult{}, err
+		}
+		session, err = session.Ready(domain.ProviderBinding{Provider: intent.Provider, SessionID: "standby-provider", Generation: 1})
+		if err != nil {
+			return app.CreateSessionResult{}, err
+		}
+		store.Set(session)
+		store.setEmpty(session.ID(), true)
+		created <- session
+		return app.CreateSessionResult{Session: session}, nil
+	})
+	finals := make(chan struct{}, 1)
+	namingRequests := make(chan string, 1)
+	controller := newController(t, creator, store, submitterFunc(func(context.Context, domain.SessionID, string) (sessionruntime.TurnResult, error) {
+		return sessionruntime.TurnResult{Final: "done", ProviderSessionName: "must be ignored", TerminalStatus: sessionruntime.StatusCompleted}, nil
+	}), notifierFunc(func(_ context.Context, notification telegramcontroller.Notification) error {
+		if notification.Kind == telegramcontroller.NotificationFinal {
+			finals <- struct{}{}
+		}
+		return nil
+	}), telegramcontroller.Options{
+		Settings: preferences, SessionNamer: settingAwareSessionNamer{settings: preferences, store: store.lockedSessions, requests: namingRequests},
+	})
+	t.Cleanup(func() { _ = controller.Close(ctx) })
+
+	if err := controller.EnsureStandby(ctx, "local"); err != nil {
+		t.Fatal(err)
+	}
+	standby := <-created
+	if standby.Name() != "default" || standby.NameSource() != domain.SessionNameDirectory {
+		t.Fatalf("standby fallback name = %q/%q", standby.Name(), standby.NameSource())
+	}
+	if _, err := controller.HandleSemanticAction(ctx, telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticSelect, SessionID: standby.ID()}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := controller.Handle(ctx, message(901, "name this standby from the request")); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-finals:
+	case <-time.After(time.Second):
+		t.Fatal("standby first turn did not complete")
+	}
+	select {
+	case request := <-namingRequests:
+		if request != "name this standby from the request" {
+			t.Fatalf("standby naming input = %q", request)
+		}
+	default:
+		t.Fatal("enabled standby naming did not receive the first prompt")
+	}
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		named, err := store.Load(ctx, standby.ID())
+		if err == nil && named.Name() == "Quick fix" && named.NameSource() == domain.SessionNameModel {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	named, _ := store.Load(ctx, standby.ID())
+	t.Fatalf("standby model name = %q/%q, want model-generated Quick fix", named.Name(), named.NameSource())
+}
+
+func hasSemanticButton(rows [][]telegramcontroller.SemanticButton, label string, action telegramcontroller.SemanticActionKind) bool {
+	for _, row := range rows {
+		for _, button := range row {
+			if button.Label == label && button.Action == action {
+				return true
+			}
+		}
+	}
+	return false
 }

@@ -1,5 +1,39 @@
 # Handoff: статус и следующий план
 
+> Текущий запрос A47 - исправить открытые дефекты A46, production document
+> ingress, немедленные archive/default Starting transitions и подтверждённый
+> показ очищенного prompt до запуска основной модели. Дополнительный RCA
+> подтвердил, что shared Luna работала за 2.407 s, но её projection supersede-ил
+> следующий accepted status; это ordering defect, а не отсутствие satellite.
+> Локально добавлены fail-closed delivery barrier, restart output sweep,
+> session-scoped archive/edit gate, Starting fallback, actual-size document
+> validation, Codex+Claude Luna replacement и cancellation classification.
+> Дополнительно закрыты current instruction/CLI settings, терминология создания,
+> auto-name default/standby с late refresh и retry, retirement старой карточки
+> фонового финала, terminal-only memory-envelope filter и production-order
+> recovery фоновой Starting. Две итерации независимого review завершены approve;
+> полный `20260911-session-flow-reliability make check-full` GREEN. Далее точный
+> manifest, commit/push, exact-SHA CI и standing-authorized restart/postflight.
+> Разрешены product/tests/docs текущего репозитория и standing release;
+> state/config/secrets и ручные Telegram writes исключены. Пакеты разделены:
+> integration owner ведёт stale archived select и Stop/restart classification,
+> отдельные owners - Luna startup diagnostics и Telegram transport classes.
+> Todo и acceptance: [SESSION_FAILURE_RCA_TODO.md](SESSION_FAILURE_RCA_TODO.md).
+
+> Текущий запрос A46 - RCA повторяющихся session/provider/recovery failures
+> завершён. В актуальном release window с 12:09:36 до 13:06:58 MSK ошибок нет;
+> PID6768 running, durable state содержит 7 archived + 3 ready и не содержит
+> awaiting/pending/accepted. Три исторических шторма разделены: 680 recovery
+> failures старого initial-start тупика исправлены `1240d77`; 302 controller
+> crash + 604 recovery failures invalid callback identity исправлены `eeb4bb5`;
+> 42 provider failures одного stale accepted input исправлены `583e895`.
+> В текущем коде доказаны четыре открытые зоны: stale select после archive
+> редактирует Telegram до failed state commit; Stop/restart ошибочно логируются
+> как provider failure; Luna startup log теряет safe `thread_not_found`; Telegram
+> transport redaction скрывает DNS/connect/TLS/reset class. Product/runtime не
+> менялись, release не выполнялся. Договор, counts, seams и RED probes:
+> [SESSION_FAILURE_RCA_TODO.md](SESSION_FAILURE_RCA_TODO.md).
+
 > Текущий дополнительный запрос A45 - проверить сообщение о Git credentials и
 > очистить источник. Actual secret в 84 reachable commit и GitHub
 > secret-scanning alerts не найден. Начальный commit `a5c79ff` оставил default

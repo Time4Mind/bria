@@ -2,12 +2,17 @@ package telegram_test
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
+	"os"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -467,6 +472,31 @@ func TestClientCreationUIMethods(t *testing.T) {
 	}
 }
 
+func TestEditMessageReplyMarkupRemovesKeyboardWithoutCardText(t *testing.T) {
+	const testToken = "654321:test-only"
+	client, err := telegram.NewClient(testToken, httpClientFunc(func(request *http.Request) (*http.Response, error) {
+		if request.URL.Path != "/bot"+testToken+"/editMessageReplyMarkup" {
+			t.Fatalf("path=%q", request.URL.Path)
+		}
+		var body telegram.EditMessageReplyMarkupRequest
+		decodeExactRequest(t, request, &body)
+		if body.ChatID != 42 || body.MessageID != 201 || body.ReplyMarkup.InlineKeyboard == nil || len(body.ReplyMarkup.InlineKeyboard) != 0 {
+			t.Fatalf("reply-markup body=%#v", body)
+		}
+		return jsonResponse(http.StatusOK, `{"ok":true,"result":{"message_id":201,"from":{"id":600,"is_bot":true},"chat":{"id":42,"type":"private"},"text":"preserved"}}`), nil
+	}), telegram.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	message, err := client.EditMessageReplyMarkup(context.Background(), telegram.EditMessageReplyMarkupRequest{
+		ChatID: 42, MessageID: 201,
+		ReplyMarkup: telegram.InlineKeyboardMarkup{InlineKeyboard: [][]telegram.InlineKeyboardButton{}},
+	})
+	if err != nil || message.MessageID != 201 || message.Chat.ID != 42 {
+		t.Fatalf("EditMessageReplyMarkup()=(%#v, %v)", message, err)
+	}
+}
+
 func TestClientDeleteMessageProvidesSecretCleanupPrimitive(t *testing.T) {
 	t.Parallel()
 
@@ -757,6 +787,98 @@ func TestClientRedactsAPIAndTransportErrors(t *testing.T) {
 	assertNoTransportSecret(t, err.Error(), testToken, "https://api.telegram.org")
 }
 
+func TestClientClassifiesTransportFailuresWithoutExposingRawErrors(t *testing.T) {
+	const testToken = "987654:transport-class-secret"
+	tests := []struct {
+		name  string
+		cause error
+		want  string
+	}{
+		{
+			name: "dns",
+			cause: &url.Error{Op: "Post", URL: "https://leak.invalid/" + testToken, Err: &net.DNSError{
+				Err:  "lookup exposed-dns-secret",
+				Name: "leak.invalid",
+			}},
+			want: "dns",
+		},
+		{
+			name: "connect",
+			cause: &url.Error{Op: "Post", URL: "https://leak.invalid/" + testToken, Err: &net.OpError{
+				Op:  "dial",
+				Net: "tcp",
+				Err: errors.New("dial exposed-connect-secret"),
+			}},
+			want: "connect",
+		},
+		{
+			name: "tls",
+			cause: &url.Error{Op: "Post", URL: "https://leak.invalid/" + testToken, Err: tls.RecordHeaderError{
+				Msg: "exposed-tls-secret",
+			}},
+			want: "tls",
+		},
+		{
+			name: "reset",
+			cause: &url.Error{Op: "Post", URL: "https://leak.invalid/" + testToken, Err: &net.OpError{
+				Op: "read",
+				Err: &os.SyscallError{
+					Syscall: "read-exposed-reset-secret",
+					Err:     syscall.ECONNRESET,
+				},
+			}},
+			want: "reset",
+		},
+		{
+			name:  "timeout",
+			cause: &url.Error{Op: "Post", URL: "https://leak.invalid/" + testToken, Err: context.DeadlineExceeded},
+			want:  "timeout",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			client := mustTestClient(t, testToken, httpClientFunc(func(*http.Request) (*http.Response, error) {
+				return nil, test.cause
+			}), telegram.Options{})
+
+			_, err := client.GetMe(context.Background())
+			if err == nil {
+				t.Fatal("GetMe() error = nil")
+			}
+			if !telegram.IsTransient(err) {
+				t.Fatalf("GetMe() error = %v, want transient", err)
+			}
+			gotClass, ok := telegram.TransportFailureClassOf(err)
+			if !ok || gotClass != telegram.TransportFailureClass(test.want) {
+				t.Fatalf(
+					"TransportFailureClassOf(GetMe()) = %q, %v; want %q, true",
+					gotClass,
+					ok,
+					test.want,
+				)
+			}
+			if !strings.Contains(err.Error(), "transport failure (class="+test.want+")") {
+				t.Fatalf("GetMe() error = %q, want safe class", err)
+			}
+			var rawURL *url.Error
+			if errors.As(err, &rawURL) {
+				t.Fatal("GetMe() error retained the raw transport error")
+			}
+			assertNoTransportSecret(
+				t,
+				fmt.Sprintf("%v|%+v|%#v", err, err, err),
+				testToken,
+				"leak.invalid",
+				"exposed-dns-secret",
+				"exposed-connect-secret",
+				"exposed-tls-secret",
+				"exposed-reset-secret",
+			)
+		})
+	}
+}
+
 func TestClientClassifiesOnlyRetryableTransportReadAndAPIFailuresAsTransient(t *testing.T) {
 	t.Parallel()
 
@@ -906,12 +1028,15 @@ func TestClientClassifiesAmbiguousSendMessageAsDeliveryUnknown(t *testing.T) {
 	t.Parallel()
 
 	client := mustTestClient(t, "111113:test-only", httpClientFunc(func(*http.Request) (*http.Response, error) {
-		return nil, errors.New("connection reset after write")
+		return nil, &net.OpError{Op: "read", Net: "tcp", Err: syscall.ECONNRESET}
 	}), telegram.Options{})
 
 	_, err := client.SendMessage(context.Background(), telegram.SendMessageRequest{ChatID: 3, Text: "safe"})
 	if !telegram.IsDeliveryUnknown(err) {
 		t.Fatalf("SendMessage() error = %v, want DeliveryUnknown", err)
+	}
+	if class, ok := telegram.TransportFailureClassOf(err); !ok || class != telegram.TransportFailureReset {
+		t.Fatalf("TransportFailureClassOf(SendMessage()) = %q, %v; want reset, true", class, ok)
 	}
 }
 

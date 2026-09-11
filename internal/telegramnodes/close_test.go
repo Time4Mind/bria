@@ -103,3 +103,27 @@ func TestRemoveClosedRetriesFailedPersistenceAndDoesNotClaimAbsentStore(t *testi
 		t.Fatalf("absent store claimed persistence: %+v, %v", result, err)
 	}
 }
+
+func TestRemoveClosedSelectsStartingDefaultFallback(t *testing.T) {
+	ctx := context.Background()
+	closing := ready(t, "11111111-1111-4111-9111-111111111111")
+	starting, err := domain.NewStartingSession("22222222-2222-4222-9222-222222222222", "intent-default", "local", domain.ProviderCodex, "/work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := &sessionStore{sessions: map[domain.SessionID]domain.Session{closing.ID(): closing, starting.ID(): starting}}
+	ui := &atomicCloseUI{uiState: &uiState{active: map[domain.ComputerID]domain.SessionID{}, history: map[domain.ComputerID][]domain.SessionID{}}}
+	scope, err := telegramnodes.New("local", store, ui, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := scope.SetActive(ctx, closing); err != nil {
+		t.Fatal(err)
+	}
+	archived := archive(t, closing)
+	store.sessions[closing.ID()] = archived
+	result, err := scope.RemoveClosed(ctx, archived)
+	if err != nil || result.Active != starting.ID() || ui.active["local"] != starting.ID() {
+		t.Fatalf("starting fallback = %+v, persisted=%q, err=%v", result, ui.active["local"], err)
+	}
+}

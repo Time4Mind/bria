@@ -7,6 +7,7 @@ import (
 	"html"
 	"strings"
 
+	"bria/internal/assistanttext"
 	"bria/internal/tooltext"
 )
 
@@ -43,6 +44,7 @@ func Render(blocks []Block) []string {
 // never be inferred from provider-authored text.
 func RenderBlocks(blocks []Block) []Block {
 	blocks = mergeTools(blocks)
+	cleanFinalEnvelopes(blocks)
 	result := make([]Block, 0, len(blocks))
 	for _, block := range blocks {
 		text := strings.TrimSpace(block.Text)
@@ -62,6 +64,41 @@ func RenderBlocks(blocks []Block) []Block {
 		result = append(result, Block{Kind: block.Kind, Text: text, FinalContinuation: block.FinalContinuation, FinalOperationID: block.FinalOperationID})
 	}
 	return result
+}
+
+func cleanFinalEnvelopes(blocks []Block) {
+	for start := 0; start < len(blocks); {
+		if blocks[start].Kind != "final" {
+			start++
+			continue
+		}
+		end := start + 1
+		if blocks[start].FinalOperationID != "" {
+			for end < len(blocks) && blocks[end].Kind == "final" && blocks[end].FinalContinuation && blocks[end].FinalOperationID == blocks[start].FinalOperationID {
+				end++
+			}
+		}
+		var joined strings.Builder
+		for i := start; i < end; i++ {
+			joined.WriteString(blocks[i].Text)
+		}
+		clean := assistanttext.StripTerminalMemoryCitation(joined.String())
+		if len(clean) != joined.Len() {
+			remaining := len(clean)
+			for i := start; i < end; i++ {
+				if remaining >= len(blocks[i].Text) {
+					remaining -= len(blocks[i].Text)
+					continue
+				}
+				blocks[i].Text = blocks[i].Text[:remaining]
+				remaining = 0
+				for j := i + 1; j < end; j++ {
+					blocks[j].Text = ""
+				}
+			}
+		}
+		start = end
+	}
 }
 
 func mergeTools(blocks []Block) []Block {

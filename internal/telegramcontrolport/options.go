@@ -59,4 +59,5 @@ type Options struct {
 	SessionNamer          SessionNamer
 	PreprocessingObserver promptpreprocess.Observer
 	PreprocessingTimeout  time.Duration
+	SessionDeliveryGate   SessionDeliveryGate
 }

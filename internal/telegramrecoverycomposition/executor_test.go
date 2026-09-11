@@ -114,6 +114,51 @@ func TestStatusRecoveryConfirmRetryCancelAndLostResponse(t *testing.T) {
 	}
 }
 
+func TestStatusRetryResumesWhenCallbackHalfWasAlreadyPreparedBeforeRestart(t *testing.T) {
+	executor, operations, transport, projector, _, _ := callbackRecoveryHarness(t, telegramflow.CallbackSendUnknown)
+	callback, found, err := operations.Load(context.Background(), "status:720")
+	if err != nil || !found || callback.Phase != telegramflow.CallbackSendUnknown || callback.Prepared == nil {
+		t.Fatalf("callback setup = %+v found=%t err=%v", callback, found, err)
+	}
+	preparedCallback := callback
+	preparedCallback.Phase = telegramflow.CallbackPrepared
+	if changed, err := operations.CompareAndSwap(context.Background(), callback.ID, callback.Phase, preparedCallback); err != nil || !changed {
+		t.Fatalf("simulate persisted callback retry half = %t, %v", changed, err)
+	}
+	binding := telegramflow.StatusRecoveryBinding{
+		OperationID: callback.ID, UpdateID: callback.UpdateID,
+		Scope:   telegramflow.RecoveryScope{Kind: telegramflow.RecoveryScopeSession, SessionID: recoverySessionID},
+		Carrier: telegramstate.Carrier{ChatID: 42, MessageID: 99}, Sequence: uint64(callback.UpdateID), Prepared: true, Edit: true,
+	}
+	status := telegramflow.StatusOperation{ID: callback.ID, Sequence: binding.Sequence, Status: callback.Prepared.Status,
+		Keyboard: callback.Prepared.Keyboard, Prepared: callback.Prepared, Edit: true, Phase: telegramflow.StatusQueued, Recovery: &binding}
+	if _, _, err := operations.EnqueueStatus(context.Background(), status); err != nil {
+		t.Fatal(err)
+	}
+	unknown := status
+	unknown.Phase = telegramflow.StatusSendUnknown
+	if changed, err := operations.CompareAndSwapStatus(context.Background(), status.ID, status.Phase, unknown); err != nil || !changed {
+		t.Fatalf("simulate still-unknown status half = %t, %v", changed, err)
+	}
+	result, err := executor.HandleCallback(context.Background(), telegrampipeline.CallbackPlan{
+		OperationID: "status:900", UpdateID: 900, SessionID: telegramui.GlobalSurfaceID,
+		Carrier: telegramstate.Carrier{ChatID: 42, MessageID: 500}, Action: telegramui.ActionStatusRecoveryRetryPossibleDuplicate,
+		Effect:         telegrampipeline.EffectStatusRecoveryRetryPossibleDuplicate,
+		StatusRecovery: &telegrampipeline.CallbackStatusRecoveryPlan{Binding: binding, Decision: telegramui.ActionStatusRecoveryRetryPossibleDuplicate},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	settledStatus, found, err := operations.LoadStatus(context.Background(), status.ID)
+	if err != nil || !found || settledStatus.Phase != telegramflow.StatusCommitted || transport.edits != 1 {
+		t.Fatalf("status retry did not converge = %+v edits=%d found=%t err=%v", settledStatus, transport.edits, found, err)
+	}
+	settledCallback, found, err := operations.Load(context.Background(), callback.ID)
+	if err != nil || !found || settledCallback.Phase != telegramflow.CallbackCommitted || len(projector.requests) != 1 || result.OperationID != "status:900" {
+		t.Fatalf("callback retry did not converge = %+v projections=%d result=%+v found=%t err=%v", settledCallback, len(projector.requests), result, found, err)
+	}
+}
+
 func TestStatusRecoveryRejectsTamperBeforeMutation(t *testing.T) {
 	for _, test := range []struct {
 		name   string

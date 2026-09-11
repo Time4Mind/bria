@@ -26,9 +26,16 @@ func (c *Controller) RefreshRecoveryCard(ctx context.Context, id domain.SessionI
 		c.mu.Unlock()
 		return
 	}
-	if current.Status() == domain.SessionReady {
+	switch {
+	case current.Status() == domain.SessionReady:
+		delete(c.pending, id)
 		c.live[id] = current
 		c.ensureWorkerLocked(id)
+	case acceptsDurableInput(current):
+		// Startup recovery is composed after the controller so output consumers
+		// are already bound. Re-register background creation/resume targets here;
+		// otherwise only the foreground selection survives the process restart.
+		c.pending[id] = current
 	}
 	c.mu.Unlock()
 	telegramturnhelpers.WakeReadyInput(c.durableInput, current)

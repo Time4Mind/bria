@@ -76,6 +76,59 @@ func TestSessionNamePrefersProviderTitleAndFallsBackToCheapModel(t *testing.T) {
 	}
 }
 
+func TestLateDefaultSessionAutoNameRefreshesCurrentCard(t *testing.T) {
+	ready := readySession(t, "bbbbbbbb-bbbb-4bbb-9bbb-bbbbbbbbbbbb", domain.ProviderCodex, "/workspace/default", "provider-b", 1)
+	var err error
+	ready, err = ready.Rename("default", domain.SessionNameDirectory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := newLockedSessions(ready)
+	release := make(chan struct{})
+	notifications := make(chan telegramcontroller.Notification, 16)
+	controller := newController(t, nil, store, submitterFunc(func(context.Context, domain.SessionID, string) (sessionruntime.TurnResult, error) {
+		return sessionruntime.TurnResult{Final: "done", TerminalStatus: sessionruntime.StatusCompleted}, nil
+	}), notifierFunc(func(_ context.Context, notification telegramcontroller.Notification) error {
+		notifications <- notification
+		return nil
+	}), telegramcontroller.Options{
+		Recovered:    []domain.Session{ready},
+		SessionNamer: delayedRefreshingSessionNamer{store: store, release: release},
+	})
+	t.Cleanup(func() { _ = controller.Close(context.Background()) })
+	mustStatus(t, controller, message(11, "/use "+string(ready.ID())))
+	mustStatus(t, controller, message(12, "rename this session"))
+
+	deadline := time.After(time.Second)
+	for {
+		select {
+		case notification := <-notifications:
+			if notification.Kind == telegramcontroller.NotificationFinal {
+				close(release)
+				goto waitRefresh
+			}
+		case <-deadline:
+			t.Fatal("final notification was not published")
+		}
+	}
+
+waitRefresh:
+	deadline = time.After(time.Second)
+	for {
+		select {
+		case notification := <-notifications:
+			if strings.HasPrefix(notification.OperationID, "session-name:") {
+				if notification.Kind != telegramcontroller.NotificationPromptStatus || notification.SessionID != ready.ID() {
+					t.Fatalf("name refresh = %#v", notification)
+				}
+				return
+			}
+		case <-deadline:
+			t.Fatal("late auto-name did not refresh the current card")
+		}
+	}
+}
+
 func TestRoutesOnlyOwnerPrivateMessagesAndUnknownSlashRequiresNativeCLI(t *testing.T) {
 	controller := newController(t, creatorFunc(nil), &memorySessions{}, submitterFunc(nil), notifierFunc(nil), telegramcontroller.Options{})
 	t.Cleanup(func() { _ = controller.Close(context.Background()) })
@@ -2208,7 +2261,7 @@ func TestSemanticActionRejectsMissingOrUnexpectedTargetFields(t *testing.T) {
 }
 
 func TestGlobalSemanticActionsExposeOnlyTypedSurfacesAndStableCreateIdentity(t *testing.T) {
-	workdir := t.TempDir()
+	workdir := canonicalTempDir(t)
 	ready := readySession(t, "11111111-1111-4111-9111-111111111111", domain.ProviderCodex, workdir, "provider-1", 1)
 	var intent app.ConfirmedSessionIntent
 	sessions := newLockedSessions(ready)
@@ -2262,7 +2315,7 @@ func TestGlobalSemanticActionsExposeOnlyTypedSurfacesAndStableCreateIdentity(t *
 }
 
 func TestSemanticCreateUsesOnlyExplicitConfirmedAbsoluteDraft(t *testing.T) {
-	workdir := t.TempDir()
+	workdir := canonicalTempDir(t)
 	ready := readySession(t, "44444444-4444-4444-9444-444444444444", domain.ProviderCodex, workdir, "provider-4", 1)
 	var intent app.ConfirmedSessionIntent
 	sessions := newLockedSessions(ready)
@@ -2287,7 +2340,7 @@ func TestSemanticCreateUsesOnlyExplicitConfirmedAbsoluteDraft(t *testing.T) {
 }
 
 func TestSemanticNewSessionDoesNotRequireInjectedDraftSelector(t *testing.T) {
-	workdir := t.TempDir()
+	workdir := canonicalTempDir(t)
 	ready := readySession(t, "55555555-5555-4555-9555-555555555555", domain.ProviderCodex, workdir, "provider-5", 1)
 	var intent app.ConfirmedSessionIntent
 	sessions := &memorySessions{}
@@ -2326,7 +2379,7 @@ func TestSemanticNewSessionDoesNotRequireInjectedDraftSelector(t *testing.T) {
 }
 
 func TestSemanticNewSessionDoesNotInferDefaultsFromPreviousSessions(t *testing.T) {
-	workdir := t.TempDir()
+	workdir := canonicalTempDir(t)
 	last := readySession(t, "66666666-6666-4666-a666-666666666666", domain.ProviderClaude, workdir, "provider-6", 1)
 	providers := &testProviderPreferences{values: map[domain.Provider]telegramcontroller.ProviderPreference{
 		domain.ProviderCodex:  {Provider: domain.ProviderCodex, Configured: true, Enabled: true},
@@ -2338,7 +2391,7 @@ func TestSemanticNewSessionDoesNotInferDefaultsFromPreviousSessions(t *testing.T
 	t.Cleanup(func() { _ = controller.Close(context.Background()) })
 
 	initial, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticMenuNew})
-	if err != nil || initial.Surface == nil || !strings.Contains(initial.Surface.Text, "Выберите бэкенд") || !hasSemanticAction(initial.Surface.Rows, telegramcontroller.SemanticCreateSelectCodex) || !hasSemanticAction(initial.Surface.Rows, telegramcontroller.SemanticCreateSelectClaude) {
+	if err != nil || initial.Surface == nil || !strings.Contains(initial.Surface.Text, "Выберите CLI") || !hasSemanticAction(initial.Surface.Rows, telegramcontroller.SemanticCreateSelectCodex) || !hasSemanticAction(initial.Surface.Rows, telegramcontroller.SemanticCreateSelectClaude) {
 		t.Fatalf("provider choice = (%#v, %v)", initial, err)
 	}
 	changed, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticCreateSelectCodex})
@@ -2402,7 +2455,7 @@ func TestNewSessionAvailabilityFollowsLiveProviderSnapshot(t *testing.T) {
 
 	providers.values[domain.ProviderCodex] = telegramcontroller.ProviderPreference{Provider: domain.ProviderCodex, Configured: true, Enabled: false}
 	none, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticMenuNew})
-	if err != nil || none.Surface == nil || !hasSemanticAction(none.Surface.Rows, telegramcontroller.SemanticCreateSelectCodex) || !hasSemanticAction(none.Surface.Rows, telegramcontroller.SemanticCreateSelectClaude) || !strings.Contains(none.Surface.Text, "Выберите бэкенд") {
+	if err != nil || none.Surface == nil || !hasSemanticAction(none.Surface.Rows, telegramcontroller.SemanticCreateSelectCodex) || !hasSemanticAction(none.Surface.Rows, telegramcontroller.SemanticCreateSelectClaude) || !strings.Contains(none.Surface.Text, "Выберите CLI") {
 		t.Fatalf("zero-enabled installed providers = (%#v, %v)", none, err)
 	}
 
@@ -3505,6 +3558,33 @@ func (namer testSessionNamer) Begin(_ context.Context, session domain.Session, _
 	}
 }
 func (testSessionNamer) Wait(context.Context) error { return nil }
+
+type delayedRefreshingSessionNamer struct {
+	store   *lockedSessions
+	release <-chan struct{}
+}
+
+func (namer delayedRefreshingSessionNamer) Begin(ctx context.Context, session domain.Session, messageID, text string) func(string) {
+	return namer.begin(ctx, session, messageID, text, nil)
+}
+
+func (namer delayedRefreshingSessionNamer) BeginWithRefresh(ctx context.Context, session domain.Session, messageID, text string, refreshed func(domain.SessionID)) func(string) {
+	return namer.begin(ctx, session, messageID, text, refreshed)
+}
+
+func (namer delayedRefreshingSessionNamer) begin(_ context.Context, session domain.Session, _, _ string, refreshed func(domain.SessionID)) func(string) {
+	return func(string) {
+		go func() {
+			<-namer.release
+			_, _ = namer.store.RenameSession(context.Background(), session.ID(), "Late name", domain.SessionNameModel)
+			if refreshed != nil {
+				refreshed(session.ID())
+			}
+		}()
+	}
+}
+
+func (delayedRefreshingSessionNamer) Wait(context.Context) error { return nil }
 
 func newLockedSessions(sessions ...domain.Session) *lockedSessions {
 	store := &lockedSessions{byID: make(map[domain.SessionID]domain.Session, len(sessions))}

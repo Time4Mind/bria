@@ -237,11 +237,19 @@ func (executor *Executor) retryStatus(ctx context.Context, operation telegramflo
 			return err
 		}
 		if found {
-			if callback.Phase != telegramflow.CallbackSendUnknown || callback.Prepared == nil || !reflect.DeepEqual(callback.Prepared, operation.Prepared) {
+			if callback.Prepared == nil || !reflect.DeepEqual(callback.Prepared, operation.Prepared) {
 				return errors.New("prepared status callback recovery no longer matches")
 			}
-			if err := executor.statuses.RetryUnknownSend(ctx, operation.ID); err != nil {
-				return err
+			switch callback.Phase {
+			case telegramflow.CallbackSendUnknown:
+				if err := executor.statuses.RetryUnknownSend(ctx, operation.ID); err != nil {
+					return err
+				}
+			case telegramflow.CallbackPrepared:
+				// A prior retry may have persisted the callback half before a
+				// process stop. Continue with the still-unknown status half.
+			default:
+				return errors.New("prepared status callback recovery no longer matches")
 			}
 		}
 	}

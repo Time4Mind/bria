@@ -12,6 +12,7 @@ import (
 	"bria/internal/coordinator"
 	"bria/internal/telegrambridge"
 	"bria/internal/telegrampipeline"
+	"bria/internal/telegramtransport"
 	"bria/internal/telegramui"
 )
 
@@ -43,6 +44,9 @@ func Reason(err error) string {
 	}
 	if code := callbackdiagnostic.Inspect(err).Code; code != "" {
 		return callbackdiagnostic.SafeCode(code)
+	}
+	if class, ok := telegramtransport.ClassOf(err); ok {
+		return callbackdiagnostic.SafeCode("transport_" + string(class))
 	}
 	for _, item := range []struct {
 		err  error

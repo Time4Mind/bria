@@ -14,6 +14,7 @@ import (
 	"bria/internal/sessionruntime"
 	"bria/internal/settingsport"
 	"bria/internal/telegramcontroller"
+	"bria/internal/turnprocessing"
 )
 
 type promptProcessorFunc func(context.Context, promptpreprocess.Request) (promptpreprocess.Result, error)
@@ -33,6 +34,150 @@ type preprocessingCompletionFunc func(context.Context)
 func (function preprocessingCompletionFunc) Accept(ctx context.Context) error {
 	function(ctx)
 	return nil
+}
+
+type preprocessingBarrierCustody struct {
+	accepted       chan telegramcontroller.OutgoingNotification
+	release        chan struct{}
+	acceptErr      error
+	waitErr        error
+	rejectDeadline bool
+}
+
+func (custody *preprocessingBarrierCustody) AcceptOutput(_ context.Context, output telegramcontroller.OutgoingNotification) (telegramcontroller.OutputReceipt, error) {
+	custody.accepted <- output
+	if custody.acceptErr != nil {
+		return telegramcontroller.OutputReceipt{}, custody.acceptErr
+	}
+	return telegramcontroller.OutputReceipt{Inserted: true, SessionID: output.SessionID, OperationID: output.OperationID, Sequence: 1}, nil
+}
+
+func (custody *preprocessingBarrierCustody) WaitOutputDelivery(ctx context.Context, _ domain.SessionID, _ string) error {
+	if _, hasDeadline := ctx.Deadline(); custody.rejectDeadline && hasDeadline {
+		return errors.New("unexpected internal prompt delivery timeout")
+	}
+	if custody.waitErr != nil {
+		return custody.waitErr
+	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-custody.release:
+		return nil
+	}
+}
+
+func TestDurablePreprocessingDoesNotStartProviderWithoutConfirmedPromptDelivery(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		acceptErr error
+		waitErr   error
+		timeout   bool
+	}{
+		{name: "enqueue failure", acceptErr: errors.New("synthetic enqueue failure")},
+		{name: "unknown receipt", waitErr: errors.New("synthetic unknown delivery")},
+		{name: "delivery timeout", timeout: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ready := readySession(t, "aaaabaaa-aaaa-4aaa-9aaa-aaaaaaaaaaaa", domain.ProviderCodex, t.TempDir(), "provider-visible", 1)
+			payload, err := promptpreprocess.Encode("clean", "raw speech")
+			if err != nil {
+				t.Fatal(err)
+			}
+			custody := &preprocessingBarrierCustody{
+				accepted:  make(chan telegramcontroller.OutgoingNotification, 1),
+				release:   make(chan struct{}),
+				acceptErr: test.acceptErr,
+				waitErr:   test.waitErr,
+			}
+			providerCalled := false
+			controller := newController(t, nil, newLockedSessions(ready), &interactiveSubmitter{submitWithCallbacks: func(context.Context, domain.SessionID, string, sessionruntime.TurnCallbacks) (sessionruntime.TurnResult, error) {
+				providerCalled = true
+				return sessionruntime.TurnResult{}, nil
+			}}, nil, telegramcontroller.Options{
+				Recovered: []domain.Session{ready}, DurableOutput: custody,
+				Preprocessor: promptProcessorFunc(func(context.Context, promptpreprocess.Request) (promptpreprocess.Result, error) {
+					return promptpreprocess.Result{Text: "cleaned prompt"}, nil
+				}),
+			})
+			t.Cleanup(func() { _ = controller.Close(context.Background()) })
+			ctx := context.Background()
+			if test.timeout {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithTimeout(ctx, 20*time.Millisecond)
+				defer cancel()
+			}
+			receipt, processErr := controller.ProcessDurableInput(ctx, telegramcontroller.DurableLeasedInput{
+				SessionID: ready.ID(), MessageID: "telegram-update:512", Sequence: 1, Payload: payload,
+			}, telegramcontroller.DurableInputCallbacks{
+				OnPrepared: func(context.Context, telegramcontroller.DurableInputPreparation) error { return nil },
+				OnAccepted: func(context.Context, telegramcontroller.DurableInputAcceptance) error { return nil },
+			})
+			if receipt.Accepted || !errors.Is(processErr, turnprocessing.ErrInputDeferred) || providerCalled {
+				t.Fatalf("unconfirmed prompt delivery = receipt:%#v err:%v provider:%t", receipt, processErr, providerCalled)
+			}
+		})
+	}
+}
+
+func TestDurablePreprocessingWaitsForVisiblePromptDeliveryBeforeProviderStarts(t *testing.T) {
+	ready := readySession(t, "aaabaaaa-aaaa-4aaa-9aaa-aaaaaaaaaaaa", domain.ProviderCodex, t.TempDir(), "provider-visible", 1)
+	payload, err := promptpreprocess.Encode("clean", "raw speech")
+	if err != nil {
+		t.Fatal(err)
+	}
+	custody := &preprocessingBarrierCustody{accepted: make(chan telegramcontroller.OutgoingNotification, 3), release: make(chan struct{}), rejectDeadline: true}
+	providerStarted := make(chan struct{}, 1)
+	controller := newController(t, nil, &memorySessions{byID: map[domain.SessionID]domain.Session{ready.ID(): ready}}, &interactiveSubmitter{submitWithCallbacks: func(_ context.Context, _ domain.SessionID, _ string, callbacks sessionruntime.TurnCallbacks) (sessionruntime.TurnResult, error) {
+		providerStarted <- struct{}{}
+		if err := callbacks.OnAccepted(callbacks.MessageID); err != nil {
+			return sessionruntime.TurnResult{}, err
+		}
+		return sessionruntime.TurnResult{TerminalStatus: sessionruntime.StatusCompleted, Final: "done"}, nil
+	}}, nil, telegramcontroller.Options{
+		Recovered: []domain.Session{ready}, DurableOutput: custody,
+		Preprocessor: promptProcessorFunc(func(context.Context, promptpreprocess.Request) (promptpreprocess.Result, error) {
+			return promptpreprocess.Result{Text: "cleaned prompt", Provider: domain.ProviderCodex, Model: "cheap"}, nil
+		}),
+	})
+	t.Cleanup(func() { _ = controller.Close(context.Background()) })
+	done := make(chan error, 1)
+	go func() {
+		_, processErr := controller.ProcessDurableInput(context.Background(), telegramcontroller.DurableLeasedInput{
+			SessionID: ready.ID(), MessageID: "telegram-update:511", Sequence: 1, Payload: payload,
+		}, telegramcontroller.DurableInputCallbacks{
+			OnPrepared: func(context.Context, telegramcontroller.DurableInputPreparation) error { return nil },
+			OnAccepted: func(context.Context, telegramcontroller.DurableInputAcceptance) error { return nil },
+		})
+		done <- processErr
+	}()
+	select {
+	case output := <-custody.accepted:
+		if output.OperationID != "telegram-update:511:prompt-status:preprocessed" {
+			t.Fatalf("first output = %#v", output)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("preprocessed prompt was not placed in durable delivery")
+	}
+	select {
+	case <-providerStarted:
+		t.Fatal("provider started before preprocessed prompt delivery completed")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(custody.release)
+	select {
+	case <-providerStarted:
+	case <-time.After(time.Second):
+		t.Fatal("provider did not start after prompt delivery completed")
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("durable input did not complete")
+	}
 }
 
 func TestDurablePreprocessingPersistsCleanedTextBeforeProviderAcceptance(t *testing.T) {
@@ -384,11 +529,16 @@ func TestPhotoCaptionIsWrappedWithoutChangingDurableAttachment(t *testing.T) {
 }
 
 func TestPreprocessingInstructionEditConsumesOneTextMessageAndCanBeCancelled(t *testing.T) {
-	preferences := &testPreferences{}
+	preferences := &testPreferences{settings: settingsport.Snapshot{
+		CardDetail: "standard", CardPageLimit: 64,
+		PreprocessingInstruction: "Keep names, dates, and commands exactly.",
+	}}
 	controller := newController(t, nil, &memorySessions{}, nil, nil, telegramcontroller.Options{Settings: preferences})
 	t.Cleanup(func() { _ = controller.Close(context.Background()) })
 	result, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticSettingsPreprocessingInstruction})
-	if err != nil || result.Surface == nil || !strings.Contains(result.Surface.Text, "новую инструкцию") {
+	if err != nil || result.Surface == nil || result.Surface.RichMarkdown ||
+		!strings.Contains(result.Surface.Text, "Keep names, dates, and commands exactly.") ||
+		!strings.Contains(result.Surface.Text, "новую инструкцию") {
 		t.Fatalf("edit surface = (%#v, %v)", result, err)
 	}
 	if _, err := controller.HandleSemanticMessage(context.Background(), coordinator.Update{ID: 701, Kind: coordinator.UpdateMessage, ActorID: 42, ConversationID: 42, ConversationKind: "private", Text: "  keep intent  "}); err != nil {
@@ -408,6 +558,64 @@ func TestPreprocessingInstructionEditConsumesOneTextMessageAndCanBeCancelled(t *
 	}
 	if preferences.settings.PreprocessingInstruction != "keep intent" {
 		t.Fatalf("cancelled edit changed instruction to %q", preferences.settings.PreprocessingInstruction)
+	}
+}
+
+func TestPreprocessingInstructionEditShowsEffectiveBuiltInInstruction(t *testing.T) {
+	preferences := &testPreferences{settings: settingsport.Snapshot{CardDetail: "standard", CardPageLimit: 64}}
+	controller := newController(t, nil, &memorySessions{}, nil, nil, telegramcontroller.Options{Settings: preferences})
+	t.Cleanup(func() { _ = controller.Close(context.Background()) })
+
+	result, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticSettingsPreprocessingInstruction})
+	if err != nil || result.Surface == nil || result.Surface.RichMarkdown || !strings.Contains(result.Surface.Text, promptpreprocess.DefaultInstruction) {
+		t.Fatalf("built-in instruction surface = (%#v, %v)", result, err)
+	}
+}
+
+func TestPreprocessingInstructionEditPaginatesMaximumCopyableInstruction(t *testing.T) {
+	instruction := strings.TrimSuffix(strings.Repeat("абвгд\n", 1489), "\n")
+	if len([]byte(instruction)) > 16*1024 {
+		t.Fatalf("test instruction exceeds settings contract: %d bytes", len([]byte(instruction)))
+	}
+	preferences := &testPreferences{settings: settingsport.Snapshot{
+		CardDetail: "standard", CardPageLimit: 64, PreprocessingInstruction: instruction,
+	}}
+	controller := newController(t, nil, &memorySessions{}, nil, nil, telegramcontroller.Options{Settings: preferences})
+	t.Cleanup(func() { _ = controller.Close(context.Background()) })
+
+	var rebuilt strings.Builder
+	action := telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticSettingsPreprocessingInstruction}
+	for page := 1; ; page++ {
+		result, err := controller.HandleSemanticAction(context.Background(), action)
+		if err != nil || result.Surface == nil {
+			t.Fatalf("instruction page %d = (%#v, %v)", page, result, err)
+		}
+		if result.Surface.RichMarkdown || len([]byte(result.Surface.Text)) > 4096 {
+			t.Fatalf("instruction page %d shape: rich=%t bytes=%d", page, result.Surface.RichMarkdown, len([]byte(result.Surface.Text)))
+		}
+		const prefixEnd = ":\n\n"
+		start := strings.Index(result.Surface.Text, prefixEnd)
+		end := strings.LastIndex(result.Surface.Text, "\n\nОтправьте новую инструкцию")
+		if start < 0 || end < start {
+			t.Fatalf("instruction page %d has no copyable body: %q", page, result.Surface.Text)
+		}
+		rebuilt.WriteString(result.Surface.Text[start+len(prefixEnd) : end])
+
+		nextChoice := 0
+		for _, row := range result.Surface.Rows {
+			for _, button := range row {
+				if button.Label == "Следующая" && button.Action == telegramcontroller.SemanticSettingsPreprocessingInstruction {
+					nextChoice = button.Choice
+				}
+			}
+		}
+		if nextChoice == 0 {
+			break
+		}
+		action.Choice = nextChoice
+	}
+	if rebuilt.String() != instruction {
+		t.Fatalf("paginated instruction changed: got %d bytes, want %d", rebuilt.Len(), len([]byte(instruction)))
 	}
 }
 

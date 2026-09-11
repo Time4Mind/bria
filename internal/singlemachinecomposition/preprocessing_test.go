@@ -2,6 +2,8 @@ package singlemachinecomposition
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -42,22 +44,36 @@ func TestPreprocessingObserverPersistsIdentityWithoutPrompt(t *testing.T) {
 }
 
 func TestPreprocessingSessionObserverPersistsSafeLifecycleOnly(t *testing.T) {
-	logger, err := safelog.Open(safelog.Options{Directory: t.TempDir()})
+	logDir := t.TempDir()
+	logger, err := safelog.Open(safelog.Options{Directory: logDir})
 	if err != nil {
 		t.Fatal(err)
 	}
 	observer := preprocessingSessionObserver{logger: logger}
-	if err := observer.ObservePreprocessingSession(context.Background(), promptpreprocesssession.LifecycleObservation{
-		State: "ready", Provider: domain.ProviderCodex, Model: "gpt-5.6-luna",
-	}); err != nil {
-		t.Fatal(err)
+	for _, observation := range []promptpreprocesssession.LifecycleObservation{
+		{State: "start_failed", Provider: domain.ProviderCodex, Model: "gpt-5.6-luna", ErrorCategory: "thread_not_found"},
+		{State: "replacement_ready", Provider: domain.ProviderCodex, Model: "gpt-5.6-luna"},
+	} {
+		if err := observer.ObservePreprocessingSession(context.Background(), observation); err != nil {
+			t.Fatal(err)
+		}
 	}
 	events, err := logger.Read(safelog.Service)
-	if err != nil || len(events) != 1 {
+	if err != nil || len(events) != 2 {
 		t.Fatalf("events = (%#v, %v)", events, err)
 	}
-	if events[0].Type != "prompt.preprocessing_session" || events[0].Fields["state"] != "ready" || events[0].Fields["model"] != "gpt-5.6-luna" || events[0].Fields["duration_ms"] != "0" {
-		t.Fatalf("event = %#v", events[0])
+	if events[0].Type != "prompt.preprocessing_session" || events[0].Fields["state"] != "start_failed" || events[0].ErrorCategory != "thread_not_found" ||
+		events[1].Fields["state"] != "replacement_ready" || events[1].ErrorCategory != "" || events[1].Fields["model"] != "gpt-5.6-luna" || events[1].Fields["duration_ms"] != "0" {
+		t.Fatalf("events = %#v", events)
+	}
+	raw, err := os.ReadFile(filepath.Join(logDir, "service.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{"provider-thread-secret", "private-token", "https://"} {
+		if strings.Contains(string(raw), forbidden) {
+			t.Fatalf("service log exposed private lifecycle detail %q", forbidden)
+		}
 	}
 }
 

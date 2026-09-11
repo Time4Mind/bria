@@ -120,7 +120,7 @@ func (flow *Flow) CurrentV2(computers []Computer, defaults Defaults) (Snapshot, 
 			} else {
 				flow.enterLocked(providerStep(flow.providers), true)
 			}
-			flow.errText = "выбранный бэкенд больше недоступен"
+			flow.errText = "выбранный CLI больше недоступен"
 		} else if flow.draft.Provider == "" && flow.step == StepProvider {
 			enabled := enabledProviders(flow.providers)
 			if len(enabled) == 1 {

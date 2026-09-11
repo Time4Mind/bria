@@ -97,8 +97,14 @@ type TransportSender interface {
 	coordinator.KeyboardSender
 	coordinator.CarrierEditor
 }
+type InlineKeyboardDeactivator interface {
+	DeactivateInlineKeyboard(context.Context, string, int64, int64) error
+}
 type CallbackAcknowledger interface {
 	AcknowledgeCallback(context.Context, string, string)
+}
+type SessionDeliveryGate interface {
+	Lock(domain.SessionID) func()
 }
 type Config struct {
 	OwnerUserID         int64
@@ -114,7 +120,8 @@ type Config struct {
 	Observer            TraceObserver
 	OnCallbackCommitted func(CallbackCommit)
 	// OnUserAction records authenticated ingress only; the scheduler owns deduplication.
-	OnUserAction func(coordinator.Update)
+	OnUserAction        func(coordinator.Update)
+	SessionDeliveryGate SessionDeliveryGate
 }
 type pendingStore struct {
 	mu    sync.Mutex
@@ -147,6 +154,7 @@ type Sender struct {
 	onCallbackCommitted func(CallbackCommit)
 	delivery            sync.Mutex
 	sessionDelivery     sync.Map // domain.SessionID -> *sync.Mutex
+	sessionGate         SessionDeliveryGate
 }
 type UnknownCallbackOperation struct {
 	OwnerUserID        int64
@@ -206,6 +214,7 @@ func New(config Config) (*Handler, *Sender, error) {
 			pending:             pending,
 			observer:            config.Observer,
 			onCallbackCommitted: config.OnCallbackCommitted,
+			sessionGate:         config.SessionDeliveryGate,
 		}, nil
 }
 func (handler *Handler) ListUnknown(ctx context.Context, limit int) ([]UnknownCallbackOperation, error) {
@@ -414,6 +423,7 @@ func (handler *Handler) executeClaimed(ctx context.Context, update coordinator.U
 	if err != nil {
 		return coordinator.Decision{}, fmt.Errorf("%w: callback effect output: %v", telegrampipeline.ErrUnknownOperation, err)
 	}
+	prepared.PreviousActiveSessionID, prepared.PreviousActiveCarrier = previousActiveCardForBackgroundFinal(snapshot, operation.Plan, prepared)
 	id, revision, absent := prepared.Card.SessionID, &prepared.Card.ExpectedCarrierRevision, &prepared.Card.ExpectedCarrierAbsent
 	if prepared.Surface != nil {
 		id, revision, absent = prepared.Surface.NativeSessionID, &prepared.Surface.ExpectedCarrierRevision, &prepared.Surface.ExpectedCarrierAbsent
@@ -488,6 +498,8 @@ func (handler *Handler) resumeOperation(ctx context.Context, update coordinator.
 			if err != nil {
 				return coordinator.Decision{}, fmt.Errorf("refresh expired callback presentation: %w", err)
 			}
+			refreshed.PreviousActiveCarrier = clonePointer(operation.Prepared.PreviousActiveCarrier)
+			refreshed.PreviousActiveSessionID = operation.Prepared.PreviousActiveSessionID
 			refreshedOperation := operation
 			refreshedOperation.Prepared = &refreshed
 			changed, err := handler.operations.CompareAndSwap(ctx, operation.ID, CallbackPrepared, refreshedOperation)
@@ -613,8 +625,13 @@ type Prepared struct {
 	Presentation telegrambridge.KeyboardPresentation
 	Card         CardOutput
 	Surface      *SurfaceOutput
-	Edit         bool
-	Terminal     bool
+	// PreviousActiveCarrier is set only when a background-final notification
+	// selects its completed session. Its keyboard is removed before the
+	// notification carrier is edited into the new active card.
+	PreviousActiveSessionID domain.SessionID       `json:",omitempty"`
+	PreviousActiveCarrier   *telegramstate.Carrier `json:",omitempty"`
+	Edit                    bool
+	Terminal                bool
 }
 
 func PrepareCompletion(
@@ -973,6 +990,18 @@ func (sender *Sender) DeliverPendingStatuses(ctx context.Context, limit int) err
 			return err
 		}
 	}
+	// A process may stop after the nested callback receipt is durable but before
+	// the outer status receipt is copied. Only that provable half-commit is safe
+	// to converge automatically; genuinely unknown transport writes stay fenced.
+	coupled, err := sender.operations.ListCoupledStatuses(ctx, limit)
+	if err != nil {
+		return err
+	}
+	for _, operation := range coupled {
+		if _, err := sender.deliverStatusOperation(ctx, operation); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 func (sender *Sender) deliverStatusOperation(ctx context.Context, operation StatusOperation) (receiptResult coordinator.Receipt, returnErr error) {
@@ -996,11 +1025,29 @@ func (sender *Sender) deliverStatusOperation(ctx context.Context, operation Stat
 		return coordinator.Receipt{}, errors.New("durable status disappeared before delivery")
 	}
 	switch current.Phase {
-	case StatusReceiptConfirmed, StatusCommitted:
+	case StatusCommitted:
 		if current.Receipt <= 0 {
 			return coordinator.Receipt{}, errors.New("confirmed durable status has invalid receipt")
 		}
 		return coordinator.Receipt{MessageID: current.Receipt}, nil
+	case StatusReceiptConfirmed:
+		return sender.commitConfirmedStatus(ctx, current)
+	case StatusSendUnknown:
+		receipt, recoverable, err := sender.recoverCoupledCallbackReceipt(ctx, current)
+		if err != nil || !recoverable {
+			return coordinator.Receipt{}, err
+		}
+		confirmed := current
+		confirmed.Phase = StatusReceiptConfirmed
+		confirmed.Receipt = receipt.MessageID
+		changed, err := sender.operations.CompareAndSwapStatus(context.WithoutCancel(ctx), current.ID, StatusSendUnknown, confirmed)
+		if err != nil {
+			return coordinator.Receipt{}, err
+		}
+		if !changed {
+			return coordinator.Receipt{}, errors.New("durable status changed while recovering callback receipt")
+		}
+		return sender.commitConfirmedStatus(ctx, confirmed)
 	case StatusQueued:
 		operation = current
 	default:
@@ -1068,6 +1115,53 @@ func (sender *Sender) deliverStatusOperation(ctx context.Context, operation Stat
 	}
 	return receipt, nil
 }
+
+func (sender *Sender) recoverCoupledCallbackReceipt(ctx context.Context, status StatusOperation) (coordinator.Receipt, bool, error) {
+	if status.Prepared == nil {
+		return coordinator.Receipt{}, false, nil
+	}
+	callback, found, err := sender.operations.Load(ctx, status.ID)
+	if err != nil || !found {
+		return coordinator.Receipt{}, false, err
+	}
+	switch callback.Phase {
+	case CallbackReceiptConfirmed, CallbackCommitted:
+		if callback.Receipt <= 0 {
+			return coordinator.Receipt{}, false, errors.New("coupled callback receipt is invalid")
+		}
+		if err := sender.settlePreparedReceipt(ctx, status.ID, *status.Prepared, callback.Receipt); err != nil {
+			return coordinator.Receipt{}, false, err
+		}
+		return coordinator.Receipt{MessageID: callback.Receipt}, true, nil
+	default:
+		return coordinator.Receipt{}, false, nil
+	}
+}
+
+func (sender *Sender) commitConfirmedStatus(ctx context.Context, confirmed StatusOperation) (coordinator.Receipt, error) {
+	if confirmed.Phase != StatusReceiptConfirmed || confirmed.Receipt <= 0 {
+		return coordinator.Receipt{}, errors.New("confirmed durable status receipt is invalid")
+	}
+	if confirmed.Prepared != nil {
+		if err := sender.settlePreparedReceipt(ctx, confirmed.ID, *confirmed.Prepared, confirmed.Receipt); err != nil {
+			return coordinator.Receipt{}, err
+		}
+	}
+	committed := confirmed
+	committed.Phase = StatusCommitted
+	committed.Prepared = nil
+	changed, err := sender.operations.CompareAndSwapStatus(context.WithoutCancel(ctx), confirmed.ID, StatusReceiptConfirmed, committed)
+	if err != nil {
+		return coordinator.Receipt{}, err
+	}
+	if !changed {
+		current, found, loadErr := sender.operations.LoadStatus(ctx, confirmed.ID)
+		if loadErr != nil || !found || current.Phase != StatusCommitted || current.Receipt != confirmed.Receipt {
+			return coordinator.Receipt{}, errors.Join(loadErr, errors.New("durable status changed while committing recovered receipt"))
+		}
+	}
+	return coordinator.Receipt{MessageID: confirmed.Receipt}, nil
+}
 func (sender *Sender) ResolveStatusReceipt(ctx context.Context, operationID string) (coordinator.Receipt, bool, error) {
 	operation, found, err := sender.operations.LoadStatus(ctx, operationID)
 	if err != nil || !found {
@@ -1114,44 +1208,28 @@ func (sender *Sender) ConfirmUnknownStatus(ctx context.Context, operationID stri
 	if err != nil {
 		return err
 	}
-	if !found || operation.Phase != StatusSendUnknown {
+	if !found || operation.Phase != StatusSendUnknown && operation.Phase != StatusReceiptConfirmed {
 		return errors.New("durable status is not awaiting explicit confirmation")
 	}
 	if operation.Edit && receipt.MessageID != operation.Status.SourceMessageID {
 		return errors.New("verified Telegram edit receipt does not match its source carrier")
 	}
 	confirmed := operation
-	confirmed.Phase = StatusReceiptConfirmed
-	confirmed.Receipt = receipt.MessageID
-	changed, err := sender.operations.CompareAndSwapStatus(ctx, operationID, StatusSendUnknown, confirmed)
-	if err != nil {
-		return err
-	}
-	if !changed {
-		return errors.New("durable status changed while confirming receipt")
-	}
-	if operation.Prepared != nil {
-		if callback, exists, loadErr := sender.operations.Load(ctx, operationID); loadErr != nil {
-			return loadErr
-		} else if exists && callback.Phase == CallbackSendUnknown {
-			if err := sender.ConfirmUnknownSend(ctx, operationID, receipt); err != nil {
-				return err
-			}
-		} else if err := finalizePrepared(ctx, sender.registry, sender.uiState, *operation.Prepared, receipt.MessageID); err != nil {
-			return err
+	if operation.Phase == StatusSendUnknown {
+		confirmed.Phase = StatusReceiptConfirmed
+		confirmed.Receipt = receipt.MessageID
+		changed, swapErr := sender.operations.CompareAndSwapStatus(ctx, operationID, StatusSendUnknown, confirmed)
+		if swapErr != nil {
+			return swapErr
 		}
+		if !changed {
+			return errors.New("durable status changed while confirming receipt")
+		}
+	} else if operation.Receipt != receipt.MessageID {
+		return errors.New("verified Telegram receipt changed after confirmation")
 	}
-	committed := confirmed
-	committed.Phase = StatusCommitted
-	committed.Prepared = nil
-	changed, err = sender.operations.CompareAndSwapStatus(ctx, operationID, StatusReceiptConfirmed, committed)
-	if err != nil {
-		return err
-	}
-	if !changed {
-		return errors.New("durable status changed while committing receipt")
-	}
-	return nil
+	_, err = sender.commitConfirmedStatus(ctx, confirmed)
+	return err
 }
 func cloneCoordinatorKeyboard(keyboard *coordinator.KeyboardMarkup) *coordinator.KeyboardMarkup {
 	if keyboard == nil {
@@ -1189,7 +1267,26 @@ func (sender *Sender) lockPreparedDelivery(prepared *Prepared) func() {
 		sender.delivery.Lock()
 		return sender.delivery.Unlock
 	}
-	value, _ := sender.sessionDelivery.LoadOrStore(prepared.Card.SessionID, &sync.Mutex{})
+	first, second := prepared.Card.SessionID, prepared.PreviousActiveSessionID
+	if second != "" && second != first && string(second) < string(first) {
+		first, second = second, first
+	}
+	firstUnlock := sender.lockSessionDelivery(first)
+	if second == "" || second == first {
+		return firstUnlock
+	}
+	secondUnlock := sender.lockSessionDelivery(second)
+	return func() {
+		secondUnlock()
+		firstUnlock()
+	}
+}
+
+func (sender *Sender) lockSessionDelivery(sessionID domain.SessionID) func() {
+	if sender.sessionGate != nil {
+		return sender.sessionGate.Lock(sessionID)
+	}
+	value, _ := sender.sessionDelivery.LoadOrStore(sessionID, &sync.Mutex{})
 	gate := value.(*sync.Mutex)
 	gate.Lock()
 	return gate.Unlock
@@ -1308,6 +1405,27 @@ func (sender *Sender) sendPrepared(
 	if wantsEdit != edit {
 		return coordinator.Receipt{}, errors.New("prepared Telegram carrier effect does not match sender method")
 	}
+	if edit && prepared.Card.SessionID != "" && prepared.Card.SessionID != domain.SessionID(telegramui.GlobalSurfaceID) {
+		state, err := sender.uiState.Load(ctx)
+		if err != nil {
+			return coordinator.Receipt{}, err
+		}
+		if prepared.Card.MakeActive && prepared.PreviousActiveCarrier != nil {
+			previous, exists := state.Card(prepared.PreviousActiveSessionID)
+			previousStillActive := prepared.PreviousActiveSessionID != "" && state.ActiveSession == prepared.PreviousActiveSessionID && exists && previous.Carrier == *prepared.PreviousActiveCarrier
+			target, targetExists := state.Card(prepared.Card.SessionID)
+			targetAlreadySelected := state.ActiveSession == prepared.Card.SessionID && targetExists && target.Carrier == (telegramstate.Carrier{
+				ChatID: prepared.Status.ConversationID, MessageID: prepared.Status.SourceMessageID,
+			})
+			if !previousStillActive && !targetAlreadySelected {
+				return coordinator.Receipt{}, carddeliveryguard.ErrNotCurrent
+			}
+		}
+		staleSelect := durable && operation.Plan.Action == telegramui.ActionSelectSession
+		if state.ActiveSession != "" && state.ActiveSession != prepared.Card.SessionID && !prepared.Card.MakeActive && (!durable || staleSelect) {
+			return coordinator.Receipt{}, carddeliveryguard.ErrNotCurrent
+		}
+	}
 	if edit && !durable && prepared.Card.ExpectedCarrierRevision != nil {
 		carrier := telegramstate.Carrier{ChatID: status.ConversationID, MessageID: status.SourceMessageID}
 		state, err := sender.uiState.Load(ctx)
@@ -1317,6 +1435,26 @@ func (sender *Sender) sendPrepared(
 		card, found := state.Card(prepared.Card.SessionID)
 		if !found || card.Carrier != carrier || card.CarrierRevision != *prepared.Card.ExpectedCarrierRevision {
 			return coordinator.Receipt{}, carddeliveryguard.ErrNotCurrent
+		}
+	}
+	if prepared.PreviousActiveCarrier != nil {
+		deactivator, ok := sender.base.(InlineKeyboardDeactivator)
+		if !ok {
+			return coordinator.Receipt{}, errors.New("Telegram transport cannot deactivate a previous inline keyboard")
+		}
+		carrier := *prepared.PreviousActiveCarrier
+		if prepared.PreviousActiveSessionID == "" || prepared.PreviousActiveSessionID == prepared.Card.SessionID ||
+			carrier.ChatID != status.ConversationID || carrier.MessageID <= 0 || carrier.MessageID == status.SourceMessageID || !edit || !prepared.Card.MakeActive {
+			return coordinator.Receipt{}, errors.New("previous active Telegram carrier is invalid")
+		}
+		// Keyboard removal is idempotent and deliberately precedes the callback
+		// send-unknown fence. A crash can therefore repeat only the safe removal,
+		// never an already attempted card transition.
+		if err := deactivator.DeactivateInlineKeyboard(ctx, operationID+":deactivate_previous", carrier.ChatID, carrier.MessageID); err != nil {
+			return coordinator.Receipt{}, fmt.Errorf("deactivate previous Telegram card: %w", err)
+		}
+		if err := sender.registry.InvalidateCarrier(ctx, carrier); err != nil {
+			return coordinator.Receipt{}, fmt.Errorf("invalidate previous Telegram card: %w", err)
 		}
 	}
 	if durable {
@@ -1430,28 +1568,66 @@ func (sender *Sender) ConfirmUnknownSend(ctx context.Context, operationID string
 	if operation.Prepared.Edit && receipt.MessageID != operation.Prepared.Status.SourceMessageID {
 		return errors.New("verified callback edit receipt does not match its source carrier")
 	}
-	confirmed := operation
-	confirmed.Phase = CallbackReceiptConfirmed
-	confirmed.Receipt = receipt.MessageID
-	changed, err := sender.operations.CompareAndSwap(ctx, operationID, CallbackSendUnknown, confirmed)
+	return sender.settlePreparedReceipt(ctx, operationID, *operation.Prepared, receipt.MessageID)
+}
+
+func (sender *Sender) settlePreparedReceipt(ctx context.Context, operationID string, prepared Prepared, receipt int64) error {
+	if receipt <= 0 {
+		return errors.New("prepared Telegram receipt must be positive")
+	}
+	operation, found, err := sender.operations.Load(ctx, operationID)
 	if err != nil {
 		return err
 	}
-	if !changed {
-		return errors.New("callback send changed while confirming receipt")
+	if !found {
+		return finalizePrepared(ctx, sender.registry, sender.uiState, prepared, receipt)
 	}
-	if err := finalizePrepared(ctx, sender.registry, sender.uiState, *confirmed.Prepared, receipt.MessageID); err != nil {
+	if operation.Prepared != nil && !reflect.DeepEqual(*operation.Prepared, prepared) {
+		return errors.New("coupled callback prepared output changed")
+	}
+	switch operation.Phase {
+	case CallbackSendUnknown:
+		confirmed := operation
+		confirmed.Phase = CallbackReceiptConfirmed
+		confirmed.Receipt = receipt
+		changed, swapErr := sender.operations.CompareAndSwap(ctx, operationID, CallbackSendUnknown, confirmed)
+		if swapErr != nil {
+			return swapErr
+		}
+		if !changed {
+			return errors.New("callback send changed while confirming receipt")
+		}
+		operation = confirmed
+	case CallbackReceiptConfirmed:
+		if operation.Receipt != receipt {
+			return errors.New("coupled callback receipt changed")
+		}
+	case CallbackCommitted:
+		if operation.Receipt != receipt {
+			return errors.New("committed callback receipt changed")
+		}
+		return nil
+	default:
+		return errors.New("callback send is not awaiting receipt settlement")
+	}
+	if operation.Prepared == nil {
+		return errors.New("confirmed callback operation lost prepared output")
+	}
+	if err := finalizePrepared(ctx, sender.registry, sender.uiState, *operation.Prepared, receipt); err != nil {
 		return err
 	}
-	committed := confirmed
+	committed := operation
 	committed.Phase = CallbackCommitted
 	committed.Prepared = nil
-	changed, err = sender.operations.CompareAndSwap(ctx, operationID, CallbackReceiptConfirmed, committed)
+	changed, err := sender.operations.CompareAndSwap(ctx, operationID, CallbackReceiptConfirmed, committed)
 	if err != nil {
 		return err
 	}
 	if !changed {
-		return errors.New("callback send changed while committing verified receipt")
+		current, exists, loadErr := sender.operations.Load(ctx, operationID)
+		if loadErr != nil || !exists || current.Phase != CallbackCommitted || current.Receipt != receipt {
+			return errors.Join(loadErr, errors.New("callback send changed while committing verified receipt"))
+		}
 	}
 	return nil
 }
@@ -1683,12 +1859,26 @@ func clonePrepared(prepared Prepared) Prepared {
 	clone.Presentation.AcceptedTurnRecovery = clonePointer(prepared.Presentation.AcceptedTurnRecovery)
 	clone.Presentation.StatusRecovery = clonePointer(prepared.Presentation.StatusRecovery)
 	clone.Presentation.ArtifactRetry = clonePointer(prepared.Presentation.ArtifactRetry)
+	clone.PreviousActiveCarrier = clonePointer(prepared.PreviousActiveCarrier)
 	clone.Card = cloneCardOutput(prepared.Card)
 	if prepared.Surface != nil {
 		surface := cloneSurfaceOutput(*prepared.Surface)
 		clone.Surface = &surface
 	}
 	return clone
+}
+
+func previousActiveCardForBackgroundFinal(state telegramstate.State, plan telegrampipeline.CallbackPlan, prepared Prepared) (domain.SessionID, *telegramstate.Carrier) {
+	if plan.Action != telegramui.ActionSelectSession || plan.SessionID == "" || prepared.Card.SessionID != plan.SessionID ||
+		!prepared.Card.MakeActive || !prepared.Edit || state.ActiveSession == "" || state.ActiveSession == plan.SessionID {
+		return "", nil
+	}
+	target, targetExists := state.Card(plan.SessionID)
+	previous, previousExists := state.Card(state.ActiveSession)
+	if !targetExists || target.Carrier != plan.Carrier || !previousExists || previous.Carrier.ChatID <= 0 || previous.Carrier.MessageID <= 0 || previous.Carrier == plan.Carrier {
+		return "", nil
+	}
+	return state.ActiveSession, clonePointer(&previous.Carrier)
 }
 func cloneSurfaceOutput(output SurfaceOutput) SurfaceOutput {
 	clone := output

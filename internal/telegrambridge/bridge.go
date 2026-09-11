@@ -317,6 +317,26 @@ func (sender *Sender) EditStatusWithKeyboard(
 	return coordinator.Receipt{MessageID: int64(message.MessageID)}, nil
 }
 
+// DeactivateInlineKeyboard removes callbacks from a previous card without
+// changing its preserved page text or screenshot.
+func (sender *Sender) DeactivateInlineKeyboard(ctx context.Context, _ string, chatID, messageID int64) error {
+	message, err := sender.client.EditMessageReplyMarkup(ctx, telegram.EditMessageReplyMarkupRequest{
+		ChatID:    telegram.ChatID(chatID),
+		MessageID: telegram.MessageID(messageID),
+		ReplyMarkup: telegram.InlineKeyboardMarkup{
+			InlineKeyboard: [][]telegram.InlineKeyboardButton{},
+		},
+		Priority: telegram.MutationInteractive,
+	})
+	if err != nil {
+		return fmt.Errorf("deactivate Telegram inline keyboard: %w", err)
+	}
+	if int64(message.Chat.ID) != chatID || int64(message.MessageID) != messageID {
+		return errors.New("Telegram keyboard deactivation returned another carrier")
+	}
+	return nil
+}
+
 func (sender *Sender) acknowledgeCallback(ctx context.Context, operationID, callbackQueryID string) {
 	if callbackQueryID == "" {
 		return

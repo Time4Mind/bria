@@ -60,6 +60,7 @@ type Request = promptpreprocess.Request
 type StartRequest struct {
 	Key                     BindingKey
 	ResumeProviderSessionID string
+	Replacement             bool
 }
 
 type Session interface {

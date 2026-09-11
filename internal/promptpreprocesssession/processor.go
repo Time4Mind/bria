@@ -148,17 +148,28 @@ func (processor *Processor) Reconcile(ctx context.Context, states []PrimaryState
 }
 
 func (processor *Processor) startSession(ctx context.Context, start StartRequest) (promptpreprocesscore.Session, error) {
+	replacement := start.Replacement
+	replacementStarted := time.Now()
 	var lastErr error
+	var lastProvider domain.Provider
+	var lastModel string
 	for attempts := 0; attempts < 2; attempts++ {
 		selection, err := processor.commands.Select(ctx)
 		if err != nil {
+			if replacement {
+				processor.observe(context.WithoutCancel(ctx), LifecycleObservation{
+					State: "replacement_failed", Duration: time.Since(replacementStarted), ErrorCategory: startupErrorCategory(err),
+				})
+			}
 			return nil, err
 		}
+		lastProvider, lastModel = selection.Provider(), selection.Model()
 		started := time.Now()
 		processor.observe(context.WithoutCancel(ctx), LifecycleObservation{
 			State: "starting", Provider: selection.Provider(), Model: selection.Model(),
 		})
 		var prepared promptpreprocesscore.Session
+		unsupportedProvider := false
 		switch selection.Provider() {
 		case domain.ProviderCodex:
 			var workdir string
@@ -170,25 +181,46 @@ func (processor *Processor) startSession(ctx context.Context, start StartRequest
 			// A stateless command is not a satellite: it cannot preserve context
 			// or resume an archived binding. Fail closed until that provider has
 			// a persistent read-only adapter contract.
+			unsupportedProvider = true
 			err = ErrUnavailable
 		}
 		if err == nil {
 			processor.observe(context.WithoutCancel(ctx), LifecycleObservation{
 				State: "ready", Provider: selection.Provider(), Model: selection.Model(), Duration: time.Since(started),
 			})
+			if replacement {
+				processor.observe(context.WithoutCancel(ctx), LifecycleObservation{
+					State: "replacement_ready", Provider: selection.Provider(), Model: selection.Model(), Duration: time.Since(started),
+				})
+			}
 			return &observedSession{session: prepared, selection: selection, processor: processor.commands}, nil
 		}
 		processor.observe(context.WithoutCancel(ctx), LifecycleObservation{
 			State: "start_failed", Provider: selection.Provider(), Model: selection.Model(),
-			Duration: time.Since(started), ErrorCategory: "provider",
+			Duration: time.Since(started), ErrorCategory: startupErrorCategory(err),
 		})
-		lastErr = err
+		if !unsupportedProvider || !errors.Is(lastErr, promptpreprocesscore.ErrResumeUnavailable) {
+			lastErr = err
+		}
 		processor.commands.Report(selection, false)
 	}
 	if lastErr == nil {
 		lastErr = ErrUnavailable
 	}
+	if replacement {
+		processor.observe(context.WithoutCancel(ctx), LifecycleObservation{
+			State: "replacement_failed", Provider: lastProvider, Model: lastModel,
+			Duration: time.Since(replacementStarted), ErrorCategory: startupErrorCategory(lastErr),
+		})
+	}
 	return nil, lastErr
+}
+
+func startupErrorCategory(err error) string {
+	if errors.Is(err, promptpreprocesscore.ErrResumeUnavailable) {
+		return "thread_not_found"
+	}
+	return "provider"
 }
 
 func (processor *Processor) observe(ctx context.Context, observation LifecycleObservation) {

@@ -2,6 +2,7 @@ package telegramcontroller
 
 import (
 	"context"
+	"slices"
 	"strings"
 
 	"bria/internal/domain"
@@ -16,7 +17,18 @@ func (controller *Controller) settingsSemanticResult(ctx context.Context) (Seman
 }
 
 func (controller *Controller) settingsCategorySemanticResult(ctx context.Context, category telegramsettingsview.Category) (SemanticActionResult, error) {
-	surface, err := telegramsettingsview.RenderCategory(ctx, controller.settings, controller.scopedProviderPreferences(), controller.queueLimit, category)
+	providers := controller.scopedProviderPreferences()
+	providerUnavailable := false
+	surface, err := telegramsettingsview.RenderCategory(ctx, controller.settings, providers, controller.queueLimit, category)
+	if err != nil && category == telegramsettingsview.CategoryProviders && providers != nil {
+		// RenderCategory is the single live inventory read. If that read fails,
+		// render a degraded page without querying the provider a second time.
+		providerUnavailable = true
+		surface, err = telegramsettingsview.RenderCategory(ctx, controller.settings, nil, controller.queueLimit, category)
+	}
+	if err == nil && providerUnavailable {
+		surface = telegramsettingsview.AppendFields(surface, telegramsettingsview.Field{Name: "Статус CLI", Value: "временно недоступен"})
+	}
 	return controller.projectSettingsSurface(ctx, surface, category, err)
 }
 
@@ -38,13 +50,6 @@ func (controller *Controller) projectSettingsSurface(ctx context.Context, surfac
 	if err != nil {
 		return SemanticActionResult{}, err
 	}
-	rows := make([][]SemanticButton, len(surface.Rows))
-	for i, row := range surface.Rows {
-		rows[i] = make([]SemanticButton, len(row))
-		for j, button := range row {
-			rows[i][j] = SemanticButton{Label: button.Label, Action: SemanticActionKind(button.Action), Choice: button.Choice}
-		}
-	}
 	if category == telegramsettingsview.CategoryCreation && controller.settings != nil {
 		if current, snapshotErr := controller.settings.Snapshot(ctx); snapshotErr == nil {
 			nodeID := controller.currentNodeID()
@@ -65,8 +70,16 @@ func (controller *Controller) projectSettingsSurface(ctx context.Context, surfac
 			if value := strings.TrimSpace(current.DefaultWorkdirs[nodeID]); value != "" {
 				workdir = value
 			}
+			surface.Text = withoutSettingsFields(surface.Text, "CLI по умолчанию", "Папка по умолчанию")
+			for rowIndex := range surface.Rows {
+				for buttonIndex := range surface.Rows[rowIndex] {
+					if surface.Rows[rowIndex][buttonIndex].Action == "settings_default_provider" {
+						surface.Rows[rowIndex][buttonIndex].Label = "CLI по умолчанию"
+					}
+				}
+			}
 			// Contextual values are part of the creation table in the same order
-			// as their controls; avoid appending duplicate, unbound rows.
+			// as their controls; avoid duplicate, node-agnostic defaults.
 			surface = telegramsettingsview.AppendFields(surface,
 				telegramsettingsview.Field{Name: "Нода", Value: nodeName},
 				telegramsettingsview.Field{Name: "CLI по умолчанию", Value: provider},
@@ -79,5 +92,22 @@ func (controller *Controller) projectSettingsSurface(ctx context.Context, surfac
 			}
 		}
 	}
+	rows := make([][]SemanticButton, len(surface.Rows))
+	for i, row := range surface.Rows {
+		rows[i] = make([]SemanticButton, len(row))
+		for j, button := range row {
+			rows[i][j] = SemanticButton{Label: button.Label, Action: SemanticActionKind(button.Action), Choice: button.Choice}
+		}
+	}
 	return SemanticActionResult{Surface: &SemanticSurface{Text: surface.Text, RichMarkdown: surface.RichMarkdown, Rows: rows}}, nil
+}
+
+func withoutSettingsFields(text string, names ...string) string {
+	lines := strings.Split(text, "\n")
+	lines = slices.DeleteFunc(lines, func(line string) bool {
+		return slices.ContainsFunc(names, func(name string) bool {
+			return strings.HasPrefix(strings.TrimSpace(line), "| "+name+" |")
+		})
+	})
+	return strings.Join(lines, "\n")
 }

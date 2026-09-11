@@ -159,6 +159,17 @@ func TestUnknownCallbackPublicVerticalRecoversOnceAndPollingContinues(t *testing
 	}
 	transport := &verticalTransport{}
 	uiState := telegramstate.NewMemoryStore()
+	if err := uiState.Update(context.Background(), func(state *telegramstate.State) error {
+		state.ActiveSession = original.Plan.SessionID
+		return state.SetCard(telegramstate.Card{
+			SessionID: original.Plan.SessionID,
+			Carrier:   original.Plan.Carrier,
+			Page:      telegramstate.Page{Current: 1, Total: 1},
+			History:   []string{"current state"},
+		})
+	}); err != nil {
+		t.Fatal(err)
+	}
 	handler, sender, err := telegramflow.New(telegramflow.Config{OwnerUserID: 7, OwnerPrivateChatID: 42, Presenter: presenter,
 		CallbackRegistry: registry, UIState: uiState, Messages: messageStub{}, Callbacks: recoveryExecutor, Operations: operations, Sender: transport})
 	if err != nil {

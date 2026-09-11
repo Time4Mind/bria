@@ -2,6 +2,7 @@ package sessioncreation_test
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"bria/internal/domain"
@@ -27,6 +28,26 @@ func TestFlowAlwaysShowsMultipleComputersAndUsesValidPerComputerDefaults(t *test
 	current, ok := flow.CurrentV2(computers, defaults)
 	if !ok || current.Step != sessioncreation.StepDirectory || current.Draft.Provider != domain.ProviderClaude || current.Draft.Workdir != "/work" {
 		t.Fatalf("selected snapshot = %#v, open=%t", current, ok)
+	}
+}
+
+func TestFlowUsesCLITermWhenSelectedProviderDisappears(t *testing.T) {
+	flow := sessioncreation.New()
+	computer := sessioncreation.Computer{ID: "local", Name: "Local", Capabilities: []sessioncreation.ProviderCapability{
+		{Provider: domain.ProviderCodex, Installed: true, Enabled: true},
+		{Provider: domain.ProviderClaude, Installed: true, Enabled: true},
+	}}
+	defaults := sessioncreation.Defaults{}
+	if initial := flow.BeginV2([]sessioncreation.Computer{computer}, defaults); initial.Step != sessioncreation.StepProvider {
+		t.Fatalf("initial step = %q", initial.Step)
+	}
+	if err := flow.SelectProviderV2(domain.ProviderCodex, defaults); err != nil {
+		t.Fatal(err)
+	}
+	computer.Capabilities[0].Enabled = false
+	current, open := flow.CurrentV2([]sessioncreation.Computer{computer}, defaults)
+	if !open || !strings.Contains(current.ValidationError, "выбранный CLI больше недоступен") || strings.Contains(strings.ToLower(current.ValidationError), "бэкенд") {
+		t.Fatalf("validation error = %q, open=%t", current.ValidationError, open)
 	}
 }
 

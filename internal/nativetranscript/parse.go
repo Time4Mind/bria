@@ -10,6 +10,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"bria/internal/assistanttext"
 	"bria/internal/runtimeprotocol"
 	"bria/internal/tooltext"
 )
@@ -188,6 +189,7 @@ func (s *parseState) parse(line []byte, opts Options, offset int64) ([]Event, er
 		}
 	}
 	final := func(text, source string) {
+		text = assistanttext.StripTerminalMemoryCitation(text)
 		if text == s.lastFinal && s.finalSource != "" && source != s.finalSource {
 			return
 		}
@@ -344,7 +346,7 @@ func (s *parseState) parse(line []byte, opts Options, offset int64) ([]Event, er
 			model(rec.Message.Model)
 			if text != "" {
 				if rec.Message.StopReason == "end_turn" {
-					emit(KindFinal, text)
+					final(text, "assistant")
 				} else {
 					emit(KindCommentary, text)
 				}

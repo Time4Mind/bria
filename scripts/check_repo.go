@@ -1186,7 +1186,7 @@ var telegramControllerAllowedImports = []string{
 	"internal/telegramturnhelpers",
 	"internal/telegramnativeview",
 	"internal/nativeapprovalflow",
-	"internal/app", "internal/cardtranscript", "internal/coordinator", "internal/domain", "internal/promptpreprocess", "internal/runtimeprotocol", "internal/sessioncreation", "internal/sessionruntime", "internal/settingsport", "internal/telegramcreationview", "internal/telegramnodes", "internal/telegramsettings", "internal/telegramsettingsview", "internal/telegramsessions", "internal/telegramstatus", "internal/turnprocessing",
+	"internal/app", "internal/cardtranscript", "internal/coordinator", "internal/domain", "internal/promptpreprocess", "internal/runtimeprotocol", "internal/sessioncreation", "internal/sessionruntime", "internal/settingsport", "internal/telegramcreationview", "internal/telegramnodes", "internal/telegramsettings", "internal/telegramsettingsview", "internal/telegramsessions", "internal/telegramstatus", "internal/turnfailure", "internal/turnprocessing",
 }
 
 var telegramBridgeAllowedImports = []string{
@@ -1477,8 +1477,12 @@ var packagePolicies = map[string]packagePolicy{
 	},
 	"internal/nativetranscript": {
 		responsibility:     "read bounded exact-session native transcripts and correlate accepted prompts, questions and final output",
-		allowedImports:     []string{"internal/nativejsonline", "internal/runtimeprotocol", "internal/tooltext"},
+		allowedImports:     []string{"internal/assistanttext", "internal/nativejsonline", "internal/runtimeprotocol", "internal/tooltext"},
 		maxProductionLines: 1100,
+	},
+	"internal/assistanttext": {
+		responsibility:     "remove strictly validated service envelopes from assistant finals without I/O",
+		maxProductionLines: 125,
 	},
 	"internal/nativejsonline": {
 		responsibility:     "frame bounded-memory native JSONL diagnostic candidates without interpreting provider events",
@@ -1596,7 +1600,7 @@ var packagePolicies = map[string]packagePolicy{
 		responsibility: "compose durable message custody, accepted-turn reconciliation and recovery finalization",
 		allowedImports: []string{
 			"internal/turncontinuation",
-			"internal/acceptedrecovery", "internal/domain", "internal/durableflow", "internal/durableinputbridge", "internal/messagejournal", "internal/sessionruntime", "internal/sessionsupervisor", "internal/telegramcontroller", "internal/telegramnotify", "internal/turnprocessing",
+			"internal/acceptedrecovery", "internal/domain", "internal/durableflow", "internal/durableinputbridge", "internal/durableoutputwait", "internal/messagejournal", "internal/sessionruntime", "internal/sessionsupervisor", "internal/telegramcontroller", "internal/telegramnotify", "internal/turnprocessing",
 		},
 		maxProductionLines: 550,
 	},
@@ -1636,6 +1640,11 @@ var packagePolicies = map[string]packagePolicy{
 		responsibility:     "process durable ordered message journal work",
 		allowedImports:     []string{"internal/acceptedinput", "internal/messagejournal"},
 		maxProductionLines: 700,
+	},
+	"internal/durableoutputwait": {
+		responsibility:     "observe one exact durable output delivery phase without mutation",
+		allowedImports:     []string{"internal/messagejournal"},
+		maxProductionLines: 100,
 	},
 	"internal/acceptedinput": {
 		responsibility:     "verify exact input custody and commit observed provider acceptance",
@@ -1882,8 +1891,8 @@ var packagePolicies = map[string]packagePolicy{
 	},
 	"internal/cardtranscript": {
 		responsibility:     "render bounded structured session transcript blocks for Telegram cards",
-		allowedImports:     []string{"internal/markdownliteral", "internal/tooltext"},
-		maxProductionLines: 500,
+		allowedImports:     []string{"internal/assistanttext", "internal/markdownliteral", "internal/tooltext"},
+		maxProductionLines: 550,
 	},
 	"internal/promptpreprocesscommand": {
 		responsibility:     "run isolated one-shot prompt rewriting through the cheapest enabled local provider",
@@ -1935,7 +1944,7 @@ var packagePolicies = map[string]packagePolicy{
 		responsibility: "compose the single-computer Bria process and bind post-commit status refresh delivery",
 		allowedImports: []string{
 			"internal/providermodels",
-			"internal/acceptedcontinuation", "internal/app", "internal/authcomposition", "internal/callbacktoken", "internal/claudestore", "internal/config", "internal/coordinator", "internal/domain", "internal/durablecomposition", "internal/durableflow", "internal/interactioncomposition", "internal/messagejournal", "internal/nativerecoverycomposition", "internal/observability", "internal/processenv", "internal/promptpreprocess", "internal/promptpreprocesscommand", "internal/promptpreprocesssession", "internal/providerquota", "internal/recoverycomposition", "internal/recoveryruntime", "internal/runtimefactory", "internal/safelog", "internal/screenproduction", "internal/sessioncreation", "internal/sessionexpiry", "internal/sessionid", "internal/sessionnaming", "internal/sessionruntime", "internal/sessionsupervisor", "internal/settings", "internal/settingscomposition", "internal/storage", "internal/supervisioncomposition", "internal/telegram", "internal/telegrambridge", "internal/telegramcompletioncomposition", "internal/telegramcontroller", "internal/telegramflow", "internal/telegramnotify", "internal/telegrampipeline", "internal/telegrampromptcomposition", "internal/telegramrecoverycomposition", "internal/telegramruntimecomposition", "internal/turnruntimecomposition", "internal/workdir",
+			"internal/acceptedcontinuation", "internal/app", "internal/authcomposition", "internal/callbacktoken", "internal/claudestore", "internal/config", "internal/coordinator", "internal/domain", "internal/durablecomposition", "internal/durableflow", "internal/interactioncomposition", "internal/messagejournal", "internal/nativerecoverycomposition", "internal/observability", "internal/processenv", "internal/promptpreprocess", "internal/promptpreprocesscommand", "internal/promptpreprocesssession", "internal/providerquota", "internal/recoverycomposition", "internal/recoveryruntime", "internal/runtimefactory", "internal/safelog", "internal/screenproduction", "internal/sessioncreation", "internal/sessiondeliverygate", "internal/sessionexpiry", "internal/sessionid", "internal/sessionnaming", "internal/sessionruntime", "internal/sessionsupervisor", "internal/settings", "internal/settingscomposition", "internal/storage", "internal/supervisioncomposition", "internal/telegram", "internal/telegrambridge", "internal/telegramcompletioncomposition", "internal/telegramcontroller", "internal/telegramflow", "internal/telegramnotify", "internal/telegrampipeline", "internal/telegrampromptcomposition", "internal/telegramrecoverycomposition", "internal/telegramruntimecomposition", "internal/turnruntimecomposition", "internal/workdir",
 		},
 		maxProductionLines: 1250,
 	},
@@ -2049,8 +2058,8 @@ var packagePolicies = map[string]packagePolicy{
 	},
 	"internal/telegram": {
 		responsibility:     "implement the Telegram HTTP transport and classify delivery outcomes",
-		allowedImports:     []string{"internal/mutationscheduler", "internal/telegramrich"},
-		maxProductionLines: 1750,
+		allowedImports:     []string{"internal/mutationscheduler", "internal/telegramrich", "internal/telegramtransport"},
+		maxProductionLines: 1800,
 	},
 	"internal/telegramapp": {
 		responsibility: "translate Telegram intents into application commands",
@@ -2082,6 +2091,11 @@ var packagePolicies = map[string]packagePolicy{
 		allowedImports:     []string{"internal/domain"},
 		maxProductionLines: 1250,
 	},
+	"internal/sessiondeliverygate": {
+		responsibility:     "serialize one session card delivery with its active-selection transition",
+		allowedImports:     []string{"internal/domain"},
+		maxProductionLines: 100,
+	},
 	"internal/sessionnaming": {
 		responsibility:     "derive and persist optional short session labels",
 		allowedImports:     []string{"internal/domain", "internal/promptpreprocess"},
@@ -2111,17 +2125,17 @@ var packagePolicies = map[string]packagePolicy{
 			"internal/telegramturnhelpers",
 			"internal/telegramnativeview",
 			"internal/nativeapprovalflow",
-			"internal/app", "internal/cardtranscript", "internal/coordinator", "internal/domain", "internal/promptpreprocess", "internal/runtimeprotocol", "internal/sessioncreation", "internal/sessionruntime", "internal/settingsport", "internal/telegramcreationview", "internal/telegramnodes", "internal/telegramsettings", "internal/telegramsettingsview", "internal/telegramsessions", "internal/telegramstatus", "internal/turnprocessing",
+			"internal/app", "internal/cardtranscript", "internal/coordinator", "internal/domain", "internal/promptpreprocess", "internal/runtimeprotocol", "internal/sessioncreation", "internal/sessionruntime", "internal/settingsport", "internal/telegramcreationview", "internal/telegramnodes", "internal/telegramsettings", "internal/telegramsettingsview", "internal/telegramsessions", "internal/telegramstatus", "internal/turnfailure", "internal/turnprocessing",
 		},
-		maxProductionLines: 5650,
+		maxProductionLines: 5800,
 	},
 	"internal/telegramflow": {
-		responsibility: "join Telegram callback, presentation, current-global-surface fencing, and durable card boundaries",
+		responsibility: "join Telegram callback, presentation, current-global-surface fencing, durable card boundaries, and crash-safe coupled receipts",
 		allowedImports: []string{
 			"internal/callbackdiagnostic", "internal/callbacktoken", "internal/carddeliveryguard", "internal/coordinator", "internal/domain", "internal/telegram", "internal/telegrambridge", "internal/telegramtrace",
 			"internal/telegramops", "internal/telegrampipeline", "internal/telegramrecovery", "internal/telegramrecovery/statusrecovery", "internal/telegramstate", "internal/telegramui",
 		},
-		maxProductionLines: 2650,
+		maxProductionLines: 2900,
 	},
 	"internal/telegramnotify": {
 		responsibility: "deliver final and background Telegram notifications",
@@ -2168,8 +2182,12 @@ var packagePolicies = map[string]packagePolicy{
 	},
 	"internal/telegramtrace": {
 		responsibility:     "build and encode correlated payload-free Telegram flow diagnostics",
-		allowedImports:     []string{"internal/controllertelemetry", "internal/callbackdiagnostic", "internal/callbacktoken", "internal/coordinator", "internal/safelog", "internal/telegrambridge", "internal/telegrampipeline", "internal/telegramui"},
+		allowedImports:     []string{"internal/controllertelemetry", "internal/callbackdiagnostic", "internal/callbacktoken", "internal/coordinator", "internal/safelog", "internal/telegrambridge", "internal/telegramtransport", "internal/telegrampipeline", "internal/telegramui"},
 		maxProductionLines: 400,
+	},
+	"internal/telegramtransport": {
+		responsibility:     "classify Telegram network failures into a bounded payload-free vocabulary",
+		maxProductionLines: 100,
 	},
 	"internal/controllertelemetry": {
 		responsibility:     "define payload-free typed session lifecycle and selection diagnostics",
@@ -2214,6 +2232,11 @@ var packagePolicies = map[string]packagePolicy{
 		responsibility:     "process one exact provider turn with durable acceptance and attachment custody",
 		allowedImports:     []string{"internal/domain", "internal/sessionruntime"},
 		maxProductionLines: 300,
+	},
+	"internal/turnfailure": {
+		responsibility:     "classify terminal provider outcomes without treating intentional cancellation as provider failure",
+		allowedImports:     []string{"internal/controllertelemetry", "internal/sessionruntime"},
+		maxProductionLines: 100,
 	},
 	"internal/update": {
 		responsibility:       "verify releases and orchestrate safe updates",
@@ -2477,7 +2500,7 @@ func checkGraph(packages []packageInfo) []string {
 				problems["workdir validator imports concrete component: "+edge] = struct{}{}
 			}
 			if beginsWith(source, "internal/telegram") &&
-				!allowedPackageImport(target, "internal/telegram", []string{"internal/mutationscheduler", "internal/telegramrich"}) {
+				!allowedPackageImport(target, "internal/telegram", []string{"internal/mutationscheduler", "internal/telegramrich", "internal/telegramtransport"}) {
 				problems["Telegram transport imports Bria product package: "+edge] = struct{}{}
 			}
 			if beginsWith(source, "internal/telegramui") &&

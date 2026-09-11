@@ -5,12 +5,15 @@ import (
 	"errors"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"bria/internal/carddeliveryguard"
 	"bria/internal/coordinator"
+	"bria/internal/domain"
+	"bria/internal/sessiondeliverygate"
 	"bria/internal/telegramflow"
 	"bria/internal/telegrampipeline"
 	"bria/internal/telegramstate"
@@ -66,12 +69,192 @@ func TestPreparedOldEditIsSuppressedAfterNewCarrierCommit(t *testing.T) {
 	}
 }
 
+func TestDurableSelectedCardIsSuppressedWhenArchiveFallbackChangedActiveSession(t *testing.T) {
+	ctx := context.Background()
+	now := time.Unix(1_800_000_000, 0).UTC()
+	presenter := newPresenter(t, now)
+	store := telegramstate.NewMemoryStore()
+	fallbackID := domain.SessionID("22222222-2222-4222-9222-222222222222")
+	if err := store.Update(ctx, func(state *telegramstate.State) error {
+		state.ActiveSession = flowSessionID
+		if err := state.SetCard(telegramstate.Card{SessionID: flowSessionID, Carrier: telegramstate.Carrier{ChatID: 42, MessageID: 5512}, Page: telegramstate.Page{Current: 1, Total: 1}}); err != nil {
+			return err
+		}
+		return state.SetCard(telegramstate.Card{SessionID: fallbackID, Carrier: telegramstate.Carrier{ChatID: 42, MessageID: 5513}, Page: telegramstate.Page{Current: 1, Total: 1}})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	base := &delayedCarrierSender{started: make(chan struct{}), release: make(chan struct{})}
+	operations := telegramflow.NewMemoryCallbackOperationStore()
+	_, outbound, err := telegramflow.New(telegramflow.Config{OwnerUserID: 7, OwnerPrivateChatID: 42, Presenter: presenter, CallbackRegistry: telegrampipeline.NewMemoryCallbackRegistry(func() time.Time { return now }), UIState: store, Messages: &messageHandler{}, Callbacks: &callbackExecutor{}, Operations: operations, Sender: base})
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := telegramui.CardProjectionInput{Pages: []telegramui.ContentPage{{Content: "selected", Anchors: []string{"selected"}}}, View: telegramui.PageView{Page: 1, Pages: 1, Anchor: "selected"}}
+	prepared, err := telegramflow.PrepareCardRefresh("status:991", flowSessionID, 42, 5512, input, "", false, nil, presenter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prepared.Card.MakeActive = false
+	claimed := telegramflow.CallbackOperation{
+		ID: prepared.OperationID, UpdateID: 991, CallbackQueryID: "query-991",
+		CallbackDigest: strings.Repeat("a", 64), Phase: telegramflow.CallbackClaimed,
+		Plan: telegrampipeline.CallbackPlan{
+			OperationID: prepared.OperationID, UpdateID: 991, SessionID: flowSessionID,
+			Carrier: telegramstate.Carrier{ChatID: 42, MessageID: 5512},
+			Action:  telegramui.ActionSelectSession, Effect: telegrampipeline.EffectSelectSession,
+		},
+	}
+	if err := operations.Create(ctx, claimed); err != nil {
+		t.Fatal(err)
+	}
+	unknown := claimed
+	unknown.Phase = telegramflow.CallbackEffectUnknown
+	if changed, err := operations.CompareAndSwap(ctx, prepared.OperationID, telegramflow.CallbackClaimed, unknown); err != nil || !changed {
+		t.Fatalf("persist unknown callback = %v, %v", changed, err)
+	}
+	durable := unknown
+	durable.Phase, durable.Prepared = telegramflow.CallbackPrepared, &prepared
+	if changed, err := operations.CompareAndSwap(ctx, prepared.OperationID, telegramflow.CallbackEffectUnknown, durable); err != nil || !changed {
+		t.Fatalf("persist prepared callback = %v, %v", changed, err)
+	}
+	if err := outbound.Register(prepared); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Update(ctx, func(state *telegramstate.State) error {
+		state.ActiveSession = fallbackID
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := outbound.EditStatusWithKeyboard(ctx, prepared.OperationID, prepared.Status, prepared.Keyboard); !errors.Is(err, carddeliveryguard.ErrNotCurrent) {
+		t.Fatalf("stale durable select error = %v, want ErrNotCurrent", err)
+	}
+	if len(base.edits) != 0 {
+		t.Fatalf("stale durable select reached Telegram: %v", base.edits)
+	}
+	operation, found, err := operations.Load(ctx, prepared.OperationID)
+	if err != nil || !found || operation.Phase != telegramflow.CallbackPrepared {
+		t.Fatalf("stale durable operation = (%#v, %v, %v), want prepared for safe resolution", operation, found, err)
+	}
+}
+
+func TestLegacyEmptyActiveSessionDoesNotBlockOrdinaryCardEdit(t *testing.T) {
+	ctx := context.Background()
+	now := time.Unix(1_800_000_000, 0).UTC()
+	presenter := newPresenter(t, now)
+	store := telegramstate.NewMemoryStore()
+	if err := store.Update(ctx, func(state *telegramstate.State) error {
+		return state.SetCard(telegramstate.Card{
+			SessionID: flowSessionID,
+			Carrier:   telegramstate.Carrier{ChatID: 42, MessageID: 5512},
+			Page:      telegramstate.Page{Current: 1, Total: 1},
+		})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	base := &delayedCarrierSender{started: make(chan struct{}), release: make(chan struct{})}
+	close(base.release)
+	_, outbound, err := telegramflow.New(telegramflow.Config{
+		OwnerUserID: 7, OwnerPrivateChatID: 42, Presenter: presenter,
+		CallbackRegistry: telegrampipeline.NewMemoryCallbackRegistry(func() time.Time { return now }),
+		UIState:          store, Messages: &messageHandler{}, Callbacks: &callbackExecutor{},
+		Operations: telegramflow.NewMemoryCallbackOperationStore(), Sender: base,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	prepared, err := telegramflow.PrepareCardRefresh("legacy-empty-active", flowSessionID, 42, 5512,
+		telegramui.CardProjectionInput{
+			Pages: []telegramui.ContentPage{{Content: "legacy"}},
+			View:  telegramui.PageView{Page: 1, Pages: 1},
+		}, "", false, nil, presenter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := outbound.Register(prepared); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := outbound.EditStatusWithKeyboard(ctx, prepared.OperationID, prepared.Status, prepared.Keyboard); err != nil {
+		t.Fatalf("legacy empty ActiveSession blocked ordinary edit: %v", err)
+	}
+	if len(base.edits) != 1 || base.edits[0] != 5512 {
+		t.Fatalf("ordinary edit did not reach its exact carrier: %v", base.edits)
+	}
+}
+
+func TestSessionDeliveryGateCoversActiveCheckAndPhysicalEdit(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	now := time.Unix(1_800_000_000, 0).UTC()
+	store := telegramstate.NewMemoryStore()
+	if err := store.Update(ctx, func(state *telegramstate.State) error {
+		state.ActiveSession = flowSessionID
+		return state.SetCard(telegramstate.Card{SessionID: flowSessionID, Carrier: telegramstate.Carrier{ChatID: 42, MessageID: 5512}, Page: telegramstate.Page{Current: 1, Total: 1}})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	gate := &sessiondeliverygate.Gate{}
+	base := &delayedCarrierSender{started: make(chan struct{}), release: make(chan struct{}), blockOperation: "gated-edit"}
+	_, outbound, err := telegramflow.New(telegramflow.Config{
+		OwnerUserID: 7, OwnerPrivateChatID: 42, Presenter: newPresenter(t, now),
+		CallbackRegistry: telegrampipeline.NewMemoryCallbackRegistry(func() time.Time { return now }),
+		UIState:          store, Messages: &messageHandler{}, Callbacks: &callbackExecutor{},
+		Operations: telegramflow.NewMemoryCallbackOperationStore(), Sender: base, SessionDeliveryGate: gate,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	prepared, err := telegramflow.PrepareCardRefresh("gated-edit", flowSessionID, 42, 5512,
+		telegramui.CardProjectionInput{Pages: []telegramui.ContentPage{{Content: "selected"}}, View: telegramui.PageView{Page: 1, Pages: 1}}, "", false, nil, newPresenter(t, now))
+	if err != nil {
+		t.Fatal(err)
+	}
+	prepared.Card.MakeActive = true
+	if err := outbound.Register(prepared); err != nil {
+		t.Fatal(err)
+	}
+	editDone := make(chan error, 1)
+	go func() {
+		_, editErr := outbound.EditStatusWithKeyboard(ctx, prepared.OperationID, prepared.Status, prepared.Keyboard)
+		editDone <- editErr
+	}()
+	waitFlowSignal(t, base.started, "physical edit did not start")
+	archiveEntered := make(chan struct{})
+	go func() {
+		unlock := gate.Lock(flowSessionID)
+		close(archiveEntered)
+		unlock()
+	}()
+	select {
+	case <-archiveEntered:
+		t.Fatal("archive gate entered while physical edit was in progress")
+	case <-time.After(30 * time.Millisecond):
+	}
+	close(base.release)
+	if err := <-editDone; err != nil {
+		t.Fatal(err)
+	}
+	waitFlowSignal(t, archiveEntered, "archive gate did not resume after physical edit")
+}
+
+func waitFlowSignal(t *testing.T, signal <-chan struct{}, message string) {
+	t.Helper()
+	select {
+	case <-signal:
+	case <-time.After(time.Second):
+		t.Fatal(message)
+	}
+}
+
 type delayedCarrierSender struct {
-	started chan struct{}
-	release chan struct{}
-	once    sync.Once
-	mu      sync.Mutex
-	edits   []int64
+	started        chan struct{}
+	release        chan struct{}
+	blockOperation string
+	once           sync.Once
+	mu             sync.Mutex
+	edits          []int64
 }
 
 func (s *delayedCarrierSender) SendStatus(context.Context, string, coordinator.Status) (coordinator.Receipt, error) {
@@ -84,7 +267,7 @@ func (s *delayedCarrierSender) EditStatusWithKeyboard(ctx context.Context, opera
 	s.mu.Lock()
 	s.edits = append(s.edits, status.SourceMessageID)
 	s.mu.Unlock()
-	if operation == "old-edit" {
+	if operation == "old-edit" || operation == s.blockOperation {
 		s.once.Do(func() { close(s.started) })
 		select {
 		case <-s.release:

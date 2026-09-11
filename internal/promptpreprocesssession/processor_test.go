@@ -44,6 +44,25 @@ func TestObservedCompletionReportsReleaseFailureWithoutLosingAcceptance(t *testi
 	}
 }
 
+func TestStartupErrorCategoryIsAllowlisted(t *testing.T) {
+	privateDetail := errors.New("https://provider.invalid/thread/private-token")
+	tests := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{name: "typed missing thread", err: errors.Join(promptpreprocesscore.ErrResumeUnavailable, privateDetail), want: "thread_not_found"},
+		{name: "untyped provider detail", err: privateDetail, want: "provider"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := startupErrorCategory(test.err); got != test.want {
+				t.Fatalf("startup category = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
 var _ promptpreprocess.Completion = completionFunc(nil)
 
 func TestProcessorProcessUsesDurablyCapturedRequestMode(t *testing.T) {

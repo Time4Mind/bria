@@ -7,10 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"bria/internal/domain"
 	"bria/internal/durableflow"
 	"bria/internal/durableinputbridge"
+	"bria/internal/durableoutputwait"
 	"bria/internal/messagejournal"
 	"bria/internal/telegramcontroller"
 	"bria/internal/telegramnotify"
@@ -210,6 +212,7 @@ func (sender TelegramOutputSender) Deliver(ctx context.Context, output durablefl
 
 type OutputCustody struct {
 	Flow               *durableflow.Flow
+	Reader             durableoutputwait.Reader
 	Wake               chan domain.SessionID
 	OwnerPrivateChatID int64
 }
@@ -240,11 +243,18 @@ func (custody OutputCustody) AcceptOutput(ctx context.Context, output telegramco
 	return result, nil
 }
 
+// WaitOutputDelivery lets the controller order provider admission after one
+// exact prompt projection. Confirmation may represent a physical edit or an
+// intentional hidden-view suppression; either is terminal and safe to pass.
+func (custody OutputCustody) WaitOutputDelivery(ctx context.Context, sessionID domain.SessionID, operationID string) error {
+	return durableoutputwait.Wait(ctx, custody.Reader, string(sessionID), operationID)
+}
+
 func coalescedStateKinds(kind telegramcontroller.NotificationKind) []string {
 	switch kind {
 	case telegramcontroller.NotificationCommentary, telegramcontroller.NotificationPromptStatus, telegramcontroller.NotificationNativeScreen,
 		telegramcontroller.NotificationFinal, telegramcontroller.NotificationError:
-		return []string{string(telegramcontroller.NotificationCommentary), string(telegramcontroller.NotificationPromptStatus), string(telegramcontroller.NotificationNativeScreen)}
+		return []string{string(telegramcontroller.NotificationCommentary), string(telegramcontroller.NotificationNativeScreen)}
 	default:
 		return nil
 	}
@@ -256,6 +266,8 @@ type OutputDispatcher struct {
 	Wake     <-chan domain.SessionID
 	Report   func(error)
 }
+
+const outputDispatchSweepInterval = 500 * time.Millisecond
 
 func (dispatcher OutputDispatcher) Run(ctx context.Context) error {
 	if ctx == nil || dispatcher.Flow == nil || dispatcher.Sessions == nil || dispatcher.Wake == nil || dispatcher.Report == nil {
@@ -291,12 +303,16 @@ func (dispatcher OutputDispatcher) Run(ctx context.Context) error {
 		}
 	}
 	deliverAll()
+	sweep := time.NewTicker(outputDispatchSweepInterval)
+	defer sweep.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case id := <-dispatcher.Wake:
 			deliver(id)
+		case <-sweep.C:
+			deliverAll()
 		}
 	}
 }

@@ -44,6 +44,12 @@ func New(store Store, enabled func(context.Context) (bool, error), generator Gen
 // Begin starts the optional model fallback and returns a completion hook. The
 // caller invokes the hook only after its lifecycle transition has committed.
 func (service *Service) Begin(ctx context.Context, session domain.Session, messageID, text string) func(string) {
+	return service.BeginWithRefresh(ctx, session, messageID, text, nil)
+}
+
+// BeginWithRefresh reports a committed rename so a visible card can refresh
+// even when cheap-model generation finishes after the provider final.
+func (service *Service) BeginWithRefresh(ctx context.Context, session domain.Session, messageID, text string, refreshed func(domain.SessionID)) func(string) {
 	var generated <-chan string
 	enabled, err := service.enabled(ctx)
 	if err == nil && enabled && session.NameSource() == domain.SessionNameDirectory {
@@ -57,9 +63,16 @@ func (service *Service) Begin(ctx context.Context, session domain.Session, messa
 				defer service.jobs.Done()
 				defer close(result)
 				name, generateErr := service.generator.Generate(ctx, session.ComputerID(), session.ID(), messageID+":name", text)
-				if generateErr == nil {
-					result <- name
+				if generateErr != nil {
+					// A transient cheap-model failure must not permanently pin the
+					// directory fallback. The next user turn may retry; successful
+					// naming remains naturally terminal through NameSourceModel.
+					service.mu.Lock()
+					delete(service.attempted, session.ID())
+					service.mu.Unlock()
+					return
 				}
+				result <- name
 			}()
 		}
 		service.mu.Unlock()
@@ -75,26 +88,44 @@ func (service *Service) Begin(ctx context.Context, session domain.Session, messa
 		select {
 		case name, ok := <-generated:
 			if ok {
-				service.apply(ctx, session.ID(), name, domain.SessionNameModel)
+				if service.apply(ctx, session.ID(), name, domain.SessionNameModel) && refreshed != nil {
+					refreshed(session.ID())
+				}
 			}
 		default:
 			service.jobs.Add(1)
 			go func() {
 				defer service.jobs.Done()
 				if name, ok := <-generated; ok {
-					service.apply(ctx, session.ID(), name, domain.SessionNameModel)
+					if service.apply(ctx, session.ID(), name, domain.SessionNameModel) && refreshed != nil {
+						refreshed(session.ID())
+					}
 				}
 			}()
 		}
 	}
 }
 
-func (service *Service) apply(ctx context.Context, id domain.SessionID, name string, source domain.SessionNameSource) {
+func (service *Service) apply(ctx context.Context, id domain.SessionID, name string, source domain.SessionNameSource) bool {
 	current, err := service.store.Load(context.WithoutCancel(ctx), id)
-	if err != nil || current.NameSource() == domain.SessionNameProvider || source == domain.SessionNameModel && current.NameSource() != domain.SessionNameDirectory {
-		return
+	if err != nil {
+		service.allowRetry(id)
+		return false
 	}
-	_, _ = service.store.RenameSession(context.WithoutCancel(ctx), id, name, source)
+	if current.NameSource() == domain.SessionNameProvider || source == domain.SessionNameModel && current.NameSource() != domain.SessionNameDirectory {
+		return false
+	}
+	if _, err := service.store.RenameSession(context.WithoutCancel(ctx), id, name, source); err != nil {
+		service.allowRetry(id)
+		return false
+	}
+	return true
+}
+
+func (service *Service) allowRetry(id domain.SessionID) {
+	service.mu.Lock()
+	delete(service.attempted, id)
+	service.mu.Unlock()
 }
 
 func (service *Service) Wait(ctx context.Context) error {

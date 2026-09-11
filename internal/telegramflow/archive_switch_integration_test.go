@@ -20,11 +20,13 @@ import (
 	"bria/internal/safelog"
 	"bria/internal/sessionruntime"
 	"bria/internal/storage"
+	"bria/internal/telegrambridge"
 	"bria/internal/telegramcontroller"
 	"bria/internal/telegramflow"
 	"bria/internal/telegrampipeline"
 	"bria/internal/telegrampromptcomposition"
 	"bria/internal/telegramruntimecomposition"
+	"bria/internal/telegramui"
 )
 
 // A23 consumer acceptance: real lifecycle, disk state, controller, signed
@@ -198,6 +200,13 @@ func TestArchiveSwitchIntegration(t *testing.T) {
 			if err != nil || selected != want {
 				t.Errorf("selection before provider exit=%q err=%v want=%q", selected, err, want)
 			}
+			immediateSelectable := archiveSwitchSelectableIDs(presenter, closeDecision.Keyboard)
+			if immediateSelectable[ids[0]] {
+				t.Errorf("closing session remained in the immediate session buttons: %#v", immediateSelectable)
+			}
+			if scenario.remaining && !immediateSelectable[ids[1]] {
+				t.Errorf("fallback session missing from the immediate session buttons: %#v", immediateSelectable)
+			}
 			sendClose := func() {
 				if _, err := outbound.EditStatusWithKeyboard(ctx, "status:2", closeDecision.Status, closeDecision.Keyboard); err != nil {
 					t.Errorf("close delivery: %v", err)
@@ -247,6 +256,114 @@ func TestArchiveSwitchIntegration(t *testing.T) {
 					"CLOSED_SESSION_CONTENT", "REMAINING_SESSION_CONTENT", "/synthetic", "provider-", "status:2", "query-2"})
 			}
 		})
+	}
+}
+
+func TestSignedStaleSessionSelectNeverEditsArchivedCardOrLeavesUnknownReceipt(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "state.json")
+	store, err := storage.OpenSessionStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := []domain.SessionID{"11111111-1111-4111-9111-111111111111", "22222222-2222-4222-9222-222222222222"}
+	sessions := make([]domain.Session, 0, len(ids))
+	for index, id := range ids {
+		starting, err := domain.NewStartingSession(id, domain.IntentID("intent-"+string(id)), "local", domain.ProviderCodex, "/synthetic")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := store.PutStartingIfAbsent(ctx, starting); err != nil {
+			t.Fatal(err)
+		}
+		ready, err := starting.Ready(domain.ProviderBinding{Provider: domain.ProviderCodex, SessionID: "provider-" + string(id), Generation: 1})
+		if err != nil || store.CompareAndSwap(ctx, starting, ready) != nil {
+			t.Fatalf("persist ready %d: %v", index, err)
+		}
+		if err := store.SetCardPrompt(ctx, id, "prompt-"+string(id), fmt.Sprintf("SESSION_%d_CONTENT", index)); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.SetCardCarrier(ctx, id, 42, int64(98+index)); err != nil {
+			t.Fatal(err)
+		}
+		sessions = append(sessions, ready)
+	}
+	controller, err := telegramcontroller.New(7, 42, "local", archiveSwitchUnused{}, store, archiveSwitchUnused{}, archiveSwitchNotify(func(context.Context, telegramcontroller.Notification) error { return nil }), telegramcontroller.Options{Recovered: sessions, UIState: store})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer controller.Close(ctx)
+	if _, err := controller.HandleSemanticAction(ctx, telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticSelect, SessionID: ids[1]}); err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Unix(1_800_000_000, 0).UTC()
+	presenter := newPresenter(t, now)
+	wire := &archiveSwitchWire{cards: make(map[int64]coordinator.Status), keyboards: make(map[int64]*coordinator.KeyboardMarkup)}
+	operations := telegramflow.NewMemoryCallbackOperationStore()
+	adapter := telegramruntimecomposition.ControllerFlowAdapter{Controller: controller}
+	cards := telegramruntimecomposition.SessionTelegramUIStore{State: store}
+	handler, outbound, err := telegramflow.New(telegramflow.Config{
+		OwnerUserID: 7, OwnerPrivateChatID: 42, Presenter: presenter,
+		CallbackRegistry: telegrampipeline.NewMemoryCallbackRegistry(func() time.Time { return now }),
+		UIState:          cards, MessageUI: adapter, Callbacks: adapter, Operations: operations, Sender: wire,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	delivery := telegrampromptcomposition.Deliverer{Controller: controller, Cards: cards, Presenter: presenter, Sender: outbound}
+	if _, err := delivery.Deliver(ctx, telegramcontroller.Notification{Kind: telegramcontroller.NotificationPromptStatus, SessionID: ids[1]}, "initial-card"); err != nil {
+		t.Fatal(err)
+	}
+	var staleToken string
+	for _, row := range *wire.keyboard(99) {
+		for _, button := range row {
+			decoded, decodeErr := presenter.DecodeCallback(button.CallbackData)
+			if decodeErr == nil && decoded.Action == telegramui.ActionSelectSession && decoded.SessionID == string(ids[0]) {
+				staleToken = button.CallbackData
+			}
+		}
+	}
+	if staleToken == "" {
+		t.Fatal("signed select callback for the future archived session was not issued")
+	}
+	closing, err := sessions[0].BeginClose(sessions[0].StateChangedAt().Add(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Replace(ctx, sessions[0], closing); err != nil {
+		t.Fatalf("persist closing: %v", err)
+	}
+	archived, err := closing.Archive(closing.StateChangedAt().Add(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Replace(ctx, closing, archived); err != nil {
+		t.Fatalf("persist archived: %v", err)
+	}
+
+	decision, err := handler.Handle(ctx, archiveSwitchUpdate(991, staleToken))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := outbound.EditStatusWithKeyboard(ctx, "status:991", decision.Status, decision.Keyboard); err != nil {
+		t.Fatal(err)
+	}
+	visible := wire.card(99).Text
+	if strings.Contains(visible, "SESSION_0_CONTENT") || !strings.HasPrefix(visible, "Сессии") {
+		t.Fatalf("stale select edited archived card: %q", visible)
+	}
+	active, err := store.LoadActiveSession(ctx)
+	if err != nil || active != ids[1] {
+		t.Fatalf("active session = %q, %v; want %q", active, err, ids[1])
+	}
+	operation, found, err := operations.Load(ctx, "status:991")
+	if err != nil || !found || operation.Phase != telegramflow.CallbackCommitted {
+		t.Fatalf("callback operation = (%#v, %v, %v), want committed", operation, found, err)
+	}
+	unknown, err := operations.ListUnknown(ctx, 10)
+	if err != nil || len(unknown) != 0 {
+		t.Fatalf("unknown callback operations = (%#v, %v), want none", unknown, err)
 	}
 }
 
@@ -361,6 +478,22 @@ func archiveSwitchButton(t *testing.T, keyboard *coordinator.KeyboardMarkup, lab
 	}
 	t.Fatalf("button %q not present in %+v", label, keyboard)
 	return ""
+}
+
+func archiveSwitchSelectableIDs(presenter *telegrambridge.Presenter, keyboard *coordinator.KeyboardMarkup) map[domain.SessionID]bool {
+	result := make(map[domain.SessionID]bool)
+	if presenter == nil || keyboard == nil {
+		return result
+	}
+	for _, row := range *keyboard {
+		for _, button := range row {
+			decoded, err := presenter.DecodeCallback(button.CallbackData)
+			if err == nil && decoded.Action == telegramui.ActionSelectSession {
+				result[domain.SessionID(decoded.SessionID)] = true
+			}
+		}
+	}
+	return result
 }
 
 type archiveSwitchUnused struct{}
