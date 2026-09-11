@@ -106,10 +106,15 @@ func ParseCodexCommandApproval(screen string) (CodexCommandApproval, bool) {
 	decisionSource := ""
 	if len(nonempty) == 1 && nonempty[0] == "2. No, and tell Codex what to do differently (esc)" {
 		request.OptionCount = 2
-	} else if len(nonempty) >= 2 && strings.HasPrefix(nonempty[0], "2. Yes, and don't ask again for commands that start with `") &&
-		strings.HasSuffix(nonempty[len(nonempty)-2], "` (p)") && nonempty[len(nonempty)-1] == "3. No, and tell Codex what to do differently (esc)" {
+	} else if len(nonempty) >= 2 && nonempty[len(nonempty)-1] == "3. No, and tell Codex what to do differently (esc)" {
+		const persistentPrefix = "2. Yes, and don't ask again for commands that start with `"
+		const persistentSuffix = "` (p)"
+		persistentOption := strings.Join(nonempty[:len(nonempty)-1], " ")
+		if !strings.HasPrefix(persistentOption, persistentPrefix) || !strings.HasSuffix(persistentOption, persistentSuffix) {
+			return zero, false
+		}
 		request.OptionCount = 3
-		decisionSource = strings.TrimSuffix(strings.TrimPrefix(strings.Join(nonempty[:len(nonempty)-1], " "), "2. Yes, and don't ask again for commands that start with `"), "` (p)")
+		decisionSource = strings.TrimSuffix(strings.TrimPrefix(persistentOption, persistentPrefix), persistentSuffix)
 	} else {
 		return zero, false
 	}

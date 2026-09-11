@@ -520,7 +520,7 @@ func (handler *Handler) resumeOperation(ctx context.Context, update coordinator.
 		if operation.Prepared == nil || operation.Receipt <= 0 {
 			return coordinator.Decision{}, errors.New("confirmed callback operation has no receipt")
 		}
-		if err := finalizePrepared(ctx, handler.registry, handler.uiState, *operation.Prepared, operation.Receipt); err != nil {
+		if err := finalizePreparedWithCallbackPolicy(ctx, handler.registry, handler.uiState, *operation.Prepared, operation.Receipt, recoveryPolicy(operation)); err != nil {
 			return coordinator.Decision{}, err
 		}
 		committed := operation
@@ -1613,7 +1613,7 @@ func (sender *Sender) settlePreparedReceipt(ctx context.Context, operationID str
 	if operation.Prepared == nil {
 		return errors.New("confirmed callback operation lost prepared output")
 	}
-	if err := finalizePrepared(ctx, sender.registry, sender.uiState, *operation.Prepared, receipt); err != nil {
+	if err := finalizePreparedWithCallbackPolicy(ctx, sender.registry, sender.uiState, *operation.Prepared, receipt, recoveryPolicy(operation)); err != nil {
 		return err
 	}
 	committed := operation
@@ -1638,6 +1638,29 @@ func finalizePrepared(
 	prepared Prepared,
 	receipt int64,
 ) error {
+	return finalizePreparedWithCallbackPolicy(ctx, registry, uiState, prepared, receipt, callbackReceiptRecoveryPolicy{})
+}
+
+type callbackReceiptRecoveryPolicy struct {
+	missingTargetIsStale           bool
+	selectedTargetMustRemainActive bool
+}
+
+func recoveryPolicy(operation CallbackOperation) callbackReceiptRecoveryPolicy {
+	return callbackReceiptRecoveryPolicy{
+		missingTargetIsStale:           true,
+		selectedTargetMustRemainActive: operation.Plan.Action == telegramui.ActionSelectSession,
+	}
+}
+
+func finalizePreparedWithCallbackPolicy(
+	ctx context.Context,
+	registry telegrampipeline.CallbackRegistry,
+	uiState telegramstate.Store,
+	prepared Prepared,
+	receipt int64,
+	policy callbackReceiptRecoveryPolicy,
+) error {
 	carrier := telegramstate.Carrier{ChatID: prepared.Status.ConversationID, MessageID: receipt}
 	if prepared.Terminal {
 		if err := registry.InvalidateCarrier(ctx, carrier); err != nil {
@@ -1660,10 +1683,12 @@ func finalizePrepared(
 		current, exists := state.Card(id)
 		replay := exists && current.LastPresentationOperation == prepared.OperationID && current.Carrier == carrier
 		callback := prepared.Status.CallbackQueryID != ""
-		stale := absent && exists && (current.Carrier != (telegramstate.Carrier{}) || current.CarrierRevision != 0) && !(replay && current.CarrierRevision == 1)
+		stale := policy.missingTargetIsStale && id != "" && !exists && expected == nil && !absent
+		stale = stale || absent && exists && (current.Carrier != (telegramstate.Carrier{}) || current.CarrierRevision != 0) && !(replay && current.CarrierRevision == 1)
+		stale = stale || policy.selectedTargetMustRemainActive && prepared.Card.MakeActive && state.ActiveSession != "" && state.ActiveSession != id
 		if expected != nil {
 			ownNavigation := callback && replay && current.CarrierRevision > *expected && current.CarrierRevision-*expected == 1
-			stale = !exists || (current.CarrierRevision != *expected && !ownNavigation) || (!callback && current.Carrier != (telegramstate.Carrier{ChatID: prepared.Status.ConversationID, MessageID: prepared.Status.SourceMessageID}))
+			stale = stale || !exists || (current.CarrierRevision != *expected && !ownNavigation) || (!callback && current.Carrier != (telegramstate.Carrier{ChatID: prepared.Status.ConversationID, MessageID: prepared.Status.SourceMessageID}))
 		}
 		if stale {
 			// The receipt is real, but its old projection must not replace a new

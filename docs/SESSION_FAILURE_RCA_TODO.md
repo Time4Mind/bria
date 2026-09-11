@@ -110,7 +110,9 @@ secrets и исходящие Telegram messages вручную не меняют
 | A47.16 | background final navigation; worker owner | Открытие новой карточки финала фоновой session делает старую presentation неинтерактивной | verified locally: real ControllerFlowAdapter/store transition, stale retry and crash convergence race tests green |
 | A47.17 | transcript isolation; worker + integration owner | Служебный memory/instruction payload не попадает в карточку workdir9; доказан источник и закрыт regression | verified locally: exact native-final provenance; terminal-only filter for new and persisted split finals green |
 | A47.18 | default-session naming; creation worker owner | При включённом auto-name автоматически создаваемая default/standby session проходит тот же naming flow, что ручная session | verified locally: late refresh plus Generate/Load/Rename retry and production-order Starting FIFO tests green |
-| A47.R | integration owner | Focused GREEN, full `make check-full`, exact-SHA CI, install/restart и live postflight | full local gate green; Git/CI/deploy pending |
+| A47.19 | postflight callback recovery; integration owner | Известный Telegram receipt завершает старый half-commit без повторного edit, воскрешения удалённой карточки или возврата на старую active session | verified locally: 6/6 live-derived cases drain on isolated copies; permanent missing-card and stale-select regressions green |
+| A47.20 | Codex approval parsing; integration owner | Включённое автоподтверждение принимает одноразовый пункт 1, даже если Codex переносит маркер `(p)` второй опции на отдельную строку | verified locally: exact 1,823-byte live screen changed RED parser to GREEN; public corpus and flow regressions green |
+| A47.R | integration owner | Focused GREEN, full `make check-full`, exact-SHA CI, install/restart и live postflight | corrected local `20260911-session-flow-reliability-recovery make check-full` GREEN; exact-SHA CI/deploy/postflight pending |
 
 Зоны A47.2 и A47.3 не пересекаются по пакетам и выполняются параллельно.
 Integration owner один меняет A47.1, объединяет результат, запускает полный gate
@@ -150,3 +152,22 @@ packaging, полный race и executable trio. Первый race-run выяв�
 недетерминизм fixture: grandchild блокировался голым `select {}` и мог быть
 завершён runtime как deadlock под общей нагрузкой. Timer-backed helper прошёл
 100/100 целевых race-прогонов, после чего полный gate стал GREEN.
+
+Первый postflight `1bd0a1d` обнаружил повторяющийся каждые 30 s
+`telegram.status_delivery_failed`. В store было шесть coupled half-commit:
+callback уже имел точный `receipt_confirmed`, status оставался `send_unknown`.
+Две старые операции ссылались на уже удалённые карточки с legacy empty-page,
+четыре были старыми `select_session`, после которых пользователь уже выбрал
+другую active session. Recovery пытался заново применить эти старые проекции;
+кроме того, проверка exact carrier revision перезаписывала ранее вычисленный
+stale-флаг. Исправление сохраняет OR всех stale-причин и завершает известный
+receipt без Telegram mutation и без восстановления устаревшей UI-проекции.
+
+До corrected release активная Codex-сессия показала ещё один неподтверждённый
+command approval при `auto_approve_commands=true`. Read-only capture точного
+живого tmux-pane подтвердил новый перенос: закрывающая кавычка persistent-rule
+оставалась в строке команды, а маркер `(p)` рендерился следующей строкой.
+Парсер требовал суффикс `` ` (p) `` в одной физической строке и поэтому не
+создавал `native.approval` вообще. Новый corpus fixture воспроизвёл RED;
+нормализация только строк известной второй опции сохраняет точные heading,
+selected one-shot, decline и footer gates и не разрешает persistent choice.

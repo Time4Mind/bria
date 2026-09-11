@@ -2,7 +2,17 @@
 
 > Текущий запрос A47 - исправить открытые дефекты A46, production document
 > ingress, немедленные archive/default Starting transitions и подтверждённый
-> показ очищенного prompt до запуска основной модели. Дополнительный RCA
+> показ очищенного prompt до запуска основной модели. Первый выпущенный SHA
+> `1bd0a1d` прошёл gate/CI, но live postflight выявил два дополнительных края:
+> шесть старых coupled callback half-commit давали ошибку каждые 30 секунд, а
+> новый перенос Codex-маркера `(p)` не распознавался автоподтверждением.
+> Локально оба исправлены: stale known receipts завершаются без Telegram edit
+> и UI resurrection, approval parser принимает перенос только внутри точной
+> известной второй опции и по-прежнему выбирает одноразовый пункт 1.
+> Точный 1,823-byte live screen сменил RED на GREEN; focused/race и полный
+> `20260911-session-flow-reliability-recovery make check-full` GREEN. Далее
+> exact manifest, commit/push, exact-SHA CI, restart и live postflight висящего
+> approval. Дополнительный RCA ранее
 > подтвердил, что shared Luna работала за 2.407 s, но её projection supersede-ил
 > следующий accepted status; это ordering defect, а не отсутствие satellite.
 > Локально добавлены fail-closed delivery barrier, restart output sweep,
@@ -12,8 +22,6 @@
 > auto-name default/standby с late refresh и retry, retirement старой карточки
 > фонового финала, terminal-only memory-envelope filter и production-order
 > recovery фоновой Starting. Две итерации независимого review завершены approve;
-> полный `20260911-session-flow-reliability make check-full` GREEN. Далее точный
-> manifest, commit/push, exact-SHA CI и standing-authorized restart/postflight.
 > Разрешены product/tests/docs текущего репозитория и standing release;
 > state/config/secrets и ручные Telegram writes исключены. Пакеты разделены:
 > integration owner ведёт stale archived select и Stop/restart classification,

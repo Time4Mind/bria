@@ -21,7 +21,7 @@ func approvalFixture(t *testing.T) string {
 
 func TestCodexAllObservedApprovalFixtures(t *testing.T) {
 	paths, err := filepath.Glob("testdata/codex-command-approval*.txt")
-	if err != nil || len(paths) != 7 {
+	if err != nil || len(paths) != 8 {
 		t.Fatal("missing observed cases", err)
 	}
 	for _, path := range paths {

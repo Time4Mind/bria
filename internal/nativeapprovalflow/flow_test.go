@@ -77,6 +77,7 @@ func TestObserveSendsOneApprovalForFullAndCollapsedScreens(t *testing.T) {
 	}{
 		{name: "full", fixture: "codex-command-approval.txt"},
 		{name: "collapsed", fixture: "codex-command-approval-collapsed.txt"},
+		{name: "wrapped persistent suffix", fixture: "codex-command-approval-p-suffix-wrapped.txt"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			driver := &flowDriver{}
