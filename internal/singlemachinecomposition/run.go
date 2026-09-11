@@ -406,9 +406,13 @@ func runTelegramController(
 	acceptedObserver, _ := starter.(telegramcontroller.AcceptedTurnObserver)
 	continuation := durablecomposition.AcceptedContinuation{Journal: journal, Wake: inputCustody.WakeSession}
 	var continueAccepted func(context.Context, domain.Session, domain.ProviderBinding, sessionsupervisor.AcceptedTurnReconciliation) error
+	var continueAcceptedWithRecovery func(context.Context, domain.Session, domain.ProviderBinding, sessionsupervisor.AcceptedTurnReconciliation, func(context.Context) error) error
 	if acceptedObserver != nil {
 		continueAccepted = func(ctx context.Context, session domain.Session, prior domain.ProviderBinding, result sessionsupervisor.AcceptedTurnReconciliation) error {
 			return continuation.ContinueAcceptedTurns(ctx, session, prior, result)
+		}
+		continueAcceptedWithRecovery = func(ctx context.Context, session domain.Session, prior domain.ProviderBinding, result sessionsupervisor.AcceptedTurnReconciliation, finalize func(context.Context) error) error {
+			return continuation.ContinueAcceptedTurnsWithRecovery(ctx, session, prior, result, finalize)
 		}
 	}
 	waiter, canWait := starter.(sessionruntime.ProcessSupervisor)
@@ -430,9 +434,11 @@ func runTelegramController(
 		supervision, err := supervisioncomposition.New(supervisioncomposition.Options{
 			LocalComputerID: computerID, Store: state, Waiter: waiter, Restarter: starter, InitialRestarter: initialStarter,
 			AcceptedTurns: durableRecovery, MaxRestartAttempts: 3, SweepInterval: supervisionSweepInterval,
-			ShouldContinueAcceptedTurns: (acceptedcontinuation.Selector{Journal: journal}).Required,
-			ContinueAcceptedTurns:       continueAccepted,
-			Now:                         clock, WaitBeforeRetry: waitRecoveryRetry, Report: reportRecovery, ReportSession: reportSessionRecovery,
+			ShouldContinueAcceptedTurns:       (acceptedcontinuation.Selector{Journal: journal}).Required,
+			ContinueAcceptedTurns:             continueAccepted,
+			ContinueAcceptedTurnsWithRecovery: continueAcceptedWithRecovery,
+			InputRecovery:                     journal,
+			Now:                               clock, WaitBeforeRetry: waitRecoveryRetry, Report: reportRecovery, ReportSession: reportSessionRecovery,
 		})
 		if err != nil {
 			return fmt.Errorf("compose session supervision: %w", err)

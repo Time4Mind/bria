@@ -1328,7 +1328,7 @@ var packagePolicies = map[string]packagePolicy{
 		// adapters belong in bounded internal packages, not in this root.
 		responsibility: "compose the coordinator process",
 		allowedImports: []string{
-			"internal/app", "internal/config", "internal/coordinator", "internal/domain", "internal/instancelock", "internal/parakeetinstall", "internal/sessionruntime", "internal/settings", "internal/singlemachinecomposition", "internal/storage", "internal/telegram", "internal/telegrambridge", "internal/telegramnotify",
+			"internal/app", "internal/config", "internal/coordinator", "internal/domain", "internal/instancelock", "internal/parakeetinstall", "internal/sessionruntime", "internal/settings", "internal/singlemachinecomposition", "internal/statecompatibility", "internal/storage", "internal/telegram", "internal/telegrambridge", "internal/telegramnotify",
 		},
 		maxProductionLines: 1700,
 		compositionRoot:    true,
@@ -1516,12 +1516,12 @@ var packagePolicies = map[string]packagePolicy{
 		maxProductionLines: 2000,
 	},
 	"internal/durablecomposition": {
-		responsibility: "compose durable message custody and accepted-turn reconciliation",
+		responsibility: "compose durable message custody, accepted-turn reconciliation and recovery finalization",
 		allowedImports: []string{
 			"internal/turncontinuation",
 			"internal/acceptedrecovery", "internal/domain", "internal/durableflow", "internal/durableinputbridge", "internal/messagejournal", "internal/sessionruntime", "internal/sessionsupervisor", "internal/telegramcontroller", "internal/telegramnotify", "internal/turnprocessing",
 		},
-		maxProductionLines: 500,
+		maxProductionLines: 550,
 	},
 	"internal/coordinator": {
 		responsibility:     "serialize coordinator commands and durable effects",
@@ -1641,8 +1641,8 @@ var packagePolicies = map[string]packagePolicy{
 	"internal/messagejournal": {
 		// This budget includes the versioned attachment custody schema and its
 		// ordered input/output journal; execution remains in durableflow.
-		responsibility:     "persist ordered inbound and outbound messages",
-		maxProductionLines: 1400,
+		responsibility:     "persist ordered inbound and outbound messages and atomic recovery cutoffs",
+		maxProductionLines: 1700,
 	},
 	"internal/multinodecomposition": {
 		responsibility:       "compose durable multi-computer coordinator roles and manual cutover",
@@ -1908,9 +1908,9 @@ var packagePolicies = map[string]packagePolicy{
 	"internal/sessionsupervisor": {
 		// Startup recovery of persisted sessions is the same lifecycle
 		// responsibility; provider-specific reads stay behind its port.
-		responsibility:     "reconcile provider exits with recoverable session lifecycle",
+		responsibility:     "reconcile provider exits, durable input cutoffs and recoverable session lifecycle",
 		allowedImports:     []string{"internal/app", "internal/domain", "internal/sessionattachment"},
-		maxProductionLines: 450,
+		maxProductionLines: 500,
 	},
 	"internal/sessionexpiry": {
 		responsibility:     "schedule lifecycle closure for expired sessions",
@@ -1950,10 +1950,15 @@ var packagePolicies = map[string]packagePolicy{
 		},
 		maxProductionLines: 1900,
 	},
+	"internal/statecompatibility": {
+		responsibility:     "validate all durable runtime documents offline before update or rollback",
+		allowedImports:     []string{"internal/config", "internal/messagejournal", "internal/storage"},
+		maxProductionLines: 100,
+	},
 	"internal/supervisioncomposition": {
-		responsibility:     "compose startup and live supervision for exact local provider bindings",
+		responsibility:     "compose startup and live supervision with exact provider and input-recovery boundaries",
 		allowedImports:     []string{"internal/app", "internal/controllertelemetry", "internal/domain", "internal/recoverybackoff", "internal/sessionattachment", "internal/sessionrecoverycontrol", "internal/sessionsupervisor", "internal/supervisioncomposition/recoverybarrier"},
-		maxProductionLines: 450,
+		maxProductionLines: 500,
 	},
 	"internal/supervisioncomposition/recoverybarrier": {
 		responsibility:     "coordinate stable recovery evidence barriers with lifecycle-aware retry backoff",
@@ -2026,7 +2031,7 @@ var packagePolicies = map[string]packagePolicy{
 			"internal/nativeapprovalflow",
 			"internal/app", "internal/cardtranscript", "internal/coordinator", "internal/domain", "internal/promptpreprocess", "internal/runtimeprotocol", "internal/sessioncreation", "internal/sessionruntime", "internal/settingsport", "internal/telegramcreationview", "internal/telegramnodes", "internal/telegramsettings", "internal/telegramsettingsview", "internal/telegramsessions", "internal/telegramstatus", "internal/turnprocessing",
 		},
-		maxProductionLines: 5600,
+		maxProductionLines: 5650,
 	},
 	"internal/telegramflow": {
 		responsibility: "join Telegram callback, presentation, current-global-surface fencing, and durable card boundaries",

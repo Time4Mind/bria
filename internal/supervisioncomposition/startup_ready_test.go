@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"bria/internal/domain"
+	"bria/internal/messagejournal"
 	"bria/internal/sessionsupervisor"
 	"bria/internal/storage"
 	"bria/internal/supervisioncomposition"
@@ -109,5 +110,56 @@ func TestManagerStartupReadyReconcilesBeforeGenericResume(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestManagerStartupSkipsOnlyLegacyBlockedContinuedQueue(t *testing.T) {
+	for _, blocked := range []bool{false, true} {
+		t.Run(map[bool]string{false: "pending-only", true: "continued-after-unknown"}[blocked], func(t *testing.T) {
+			ctx := context.Background()
+			ready, _ := readySession(t)
+			store := &memoryStore{session: ready}
+			journal, err := messagejournal.Open(filepath.Join(t.TempDir(), "journal.json"), messagejournal.DefaultLimits())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, _, err = journal.EnqueueInput(ctx, string(ready.ID()), "first", []byte("private")); err != nil {
+				t.Fatal(err)
+			}
+			if blocked {
+				if _, err = journal.LeaseNextInput(ctx, string(ready.ID()), "old", time.Unix(1, 0), time.Minute); err != nil {
+					t.Fatal(err)
+				}
+				if _, err = journal.MarkInputDeliveryUnknown(ctx, string(ready.ID()), "first", "old"); err != nil {
+					t.Fatal(err)
+				}
+				if _, _, err = journal.EnqueueInput(ctx, string(ready.ID()), "continued", []byte("private")); err != nil {
+					t.Fatal(err)
+				}
+			}
+			runtime := &runtimeStub{}
+			manager, err := supervisioncomposition.New(supervisioncomposition.Options{
+				LocalComputerID: "computer", Store: store, Restarter: runtime, Waiter: runtime,
+				AcceptedTurns: acceptedStub{}, InputRecovery: journal, MaxRestartAttempts: 1, SweepInterval: time.Hour,
+				Now: time.Now, WaitBeforeRetry: func(context.Context, int) error { return nil }, Report: func(error) {},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := manager.RecoverStartup(ctx)
+			if err != nil || result.Recovered != 1 {
+				t.Fatalf("RecoverStartup() = %+v, %v", result, err)
+			}
+			inputs, err := journal.Inputs(ctx, string(ready.ID()))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !blocked && (len(inputs) != 1 || inputs[0].Phase != messagejournal.InputPending) {
+				t.Fatalf("ordinary restart discarded pending input: %+v", inputs)
+			}
+			if blocked && (len(inputs) != 2 || inputs[0].Phase != messagejournal.InputSkipped || inputs[1].Phase != messagejournal.InputSkipped) {
+				t.Fatalf("legacy blocked queue was retained: %+v", inputs)
+			}
+		})
 	}
 }

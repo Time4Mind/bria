@@ -4,6 +4,7 @@ package sessionsupervisor
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"sync"
@@ -48,28 +49,39 @@ type ReconciledAcceptedTurn = sessionattachment.ReconciledAcceptedTurn
 type AcceptedTurnReconciliation = sessionattachment.AcceptedTurnReconciliation
 type AcceptedTurnReconciler = sessionattachment.AcceptedTurnReconciler
 
+type InputRecovery interface {
+	BeginInputRecovery(context.Context, string, string, bool) (bool, error)
+	CommitInputRecoverySkip(context.Context, string, string) error
+}
+
 type Options struct {
-	MaxRestartAttempts          int
-	WaitBeforeRetry             RetryWaiter
-	Now                         func() time.Time
-	AcceptedTurns               AcceptedTurnReconciler
-	ShouldContinueAcceptedTurns func(context.Context, domain.Session, domain.ProviderBinding, AcceptedTurnReconciliation) (bool, error)
-	ContinueAcceptedTurns       func(context.Context, domain.Session, domain.ProviderBinding, AcceptedTurnReconciliation) error
+	MaxRestartAttempts                int
+	WaitBeforeRetry                   RetryWaiter
+	Now                               func() time.Time
+	AcceptedTurns                     AcceptedTurnReconciler
+	ShouldContinueAcceptedTurns       func(context.Context, domain.Session, domain.ProviderBinding, AcceptedTurnReconciliation) (bool, error)
+	ContinueAcceptedTurns             func(context.Context, domain.Session, domain.ProviderBinding, AcceptedTurnReconciliation) error
+	ContinueAcceptedTurnsWithRecovery func(context.Context, domain.Session, domain.ProviderBinding, AcceptedTurnReconciliation, func(context.Context) error) error
+	InputRecovery                     InputRecovery
+	LegacyBlockedRecovery             bool
 }
 
 type Result = sessionattachment.Result
 
 type Supervisor struct {
-	store          Store
-	waiter         ProcessWaiter
-	restarter      Restarter
-	maxAttempts    int
-	retry          RetryWaiter
-	now            func() time.Time
-	reconciler     AcceptedTurnReconciler
-	shouldContinue func(context.Context, domain.Session, domain.ProviderBinding, AcceptedTurnReconciliation) (bool, error)
-	continuation   func(context.Context, domain.Session, domain.ProviderBinding, AcceptedTurnReconciliation) error
-	recoveryMu     sync.Mutex
+	store                    Store
+	waiter                   ProcessWaiter
+	restarter                Restarter
+	maxAttempts              int
+	retry                    RetryWaiter
+	now                      func() time.Time
+	reconciler               AcceptedTurnReconciler
+	shouldContinue           func(context.Context, domain.Session, domain.ProviderBinding, AcceptedTurnReconciliation) (bool, error)
+	continuation             func(context.Context, domain.Session, domain.ProviderBinding, AcceptedTurnReconciliation) error
+	continuationWithRecovery func(context.Context, domain.Session, domain.ProviderBinding, AcceptedTurnReconciliation, func(context.Context) error) error
+	inputRecovery            InputRecovery
+	legacyBlockedRecovery    bool
+	recoveryMu               sync.Mutex
 }
 
 func New(store Store, waiter ProcessWaiter, restarter Restarter, options Options) (*Supervisor, error) {
@@ -82,9 +94,12 @@ func New(store Store, waiter ProcessWaiter, restarter Restarter, options Options
 	return &Supervisor{
 		store: store, waiter: waiter, restarter: restarter,
 		maxAttempts: options.MaxRestartAttempts, retry: options.WaitBeforeRetry, now: options.Now,
-		reconciler:     options.AcceptedTurns,
-		shouldContinue: options.ShouldContinueAcceptedTurns,
-		continuation:   options.ContinueAcceptedTurns,
+		reconciler:               options.AcceptedTurns,
+		shouldContinue:           options.ShouldContinueAcceptedTurns,
+		continuation:             options.ContinueAcceptedTurns,
+		continuationWithRecovery: options.ContinueAcceptedTurnsWithRecovery,
+		inputRecovery:            options.InputRecovery,
+		legacyBlockedRecovery:    options.LegacyBlockedRecovery,
 	}, nil
 }
 
@@ -172,8 +187,12 @@ func (supervisor *Supervisor) Watch(ctx context.Context, sessionID domain.Sessio
 		return supervisor.staleAfterConflict(ctx, current, err)
 	}
 	result := Result{AwaitingRecovery: true, Session: awaiting}
+	recoveryToken, recoveryActive, recoveryErr := supervisor.beginInputRecovery(ctx, awaiting, observed, supervisor.legacyBlockedRecovery)
+	if recoveryErr != nil {
+		return result, fmt.Errorf("begin input recovery: %w", recoveryErr)
+	}
 	if canAttach {
-		return supervisor.attach(ctx, awaiting, observed, attacher)
+		return supervisor.attach(ctx, awaiting, observed, attacher, recoveryToken, recoveryActive)
 	}
 	if needsAcceptedTurnReconciliation(current.Status()) || supervisor.reconciler != nil && current.Status() == domain.SessionReady {
 		if supervisor.reconciler == nil {
@@ -193,6 +212,9 @@ func (supervisor *Supervisor) Watch(ctx context.Context, sessionID domain.Sessio
 			}
 		}
 		if current.Status() == domain.SessionClosingAfterWork {
+			if commitErr := supervisor.commitInputRecovery(ctx, current.ID(), recoveryToken, recoveryActive); commitErr != nil {
+				return result, fmt.Errorf("commit closing input recovery: %w", commitErr)
+			}
 			archived, buildErr := archiveExited(current, supervisor.now().UTC())
 			if buildErr != nil {
 				return result, fmt.Errorf("archive reconciled closing session: %w", buildErr)
@@ -206,12 +228,12 @@ func (supervisor *Supervisor) Watch(ctx context.Context, sessionID domain.Sessio
 			return result, nil
 		}
 	}
-	restarted, restartErr := supervisor.restart(ctx, awaiting, observed)
+	restarted, restartErr := supervisor.restart(ctx, awaiting, observed, recoveryToken, recoveryActive)
 	restarted.Reconciliation = result.Reconciliation
 	return restarted, restartErr
 }
 
-func (supervisor *Supervisor) restart(ctx context.Context, awaiting domain.Session, prior domain.ProviderBinding) (Result, error) {
+func (supervisor *Supervisor) restart(ctx context.Context, awaiting domain.Session, prior domain.ProviderBinding, recoveryToken string, recoveryActive bool) (Result, error) {
 	request := app.StartSessionRequest{
 		SessionID: awaiting.ID(), ComputerID: awaiting.ComputerID(), Provider: awaiting.Provider(),
 		Workdir: awaiting.Workdir(), Mode: app.SessionStartResume, PriorBinding: &prior,
@@ -227,6 +249,10 @@ func (supervisor *Supervisor) restart(ctx context.Context, awaiting domain.Sessi
 		if startErr == nil {
 			recovered, recoverErr := awaiting.Recovered(binding, supervisor.now().UTC())
 			if recoverErr == nil {
+				if commitErr := supervisor.commitInputRecovery(ctx, awaiting.ID(), recoveryToken, recoveryActive); commitErr != nil {
+					abortErr := supervisor.restarter.Abort(ctx, request, binding)
+					return result, errors.Join(fmt.Errorf("commit recovered input boundary: %w", commitErr), abortErr)
+				}
 				if replaceErr := supervisor.store.Replace(ctx, awaiting, recovered); replaceErr == nil {
 					result.AwaitingRecovery = false
 					result.Recovered = true
@@ -255,6 +281,30 @@ func (supervisor *Supervisor) restart(ctx context.Context, awaiting domain.Sessi
 		}
 	}
 	return result, errors.Join(append([]error{ErrRecoveryExhausted}, failures...)...)
+}
+
+func (supervisor *Supervisor) beginInputRecovery(ctx context.Context, awaiting domain.Session, prior domain.ProviderBinding, legacyBlockedOnly bool) (string, bool, error) {
+	if supervisor.inputRecovery == nil {
+		return "", false, nil
+	}
+	token := inputRecoveryToken(awaiting, prior)
+	active, err := supervisor.inputRecovery.BeginInputRecovery(ctx, string(awaiting.ID()), token, legacyBlockedOnly)
+	return token, active, err
+}
+
+func (supervisor *Supervisor) commitInputRecovery(ctx context.Context, sessionID domain.SessionID, token string, active bool) error {
+	if !active {
+		return nil
+	}
+	if supervisor.inputRecovery == nil || token == "" {
+		return errors.New("input recovery boundary is unavailable")
+	}
+	return supervisor.inputRecovery.CommitInputRecoverySkip(context.WithoutCancel(ctx), string(sessionID), token)
+}
+
+func inputRecoveryToken(awaiting domain.Session, prior domain.ProviderBinding) string {
+	material := fmt.Sprintf("%s\x00%s\x00%s\x00%d\x00%d", awaiting.ID(), prior.Provider, prior.SessionID, prior.Generation, awaiting.StateChangedAt().UnixNano())
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(material)))
 }
 
 func (supervisor *Supervisor) staleAfterConflict(ctx context.Context, previous domain.Session, replaceErr error) (Result, error) {

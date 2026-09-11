@@ -21,7 +21,7 @@ import (
 	"bria/internal/telegramui"
 )
 
-const Version = 1
+const Version = 2
 
 var ErrInvalid = fmt.Errorf("invalid coordinator bundle")
 
@@ -35,6 +35,7 @@ type Route struct {
 type JournalSession struct {
 	SessionID    domain.SessionID `json:"session_id"`
 	NextSequence uint64           `json:"next_sequence"`
+	RecoveryOpen bool             `json:"recovery_open,omitempty"`
 }
 
 type TelegramScope struct {
@@ -183,7 +184,7 @@ func (bundle Bundle) Validate() error {
 func validateJournals(bundle Bundle, sessions map[domain.SessionID]domain.SessionSnapshot) error {
 	high := make(map[domain.SessionID]uint64, len(bundle.Journals))
 	for _, journal := range bundle.Journals {
-		if journal.NextSequence == 0 {
+		if journal.NextSequence == 0 || journal.RecoveryOpen {
 			return invalid("journal high-water")
 		}
 		if _, exists := sessions[journal.SessionID]; !exists {
@@ -258,7 +259,7 @@ func validateJournals(bundle Bundle, sessions map[domain.SessionID]domain.Sessio
 
 func validInputPhase(phase messagejournal.InputPhase) bool {
 	switch phase {
-	case messagejournal.InputPending, messagejournal.InputAccepted, messagejournal.InputCompleted, messagejournal.InputTerminalFailed, messagejournal.InputFailed, messagejournal.InputUnknown:
+	case messagejournal.InputPending, messagejournal.InputAccepted, messagejournal.InputCompleted, messagejournal.InputTerminalFailed, messagejournal.InputFailed, messagejournal.InputUnknown, messagejournal.InputSkipped:
 		return true
 	}
 	return false

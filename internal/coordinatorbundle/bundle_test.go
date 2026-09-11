@@ -28,7 +28,7 @@ func TestBundleValidatesCompleteCredentialFreeCoordinatorState(t *testing.T) {
 }
 
 func TestBundlePreservesProvenTerminalFailureWithoutConvertingLegacyFailure(t *testing.T) {
-	for _, phase := range []messagejournal.InputPhase{"terminal_failed", messagejournal.InputFailed, messagejournal.InputUnknown} {
+	for _, phase := range []messagejournal.InputPhase{"terminal_failed", messagejournal.InputFailed, messagejournal.InputUnknown, messagejournal.InputSkipped} {
 		bundle := validBundle()
 		bundle.Inputs[0].Phase = phase
 		digest, err := bundle.Digest()
@@ -60,6 +60,9 @@ func TestBundleRejectsLossyOrUnboundState(t *testing.T) {
 		},
 		"missing callback operations": func(bundle *coordinatorbundle.Bundle) { bundle.CallbackOperations.Operations = nil },
 		"missing key identity":        func(bundle *coordinatorbundle.Bundle) { bundle.CallbackVerificationKeyID = "" },
+		"open input recovery": func(bundle *coordinatorbundle.Bundle) {
+			bundle.Journals[0].RecoveryOpen = true
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			bundle := validBundle()

@@ -47,7 +47,7 @@ func RootReady(ctx context.Context, journal JournalReader, sessionID, messageID 
 		if prior.Sequence < sequence && (prior.Phase == messagejournal.InputAccepted || prior.Phase == messagejournal.InputUnknown || prior.Phase == messagejournal.InputFailed) {
 			continue
 		}
-		if prior.Sequence < sequence && prior.Phase != messagejournal.InputCompleted && prior.Phase != messagejournal.InputTerminalFailed {
+		if prior.Sequence < sequence && prior.Phase != messagejournal.InputCompleted && prior.Phase != messagejournal.InputTerminalFailed && prior.Phase != messagejournal.InputSkipped {
 			return false, nil
 		}
 	}

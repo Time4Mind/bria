@@ -59,7 +59,7 @@ func (s Selector) Required(ctx context.Context, session domain.Session, prior do
 			return false, errors.New("accepted continuation input is missing")
 		}
 		switch input.Phase {
-		case messagejournal.InputCompleted, messagejournal.InputTerminalFailed:
+		case messagejournal.InputCompleted, messagejournal.InputTerminalFailed, messagejournal.InputSkipped:
 			continue
 		case messagejournal.InputUnknown:
 			if input.Sequence > latestAccepted {

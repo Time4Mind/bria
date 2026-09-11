@@ -25,20 +25,22 @@ type Store interface {
 }
 
 type Options struct {
-	LocalComputerID             domain.ComputerID
-	Store                       Store
-	Waiter                      sessionsupervisor.ProcessWaiter
-	Restarter                   sessionsupervisor.Restarter
-	InitialRestarter            sessionsupervisor.Restarter
-	AcceptedTurns               sessionsupervisor.AcceptedTurnReconciler
-	ShouldContinueAcceptedTurns func(context.Context, domain.Session, domain.ProviderBinding, sessionsupervisor.AcceptedTurnReconciliation) (bool, error)
-	ContinueAcceptedTurns       func(context.Context, domain.Session, domain.ProviderBinding, sessionsupervisor.AcceptedTurnReconciliation) error
-	MaxRestartAttempts          int
-	SweepInterval               time.Duration
-	WaitBeforeRetry             sessionsupervisor.RetryWaiter
-	Now                         func() time.Time
-	Report                      func(error)
-	ReportSession               func(domain.SessionID, error)
+	LocalComputerID                   domain.ComputerID
+	Store                             Store
+	Waiter                            sessionsupervisor.ProcessWaiter
+	Restarter                         sessionsupervisor.Restarter
+	InitialRestarter                  sessionsupervisor.Restarter
+	AcceptedTurns                     sessionsupervisor.AcceptedTurnReconciler
+	ShouldContinueAcceptedTurns       func(context.Context, domain.Session, domain.ProviderBinding, sessionsupervisor.AcceptedTurnReconciliation) (bool, error)
+	ContinueAcceptedTurns             func(context.Context, domain.Session, domain.ProviderBinding, sessionsupervisor.AcceptedTurnReconciliation) error
+	ContinueAcceptedTurnsWithRecovery func(context.Context, domain.Session, domain.ProviderBinding, sessionsupervisor.AcceptedTurnReconciliation, func(context.Context) error) error
+	InputRecovery                     sessionsupervisor.InputRecovery
+	MaxRestartAttempts                int
+	SweepInterval                     time.Duration
+	WaitBeforeRetry                   sessionsupervisor.RetryWaiter
+	Now                               func() time.Time
+	Report                            func(error)
+	ReportSession                     func(domain.SessionID, error)
 }
 
 type watchedBinding struct {
@@ -72,14 +74,18 @@ func New(options Options) (*Manager, error) {
 	supervisorOptions := sessionsupervisor.Options{
 		MaxRestartAttempts: options.MaxRestartAttempts, WaitBeforeRetry: options.WaitBeforeRetry,
 		Now: options.Now, AcceptedTurns: options.AcceptedTurns,
-		ShouldContinueAcceptedTurns: options.ShouldContinueAcceptedTurns,
-		ContinueAcceptedTurns:       options.ContinueAcceptedTurns,
+		ShouldContinueAcceptedTurns:       options.ShouldContinueAcceptedTurns,
+		ContinueAcceptedTurns:             options.ContinueAcceptedTurns,
+		ContinueAcceptedTurnsWithRecovery: options.ContinueAcceptedTurnsWithRecovery,
+		InputRecovery:                     options.InputRecovery,
 	}
 	control, err := sessionrecoverycontrol.New(options.Store, options.Waiter, options.Restarter, options.InitialRestarter, supervisorOptions)
 	if err != nil {
 		return nil, ErrInvalidOptions
 	}
-	startup, err := sessionsupervisor.New(options.Store, exitedWaiter{}, options.Restarter, supervisorOptions)
+	startupOptions := supervisorOptions
+	startupOptions.LegacyBlockedRecovery = true
+	startup, err := sessionsupervisor.New(options.Store, exitedWaiter{}, options.Restarter, startupOptions)
 	if err != nil {
 		return nil, ErrInvalidOptions
 	}

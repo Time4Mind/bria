@@ -14,7 +14,7 @@ import (
 	"sync"
 )
 
-const formatVersion = 2
+const formatVersion = 3
 
 const (
 	hardMaxSessions          = 1024
@@ -39,10 +39,24 @@ type document struct {
 }
 
 type sessionRecord struct {
-	SessionID    string         `json:"session_id"`
-	NextSequence uint64         `json:"next_sequence"`
-	Inputs       []inputRecord  `json:"inputs"`
-	Outputs      []outputRecord `json:"outputs"`
+	SessionID    string               `json:"session_id"`
+	NextSequence uint64               `json:"next_sequence"`
+	Inputs       []inputRecord        `json:"inputs"`
+	Outputs      []outputRecord       `json:"outputs"`
+	Recovery     *inputRecoveryRecord `json:"input_recovery,omitempty"`
+}
+
+type inputRecoveryPhase string
+
+const (
+	inputRecoveryOpen      inputRecoveryPhase = "open"
+	inputRecoveryCommitted inputRecoveryPhase = "committed"
+)
+
+type inputRecoveryRecord struct {
+	Token           string             `json:"token"`
+	ThroughSequence uint64             `json:"through_sequence"`
+	Phase           inputRecoveryPhase `json:"phase"`
 }
 
 type inputRecord struct {
@@ -175,7 +189,20 @@ func (journal *Journal) read() (document, error) {
 	if err := decoder.Decode(&loaded); err != nil {
 		return document{}, fmt.Errorf("%w: decode: %v", ErrInvalidFormat, err)
 	}
-	if loaded.Version == 1 {
+	sourceVersion := loaded.Version
+	if sourceVersion == 1 || sourceVersion == 2 {
+		for _, session := range loaded.Sessions {
+			if session.Recovery != nil {
+				return document{}, fmt.Errorf("%w: legacy journal contains input recovery state", ErrInvalidFormat)
+			}
+			for _, input := range session.Inputs {
+				if input.Phase == InputSkipped {
+					return document{}, fmt.Errorf("%w: legacy journal contains skipped input", ErrInvalidFormat)
+				}
+			}
+		}
+	}
+	if loaded.Version == 1 || loaded.Version == 2 {
 		loaded.Version = formatVersion
 	}
 	var trailing any
@@ -303,6 +330,31 @@ func validateDocument(loaded document, limits Limits) error {
 }
 
 func validateSession(session sessionRecord, limits Limits) error {
+	if session.Recovery != nil {
+		if err := validateOpaqueID(session.Recovery.Token, limits.MaxIDBytes, "input recovery token"); err != nil {
+			return err
+		}
+		if session.Recovery.ThroughSequence == 0 || session.Recovery.ThroughSequence > session.NextSequence {
+			return errors.New("input recovery boundary is invalid")
+		}
+		switch session.Recovery.Phase {
+		case inputRecoveryOpen, inputRecoveryCommitted:
+		default:
+			return errors.New("input recovery phase is invalid")
+		}
+	}
+	if session.Recovery != nil && session.Recovery.Phase == inputRecoveryCommitted {
+		for _, input := range session.Inputs {
+			if input.Sequence > session.Recovery.ThroughSequence {
+				break
+			}
+			switch input.Phase {
+			case InputCompleted, InputTerminalFailed, InputSkipped:
+			default:
+				return errors.New("committed input recovery retains unresolved input")
+			}
+		}
+	}
 	sequences := make([]uint64, 0, len(session.Inputs)+len(session.Outputs))
 	messageIDs := make(map[string]struct{}, len(session.Inputs))
 	pendingInputs := 0
@@ -332,7 +384,7 @@ func validateSession(session sessionRecord, limits Limits) error {
 			if err := validateLease(input.Lease, limits); err != nil {
 				return err
 			}
-		case InputAccepted, InputCompleted, InputFailed, InputUnknown, InputTerminalFailed:
+		case InputAccepted, InputCompleted, InputFailed, InputUnknown, InputTerminalFailed, InputSkipped:
 			if input.Lease != (leaseRecord{}) {
 				return errors.New("terminal or accepted input retains a lease")
 			}

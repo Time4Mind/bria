@@ -13,7 +13,8 @@ check_state_compatibility() {
 		printf '%s\n' 'rollback-install: target cannot validate current state; keep current version' >&2
 		return 1
 	}
-	test "$state_receipt" = 'Bria state compatibility: OK' || {
+	expected_state_receipt=$(printf 'Bria state compatibility: OK\nBria message journal compatibility: OK')
+	test "$state_receipt" = "$expected_state_receipt" || {
 		printf '%s\n' 'rollback-install: target state compatibility receipt is missing' >&2
 		return 1
 	}

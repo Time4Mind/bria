@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"bria/internal/app"
 	"bria/internal/domain"
+	"bria/internal/messagejournal"
 	"bria/internal/providerattachport"
 	"bria/internal/sessionsupervisor"
 )
@@ -20,6 +22,150 @@ type attachRuntime struct {
 	err      error
 	detached bool
 	onAttach func()
+}
+
+type orderedInputRecovery struct {
+	events    *[]string
+	active    bool
+	beginErr  error
+	commitErr error
+}
+
+func (recovery orderedInputRecovery) BeginInputRecovery(context.Context, string, string, bool) (bool, error) {
+	*recovery.events = append(*recovery.events, "begin")
+	return recovery.active, recovery.beginErr
+}
+
+func (recovery orderedInputRecovery) CommitInputRecoverySkip(context.Context, string, string) error {
+	*recovery.events = append(*recovery.events, "commit")
+	return recovery.commitErr
+}
+
+type orderedRecoveryStore struct {
+	*memoryStore
+	events *[]string
+}
+
+func (store orderedRecoveryStore) Replace(ctx context.Context, expected, next domain.Session) error {
+	*store.events = append(*store.events, "replace:"+string(next.Status()))
+	return store.memoryStore.Replace(ctx, expected, next)
+}
+
+type orderedRecoveryReconciler struct{ events *[]string }
+
+func (reconciler orderedRecoveryReconciler) ReconcileAcceptedTurns(context.Context, domain.SessionID, domain.ProviderBinding) (sessionsupervisor.AcceptedTurnReconciliation, error) {
+	*reconciler.events = append(*reconciler.events, "reconcile")
+	return sessionsupervisor.AcceptedTurnReconciliation{}, nil
+}
+
+func TestAttachedRecoveryCommitsCapturedInputsBeforePublishingReady(t *testing.T) {
+	for _, commitErr := range []error{nil, errors.New("synthetic recovery commit failure")} {
+		t.Run(fmt.Sprint(commitErr), func(t *testing.T) {
+			ready := readySession(t, "input-recovery-order")
+			prior, _ := ready.Binding()
+			next := prior
+			next.Generation++
+			var events []string
+			baseStore := &memoryStore{session: ready}
+			store := orderedRecoveryStore{memoryStore: baseStore, events: &events}
+			runtime := &attachRuntime{binding: next, onAttach: func() { events = append(events, "attach") }}
+			supervisor, err := sessionsupervisor.New(store, waitFunc(func(context.Context, domain.SessionID, domain.ProviderBinding) error { return nil }), runtime, sessionsupervisor.Options{
+				MaxRestartAttempts: 1,
+				WaitBeforeRetry:    func(context.Context, int) error { return nil },
+				Now:                time.Now,
+				AcceptedTurns:      orderedRecoveryReconciler{events: &events},
+				InputRecovery:      orderedInputRecovery{events: &events, active: true, commitErr: commitErr},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := supervisor.Watch(context.Background(), ready.ID(), prior)
+			wantPrefix := []string{"replace:awaiting_recovery", "begin", "attach", "reconcile", "commit"}
+			if len(events) < len(wantPrefix) {
+				t.Fatalf("recovery events = %v", events)
+			}
+			for index := range wantPrefix {
+				if events[index] != wantPrefix[index] {
+					t.Fatalf("recovery events = %v, want prefix %v", events, wantPrefix)
+				}
+			}
+			if commitErr == nil {
+				if err != nil || !result.Recovered || len(events) != 6 || events[5] != "replace:ready" || store.session.Status() != domain.SessionReady || runtime.detached {
+					t.Fatalf("successful recovery = %+v, %v, events=%v status=%s detached=%t", result, err, events, store.session.Status(), runtime.detached)
+				}
+				return
+			}
+			if !errors.Is(err, commitErr) || result.Recovered || store.session.Status() != domain.SessionAwaitingRecovery || !runtime.detached {
+				t.Fatalf("failed recovery commit escaped: %+v, %v, events=%v status=%s detached=%t", result, err, events, store.session.Status(), runtime.detached)
+			}
+		})
+	}
+}
+
+func TestAttachedRecoveryRetrySkipsOnlyOriginalBoundaryAndDispatchesSuccessorOnce(t *testing.T) {
+	ctx := context.Background()
+	journal, err := messagejournal.Open(filepath.Join(t.TempDir(), "journal.json"), messagejournal.DefaultLimits())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err = journal.EnqueueInput(ctx, "recovery-cutoff", "unknown-old", []byte("old")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = journal.LeaseNextInput(ctx, "recovery-cutoff", "crashed", time.Unix(1, 0), time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = journal.MarkInputDeliveryUnknown(ctx, "recovery-cutoff", "unknown-old", "crashed"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err = journal.EnqueueInput(ctx, "recovery-cutoff", "pending-old", []byte("old pending")); err != nil {
+		t.Fatal(err)
+	}
+
+	ready := readySession(t, "recovery-cutoff")
+	prior, _ := ready.Binding()
+	next := prior
+	next.Generation++
+	store := &memoryStore{session: ready}
+	transient := errors.New("synthetic attach interruption")
+	runtime := &attachRuntime{binding: next, err: transient}
+	options := sessionsupervisor.Options{
+		MaxRestartAttempts: 1,
+		WaitBeforeRetry:    func(context.Context, int) error { return nil },
+		Now:                time.Now,
+		AcceptedTurns:      &fakeReconciler{},
+		InputRecovery:      journal,
+	}
+	supervisor, err := sessionsupervisor.New(store, waitFunc(func(context.Context, domain.SessionID, domain.ProviderBinding) error { return nil }), runtime, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := supervisor.Watch(ctx, ready.ID(), prior)
+	if !errors.Is(err, transient) || !first.AwaitingRecovery || store.session.Status() != domain.SessionAwaitingRecovery {
+		t.Fatalf("first recovery = %+v, %v, status=%s", first, err, store.session.Status())
+	}
+	before, err := journal.Inputs(ctx, string(ready.ID()))
+	if err != nil || len(before) != 2 || before[0].Phase != messagejournal.InputUnknown || before[1].Phase != messagejournal.InputPending {
+		t.Fatalf("failed attach changed captured inputs: %+v, %v", before, err)
+	}
+	if _, _, err = journal.EnqueueInput(ctx, string(ready.ID()), "after-boundary", []byte("new")); err != nil {
+		t.Fatal(err)
+	}
+	runtime.err = nil
+	second, err := supervisor.RecoverPersisted(ctx, ready.ID(), prior)
+	if err != nil || !second.Recovered || store.session.Status() != domain.SessionReady {
+		t.Fatalf("retried recovery = %+v, %v, status=%s", second, err, store.session.Status())
+	}
+	after, err := journal.Inputs(ctx, string(ready.ID()))
+	if err != nil || len(after) != 3 || after[0].Phase != messagejournal.InputSkipped || after[1].Phase != messagejournal.InputSkipped || after[2].Phase != messagejournal.InputPending {
+		t.Fatalf("recovery cutoff result = %+v, %v", after, err)
+	}
+	nextInput, err := journal.LeaseNextInput(ctx, string(ready.ID()), "recovered", time.Unix(100, 0), time.Minute)
+	if err != nil || nextInput.MessageID != "after-boundary" || nextInput.Sequence != 3 {
+		t.Fatalf("successor lease = %+v, %v", nextInput, err)
+	}
+	if _, err := journal.LeaseNextInput(ctx, string(ready.ID()), "duplicate", time.Unix(101, 0), time.Minute); !errors.Is(err, messagejournal.ErrNoAvailable) {
+		t.Fatalf("successor leased twice: %v", err)
+	}
 }
 
 func (*attachRuntime) SupportsAttach(domain.Provider) bool { return true }

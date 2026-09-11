@@ -104,6 +104,7 @@ func runContextWithDependencies(ctx context.Context, args []string, stdout, stde
 		}
 		if args[0] == "check-state" {
 			fmt.Fprintln(stdout, "Bria state compatibility: OK")
+			fmt.Fprintln(stdout, "Bria message journal compatibility: OK")
 		}
 		if args[0] == "check-telegram" {
 			fmt.Fprintln(stdout, "Telegram identity: OK")

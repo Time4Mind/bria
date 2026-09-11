@@ -29,6 +29,20 @@ type AcceptedContinuation struct {
 }
 
 func (c AcceptedContinuation) ContinueAcceptedTurns(ctx context.Context, session domain.Session, prior domain.ProviderBinding, reconciliation sessionsupervisor.AcceptedTurnReconciliation) error {
+	return c.continueAcceptedTurns(ctx, session, prior, reconciliation, nil)
+}
+
+// ContinueAcceptedTurnsWithRecovery commits the captured recovery boundary
+// after every retained accepted turn is terminal, but before lifecycle Ready
+// and the queue wake become visible.
+func (c AcceptedContinuation) ContinueAcceptedTurnsWithRecovery(ctx context.Context, session domain.Session, prior domain.ProviderBinding, reconciliation sessionsupervisor.AcceptedTurnReconciliation, finalizeRecovery func(context.Context) error) error {
+	if finalizeRecovery == nil {
+		return errors.New("accepted continuation recovery finalizer is required")
+	}
+	return c.continueAcceptedTurns(ctx, session, prior, reconciliation, finalizeRecovery)
+}
+
+func (c AcceptedContinuation) continueAcceptedTurns(ctx context.Context, session domain.Session, prior domain.ProviderBinding, reconciliation sessionsupervisor.AcceptedTurnReconciliation, finalizeRecovery func(context.Context) error) error {
 	binding, bound := session.Binding()
 	if ctx == nil || c.Journal == nil || c.Controller == nil || !bound || session.ID() == "" || binding.Provider != prior.Provider || binding.SessionID != prior.SessionID || binding.Generation <= prior.Generation {
 		return errors.New("accepted continuation binding is invalid")
@@ -60,7 +74,7 @@ func (c AcceptedContinuation) ContinueAcceptedTurns(ctx context.Context, session
 		if input.SessionID != string(session.ID()) || input.Sequence == 0 {
 			return errors.New("accepted continuation input is missing")
 		}
-		if input.Phase == messagejournal.InputCompleted || input.Phase == messagejournal.InputTerminalFailed {
+		if input.Phase == messagejournal.InputCompleted || input.Phase == messagejournal.InputTerminalFailed || input.Phase == messagejournal.InputSkipped {
 			continue
 		}
 		if input.Phase != messagejournal.InputAccepted && input.Phase != messagejournal.InputUnknown {
@@ -86,11 +100,24 @@ func (c AcceptedContinuation) ContinueAcceptedTurns(ctx context.Context, session
 		for i := range requests {
 			requests[i].Callbacks = quiet.callbacks(requests[i].Input)
 		}
-		return controller.ContinueAcceptedBatch(ctx, binding, requests, func() {
+		settled := func() {
 			if c.Wake != nil {
 				c.Wake(session.ID())
 			}
-		})
+		}
+		if finalizeRecovery != nil {
+			recoveryController, supported := c.Controller.(interface {
+				ContinueAcceptedBatchWithRecovery(context.Context, domain.ProviderBinding, []turncontinuation.Member, func(context.Context) error, func()) error
+			})
+			if !supported {
+				return errors.New("accepted continuation recovery finalization is unavailable")
+			}
+			return recoveryController.ContinueAcceptedBatchWithRecovery(ctx, binding, requests, finalizeRecovery, settled)
+		}
+		return controller.ContinueAcceptedBatch(ctx, binding, requests, settled)
+	}
+	if finalizeRecovery != nil {
+		return errors.New("accepted continuation recovery finalization is unavailable")
 	}
 	if len(requests) != 1 {
 		return errors.New("accepted batch observation is unavailable")

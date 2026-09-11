@@ -22,6 +22,7 @@ import (
 var (
 	ErrInvalidSource                    = errors.New("invalid backup source")
 	ErrAcceptedInputNeedsReconciliation = errors.New("accepted input must be reconciled before backup")
+	ErrInputRecoveryInProgress          = errors.New("input recovery must finish before backup")
 )
 
 type ReadBarrier interface {
@@ -37,8 +38,7 @@ type SessionSource interface {
 	List(context.Context) ([]domain.Session, error)
 }
 type JournalSource interface {
-	Inputs(context.Context, string) ([]messagejournal.Input, error)
-	Outputs(context.Context, string) ([]messagejournal.Output, error)
+	BackupRecords(context.Context, string) ([]messagejournal.Input, []messagejournal.Output, error)
 }
 type HistorySource interface {
 	OpenHistory(context.Context, domain.SessionSnapshot) (io.ReadCloser, error)
@@ -114,13 +114,12 @@ func (source *CurrentState) BeginSnapshot(ctx context.Context) (_ backupruntime.
 		}
 		seenSessions[snapshot.ID] = struct{}{}
 		sessionSnapshots[index] = snapshot
-		inputs, err := source.options.Journal.Inputs(ctx, string(session.ID()))
+		inputs, outputs, err := source.options.Journal.BackupRecords(ctx, string(session.ID()))
 		if err != nil {
+			if errors.Is(err, messagejournal.ErrRecoveryInProgress) {
+				return nil, fmt.Errorf("%w: session %q", ErrInputRecoveryInProgress, session.ID())
+			}
 			return nil, fmt.Errorf("read undelivered input for session %q: %w", session.ID(), err)
-		}
-		outputs, err := source.options.Journal.Outputs(ctx, string(session.ID()))
-		if err != nil {
-			return nil, fmt.Errorf("read undelivered output for session %q: %w", session.ID(), err)
 		}
 		if err := validateJournalRecords(session.ID(), inputs, outputs); err != nil {
 			return nil, err
@@ -304,7 +303,7 @@ func validateJournalRecords(id domain.SessionID, inputs []messagejournal.Input, 
 
 func validInputPhase(phase messagejournal.InputPhase) bool {
 	switch phase {
-	case messagejournal.InputPending, messagejournal.InputAccepted, messagejournal.InputCompleted, messagejournal.InputTerminalFailed, messagejournal.InputFailed, messagejournal.InputUnknown:
+	case messagejournal.InputPending, messagejournal.InputAccepted, messagejournal.InputCompleted, messagejournal.InputTerminalFailed, messagejournal.InputFailed, messagejournal.InputUnknown, messagejournal.InputSkipped:
 		return true
 	default:
 		return false

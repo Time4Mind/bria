@@ -81,3 +81,34 @@ func TestReplayFencedUnknownDoesNotBlockNewerRoot(t *testing.T) {
 		t.Fatalf("old unknown lost replay fence: %+v err=%v", inputs, err)
 	}
 }
+
+func TestSkippedRecoveryInputIsTerminalForAcceptanceAndNewRoot(t *testing.T) {
+	ctx := context.Background()
+	j, err := messagejournal.Open(filepath.Join(t.TempDir(), "journal.json"), messagejournal.DefaultLimits())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"old", "next"} {
+		if _, _, err := j.EnqueueInput(ctx, "s", id, []byte(id)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if active, err := j.BeginInputRecovery(ctx, "s", "recovery", false); err != nil || !active {
+		t.Fatalf("begin recovery = %t, %v", active, err)
+	}
+	if err := j.CommitInputRecoverySkip(ctx, "s", "recovery"); err != nil {
+		t.Fatal(err)
+	}
+	if err := acceptedinput.VerifyAcceptance(ctx, j, "s", "old", 1); !errors.Is(err, acceptedinput.ErrInvalidReceipt) {
+		t.Fatalf("skipped receipt was accepted: %v", err)
+	}
+	if err := acceptedinput.Commit(ctx, j, "s", "old", 1, "stale-worker"); !errors.Is(err, acceptedinput.ErrInvalidReceipt) {
+		t.Fatalf("late acceptance was accepted: %v", err)
+	}
+	if _, _, err := j.EnqueueInput(ctx, "s", "after", []byte("after")); err != nil {
+		t.Fatal(err)
+	}
+	if ready, err := acceptedinput.RootReady(ctx, j, "s", "after", 3); err != nil || !ready {
+		t.Fatalf("skipped prefix blocked new root: ready=%t err=%v", ready, err)
+	}
+}

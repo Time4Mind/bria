@@ -111,6 +111,29 @@ func TestSelectedSignedArtifactInstallAndRollbackDoNotRequireOtherArchives(t *te
 	}
 }
 
+func TestRollbackRejectsLegacyBinaryWithoutJournalCompatibilityReceipt(t *testing.T) {
+	root := t.TempDir()
+	trustPath, privatePath := signingFixture(t, root)
+	installRoot := filepath.Join(root, "install")
+	if err := os.Mkdir(installRoot, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(root, "config.json")
+	if err := os.WriteFile(configPath, []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	legacy := signedReleaseFixture(t, root, "1.0.0", "1.0.0", trustPath, privatePath, false, true, false)
+	runScript(t, "install-release.sh", testPlatform(), runtime.GOARCH, legacy, trustPath, installRoot, configPath)
+	current := signedReleaseFixture(t, root, "1.1.0", "1.1.0", trustPath, privatePath, false)
+	runScript(t, "install-release.sh", testPlatform(), runtime.GOARCH, current, trustPath, installRoot, configPath)
+
+	command := scriptCommand("rollback-install.sh", installRoot, configPath, trustPath)
+	if result, err := command.CombinedOutput(); err == nil {
+		t.Fatalf("legacy rollback without journal receipt succeeded:\n%s", result)
+	}
+	assertLink(t, filepath.Join(installRoot, "current"), "releases/1.1.0")
+}
+
 func assertFileContent(t *testing.T, path, expected string) {
 	t.Helper()
 	content, err := os.ReadFile(path)
@@ -284,9 +307,11 @@ func signedReleaseFixture(t *testing.T, root, version, binaryVersion, trustPath,
 		if err := os.MkdirAll(bundle, 0o700); err != nil {
 			t.Fatal(err)
 		}
-		stateCheck := "printf 'Bria state compatibility: OK\\n'"
+		stateCheck := "printf 'Bria state compatibility: OK\\nBria message journal compatibility: OK\\n'"
 		if len(compatibleState) != 0 && !compatibleState[0] {
 			stateCheck = "exit 2"
+		} else if len(compatibleState) > 1 && !compatibleState[1] {
+			stateCheck = "printf 'Bria state compatibility: OK\\n'"
 		}
 		bria := []byte("#!/bin/sh\ncase \"${1:-}\" in --version) printf 'bria " + binaryVersion + "\\n' ;; check-state) " + stateCheck + " ;; install-parakeet|check-config) exit 0 ;; *) exit 0 ;; esac\n")
 		writeExecutable(t, filepath.Join(bundle, "bria"), bria)

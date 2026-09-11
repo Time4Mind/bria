@@ -9,14 +9,16 @@ import (
 )
 
 var (
-	ErrConflict          = errors.New("message journal identity conflict")
-	ErrInvalidFormat     = errors.New("invalid message journal format")
-	ErrInvalidTransition = errors.New("invalid message journal transition")
-	ErrJournalFull       = errors.New("message journal capacity reached")
-	ErrLeaseOwner        = errors.New("message journal lease owner mismatch")
-	ErrNoAvailable       = errors.New("no ordered journal item is available")
-	ErrNotFound          = errors.New("message journal item not found")
-	ErrQueueFull         = errors.New("session input queue is full")
+	ErrConflict           = errors.New("message journal identity conflict")
+	ErrInvalidFormat      = errors.New("invalid message journal format")
+	ErrInvalidTransition  = errors.New("invalid message journal transition")
+	ErrJournalFull        = errors.New("message journal capacity reached")
+	ErrLeaseOwner         = errors.New("message journal lease owner mismatch")
+	ErrNoAvailable        = errors.New("no ordered journal item is available")
+	ErrNotFound           = errors.New("message journal item not found")
+	ErrQueueFull          = errors.New("session input queue is full")
+	ErrRecoveryInProgress = errors.New("input recovery is in progress")
+	ErrInputSkipped       = errors.New("input was skipped by recovery")
 )
 
 type InputPhase string
@@ -28,6 +30,7 @@ const (
 	InputFailed         InputPhase = "failed"
 	InputTerminalFailed InputPhase = "terminal_failed"
 	InputUnknown        InputPhase = "unknown"
+	InputSkipped        InputPhase = "skipped"
 )
 
 type OutputPhase string

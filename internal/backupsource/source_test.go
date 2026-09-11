@@ -158,6 +158,25 @@ func TestCurrentStateBlocksBackupUntilAcceptedInputIsReconciled(t *testing.T) {
 	}
 }
 
+func TestCurrentStateBlocksBackupWhileInputRecoveryBoundaryIsOpen(t *testing.T) {
+	session, err := domain.NewStartingSession("session-1", "intent-1", "mac", domain.ProviderCodex, "/work/project")
+	if err != nil {
+		t.Fatal(err)
+	}
+	options := validSourceOptions(t, []domain.Session{session}, journalPort{})
+	options.Journal = journalPort{err: messagejournal.ErrRecoveryInProgress}
+	source, err := backupsource.New(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if transaction, err := source.BeginSnapshot(context.Background()); !errors.Is(err, backupsource.ErrInputRecoveryInProgress) {
+		if transaction != nil {
+			_ = transaction.Close()
+		}
+		t.Fatalf("BeginSnapshot error = %v, want ErrInputRecoveryInProgress", err)
+	}
+}
+
 func TestCurrentStateReturnsSnapshotAndBarrierReleaseFailuresTogether(t *testing.T) {
 	readFailure := errors.New("settings unavailable")
 	releaseFailure := errors.New("barrier release failed")
@@ -248,13 +267,11 @@ func (s sessionPort) List(context.Context) ([]domain.Session, error) {
 type journalPort struct {
 	inputs  []messagejournal.Input
 	outputs []messagejournal.Output
+	err     error
 }
 
-func (j journalPort) Inputs(context.Context, string) ([]messagejournal.Input, error) {
-	return append([]messagejournal.Input(nil), j.inputs...), nil
-}
-func (j journalPort) Outputs(context.Context, string) ([]messagejournal.Output, error) {
-	return append([]messagejournal.Output(nil), j.outputs...), nil
+func (j journalPort) BackupRecords(context.Context, string) ([]messagejournal.Input, []messagejournal.Output, error) {
+	return append([]messagejournal.Input(nil), j.inputs...), append([]messagejournal.Output(nil), j.outputs...), j.err
 }
 
 type history string

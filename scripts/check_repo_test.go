@@ -101,8 +101,8 @@ func TestArchitectureCheckerRegistersInitialRecoverySupportBoundaries(t *testing
 
 func TestArchitectureCheckerBudgetsLiveRecoveryComposition(t *testing.T) {
 	policy := packagePolicies["internal/supervisioncomposition"]
-	if policy.maxProductionLines != 450 {
-		t.Fatalf("supervision composition budget = %d, want 450", policy.maxProductionLines)
+	if policy.maxProductionLines != 500 || policy.responsibility != "compose startup and live supervision with exact provider and input-recovery boundaries" {
+		t.Fatalf("supervision composition policy = %#v", policy)
 	}
 	recoveryBarrier := packagePolicies["internal/supervisioncomposition/recoverybarrier"]
 	if recoveryBarrier.responsibility != "coordinate stable recovery evidence barriers with lifecycle-aware retry backoff" ||
@@ -655,9 +655,9 @@ func TestArchitectureCheckerRegistersCurrentCompositionBoundaries(t *testing.T) 
 		},
 		{
 			path:           "internal/durablecomposition",
-			responsibility: "compose durable message custody and accepted-turn reconciliation",
+			responsibility: "compose durable message custody, accepted-turn reconciliation and recovery finalization",
 			imports:        []string{"internal/turncontinuation", "internal/acceptedrecovery", "internal/domain", "internal/durableflow", "internal/durableinputbridge", "internal/messagejournal", "internal/sessionruntime", "internal/sessionsupervisor", "internal/telegramcontroller", "internal/telegramnotify", "internal/turnprocessing"},
-			limit:          500,
+			limit:          550,
 		},
 		{
 			path:           "internal/acceptedinput",
@@ -748,7 +748,7 @@ func TestArchitectureCheckerRegistersCurrentCompositionBoundaries(t *testing.T) 
 
 func TestArchitectureCheckerUsesOnlyCurrentBriaCommandDirectImports(t *testing.T) {
 	for _, imported := range []string{
-		"internal/app", "internal/config", "internal/coordinator", "internal/domain", "internal/instancelock", "internal/sessionruntime", "internal/settings", "internal/singlemachinecomposition", "internal/storage", "internal/telegram", "internal/telegrambridge", "internal/telegramnotify",
+		"internal/app", "internal/config", "internal/coordinator", "internal/domain", "internal/instancelock", "internal/sessionruntime", "internal/settings", "internal/singlemachinecomposition", "internal/statecompatibility", "internal/storage", "internal/telegram", "internal/telegrambridge", "internal/telegramnotify",
 	} {
 		if errors := checkGraph(graphWithEdge("cmd/bria", imported)); len(errors) != 0 {
 			t.Fatalf("current direct import %s rejected: %v", imported, errors)
@@ -957,8 +957,8 @@ func TestArchitectureCheckerCapsCoherentCustodyResponsibilities(t *testing.T) {
 	}{
 		{path: "internal/authflow", limit: 1500},
 		{path: "internal/mediaflow", limit: 350},
-		{path: "internal/messagejournal", limit: 1400},
-		{path: "internal/sessionsupervisor", limit: 450},
+		{path: "internal/messagejournal", limit: 1700},
+		{path: "internal/sessionsupervisor", limit: 500},
 		{path: "internal/telegramflow", limit: 2650},
 		{path: "internal/telegrampipeline", limit: 1800},
 		{path: "internal/sessionruntime", limit: 1850},
@@ -998,7 +998,7 @@ func TestArchitectureCheckerCapsCoherentCustodyResponsibilities(t *testing.T) {
 		{path: "internal/statejson", limit: 100},
 		{path: "internal/telegram", limit: 1750},
 		{path: "internal/telegramcompletioncomposition", limit: 275},
-		{path: "internal/telegramcontroller", limit: 5600},
+		{path: "internal/telegramcontroller", limit: 5650},
 		{path: "internal/finalpersist", limit: 200},
 		{path: "internal/turnadmission", limit: 120},
 		{path: "internal/telegramsemantic", limit: 200},

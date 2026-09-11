@@ -57,7 +57,7 @@ func (f *Fence) Lease(ctx context.Context, journal JournalLeaser, sessionID, own
 		if err != nil {
 			return messagejournal.Input{}, err
 		}
-		if input.Phase != messagejournal.InputAccepted && input.Phase != messagejournal.InputCompleted && input.Phase != messagejournal.InputTerminalFailed {
+		if input.Phase != messagejournal.InputAccepted && input.Phase != messagejournal.InputCompleted && input.Phase != messagejournal.InputTerminalFailed && input.Phase != messagejournal.InputSkipped {
 			return messagejournal.Input{}, ErrUncommitted
 		}
 		delete(f.blocked, key)

@@ -36,8 +36,12 @@ func (supervisor *Supervisor) RecoverPersisted(ctx context.Context, sessionID do
 	if !ok || target == domain.SessionStarting {
 		return result, errors.New("persisted recovery target is unavailable")
 	}
+	recoveryToken, recoveryActive, recoveryErr := supervisor.beginInputRecovery(ctx, current, prior, supervisor.legacyBlockedRecovery)
+	if recoveryErr != nil {
+		return result, fmt.Errorf("begin persisted input recovery: %w", recoveryErr)
+	}
 	if attacher, ok := supervisor.restarter.(app.SessionAttacher); ok && attacher.SupportsAttach(current.Provider()) {
-		return supervisor.attach(ctx, current, prior, attacher)
+		return supervisor.attach(ctx, current, prior, attacher, recoveryToken, recoveryActive)
 	}
 	if needsAcceptedTurnReconciliation(target) || supervisor.reconciler != nil && target == domain.SessionReady {
 		if supervisor.reconciler == nil {
@@ -58,6 +62,9 @@ func (supervisor *Supervisor) RecoverPersisted(ctx context.Context, sessionID do
 		}
 	}
 	if target == domain.SessionClosingAfterWork || target == domain.SessionClosing {
+		if commitErr := supervisor.commitInputRecovery(ctx, current.ID(), recoveryToken, recoveryActive); commitErr != nil {
+			return result, fmt.Errorf("commit closing input recovery: %w", commitErr)
+		}
 		archived, archiveErr := archivePersistedRecovery(current, supervisor.now().UTC())
 		if archiveErr != nil {
 			return result, fmt.Errorf("archive persisted closing recovery: %w", archiveErr)
@@ -70,7 +77,7 @@ func (supervisor *Supervisor) RecoverPersisted(ctx context.Context, sessionID do
 		result.Session = archived
 		return result, nil
 	}
-	restarted, restartErr := supervisor.restart(ctx, current, prior)
+	restarted, restartErr := supervisor.restart(ctx, current, prior, recoveryToken, recoveryActive)
 	restarted.Reconciliation = result.Reconciliation
 	return restarted, restartErr
 }

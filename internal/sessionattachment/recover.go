@@ -19,6 +19,11 @@ func Recover(ctx context.Context, awaiting domain.Session, prior domain.Provider
 	binding, err := options.Attacher.Attach(ctx, request)
 	if err != nil {
 		if errors.Is(err, providerattachport.ErrTerminalUnavailable) {
+			if options.CommitInputRecovery != nil {
+				if commitErr := options.CommitInputRecovery(context.WithoutCancel(ctx)); commitErr != nil {
+					return result, fmt.Errorf("commit unavailable input recovery: %w", commitErr)
+				}
+			}
 			at := options.Now().UTC()
 			closing, closeErr := awaiting.BeginClose(at)
 			if closeErr != nil {
@@ -74,7 +79,10 @@ func Recover(ctx context.Context, awaiting domain.Session, prior domain.Provider
 			return result, errors.Join(ErrReconciliationRequired, fmt.Errorf("select accepted continuation: %w", err))
 		}
 	}
-	if active && options.ContinueAcceptedTurns == nil {
+	if active && options.ContinueAcceptedTurns == nil && options.ContinueAcceptedTurnsWithRecovery == nil {
+		return result, ErrReconciliationRequired
+	}
+	if active && options.CommitInputRecovery != nil && options.ContinueAcceptedTurnsWithRecovery == nil {
 		return result, ErrReconciliationRequired
 	}
 	if active && recovered.Status() == domain.SessionClosing {
@@ -99,6 +107,11 @@ func Recover(ctx context.Context, awaiting domain.Session, prior domain.Provider
 	if err := ctx.Err(); err != nil {
 		return result, err
 	}
+	if !active && options.CommitInputRecovery != nil {
+		if err = options.CommitInputRecovery(context.WithoutCancel(ctx)); err != nil {
+			return result, fmt.Errorf("commit attached input recovery: %w", err)
+		}
+	}
 	if err = options.Store.Replace(ctx, awaiting, recovered); err != nil {
 		return options.Conflict(ctx, awaiting, err)
 	}
@@ -118,7 +131,12 @@ func Recover(ctx context.Context, awaiting domain.Session, prior domain.Provider
 		return result, nil
 	}
 	if active {
-		if err = options.ContinueAcceptedTurns(ctx, recovered, prior, result.Reconciliation); err != nil {
+		if options.ContinueAcceptedTurnsWithRecovery != nil {
+			err = options.ContinueAcceptedTurnsWithRecovery(ctx, recovered, prior, result.Reconciliation, options.CommitInputRecovery)
+		} else {
+			err = options.ContinueAcceptedTurns(ctx, recovered, prior, result.Reconciliation)
+		}
+		if err != nil {
 			blocked, blockErr := blockAttached(ctx, options, recovered, err)
 			blocked.Reconciliation = result.Reconciliation
 			return blocked, blockErr
@@ -130,12 +148,13 @@ func Recover(ctx context.Context, awaiting domain.Session, prior domain.Provider
 }
 
 func blockAttached(ctx context.Context, options Options, recovered domain.Session, cause error) (Result, error) {
+	custodyCtx := context.WithoutCancel(ctx)
 	blocked, err := recovered.AwaitRecoveryAt(options.Now().UTC())
 	if err == nil {
-		err = options.Store.Replace(ctx, recovered, blocked)
+		err = options.Store.Replace(custodyCtx, recovered, blocked)
 	}
 	if err != nil {
-		return options.Conflict(ctx, recovered, errors.Join(cause, err))
+		return options.Conflict(custodyCtx, recovered, errors.Join(cause, err))
 	}
 	return Result{Session: blocked, AwaitingRecovery: true}, errors.Join(ErrReconciliationRequired, cause)
 }

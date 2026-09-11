@@ -18,7 +18,7 @@ func TestBackupDoesNotRequeueProvenTerminalFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	inputs := []messagejournal.Input{}
-	for i, phase := range []messagejournal.InputPhase{messagejournal.InputTerminalFailed, messagejournal.InputPending, messagejournal.InputFailed, messagejournal.InputUnknown} {
+	for i, phase := range []messagejournal.InputPhase{messagejournal.InputTerminalFailed, messagejournal.InputSkipped, messagejournal.InputPending, messagejournal.InputFailed, messagejournal.InputUnknown} {
 		inputs = append(inputs, messagejournal.Input{SessionID: "session-1", MessageID: string(phase), Sequence: uint64(i + 1), Phase: phase})
 	}
 	source, err := backupsource.New(validSourceOptions(t, []domain.Session{session}, journalPort{inputs: inputs}))
@@ -42,7 +42,7 @@ func TestBackupDoesNotRequeueProvenTerminalFailure(t *testing.T) {
 		t.Fatalf("terminal failure requeued or pending records lost: %#v", restored)
 	}
 	for i, record := range restored.Sessions[0].Records {
-		want := inputs[i+1]
+		want := inputs[i+2]
 		if record.Input == nil || record.Input.MessageID != want.MessageID || record.Input.Phase != want.Phase || record.SourceSequence != want.Sequence {
 			t.Fatalf("changed undelivered identity/order: %#v", record)
 		}

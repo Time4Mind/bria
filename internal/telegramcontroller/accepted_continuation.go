@@ -27,6 +27,28 @@ func (c *Controller) ContinueAcceptedInput(ctx context.Context, binding domain.P
 
 // ContinueAcceptedBatch validates the entire custody plan before any observer starts.
 func (c *Controller) ContinueAcceptedBatch(ctx context.Context, binding domain.ProviderBinding, members []turncontinuation.Member, settled func()) error {
+	return c.continueAcceptedBatch(ctx, binding, members, nil, settled, nil)
+}
+
+// ContinueAcceptedBatchWithRecovery preserves the same observation pipeline,
+// adding one fallible durable recovery commit before lifecycle Ready.
+func (c *Controller) ContinueAcceptedBatchWithRecovery(ctx context.Context, binding domain.ProviderBinding, members []turncontinuation.Member, finalizeRecovery func(context.Context) error, settled func()) error {
+	if finalizeRecovery == nil {
+		return errors.New("accepted recovery finalizer is required")
+	}
+	done := make(chan error, 1)
+	if err := c.continueAcceptedBatch(ctx, binding, members, finalizeRecovery, settled, func(err error) { done <- err }); err != nil {
+		return err
+	}
+	select {
+	case err := <-done:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (c *Controller) continueAcceptedBatch(ctx context.Context, binding domain.ProviderBinding, members []turncontinuation.Member, finalizeRecovery func(context.Context) error, settled func(), completed func(error)) error {
 	groups, err := turncontinuation.Plan(members)
 	if err != nil {
 		return err
@@ -76,17 +98,21 @@ func (c *Controller) ContinueAcceptedBatch(ctx context.Context, binding domain.P
 	worker.continuation = run
 	admission := turnadmission.NewAdmission()
 	worker.admission = admission
+	runContext := c.rootContext
+	if completed != nil {
+		runContext = ctx
+	}
 	c.durableWork.Add(1)
 	go func() {
 		defer c.durableWork.Done()
 		var observedRoot string
-		err := turncontinuation.Execute(c.rootContext, groups, func(m turncontinuation.Member) DurableInputCompletion {
+		err := turncontinuation.Execute(runContext, groups, func(m turncontinuation.Member) DurableInputCompletion {
 			observedRoot = m.Input.MessageID
-			current, err := c.sessions.Load(c.rootContext, id)
+			current, err := c.sessions.Load(runContext, id)
 			if actual, bound := current.Binding(); err != nil || !bound || actual != binding {
 				return DurableInputAwaitingRecovery
 			}
-			outcome, _ := worker.runTurnWithAcceptance(c.rootContext, queuedTurn{observedBinding: &binding, messageID: m.Input.MessageID, attachments: m.Input.Attachments, admission: admission}, func(context.Context) error { return nil })
+			outcome, _ := worker.runTurnWithAcceptance(runContext, queuedTurn{observedBinding: &binding, messageID: m.Input.MessageID, attachments: m.Input.Attachments, admission: admission}, func(context.Context) error { return nil })
 			return outcome
 		}, func(m turncontinuation.Member, outcome DurableInputCompletion) error {
 			if outcome != DurableInputSucceeded && outcome != DurableInputTerminalFailed {
@@ -94,7 +120,7 @@ func (c *Controller) ContinueAcceptedBatch(ctx context.Context, binding domain.P
 			}
 			request := turnprocessing.Request{SessionID: id, ProviderSessionID: binding.SessionID, MessageID: m.Input.MessageID, Input: PreparedInput{Attachments: m.Input.Attachments}}
 			attachmentsDone := m.Input.MessageID == observedRoot
-			return c.retryFinalization(c.rootContext, id, binding, m.Input.MessageID, func(attempt context.Context) error {
+			return c.retryFinalization(runContext, id, binding, m.Input.MessageID, func(attempt context.Context) error {
 				if !attachmentsDone {
 					if err := turnprocessing.CompleteAttachments(attempt, c.attachments, request); err != nil {
 						return err
@@ -104,12 +130,17 @@ func (c *Controller) ContinueAcceptedBatch(ctx context.Context, binding domain.P
 				return m.Callbacks.OnCompleted(attempt, DurableInputProcessReceipt{SessionID: id, MessageID: m.Input.MessageID, Sequence: m.Input.Sequence, Accepted: true, Completion: outcome})
 			})
 		}, func() error {
-			current, err := c.sessions.Load(c.rootContext, id)
+			message := groups[len(groups)-1].Members[0].Input.MessageID
+			if finalizeRecovery != nil {
+				if err := c.retryFinalization(runContext, id, binding, message+":recovery-skip", finalizeRecovery); err != nil {
+					return err
+				}
+			}
+			current, err := c.sessions.Load(runContext, id)
 			if actual, bound := current.Binding(); err != nil || !bound || actual != binding {
 				return sessionruntime.ErrBindingMismatch
 			}
-			message := groups[len(groups)-1].Members[0].Input.MessageID
-			_, err = worker.finishLifecycle(c.rootContext, message, binding)
+			_, err = worker.finishLifecycle(runContext, message, binding)
 			return err
 		})
 		admission.Seal()
@@ -119,6 +150,9 @@ func (c *Controller) ContinueAcceptedBatch(ctx context.Context, binding domain.P
 		admission.FinishRoot(err)
 		if err == nil && settled != nil {
 			settled()
+		}
+		if completed != nil {
+			completed(err)
 		}
 	}()
 	return nil

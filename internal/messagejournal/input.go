@@ -130,10 +130,13 @@ func (journal *Journal) LeaseNextInput(
 		if err != nil {
 			return ErrNoAvailable
 		}
+		if session.Recovery != nil && session.Recovery.Phase == inputRecoveryOpen {
+			return ErrNoAvailable
+		}
 		for index := range session.Inputs {
 			record := &session.Inputs[index]
 			switch record.Phase {
-			case InputAccepted, InputCompleted, InputTerminalFailed:
+			case InputAccepted, InputCompleted, InputTerminalFailed, InputSkipped:
 				continue
 			case InputFailed, InputUnknown:
 				// A later message must not overtake an earlier failed
@@ -157,7 +160,13 @@ func (journal *Journal) LeaseNextInput(
 }
 
 func (journal *Journal) MarkInputAccepted(ctx context.Context, sessionID, messageID, owner string) (Input, error) {
-	return journal.transitionInput(ctx, sessionID, messageID, func(record *inputRecord) error {
+	return journal.transitionInputWithSession(ctx, sessionID, messageID, func(session *sessionRecord, record *inputRecord) error {
+		if session.Recovery != nil && session.Recovery.Phase == inputRecoveryOpen && record.Sequence <= session.Recovery.ThroughSequence {
+			return ErrInputSkipped
+		}
+		if record.Phase == InputSkipped {
+			return ErrInputSkipped
+		}
 		if record.Phase == InputAccepted {
 			return errNoMutation
 		}
@@ -326,6 +335,17 @@ func (journal *Journal) transitionInput(
 	messageID string,
 	transition func(*inputRecord) error,
 ) (Input, error) {
+	return journal.transitionInputWithSession(ctx, sessionID, messageID, func(_ *sessionRecord, record *inputRecord) error {
+		return transition(record)
+	})
+}
+
+func (journal *Journal) transitionInputWithSession(
+	ctx context.Context,
+	sessionID string,
+	messageID string,
+	transition func(*sessionRecord, *inputRecord) error,
+) (Input, error) {
 	if err := ctx.Err(); err != nil {
 		return Input{}, err
 	}
@@ -343,7 +363,7 @@ func (journal *Journal) transitionInput(
 			if record.MessageID != messageID {
 				continue
 			}
-			err := transition(record)
+			err := transition(session, record)
 			result = inputFromRecord(sessionID, *record)
 			return err
 		}
