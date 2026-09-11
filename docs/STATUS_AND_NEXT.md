@@ -7,6 +7,13 @@
 > в runner git-config и удалял post-job. Все 10 checkout steps теперь явно
 > `false`, добавлен fail-closed policy test. Также устранён повторяемый false
 > positive сканера на raw bytes собранного `bin/bria` без ослабления source scan.
+> Выпуск завершён: `cf5a641` в `origin/main`, полный gate и оба exact-SHA CI
+> GREEN. Установлена версия `20260911-git-credential-cleanup`, PID6768 running и
+> держит единственный lock; hashes, config/settings, state/history/journal
+> сохранены. Итоговый identity-only `getMe` PASS. Перед ним три probe подряд
+> вернули transient transport failure без HTTP auth rejection; endpoint был
+> достижим, после чего проверка прошла без изменения credential. Повтор требует
+> отдельного сетевого RCA, если возникнет снова.
 > Договор и evidence: [GIT_CREDENTIAL_CLEANUP_TODO.md](GIT_CREDENTIAL_CLEANUP_TODO.md).
 
 > Текущий запрос A44 - реализовать и выпустить
@@ -37,8 +44,10 @@
 > повторно проверяют carrier/revision перед background edit. Профильные
 > RED/GREEN и joined navigation/final тесты PASS. Полный `make check-full`
 > 2026-09-11 GREEN, включая architecture, unit/integration, vet, packaging,
-> race и executable-trio acceptance. Следующий шаг - standing release, CI и
-> live postflight; после него отдельный аудит Git commit с credential.
+> race и executable-trio acceptance. Выпуск завершён: `7949654` в `origin/main`,
+> Stage 1 `34580813867` и Platform `34580814028` GREEN; установленная версия
+> прошла hashes, sole-lock, state/config/journal, сохранность и Telegram
+> postflight. Затем A44 runtime штатно вошёл в выпущенную версию A45.
 > Договор и todo: [MESSAGE_ORDER_AND_PAGE_MODE_TODO.md](MESSAGE_ORDER_AND_PAGE_MODE_TODO.md).
 
 > Текущий запрос A43 - исправить зависший препроцессинг и порядок сообщений

@@ -166,7 +166,7 @@ delivery path. Live flow в 10:10:15 MSK подтвердил `card.send_started
 | A44.1 | Порядок запросов и ответов внутри одного native turn | реализовано, профильные тесты GREEN | Exact/FIFO native user boundary меняет owner model events и final; Claude parser/test использует ту же границу, реальная queued same-turn Claude-сессия не запускалась |
 | A44.2 | Следование и фиксированная страница | реализовано, сквозной тест GREEN | Каждый input создаёт новый carrier на latest/follow; предыдущий carrier заморожен; final открывает отдельную карточку с началом ответа |
 | A44.3 | Регрессионные сценарии и реализация | профильные RED/GREEN завершены | Покрыты input-card, provider ordering, physical carrier race и final-card |
-| A44.R | Полный gate и standing release | gate GREEN, release выполняется | Remote SHA, CI, installed hashes и service postflight подтверждены |
+| A44.R | Полный gate и standing release | завершено | `7949654` в `origin/main`; Stage 1 `34580813867` и Platform `34580814028` GREEN; версия `20260911-message-order-card-follow` прошла installed hashes, sole-lock, state/config/journal и Telegram postflight, затем штатно заменена A45 без изменения A44 runtime-кода |
 
 ## Coverage map реализации
 
@@ -200,8 +200,11 @@ write-owner; integration owner проверяет изменения непос�
 - Профильные тесты `nativeadapter`, `sessionruntime`, `telegramflow`,
   `telegrampromptcomposition` и joined navigation/final проходят. Полный
   `make check-full` 2026-09-11 GREEN, включая architecture, unit/integration,
-  vet, packaging, race и executable-trio acceptance. Git/CI/deploy и live
-  postflight ещё не выполнены.
+  vet, packaging, race и executable-trio acceptance. Commit `7949654` попал в
+  `origin/main`; Stage 1 `34580813867` и Platform `34580814028` прошли. Версия
+  `20260911-message-order-card-follow` была установлена и проверена по hashes,
+  sole lock, state/config/journal, сохранности данных и Telegram identity. После
+  этого тот же runtime-код штатно вошёл в следующую версию A45.
 
 ## Следующая отдельная задача после A44 release
 
@@ -210,6 +213,10 @@ write-owner; integration owner проверяет изменения непос�
 достижимую историю. Обычное удаление из текущего tree разрешено как новая
 разработка; переписывание опубликованной истории и force-push остаются отдельной
 destructive последовательностью и требуют exact manifest перед выполнением.
+Расследование завершено в
+[GIT_CREDENTIAL_CLEANUP_TODO.md](GIT_CREDENTIAL_CLEANUP_TODO.md): actual secret
+не найден, history rewrite не потребовался, небезопасный checkout default
+устранён и защищён policy-тестом.
 
 ## Отдельный повторяющийся дефект логов
 
