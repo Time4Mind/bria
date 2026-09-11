@@ -77,8 +77,10 @@
 
 Тяжёлые проверки выполнять локально на прогретом репозиторном Go cache; GitHub
 оставлять независимым clean-runner доказательством точного commit SHA. Перед
-полным gate сначала запускать focused regression и `make check-architecture`.
-Финальный локальный gate запускать сразу вне filesystem/network sandbox:
+полным gate сначала запускать focused regression, `make check-architecture` и
+`make release-supply-chain`; сам `check-operational` также выполняет эту
+fail-closed проверку. Финальный локальный gate запускать сразу вне
+filesystem/network sandbox:
 native-terminal tests создают IPC, а `httptest` открывает loopback listener.
 Запуск их сначала в sandbox даёт ложные `operation not permitted` и не является
 полезной проверкой кода.

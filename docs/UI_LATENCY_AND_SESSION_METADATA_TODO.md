@@ -81,7 +81,14 @@ safe logs и identity-only postflight; ручной Telegram tap агент не
   process-tree fixture: raw helper временно писал `ready` в тот же файл, из
   которого parent ожидал PID adapter. Сигналы разделены; точный тест проходит
   100 race-повторов. Финальный полный versioned gate исправленного дерева GREEN.
-- Exact-SHA CI исправленного commit и live postflight ещё не завершены.
+- Follow-up `26a36a1` отправлен в `origin/main`; Stage 1 `34620133344` и Platform
+  Matrix `34620133235` завершились GREEN на точном SHA.
+- Release preflight выявил старый mutable `golang:1.25-bookworm` в `Dockerfile`:
+  `make release` корректно отказал до создания output. Официальный Docker
+  registry 2026-09-11 вернул OCI index digest `sha256:3b4a1151...b36437`;
+  `GO_IMAGE` закреплён полным digest, а supply-chain validation добавлен в
+  `check-operational`, чтобы любой обычный full gate находил такой дефект до
+  release. Follow-up exact-SHA CI и live postflight ещё не завершены.
 - Для New, browser, settings и pagination локально доказан один inventory/read
   path и regression latency seam. Физический callback-to-Telegram receipt для
   этих четырёх flow не создавался искусственно и остаётся на ближайшие обычные

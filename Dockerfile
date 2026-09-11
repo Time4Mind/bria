@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
-# Docker Hub official-images multi-arch OCI indexes, resolved 2026-09-03.
-ARG GO_IMAGE=golang:1.25-bookworm
+# Docker Hub official-images multi-arch OCI indexes, verified 2026-09-11.
+ARG GO_IMAGE=golang:1.25-bookworm@sha256:3b4a11519ad929d1e1d261a12cff056f0c85b735253d7d861346b9c6f8b36437
 ARG RUNTIME_IMAGE=alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
 ARG TARGETARCH=arm64
 

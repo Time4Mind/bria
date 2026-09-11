@@ -15,8 +15,12 @@
 > проходит 100 race-повторов, architecture GREEN. Второй A25 failure из того же
 > job не воспроизведён в 1000 race-повторах и не относится к A48 path. Отдельный
 > race-флейк Claude process-tree fixture устранён разделением raw-ready и PID
-> handshakes; 100 повторов и полный исправленный `make check-full` GREEN. Далее -
-> commit/push, exact-SHA CI, install/restart
+> handshakes; 100 повторов и полный исправленный `make check-full` GREEN. Commit
+> `26a36a1` в `origin/main`, Stage 1 `34620133344` и Platform Matrix
+> `34620133235` GREEN. Release preflight обнаружил прежний mutable `GO_IMAGE`;
+> локально добавлен официальный OCI digest и supply-chain check перенесён в
+> обычный full gate, чтобы дефект не откладывался до deploy. Далее - follow-up
+> gate/commit/CI, install/restart
 > `gui/501/com.time4mind.bria.v2` и safe live postflight. Полный договор и
 > evidence: [UI_LATENCY_AND_SESSION_METADATA_TODO.md](UI_LATENCY_AND_SESSION_METADATA_TODO.md).
 

@@ -60,6 +60,7 @@ check-vet:
 	$(GO_ENV) $(GO) vet -mod=readonly ./...
 
 check-operational:
+	./packaging/verify-supply-chain.sh
 	./packaging/test_contracts.sh
 	$(GO_ENV) $(GO) test -mod=readonly ./packaging
 	$(GO_ENV) $(GO) test -mod=readonly ./packaging/releasepack
