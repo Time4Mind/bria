@@ -44,7 +44,7 @@
 | A48.6 | Default-session auto-name live defect | отдельный naming owner; naming/standby files only | младшая модель получает strict Latin prompt; любой ответ вне ASCII A-Z/a-z/0-9 отклоняется; валидное имя применяется и обновляет карточку до окончания основной модели | local verified |
 | A48.7 | Live `awaiting_recovery` при живом Codex terminal | recovery owner; supervision/session attachment tests and implementation | adapter/observer failure не оставляет живой terminal в устойчивом awaiting; unresolved inputs безопасно skip-ятся по согласованному recovery contract | local verified |
 | A48.8 | Короткий заголовок карточки без readiness copy | integration owner; session header renderer и wire regression | lifecycle state отсутствует в header, model и время сохраняются | local verified |
-| A48.R | Release | integration owner | full gate, exact SHA CI, verified install and live postflight | local gate verified; release pending |
+| A48.R | Release | integration owner | full gate, exact SHA CI, verified install and live postflight | verified live |
 
 Integration owner владеет synthesis, общими flow-файлами и выпуском. Owners не
 редактируют пересекающиеся файлы; обнаруженное пересечение возвращается
@@ -122,3 +122,12 @@ safe logs и identity-only postflight; ручной Telegram tap агент не
   path и regression latency seam. Физический callback-to-Telegram receipt для
   этих четырёх flow не создавался искусственно и остаётся на ближайшие обычные
   пользовательские нажатия; select-session измерен live выше.
+- Финальный source commit `2290033a417c949460f49feceb74bb8b6432b129`
+  отправлен в `origin/main`. Stage 1 `34628565666` и Platform Matrix
+  `34628565787` GREEN, включая native macOS, Ubuntu, Docker, WSL и cross
+  compile. Подписанная сборка `20260911-ui-latency-session-metadata-v2`
+  установлена и штатно перезапущена только как
+  `gui/501/com.time4mind.bria.v2`; packaged postflight с identity-only Telegram
+  probe GREEN. После рестарта config/settings hashes совпали с preflight,
+  durable state содержит 12 archived + 6 ready и не содержит
+  `awaiting_recovery`; новых critical-событий после `telegram.flow_ready` нет.

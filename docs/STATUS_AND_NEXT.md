@@ -33,9 +33,12 @@
 > unsent input и повторно будит FIFO; unexpected stdout EOF получил bounded
 > pre/post-stop drain безопасного stderr-класса до `Cmd.Wait`. Deterministic
 > RED/GREEN и single-CPU race-повторы GREEN.
-> Далее - full gate/commit/exact-SHA CI, повторная подписанная установка и
-> штатный restart/postflight
-> `gui/501/com.time4mind.bria.v2` и safe live postflight. Полный договор и
+> Финальный commit `2290033a` находится в `origin/main`; Stage 1
+> `34628565666` и Platform Matrix `34628565787` GREEN. Подписанная сборка
+> `20260911-ui-latency-session-metadata-v2` установлена, сервис
+> `gui/501/com.time4mind.bria.v2` штатно перезапущен, packaged postflight GREEN.
+> Config/settings сохранены, live state после рестарта: 12 archived + 6 ready,
+> без `awaiting_recovery` и без новых critical-событий. Полный договор и
 > evidence: [UI_LATENCY_AND_SESSION_METADATA_TODO.md](UI_LATENCY_AND_SESSION_METADATA_TODO.md).
 
 > Текущий запрос A47 - исправить открытые дефекты A46, production document
