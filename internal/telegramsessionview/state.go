@@ -10,8 +10,11 @@ import (
 
 var moscowTime = time.FixedZone("MSK", 3*60*60)
 
-func Header(label, nodeName string, provider domain.Provider, stateText string, lastEventUnixNano int64) string {
-	header := fmt.Sprintf("%s · %s · %s · %s", label, nodeName, provider, stateText)
+func Header(label, nodeName string, provider domain.Provider, lastEventUnixNano int64, model string) string {
+	header := fmt.Sprintf("%s · %s · %s", label, nodeName, provider)
+	if model != "" {
+		header += " · " + model
+	}
 	if lastEventUnixNano > 0 {
 		header += " · " + time.Unix(0, lastEventUnixNano).In(moscowTime).Format("15:04:05")
 	}

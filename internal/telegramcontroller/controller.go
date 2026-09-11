@@ -1699,14 +1699,10 @@ func (controller *Controller) semanticCardForSession(ctx context.Context, sessio
 	}
 	rowSizes := telegramsessions.RowSizes(len(selectable))
 	working := session.Status() == domain.SessionRunning || session.Status() == domain.SessionStopping || session.Status() == domain.SessionClosingAfterWork
-	stateText := telegramsessionview.StateText(session.Status())
 	controller.hydrateNativeModel(ctx, session)
 	controller.mu.Lock()
 	nativeModel := controller.nativeSnapshots[sessionID].Model
 	controller.mu.Unlock()
-	if nativeModel != "" {
-		stateText += " · " + nativeModel
-	}
 	nodeName := string(session.ComputerID())
 	if nodes, inventoryErr := controller.nodeInventory(ctx); inventoryErr == nil {
 		nodeName = telegramnodes.Name(session.ComputerID(), nodes)
@@ -1718,7 +1714,7 @@ func (controller *Controller) semanticCardForSession(ctx context.Context, sessio
 	card := SemanticCard{
 		SessionID: sessionID,
 		Effect:    SemanticEditSameCarrier,
-		Header:    telegramsessionview.Header(labelsByID[sessionID], nodeName, session.Provider(), stateText, lastEventUnixNano),
+		Header:    telegramsessionview.Header(labelsByID[sessionID], nodeName, session.Provider(), lastEventUnixNano, nativeModel),
 		Footer:    footer,
 		Pages:     pages,
 		View:      SemanticPageView{Page: view.Page, Pages: view.Pages, Anchor: view.Anchor, FollowLatest: view.FollowLatest},

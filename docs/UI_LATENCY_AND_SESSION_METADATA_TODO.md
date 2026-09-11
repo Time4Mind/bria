@@ -14,6 +14,8 @@
 - Дополнение: повторно проверить production-путь автонейминга default-сессий;
   прежний regression test не является приёмкой, если live default остаётся без
   автоматически обновлённого имени.
+- Дополнение: убрать lifecycle copy (`готова`, `в работе` и другие состояния)
+  из заголовка активной карточки; сохранить label, node, CLI, model и `hh:mm:ss`.
 - Источники: safe structured logs актуальной новой Bria после запуска
   `20260911-session-flow-reliability-recovery`, текущий код и публичные тестовые
   seams. Период live RCA - с 2026-09-11 16:32:45 MSK до конца проверки.
@@ -41,6 +43,7 @@
 | A48.5 | Independent review | read-only reviewer | проверены race, ordering, latency и product contract | approved |
 | A48.6 | Default-session auto-name live defect | отдельный naming owner; naming/standby files only | младшая модель получает strict Latin prompt; любой ответ вне ASCII A-Z/a-z/0-9 отклоняется; валидное имя применяется и обновляет карточку до окончания основной модели | local verified |
 | A48.7 | Live `awaiting_recovery` при живом Codex terminal | recovery owner; supervision/session attachment tests and implementation | adapter/observer failure не оставляет живой terminal в устойчивом awaiting; unresolved inputs безопасно skip-ятся по согласованному recovery contract | local verified |
+| A48.8 | Короткий заголовок карточки без readiness copy | integration owner; session header renderer и wire regression | lifecycle state отсутствует в header, model и время сохраняются | local verified |
 | A48.R | Release | integration owner | full gate, exact SHA CI, verified install and live postflight | local gate verified; release pending |
 
 Integration owner владеет synthesis, общими flow-файлами и выпуском. Owners не
@@ -59,6 +62,9 @@ safe logs и identity-only postflight; ручной Telegram tap агент не
 - Автонейминг: prompt явно разрешает только `A-Z`, `a-z`, `0-9`; тест с ответом
   `Кнопка меню` получает invalid output, а `Fast name` сохраняется и вызывает
   refresh до завершения primary turn.
+- Header regression: `default · Local · codex · gpt-5.6-sol · 17:10:37`
+  сохраняет модель и московское время, но не содержит lifecycle copy `готова`
+  или `не готова`; фоновые badges остаются без изменений.
 - Independent review обнаружил и закрыл обход через третий фрагмент ответа:
   `Fast name Кириллица` теперь целиком отклоняется до усечения. Повторный review
   актуального diff завершён `APPROVE`.

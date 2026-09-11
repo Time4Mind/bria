@@ -132,7 +132,7 @@ func TestActiveCardMarkdownQuoteUsesNativeRichBlockquoteOnWire(t *testing.T) {
 	}
 	defer sender.Close(context.Background())
 	body := "Exact preview:\n\n&gt; Проверил прототип.\n&gt;\n&gt; Что проверено:\n&gt; - нет дублей;\n&gt; - арифметика сходится.\n\nСледующий абзац."
-	status := coordinator.Status{ConversationID: 42, SourceMessageID: 55, Text: "workdir · local · codex · готова\n\n─────  \n" + body, RichMarkdown: true}
+	status := coordinator.Status{ConversationID: 42, SourceMessageID: 55, Text: "workdir · local · codex\n\n─────  \n" + body, RichMarkdown: true}
 	keyboard := coordinator.KeyboardMarkup{{{Text: "1/1", CallbackData: "signed"}}}
 	if _, err := sender.EditStatusWithKeyboard(context.Background(), "active-card-quote", status, &keyboard); err != nil {
 		t.Fatal(err)

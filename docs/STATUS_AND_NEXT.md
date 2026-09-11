@@ -5,7 +5,9 @@
 > default auto-name и живой-terminal recovery. Автонейминг теперь требует от
 > дешёвой модели только ASCII Latin (`A-Z`, `a-z`, цифры) и fail-closed отклоняет
 > любой ответ с кириллицей или пунктуацией; валидное имя применяется до финала
-> primary turn. Локально также закрыты repeatable callbacks, bounded ledgers,
+> primary turn. Заголовок активной карточки больше не показывает lifecycle copy
+> `готова`/`в работе`, сохраняя model и `hh:mm:ss`. Локально также закрыты
+> repeatable callbacks, bounded ledgers,
 > один inventory read для New/browser, durable page plan без write из
 > `ProjectCurrent`, rollback-compatible activity sidecar и safe recovery cutoff.
 > architecture, global race и executable trio. Первый source commit `80192c6`

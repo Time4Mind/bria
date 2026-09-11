@@ -1907,10 +1907,10 @@ func TestMessageDuringAsyncStartingEntersDurableCustodyBeforeProviderReady(t *te
 	store.Set(awaiting)
 	outcomes <- telegramcontroller.SessionStartOutcome{Session: awaiting, StartError: errors.New("provider startup failed")}
 	close(outcomes)
-	eventuallyCurrentCardContains(t, controller, starting.ID(), "ожидает восстановления")
+	eventuallyCurrentCardRecovery(t, controller, starting.ID(), true)
 	store.Set(ready)
 	controller.RefreshRecoveryCard(context.Background(), ready.ID())
-	eventuallyCurrentCardContains(t, controller, ready.ID(), "готова")
+	eventuallyCurrentCardRecovery(t, controller, ready.ID(), false)
 }
 
 func TestExhaustedEmptyAsyncStartRestoresPreviousActiveCard(t *testing.T) {
@@ -3253,6 +3253,19 @@ func eventuallyCurrentCardContains(t *testing.T, controller *telegramcontroller.
 		time.Sleep(time.Millisecond)
 	}
 	t.Fatalf("current card %q never contained %q", id, want)
+}
+
+func eventuallyCurrentCardRecovery(t *testing.T, controller *telegramcontroller.Controller, id domain.SessionID, want bool) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		decision, err := controller.ProjectCurrent(context.Background(), "")
+		if err == nil && decision.Card != nil && decision.Card.SessionID == id && decision.Card.Recovery == want {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("current card %q recovery never became %t", id, want)
 }
 
 func readySession(t *testing.T, id string, provider domain.Provider, workdir, providerID string, generation uint64) domain.Session {
