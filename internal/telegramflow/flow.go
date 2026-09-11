@@ -3,6 +3,7 @@ package telegramflow
 import (
 	"bria/internal/callbackdiagnostic"
 	"bria/internal/callbacktoken"
+	"bria/internal/carddeliveryguard"
 	"bria/internal/coordinator"
 	"bria/internal/domain"
 	"bria/internal/telegram"
@@ -145,6 +146,7 @@ type Sender struct {
 	observer            TraceObserver
 	onCallbackCommitted func(CallbackCommit)
 	delivery            sync.Mutex
+	sessionDelivery     sync.Map // domain.SessionID -> *sync.Mutex
 }
 type UnknownCallbackOperation struct {
 	OwnerUserID        int64
@@ -982,8 +984,8 @@ func (sender *Sender) deliverStatusOperation(ctx context.Context, operation Stat
 		}
 		sender.trace(context.WithoutCancel(ctx), TraceEvent{Stage: "delivery.durable", OperationID: operation.ID, Result: result, Error: errorText, Duration: time.Since(started)})
 	}()
-	sender.delivery.Lock()
-	defer sender.delivery.Unlock()
+	unlock := sender.lockPreparedDelivery(operation.Prepared)
+	defer unlock()
 	current, found, err := sender.operations.LoadStatus(ctx, operation.ID)
 	loadFinished := time.Now()
 	sender.trace(ctx, TraceEvent{Stage: "delivery.operation.load", OperationID: operation.ID, Result: traceResult(err), Error: traceError(err), Duration: loadFinished.Sub(started)})
@@ -1168,23 +1170,29 @@ func (sender *Sender) SendStatus(ctx context.Context, operationID string, status
 	return sender.base.SendStatus(ctx, operationID, status)
 }
 func (sender *Sender) SendStatusWithKeyboard(ctx context.Context, operationID string, status coordinator.Status, keyboard *coordinator.KeyboardMarkup) (coordinator.Receipt, error) {
-	if sender.pendingGlobalSurface(operationID) {
-		sender.delivery.Lock()
-		defer sender.delivery.Unlock()
+	if prepared, found := sender.pending.peek(operationID); found {
+		unlock := sender.lockPreparedDelivery(&prepared)
+		defer unlock()
 	}
 	return sender.sendPrepared(ctx, operationID, status, keyboard, false)
 }
 func (sender *Sender) EditStatusWithKeyboard(ctx context.Context, operationID string, status coordinator.Status, keyboard *coordinator.KeyboardMarkup) (coordinator.Receipt, error) {
-	if sender.pendingGlobalSurface(operationID) {
-		sender.delivery.Lock()
-		defer sender.delivery.Unlock()
+	if prepared, found := sender.pending.peek(operationID); found {
+		unlock := sender.lockPreparedDelivery(&prepared)
+		defer unlock()
 	}
 	return sender.sendPrepared(ctx, operationID, status, keyboard, true)
 }
 
-func (sender *Sender) pendingGlobalSurface(operationID string) bool {
-	prepared, found := sender.pending.peek(operationID)
-	return found && prepared.Presentation.SessionID == telegramui.GlobalSurfaceID
+func (sender *Sender) lockPreparedDelivery(prepared *Prepared) func() {
+	if prepared == nil || prepared.Card.SessionID == "" {
+		sender.delivery.Lock()
+		return sender.delivery.Unlock
+	}
+	value, _ := sender.sessionDelivery.LoadOrStore(prepared.Card.SessionID, &sync.Mutex{})
+	gate := value.(*sync.Mutex)
+	gate.Lock()
+	return gate.Unlock
 }
 
 // EditCurrentGlobalSurface replaces one global surface only while the exact
@@ -1299,6 +1307,17 @@ func (sender *Sender) sendPrepared(
 	wantsEdit := prepared.Edit
 	if wantsEdit != edit {
 		return coordinator.Receipt{}, errors.New("prepared Telegram carrier effect does not match sender method")
+	}
+	if edit && !durable && prepared.Card.ExpectedCarrierRevision != nil {
+		carrier := telegramstate.Carrier{ChatID: status.ConversationID, MessageID: status.SourceMessageID}
+		state, err := sender.uiState.Load(ctx)
+		if err != nil {
+			return coordinator.Receipt{}, err
+		}
+		card, found := state.Card(prepared.Card.SessionID)
+		if !found || card.Carrier != carrier || card.CarrierRevision != *prepared.Card.ExpectedCarrierRevision {
+			return coordinator.Receipt{}, carddeliveryguard.ErrNotCurrent
+		}
 	}
 	if durable {
 		sendUnknown := operation

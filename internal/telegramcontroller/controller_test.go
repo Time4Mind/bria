@@ -1735,7 +1735,7 @@ func TestPromptStatusInActiveCardMovesFromQueuedToProviderAccepted(t *testing.T)
 	update := message(90, "prompt")
 	update.SourceMessageID = 900
 	queued, err := controller.HandleSemanticMessage(context.Background(), update)
-	if err != nil || queued.Card == nil || !strings.Contains(queued.Card.Pages[0].Content, "🙋‍♂ prompt") {
+	if err != nil || queued.Card == nil || !queued.Card.OpenLatest || !strings.Contains(queued.Card.Pages[0].Content, "🙋‍♂ prompt") {
 		t.Fatalf("queued card = (%#v, %v)", queued, err)
 	}
 	if _, err := controller.ProcessDurableInput(context.Background(), telegramcontroller.DurableLeasedInput{

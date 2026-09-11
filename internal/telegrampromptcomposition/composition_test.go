@@ -14,6 +14,7 @@ import (
 	"bria/internal/telegrambridge"
 	"bria/internal/telegramcontroller"
 	"bria/internal/telegramflow"
+	"bria/internal/telegramnotify"
 	"bria/internal/telegramstate"
 )
 
@@ -61,6 +62,17 @@ func (stub controllerStub) ProjectCurrent(context.Context, domain.SessionID) (te
 type senderStub struct {
 	prepared telegramflow.Prepared
 	status   coordinator.Status
+}
+
+type observedSender struct {
+	edits chan coordinator.Status
+}
+
+func (stub *observedSender) Register(telegramflow.Prepared) error { return nil }
+
+func (stub *observedSender) EditStatusWithKeyboard(_ context.Context, _ string, status coordinator.Status, _ *coordinator.KeyboardMarkup) (coordinator.Receipt, error) {
+	stub.edits <- status
+	return coordinator.Receipt{MessageID: status.SourceMessageID}, nil
 }
 
 func (stub *senderStub) Register(prepared telegramflow.Prepared) error {
@@ -231,5 +243,77 @@ func TestDelivererEditsActiveCardWithInCardMarker(t *testing.T) {
 	}
 	if queued.status.Text != "" {
 		t.Fatal("canceled native edit mutated the menu")
+	}
+}
+
+func TestPromptStatusWaitsForItsNewInputCarrierAndNeverEditsPreviousCard(t *testing.T) {
+	now := time.Date(2026, 9, 11, 10, 0, 0, 0, time.UTC)
+	codec, err := callbacktoken.New(bytes.Repeat([]byte{7}, 32), bytes.NewReader(make([]byte, 4096)), func() time.Time { return now })
+	if err != nil {
+		t.Fatal(err)
+	}
+	presenter, err := telegrambridge.NewPresenter(codec, func() time.Time { return now }, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const sessionID = domain.SessionID("00000000-0000-4000-8000-000000000071")
+	card := telegramcontroller.SemanticCard{
+		SessionID: sessionID, Effect: telegramcontroller.SemanticEditSameCarrier, Header: "Сессия test\n",
+		Pages: []telegramcontroller.SemanticContentPage{{Content: "👨‍💻 Новый запрос", Anchors: []string{"prompt"}}},
+		View:  telegramcontroller.SemanticPageView{Page: 1, Pages: 1, Anchor: "prompt", FollowLatest: true},
+	}
+	state := telegramstate.NewMemoryStore()
+	if err := state.Update(context.Background(), func(current *telegramstate.State) error {
+		current.ActiveSession = sessionID
+		return current.SetCard(telegramstate.Card{
+			SessionID: sessionID, Carrier: telegramstate.Carrier{ChatID: 42, MessageID: 77},
+			CarrierRevision: 1, LastPresentationOperation: "status:70",
+			Page: telegramstate.Page{Current: 1, Total: 1, FollowLatest: false},
+		})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	sender := &observedSender{edits: make(chan coordinator.Status, 1)}
+	deliverer := Deliverer{Controller: controllerStub{card: card}, Cards: state, Presenter: presenter, Sender: sender}
+	type result struct {
+		receipt telegramnotify.DeliveryReceipt
+		err     error
+	}
+	done := make(chan result, 1)
+	go func() {
+		receipt, deliverErr := deliverer.Deliver(context.Background(), telegramcontroller.Notification{
+			OperationID: "telegram-update:71:prompt-status:accepted", ConversationID: 42,
+			SessionID: sessionID, Kind: telegramcontroller.NotificationPromptStatus, Text: "👨‍💻",
+		}, "telegram-update:71:prompt-status:accepted")
+		done <- result{receipt: receipt, err: deliverErr}
+	}()
+	select {
+	case edit := <-sender.edits:
+		t.Fatalf("previous carrier was edited before new input card committed: %#v", edit)
+	case <-time.After(50 * time.Millisecond):
+	}
+	if err := state.Update(context.Background(), func(current *telegramstate.State) error {
+		stored, _ := current.Card(sessionID)
+		stored.Carrier = telegramstate.Carrier{ChatID: 42, MessageID: 78}
+		stored.LastPresentationOperation = "status:71"
+		return current.SetCard(stored)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case got := <-done:
+		if got.err != nil || got.receipt.State != telegramnotify.DeliveryConfirmed {
+			t.Fatalf("Deliver() = (%#v, %v)", got.receipt, got.err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("prompt status did not resume after new carrier commit")
+	}
+	select {
+	case edit := <-sender.edits:
+		if edit.SourceMessageID != 78 {
+			t.Fatalf("prompt status edited carrier %d, want 78", edit.SourceMessageID)
+		}
+	default:
+		t.Fatal("new input carrier was not refreshed")
 	}
 }

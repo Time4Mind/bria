@@ -44,8 +44,11 @@ type SemanticPageView struct {
 	FollowLatest bool
 }
 type SemanticCard struct {
-	SessionID                          domain.SessionID
-	Effect                             SemanticCarrierEffect
+	SessionID domain.SessionID
+	Effect    SemanticCarrierEffect
+	// OpenLatest marks a card created by a new user input. Its new carrier must
+	// start at the current tail independently of the previous carrier's view.
+	OpenLatest                         bool
 	Header                             string
 	Footer                             string
 	Pages                              []SemanticContentPage

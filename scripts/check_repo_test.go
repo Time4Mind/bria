@@ -21,7 +21,7 @@ func TestNativeMigrationKeepsExactPackageBoundaries(t *testing.T) {
 		path    string
 		imports []string
 	}{
-		{"internal/nativeadapter", []string{"internal/domain", "internal/nativeacceptance", "internal/nativeattachment", "internal/nativecapture", "internal/nativecli", "internal/nativephotostaging", "internal/nativereceiptstore", "internal/nativestartupdiagnostic", "internal/nativeterminal", "internal/nativetranscript", "internal/runtimediagnostic", "internal/runtimeprotocol"}},
+		{"internal/nativeadapter", []string{"internal/domain", "internal/nativeacceptance", "internal/nativeattachment", "internal/nativecapture", "internal/nativecli", "internal/nativeeventkind", "internal/nativeinputowner", "internal/nativephotostaging", "internal/nativereceiptstore", "internal/nativestartupdiagnostic", "internal/nativeterminal", "internal/nativetranscript", "internal/runtimediagnostic", "internal/runtimeprotocol"}},
 		{"internal/nativecapture", nil},
 		{"internal/nativeattachment", nil},
 		{"internal/nativecli", []string{"internal/domain", "internal/nativeapproval"}},
@@ -692,7 +692,7 @@ func TestArchitectureCheckerRegistersCurrentCompositionBoundaries(t *testing.T) 
 		{
 			path:           "internal/telegrampromptcomposition",
 			responsibility: "refresh active prompt and native-screen cards with visibility-scoped cancellation",
-			imports:        []string{"internal/carddeliveryguard", "internal/coordinator", "internal/domain", "internal/telegrambridge", "internal/telegramcontroller", "internal/telegramflow", "internal/telegramnotify", "internal/telegramstate", "internal/telegramui"},
+			imports:        []string{"internal/carddeliveryguard", "internal/coordinator", "internal/domain", "internal/inputcarrierguard", "internal/telegrambridge", "internal/telegramcontroller", "internal/telegramflow", "internal/telegramnotify", "internal/telegramstate", "internal/telegramui"},
 			limit:          225,
 		},
 		{

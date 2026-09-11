@@ -593,9 +593,11 @@ func TestStarterSteersCurrentTurnAndReturnsBeforeRootFinal(t *testing.T) {
 	starter, request, binding := startHelper(t, "steer", sessionruntime.Options{})
 	rootDone := make(chan sessionruntime.TurnResult, 1)
 	rootErr := make(chan error, 1)
+	events := make(chan sessionruntime.TurnEvent, 1)
 	go func() {
 		result, err := starter.SubmitWithCallbacks(context.Background(), request.SessionID, "root", sessionruntime.TurnCallbacks{
 			MessageID: "message-root", OnAccepted: func(string) error { return nil },
+			OnEvent: func(event sessionruntime.TurnEvent) error { events <- event; return nil },
 		})
 		rootDone <- result
 		rootErr <- err
@@ -620,11 +622,19 @@ func TestStarterSteersCurrentTurnAndReturnsBeforeRootFinal(t *testing.T) {
 	}
 	select {
 	case result := <-rootDone:
-		if err := <-rootErr; err != nil || result.Final != "done:root+follow-up" {
+		if err := <-rootErr; err != nil || result.Final != "done:root+follow-up" || result.FinalMessageID != "message-follow-up" {
 			t.Fatalf("root result = (%#v, %v)", result, err)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("root turn did not complete after steer")
+	}
+	select {
+	case event := <-events:
+		if event.Text != "after:follow-up" || event.MessageID != "message-follow-up" {
+			t.Fatalf("steer event = %#v", event)
+		}
+	default:
+		t.Fatal("steer-owned event was not streamed")
 	}
 	if err := starter.Abort(context.Background(), request, binding); err != nil {
 		t.Fatal(err)
@@ -1222,7 +1232,8 @@ func TestSessionRuntimeHelperProcess(t *testing.T) {
 				os.Exit(43)
 			}
 			emit(map[string]any{"protocol": 1, "type": "accepted", "request_id": message.RequestID, "message_id": message.MessageID})
-			emit(map[string]any{"protocol": 1, "type": "final", "request_id": rootRequestID, "text": "done:root+follow-up"})
+			emit(map[string]any{"protocol": 1, "type": "event", "request_id": message.RequestID, "kind": "commentary", "text": "after:follow-up"})
+			emit(map[string]any{"protocol": 1, "type": "final", "request_id": message.RequestID, "text": "done:root+follow-up"})
 			emit(map[string]any{"protocol": 1, "type": "completed", "request_id": rootRequestID, "status": "completed"})
 		case "interaction_response":
 			if mode != "interaction" || message.RequestID == "" || message.InteractionResponse == nil ||

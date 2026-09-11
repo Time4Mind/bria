@@ -125,8 +125,12 @@ func TestTelegramControllerFlowAdapterMapsSurfaceTargetsAndMessageCards(t *testi
 		},
 	}}, messageResult: telegramcontroller.SemanticActionResult{Card: &telegramcontroller.SemanticCard{
 		SessionID: sessionID, Effect: telegramcontroller.SemanticEditSameCarrier,
-		Header: "new card\n", Pages: []telegramcontroller.SemanticContentPage{{Content: "body", Anchors: []string{"a"}}},
-		View: telegramcontroller.SemanticPageView{Page: 1, Pages: 1, Anchor: "a", FollowLatest: true},
+		Header: "new card\n", Pages: []telegramcontroller.SemanticContentPage{
+			{Content: "old", Anchors: []string{"a"}},
+			{Content: "body", Anchors: []string{"b"}},
+		},
+		View:       telegramcontroller.SemanticPageView{Page: 1, Pages: 2, Anchor: "a", FollowLatest: false},
+		OpenLatest: true,
 	}}}
 	adapter := telegramruntimecomposition.ControllerFlowAdapter{Controller: stub}
 
@@ -155,6 +159,9 @@ func TestTelegramControllerFlowAdapterMapsSurfaceTargetsAndMessageCards(t *testi
 	}
 	if message.Card == nil || message.Card.Projection.Effect != telegramui.EffectSendOneNewCard {
 		t.Fatalf("message card = %#v", message.Card)
+	}
+	if got := message.Card.Projection.Card.View; got.Page != 2 || got.Pages != 2 || got.Anchor != "b" || !got.FollowLatest {
+		t.Fatalf("new-input view = %#v, want latest page in follow mode", got)
 	}
 }
 

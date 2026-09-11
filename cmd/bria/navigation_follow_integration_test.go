@@ -118,6 +118,53 @@ func TestNavigationFollowJoinedLatestAndPinnedGrowth(t *testing.T) {
 	}
 }
 
+func TestNavigationFollowJoinedEveryInputStartsLatestCarrierAndFreezesPrevious(t *testing.T) {
+	f := newNavigationFollowFixture(t)
+	f.click(telegramui.ActionPageLatest)
+	f.click(telegramui.ActionPagePrevious)
+	before := f.wire.snapshot()
+	old := before[len(before)-1]
+	state, err := f.store.LoadTelegramUI(f.ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pinned, _ := state.Card(f.id)
+	if pinned.Page.FollowLatest || pinned.Page.Current == pinned.Page.Total {
+		t.Fatal("fixture did not pin an earlier page")
+	}
+
+	f.message("VISIBLE_NEW_INPUT")
+	afterInput := f.wire.snapshot()
+	if len(afterInput) != len(before)+1 {
+		t.Fatalf("new input mutations=%d, want one new carrier", len(afterInput)-len(before))
+	}
+	current := afterInput[len(afterInput)-1]
+	if current.Method != "sendRichMessage" || current.ID == old.ID || !strings.Contains(current.Text, "VISIBLE_NEW_INPUT") {
+		t.Fatalf("new input carrier = %+v", current)
+	}
+	state, err = f.store.LoadTelegramUI(f.ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	card, _ := state.Card(f.id)
+	if card.Carrier.MessageID != current.ID || card.Page.Current != card.Page.Total || !card.Page.FollowLatest {
+		t.Fatalf("new input page state = %+v", card)
+	}
+
+	f.append("commentary", "MODEL_AFTER_NEW_INPUT")
+	f.deliver(telegramcontroller.NotificationCommentary, "after-new-input")
+	packets := f.wire.snapshot()
+	last := packets[len(packets)-1]
+	if last.ID != current.ID || !strings.Contains(last.Text, "MODEL_AFTER_NEW_INPUT") {
+		t.Fatalf("model update did not target newest carrier: %+v", last)
+	}
+	for _, packet := range packets[len(afterInput):] {
+		if packet.ID == old.ID {
+			t.Fatalf("previous carrier received a later mutation: %+v", packet)
+		}
+	}
+}
+
 func TestNavigationFollowJoinedFinalNewCarrierStartsAnswer(t *testing.T) {
 	for _, pinned := range []bool{false, true} {
 		for _, long := range []bool{false, true} {

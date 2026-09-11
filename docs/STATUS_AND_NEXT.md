@@ -1,5 +1,37 @@
 # Handoff: статус и следующий план
 
+> Текущий запрос A44 - реализовать и выпустить
+> порядок `запрос -> ответ` и режимы `следование / фиксированная страница`.
+> Live RCA подтвердил: два Telegram-запроса `783531733`/`783531735` приняты как
+> один native Codex turn, но все последующие модельные события получили turn-key
+> первого запроса и были вставлены выше второго. Native rollout сохраняет
+> правильный хронологический порядок. Три изолированных Luna-прогона с девятью
+> steer подтвердили устойчивую границу: RPC acceptance происходит немедленно,
+> старый output продолжается, затем появляется отдельный matched user record и
+> только после него начинается новый model item. Значит fallback по времени не
+> нужен; owner model events можно переключать по user record. Для Claude Code
+> согласована та же семантика при наличии доказуемой native boundary, иначе
+> append-only fallback с немедленным закреплением позиции. A44.2 обсуждает
+> persisted follow/pinned plan и отдельную final-card. Live A44.2 RCA: final
+> безусловно сохраняет `follow_latest=false`, даже на последней странице;
+> следующий запрос наследует эту фиксацию и не следует за первой новой страницей.
+> Эпизод 09:38-09:39 MSK: `8/8 false` -> `8/9 false`, затем только ручной Latest
+> дал `9/9 true`. Уточнённый live-диагноз: основной ingress уже создаёт новый
+> carrier на каждый input, включая steer. Дефект в том, что новая карточка может
+> унаследовать старый page plan (`8/9 false` вместо `9/9 true`), а параллельный
+> prompt-status может начать edit старого carrier. Цель: оставить существующий
+> send, принудить новый carrier к latest/follow и fence-ить фоновые edits
+> предыдущего. Final по-прежнему публикуется отдельной карточкой с началом
+> ответа. A44 полностью согласован Артёмом. Реализация выполнена локально:
+> exact/FIFO owner проходит через nativeadapter -> sessionruntime -> controller,
+> новый input получает latest/follow, а prepared публикации сериализованы и
+> повторно проверяют carrier/revision перед background edit. Профильные
+> RED/GREEN и joined navigation/final тесты PASS. Полный `make check-full`
+> 2026-09-11 GREEN, включая architecture, unit/integration, vet, packaging,
+> race и executable-trio acceptance. Следующий шаг - standing release, CI и
+> live postflight; после него отдельный аудит Git commit с credential.
+> Договор и todo: [MESSAGE_ORDER_AND_PAGE_MODE_TODO.md](MESSAGE_ORDER_AND_PAGE_MODE_TODO.md).
+
 > Текущий запрос A43 - исправить зависший препроцессинг и порядок сообщений
 > активной `workdir7`. Договор и evidence:
 > [PREPROCESSING_HELD_INPUT_DIAGNOSIS_TODO.md](PREPROCESSING_HELD_INPUT_DIAGNOSIS_TODO.md).

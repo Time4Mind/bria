@@ -9,6 +9,7 @@ import (
 	"bria/internal/carddeliveryguard"
 	"bria/internal/coordinator"
 	"bria/internal/domain"
+	"bria/internal/inputcarrierguard"
 	"bria/internal/telegrambridge"
 	"bria/internal/telegramcontroller"
 	"bria/internal/telegramflow"
@@ -68,6 +69,14 @@ func (deliverer Deliverer) Deliver(ctx context.Context, notification telegramcon
 	stored, ok := state.Card(notification.SessionID)
 	if !ok || stored.Carrier.ChatID <= 0 || stored.Carrier.MessageID <= 0 {
 		return receipt, errors.New("active prompt card carrier is not confirmed")
+	}
+	stored, ready, err := inputcarrierguard.Await(ctx, deliverer.Cards, notification.SessionID, operationID, stored)
+	if err != nil {
+		return receipt, err
+	}
+	if !ready {
+		receipt.State, receipt.Suppressed = telegramnotify.DeliveryConfirmed, true
+		return receipt, nil
 	}
 	if err = carddeliveryguard.Check(ctx, deliverer.Cards, notification.SessionID, stored.Carrier); err != nil {
 		return receipt, err

@@ -6,6 +6,7 @@ import (
 
 	"bria/internal/domain"
 	"bria/internal/runtimeprotocol"
+	"bria/internal/turnstream"
 )
 
 const ProtocolVersion = 1
@@ -39,14 +40,12 @@ var (
 	ErrInteractionAcceptanceHandler = errors.New("provider interaction acceptance handler failed")
 )
 
-type EventKind string
+type EventKind = turnstream.EventKind
 
-const (
-	EventCommentary EventKind = "commentary"
-	EventQuestion   EventKind = "question"
-	EventTool       EventKind = "tool"
-	EventThinking   EventKind = "thinking"
-)
+const EventCommentary = turnstream.EventCommentary
+const EventQuestion = turnstream.EventQuestion
+const EventTool = turnstream.EventTool
+const EventThinking = turnstream.EventThinking
 
 const (
 	StatusCompleted   = "completed"
@@ -62,26 +61,8 @@ const (
 	ErrorInterrupted          = "interrupted"
 )
 
-// TurnEvent is one ordered, safe-to-display non-final provider event.
-type TurnEvent struct {
-	ID       string
-	Kind     EventKind
-	Text     string
-	Metadata *runtimeprotocol.EventMetadata
-}
-
-// TurnResult is publishable only when Submit returns a nil error. On every
-// failed or interrupted turn Final is empty even if an adapter sent a final
-// candidate before its terminal failure.
-type TurnResult struct {
-	// With OnEvent, Events retains a bounded prefix; the callback receives the
-	// entire ordered stream. Without a consumer, excess events fail closed.
-	Events              []TurnEvent
-	Final               string
-	TerminalStatus      string
-	ErrorCode           string
-	ProviderSessionName string
-}
+type TurnEvent = turnstream.Event
+type TurnResult = turnstream.Result
 
 // InteractionRequest and InteractionResponse deliberately reuse the bounded
 // provider-neutral wire contract rather than exposing provider-specific JSON.

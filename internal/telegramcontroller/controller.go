@@ -243,9 +243,11 @@ func (controller *Controller) handleSemanticMessage(ctx context.Context, update 
 	messageID := "telegram-update:" + strconv.FormatInt(update.ID, 10)
 	controller.mu.Lock()
 	promptSession := controller.promptSessions[messageID]
+	delete(controller.promptSessions, messageID)
 	controller.mu.Unlock()
 	if promptSession != "" {
 		card, cardErr := controller.semanticCard(ctx, promptSession, true)
+		card.OpenLatest = true
 		result.Card = &card
 		return result, cardErr
 	}
@@ -2585,9 +2587,6 @@ func (controller *Controller) publishProcessedPromptState(ctx context.Context, s
 	if err := controller.setProcessedPromptState(ctx, sessionID, messageID, text, emoji, preprocessingFailed); err != nil {
 		return err
 	}
-	controller.mu.Lock()
-	delete(controller.promptSessions, messageID)
-	controller.mu.Unlock()
 	controller.notify(ctx, Notification{
 		OperationID:    messageID + ":prompt-status:" + emoji,
 		ConversationID: controller.ownerPrivateChatID,
@@ -2878,7 +2877,7 @@ func (worker *sessionWorker) runTurnWithAcceptance(
 		worker.controller.replaceLive(running)
 		current = running
 	}
-	eventIndex := 0
+	eventIndexes := make(map[string]int)
 	binding, _ := current.Binding()
 	worker.mu.Lock()
 	worker.completionBinding = binding
@@ -2894,11 +2893,19 @@ func (worker *sessionWorker) runTurnWithAcceptance(
 	execution, err := worker.executeRequest(turnContext, turn, request, turnprocessing.Callbacks{
 		MarkInputAccepted: onAccepted,
 		OnEvent: func(event sessionruntime.TurnEvent) error {
-			eventIndex++
-			return worker.emitTurnEvent(turn.messageID, eventIndex, event)
+			owner := event.MessageID
+			if owner == "" {
+				owner = turn.messageID
+			}
+			eventIndexes[owner]++
+			return worker.emitTurnEvent(owner, eventIndexes[owner], event)
 		},
 	})
 	result, accepted, streamedEvents := execution.Result, execution.Accepted, execution.StreamedEvents
+	finalOwner := result.FinalMessageID
+	if finalOwner == "" {
+		finalOwner = turn.messageID
+	}
 	terminalProven = result.TerminalStatus == sessionruntime.StatusCompleted || result.TerminalStatus == sessionruntime.StatusFailed || result.TerminalStatus == sessionruntime.StatusInterrupted
 	if err != nil {
 		worker.controller.closeFlow.Observe(controllertelemetry.WithOperation(context.WithoutCancel(ctx), turn.messageID), controllertelemetry.Event{Stage: controllertelemetry.ProviderFailure, Reason: controllertelemetry.RuntimeFailureReason(sessionruntime.RuntimeFailureClass(err)), Outcome: controllertelemetry.Failed, SessionID: string(worker.sessionID), NodeID: string(current.ComputerID())})
@@ -2912,12 +2919,17 @@ func (worker *sessionWorker) runTurnWithAcceptance(
 	terminalStateValid := turn.observedBinding != nil || worker.controller.turnLifecycle == nil && current.Status() == domain.SessionReady
 	if err == nil && result.TerminalStatus == sessionruntime.StatusCompleted {
 		if !streamedEvents {
-			for eventIndex, event := range result.Events {
-				worker.emitTurnEvent(turn.messageID, eventIndex+1, event)
+			for _, event := range result.Events {
+				owner := event.MessageID
+				if owner == "" {
+					owner = turn.messageID
+				}
+				eventIndexes[owner]++
+				worker.emitTurnEvent(owner, eventIndexes[owner], event)
 			}
 		}
 		if result.Final != "" {
-			if persistErr := worker.controller.persistFinal(worker.controller.rootContext, worker.sessionID, turn.messageID, result.Final, binding); persistErr != nil {
+			if persistErr := worker.controller.persistFinal(worker.controller.rootContext, worker.sessionID, finalOwner, result.Final, binding); persistErr != nil {
 				return DurableInputUnknown, accepted
 			}
 		}
@@ -2963,14 +2975,14 @@ func (worker *sessionWorker) runTurnWithAcceptance(
 	}
 	if worker.controller.finals != nil {
 		if err := worker.controller.finals.ProcessFinal(context.WithoutCancel(worker.controller.rootContext), FinalObservation{
-			OperationID: turn.messageID + ":final", SessionID: worker.sessionID, MessageID: turn.messageID, Text: result.Final,
+			OperationID: finalOwner + ":final", SessionID: worker.sessionID, MessageID: finalOwner, Text: result.Final,
 		}); err != nil {
-			worker.notifyTurnError(turn.messageID+":final-processor-error", "Не удалось обработать итоговые артефакты.")
+			worker.notifyTurnError(finalOwner+":final-processor-error", "Не удалось обработать итоговые артефакты.")
 		}
 	}
 	publish := func(attempt context.Context) error {
 		if !worker.controller.notify(attempt, Notification{
-			OperationID:    turn.messageID + ":final",
+			OperationID:    finalOwner + ":final",
 			ConversationID: worker.controller.ownerPrivateChatID,
 			SessionID:      worker.sessionID,
 			Kind:           NotificationFinal,

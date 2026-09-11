@@ -96,3 +96,51 @@ func TestAcceptedContinuationReplaysStableEventsThroughDurableHistoryAndOutput(t
 		t.Fatal("final identity changed")
 	}
 }
+
+func TestAppliedSteerOwnsItsEventsAndFinalThroughController(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	ready := readySession(t, "bbbbbbbb-bbbb-4bbb-9bbb-bbbbbbbbbbbb", domain.ProviderCodex, t.TempDir(), "native", 2)
+	running, err := ready.StartWork(time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding, _ := running.Binding()
+	state := &identifiedEventState{retryFinalState: retryFinalState{attempt: make(chan struct{}, 4)}, events: map[string]string{}}
+	outputs := map[string]string{}
+	provider := &acceptedObserver{observe: func(_ context.Context, _ domain.SessionID, _ domain.ProviderBinding, cb sessionruntime.TurnCallbacks) (sessionruntime.TurnResult, error) {
+		if err := cb.OnEvent(sessionruntime.TurnEvent{ID: "offset:30", Kind: sessionruntime.EventCommentary, Text: "after steer", MessageID: "steer"}); err != nil {
+			return sessionruntime.TurnResult{}, err
+		}
+		return sessionruntime.TurnResult{TerminalStatus: sessionruntime.StatusCompleted, Final: "steer final", FinalMessageID: "steer"}, nil
+	}}
+	c := newController(t, nil, newLockedSessions(running), provider, nil, telegramcontroller.Options{
+		UIState: state,
+		DurableOutput: durableOutputFunc(func(_ context.Context, n telegramcontroller.OutgoingNotification) (telegramcontroller.OutputReceipt, error) {
+			outputs[n.OperationID] = string(n.Payload)
+			return telegramcontroller.OutputReceipt{SessionID: n.SessionID, OperationID: n.OperationID, Sequence: uint64(len(outputs))}, nil
+		}),
+	})
+	defer c.Close(context.Background())
+	done := make(chan telegramcontroller.DurableInputProcessReceipt, 1)
+	if err := c.ContinueAcceptedInput(ctx, binding, telegramcontroller.DurableLeasedInput{SessionID: running.ID(), MessageID: "root", Sequence: 1}, telegramcontroller.DurableInputCallbacks{OnCompleted: func(_ context.Context, r telegramcontroller.DurableInputProcessReceipt) error {
+		done <- r
+		return nil
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case receipt := <-done:
+		if receipt.Completion != telegramcontroller.DurableInputSucceeded {
+			t.Fatalf("completion = %+v", receipt)
+		}
+	case <-ctx.Done():
+		t.Fatal("accepted turn did not finish")
+	}
+	state.eventMu.Lock()
+	event := state.events["steer:offset:30"]
+	state.eventMu.Unlock()
+	if event != "commentary:after steer" || outputs["steer:final"] != "steer final" {
+		t.Fatalf("owner routing: event=%q outputs=%v", event, outputs)
+	}
+}

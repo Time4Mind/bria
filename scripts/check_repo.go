@@ -1103,7 +1103,7 @@ var runtimeFactoryAllowedImports = []string{
 }
 
 var sessionRuntimeAllowedImports = []string{
-	"internal/app", "internal/domain", "internal/nativecontrolport", "internal/orphanresume", "internal/processgroup", "internal/runtimecommand", "internal/runtimediagnostic", "internal/runtimeprotocol",
+	"internal/app", "internal/domain", "internal/nativecontrolport", "internal/orphanresume", "internal/processgroup", "internal/runtimecommand", "internal/runtimediagnostic", "internal/runtimeprotocol", "internal/turnstream",
 }
 
 var telegramControllerAllowedImports = []string{
@@ -1254,6 +1254,11 @@ var packagePolicies = map[string]packagePolicy{
 		allowedImports:     []string{"internal/domain", "internal/telegramstate"},
 		maxProductionLines: 100,
 	},
+	"internal/inputcarrierguard": {
+		responsibility:     "wait for the exact durable user-input Telegram carrier before a prompt refresh",
+		allowedImports:     []string{"internal/domain", "internal/telegramstate"},
+		maxProductionLines: 100,
+	},
 	"internal/viewdeliverycontext": {
 		responsibility:     "derive cancellable delivery contexts distinguishing view replacement from service shutdown",
 		maxProductionLines: 75,
@@ -1352,8 +1357,17 @@ var packagePolicies = map[string]packagePolicy{
 	},
 	"internal/nativeadapter": {
 		responsibility:     "bridge exact native CLI terminal sessions, validated photo attachments, transcripts and throttled unsolicited screen observations",
-		allowedImports:     []string{"internal/domain", "internal/nativeacceptance", "internal/nativeattachment", "internal/nativecapture", "internal/nativecli", "internal/nativephotostaging", "internal/nativereceiptstore", "internal/nativestartupdiagnostic", "internal/nativeterminal", "internal/nativetranscript", "internal/runtimediagnostic", "internal/runtimeprotocol"},
+		allowedImports:     []string{"internal/domain", "internal/nativeacceptance", "internal/nativeattachment", "internal/nativecapture", "internal/nativecli", "internal/nativeeventkind", "internal/nativeinputowner", "internal/nativephotostaging", "internal/nativereceiptstore", "internal/nativestartupdiagnostic", "internal/nativeterminal", "internal/nativetranscript", "internal/runtimediagnostic", "internal/runtimeprotocol"},
 		maxProductionLines: 850,
+	},
+	"internal/nativeeventkind": {
+		responsibility:     "project displayable native transcript kinds onto provider-neutral runtime event kinds",
+		allowedImports:     []string{"internal/nativetranscript"},
+		maxProductionLines: 40,
+	},
+	"internal/nativeinputowner": {
+		responsibility:     "select the latest exact applied input boundary for one native turn",
+		maxProductionLines: 60,
 	},
 	"internal/nativecapture": {
 		responsibility:     "bound native terminal payloads and fingerprint exact captured bytes",
@@ -1735,7 +1749,7 @@ var packagePolicies = map[string]packagePolicy{
 	"internal/telegrampromptcomposition": {
 		responsibility: "refresh active prompt and native-screen cards with visibility-scoped cancellation",
 		allowedImports: []string{
-			"internal/carddeliveryguard", "internal/coordinator", "internal/domain", "internal/telegrambridge", "internal/telegramcontroller",
+			"internal/carddeliveryguard", "internal/coordinator", "internal/domain", "internal/inputcarrierguard", "internal/telegrambridge", "internal/telegramcontroller",
 			"internal/telegramflow", "internal/telegramnotify", "internal/telegramstate", "internal/telegramui",
 		},
 		maxProductionLines: 225,
@@ -1901,9 +1915,14 @@ var packagePolicies = map[string]packagePolicy{
 	"internal/sessionruntime": {
 		responsibility: "supervise provider adapter sessions and exact native terminal key and screen requests",
 		allowedImports: []string{
-			"internal/app", "internal/domain", "internal/nativecontrolport", "internal/orphanresume", "internal/processgroup", "internal/runtimecommand", "internal/runtimediagnostic", "internal/runtimeprotocol",
+			"internal/app", "internal/domain", "internal/nativecontrolport", "internal/orphanresume", "internal/processgroup", "internal/runtimecommand", "internal/runtimediagnostic", "internal/runtimeprotocol", "internal/turnstream",
 		},
 		maxProductionLines: 1850,
+	},
+	"internal/turnstream": {
+		responsibility:     "carry provider-neutral streamed event ownership and terminal result data",
+		allowedImports:     []string{"internal/runtimeprotocol"},
+		maxProductionLines: 100,
 	},
 	"internal/sessionsupervisor": {
 		// Startup recovery of persisted sessions is the same lifecycle
@@ -2036,7 +2055,7 @@ var packagePolicies = map[string]packagePolicy{
 	"internal/telegramflow": {
 		responsibility: "join Telegram callback, presentation, current-global-surface fencing, and durable card boundaries",
 		allowedImports: []string{
-			"internal/callbackdiagnostic", "internal/callbacktoken", "internal/coordinator", "internal/domain", "internal/telegram", "internal/telegrambridge", "internal/telegramtrace",
+			"internal/callbackdiagnostic", "internal/callbacktoken", "internal/carddeliveryguard", "internal/coordinator", "internal/domain", "internal/telegram", "internal/telegrambridge", "internal/telegramtrace",
 			"internal/telegramops", "internal/telegrampipeline", "internal/telegramrecovery", "internal/telegramrecovery/statusrecovery", "internal/telegramstate", "internal/telegramui",
 		},
 		maxProductionLines: 2650,

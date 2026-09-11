@@ -136,6 +136,7 @@ type activeTurn struct {
 	interruptConfirmed bool
 	terminalErr        error
 	steers             map[string]*steerWaiter
+	acceptedSteers     map[string]string
 }
 
 type steerWaiter struct {
@@ -532,7 +533,7 @@ func (starter *Starter) consumeTurn(ctx context.Context, sessionID domain.Sessio
 		record.turnMu.Unlock()
 		return TurnResult{}, fmt.Errorf("%w: %q", ErrTurnInFlight, sessionID)
 	}
-	turn := &activeTurn{requestID: requestID, done: make(chan struct{}), steers: make(map[string]*steerWaiter)}
+	turn := &activeTurn{requestID: requestID, done: make(chan struct{}), steers: make(map[string]*steerWaiter), acceptedSteers: make(map[string]string)}
 	record.turn = turn
 	record.turnMu.Unlock()
 	// The wire consumer owns settlement, including every failed early return.
@@ -558,6 +559,7 @@ func (starter *Starter) consumeTurn(ctx context.Context, sessionID domain.Sessio
 	accepted := false
 	finalSeen := false
 	pendingFinal := ""
+	pendingFinalMessageID := ""
 	interactionCount := 0
 	interactions := make(map[string]bool)
 	for {
@@ -577,8 +579,33 @@ func (starter *Starter) consumeTurn(ctx context.Context, sessionID domain.Sessio
 				if starter.acceptSteer(record, turn, message) {
 					continue
 				}
-				starter.killAndWait(record)
-				return TurnResult{}, fmt.Errorf("%w: invalid or uncorrelated response", ErrProtocol)
+				messageID, owned := starter.acceptedSteerMessage(record, turn, message.RequestID)
+				if !owned || (message.Type != "event" && message.Type != "final") {
+					starter.killAndWait(record)
+					return TurnResult{}, fmt.Errorf("%w: invalid or uncorrelated response", ErrProtocol)
+				}
+				switch message.Type {
+				case "event":
+					if !accepted || finalSeen || (callbacks.OnEvent == nil && len(result.Events) >= starter.maxTurnEvents) || validateEvent(message, starter.maxTextBytes) != nil {
+						return starter.protocolTurnFailure(record, requestID)
+					}
+					event := TurnEvent{ID: message.EventID, Kind: message.Kind, Text: message.Text, Metadata: message.EventMetadata, MessageID: messageID}
+					if callbacks.OnEvent != nil {
+						if err := callbacks.OnEvent(event); err != nil {
+							starter.killAndWait(record)
+							return TurnResult{}, ErrEventHandler
+						}
+					}
+					if len(result.Events) < starter.maxTurnEvents {
+						result.Events = append(result.Events, event)
+					}
+				case "final":
+					if !accepted || finalSeen || validateText(message.Text, starter.maxTextBytes) != nil {
+						return starter.protocolTurnFailure(record, requestID)
+					}
+					finalSeen, pendingFinal, pendingFinalMessageID = true, message.Text, messageID
+				}
+				continue
 			}
 			switch message.Type {
 			case "accepted":
@@ -657,6 +684,7 @@ func (starter *Starter) consumeTurn(ctx context.Context, sessionID domain.Sessio
 				}
 				finalSeen = true
 				pendingFinal = message.Text
+				pendingFinalMessageID = ""
 			case "completed":
 				if !accepted || validateTerminal(message) != nil {
 					starter.killAndWait(record)
@@ -680,6 +708,7 @@ func (starter *Starter) consumeTurn(ctx context.Context, sessionID domain.Sessio
 					return result, fmt.Errorf("%w: %s", ErrTurnFailed, result.ErrorCode)
 				}
 				result.Final = pendingFinal
+				result.FinalMessageID = pendingFinalMessageID
 				return result, nil
 			default:
 				return starter.protocolTurnFailure(record, requestID)
@@ -772,8 +801,22 @@ func (starter *Starter) acceptSteer(record *processRecord, turn *activeTurn, mes
 		return false
 	}
 	delete(turn.steers, message.RequestID)
+	if turn.acceptedSteers == nil {
+		turn.acceptedSteers = make(map[string]string)
+	}
+	turn.acceptedSteers[message.RequestID] = waiter.messageID
 	waiter.result <- nil
 	return true
+}
+
+func (starter *Starter) acceptedSteerMessage(record *processRecord, turn *activeTurn, requestID string) (string, bool) {
+	record.turnMu.Lock()
+	defer record.turnMu.Unlock()
+	if record.turn != turn {
+		return "", false
+	}
+	messageID, ok := turn.acceptedSteers[requestID]
+	return messageID, ok
 }
 
 // StopCurrent requests interruption of the active turn and returns only after
@@ -1119,6 +1162,15 @@ func (starter *Starter) drainInterrupted(record *processRecord, turn *activeTurn
 			message := incoming.message
 			if message.RequestID != turn.requestID {
 				if starter.acceptSteer(record, turn, message) {
+					continue
+				}
+				_, owned := starter.acceptedSteerMessage(record, turn, message.RequestID)
+				if owned && message.Type == "event" && !finalSeen && eventCount < starter.maxTurnEvents && validateEvent(message, starter.maxTextBytes) == nil {
+					eventCount++
+					continue
+				}
+				if owned && message.Type == "final" && !finalSeen && validateText(message.Text, starter.maxTextBytes) == nil {
+					finalSeen = true
 					continue
 				}
 				starter.killAndWait(record)

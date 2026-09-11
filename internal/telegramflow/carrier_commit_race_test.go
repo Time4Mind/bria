@@ -2,18 +2,69 @@ package telegramflow_test
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"reflect"
 	"sync"
 	"testing"
 	"time"
 
+	"bria/internal/carddeliveryguard"
 	"bria/internal/coordinator"
 	"bria/internal/telegramflow"
 	"bria/internal/telegrampipeline"
 	"bria/internal/telegramstate"
 	"bria/internal/telegramui"
 )
+
+func TestPreparedOldEditIsSuppressedAfterNewCarrierCommit(t *testing.T) {
+	ctx := context.Background()
+	now := time.Unix(1_800_000_000, 0).UTC()
+	presenter := newPresenter(t, now)
+	store := telegramstate.NewMemoryStore()
+	if err := store.Update(ctx, func(state *telegramstate.State) error {
+		state.ActiveSession = flowSessionID
+		return state.SetCard(telegramstate.Card{SessionID: flowSessionID, Carrier: telegramstate.Carrier{ChatID: 42, MessageID: 5512}, Page: telegramstate.Page{Current: 1, Total: 1}})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	base := &delayedCarrierSender{started: make(chan struct{}), release: make(chan struct{})}
+	_, outbound, err := telegramflow.New(telegramflow.Config{OwnerUserID: 7, OwnerPrivateChatID: 42, Presenter: presenter, CallbackRegistry: telegrampipeline.NewMemoryCallbackRegistry(func() time.Time { return now }), UIState: store, Messages: &messageHandler{}, Callbacks: &callbackExecutor{}, Operations: telegramflow.NewMemoryCallbackOperationStore(), Sender: base})
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := telegramui.CardProjectionInput{Pages: []telegramui.ContentPage{{Content: "old", Anchors: []string{"old"}}}, View: telegramui.PageView{Page: 1, Pages: 1, Anchor: "old"}}
+	old, err := telegramflow.PrepareCardRefresh("stale-edit", flowSessionID, 42, 5512, input, "", false, nil, presenter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	initial, _ := store.Load(ctx)
+	initialCard, _ := initial.Card(flowSessionID)
+	old.Card.ExpectedCarrierRevision = &initialCard.CarrierRevision
+	if err := outbound.Register(old); err != nil {
+		t.Fatal(err)
+	}
+	input.Pages[0] = telegramui.ContentPage{Content: "new", Anchors: []string{"new"}}
+	input.View.Anchor = "new"
+	newCard, err := telegramflow.PrepareCompletion("new-send", flowSessionID, 42, true, input, false, nil, presenter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := outbound.Register(newCard); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := outbound.SendStatusWithKeyboard(ctx, newCard.OperationID, newCard.Status, newCard.Keyboard); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := outbound.EditStatusWithKeyboard(ctx, old.OperationID, old.Status, old.Keyboard); !errors.Is(err, carddeliveryguard.ErrNotCurrent) {
+		t.Fatalf("stale edit error = %v, want ErrNotCurrent", err)
+	}
+	base.mu.Lock()
+	defer base.mu.Unlock()
+	if len(base.edits) != 0 {
+		t.Fatalf("stale edit reached Telegram: %v", base.edits)
+	}
+}
 
 type delayedCarrierSender struct {
 	started chan struct{}
@@ -126,8 +177,38 @@ func testLateOldEdit(t *testing.T, disk, final, aba bool) {
 	if err := outbound.Register(newCard); err != nil {
 		t.Fatal(err)
 	}
-	if receipt, err := outbound.SendStatusWithKeyboard(ctx, newCard.OperationID, newCard.Status, newCard.Keyboard); err != nil || receipt.MessageID != 5514 {
-		t.Fatalf("new send=%+v %v", receipt, err)
+	type sendResult struct {
+		receipt coordinator.Receipt
+		err     error
+	}
+	newDone := make(chan sendResult, 1)
+	go func() {
+		receipt, sendErr := outbound.SendStatusWithKeyboard(ctx, newCard.OperationID, newCard.Status, newCard.Keyboard)
+		newDone <- sendResult{receipt: receipt, err: sendErr}
+	}()
+	select {
+	case result := <-newDone:
+		t.Fatalf("new carrier bypassed the in-flight old edit: %+v %v", result.receipt, result.err)
+	case <-time.After(20 * time.Millisecond):
+	}
+	// The previous edit must finish before the new carrier can be published;
+	// after the new receipt, no old-card mutation may still be in flight.
+	base.release <- struct{}{}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	select {
+	case result := <-newDone:
+		if result.err != nil || result.receipt.MessageID != 5514 {
+			t.Fatalf("new send=%+v %v", result.receipt, result.err)
+		}
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
 	}
 	wantCarrier := int64(5514)
 	if aba {
@@ -154,16 +235,6 @@ func testLateOldEdit(t *testing.T, disk, final, aba bool) {
 		if !reflect.DeepEqual(card.PendingFinalOperations, []string{"input-B:final"}) || !reflect.DeepEqual(card.History, oldCard.History) {
 			t.Fatalf("final receipt lost history or exact pending custody: %+v", card)
 		}
-	}
-	// Release through a separate channel send so deferred close is safe on fatal.
-	base.release <- struct{}{}
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatal(err)
-		}
-	case <-ctx.Done():
-		t.Fatal(ctx.Err())
 	}
 	got, err := store.Load(ctx)
 	if err != nil {

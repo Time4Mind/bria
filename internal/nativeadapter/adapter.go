@@ -16,6 +16,8 @@ import (
 	"bria/internal/domain"
 	"bria/internal/nativecapture"
 	"bria/internal/nativecli"
+	"bria/internal/nativeeventkind"
+	"bria/internal/nativeinputowner"
 	"bria/internal/nativeterminal"
 	"bria/internal/nativetranscript"
 	"bria/internal/runtimeprotocol"
@@ -48,6 +50,7 @@ type adapter struct {
 	active      *activeInput
 	steers      []*activeInput
 	final       string
+	finalOwner  string
 	receipts    map[string]string
 	turnIDs     map[string]string
 	observation nativeObservationState
@@ -259,6 +262,7 @@ func (a *adapter) handle(ctx context.Context, r runtimeprotocol.ParentMessage) e
 		if r.Type == runtimeprotocol.TypeSubmit {
 			a.active = pending
 			a.final = ""
+			a.finalOwner = ""
 		} else {
 			a.steers = append(a.steers, pending)
 		}
@@ -443,34 +447,24 @@ func (a *adapter) consumeEvents(events []nativetranscript.Event) error {
 				}
 			}
 		case nativetranscript.KindCommentary, nativetranscript.KindTool, nativetranscript.KindQuestion, nativetranscript.KindThinking:
-			if a.matchesPendingTurn(event.TurnID) && event.Text != "" {
-				text := event.Text
-				kind := "commentary"
-				if event.Kind == nativetranscript.KindQuestion {
-					kind = "question"
-				}
-				if event.Kind == nativetranscript.KindTool {
-					kind = "tool"
-				}
-				if event.Kind == nativetranscript.KindThinking {
-					kind = "thinking"
-				}
-				if err = a.emit(runtimeprotocol.AdapterMessage{Type: runtimeprotocol.TypeEvent, RequestID: a.active.request.RequestID, Kind: kind, Text: text, EventMetadata: event.Metadata, EventID: event.ID}); err != nil {
+			if owner := a.modelEventOwner(event.TurnID); owner != nil && event.Text != "" {
+				if err = a.emit(runtimeprotocol.AdapterMessage{Type: runtimeprotocol.TypeEvent, RequestID: owner.request.RequestID, Kind: nativeeventkind.Runtime(event.Kind), Text: event.Text, EventMetadata: event.Metadata, EventID: event.ID}); err != nil {
 					return err
 				}
 			}
 		case nativetranscript.KindFinal:
-			if a.matchesPendingTurn(event.TurnID) {
+			if owner := a.modelEventOwner(event.TurnID); owner != nil {
 				a.final = event.Text
+				a.finalOwner = owner.request.RequestID
 			}
 		case nativetranscript.KindComplete:
-			if a.matchesPendingTurn(event.TurnID) {
+			if a.modelEventOwner(event.TurnID) != nil {
 				if err = a.complete(event.TurnID); err != nil {
 					return err
 				}
 			}
 		case nativetranscript.KindInterrupted:
-			if a.matchesPendingTurn(event.TurnID) {
+			if a.modelEventOwner(event.TurnID) != nil {
 				id := a.active.request.RequestID
 				for _, p := range append([]*activeInput{a.active}, a.steers...) {
 					if p.accepted && !p.completed && p.turnID == event.TurnID {
@@ -486,22 +480,23 @@ func (a *adapter) consumeEvents(events []nativetranscript.Event) error {
 				a.active = nil
 				a.steers = nil
 				a.final = ""
+				a.finalOwner = ""
 			}
 		}
 	}
 	return nil
 }
 
-func (a *adapter) matchesPendingTurn(turnID string) bool {
-	if turnID == "" || a.active == nil || !a.active.accepted {
-		return false
+func (a *adapter) modelEventOwner(turnID string) *activeInput {
+	pending := append([]*activeInput{a.active}, a.steers...)
+	index := nativeinputowner.Latest(turnID, len(pending), func(index int) (string, bool, bool) {
+		p := pending[index]
+		return p.turnID, p.accepted, p.completed
+	})
+	if index < 0 {
+		return nil
 	}
-	for _, p := range append([]*activeInput{a.active}, a.steers...) {
-		if p != nil && p.accepted && !p.completed && p.turnID == turnID {
-			return true
-		}
-	}
-	return false
+	return pending[index]
 }
 
 func (a *adapter) complete(turnID string) error {
@@ -521,7 +516,11 @@ func (a *adapter) complete(turnID string) error {
 		return nil
 	}
 	if a.final != "" {
-		if err := a.emit(runtimeprotocol.AdapterMessage{Type: runtimeprotocol.TypeFinal, RequestID: id, Text: a.final}); err != nil {
+		owner := a.finalOwner
+		if owner == "" {
+			owner = id
+		}
+		if err := a.emit(runtimeprotocol.AdapterMessage{Type: runtimeprotocol.TypeFinal, RequestID: owner, Text: a.final}); err != nil {
 			return err
 		}
 	}
@@ -535,6 +534,7 @@ func (a *adapter) complete(turnID string) error {
 	a.active = nil
 	a.steers = nil
 	a.final = ""
+	a.finalOwner = ""
 	return nil
 }
 

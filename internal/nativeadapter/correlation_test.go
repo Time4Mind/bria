@@ -2,10 +2,12 @@ package nativeadapter
 
 import (
 	"bytes"
+	"encoding/json"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"bria/internal/domain"
 	"bria/internal/nativetranscript"
 	"bria/internal/runtimeprotocol"
 )
@@ -59,8 +61,8 @@ func TestQueuedSteerWaitsForOwnNativeTurnCompletion(t *testing.T) {
 		t.Fatalf("terminal frame count=%d", len(lines))
 	}
 	final, err := runtimeprotocol.DecodeAdapterLine(lines[0], runtimeprotocol.Limits{})
-	if err != nil || final.Type != runtimeprotocol.TypeFinal || final.RequestID != "root" || final.Text != "second final" {
-		t.Fatal("queued result lost root request correlation")
+	if err != nil || final.Type != runtimeprotocol.TypeFinal || final.RequestID != "steer" || final.Text != "second final" {
+		t.Fatal("queued result lost latest applied input correlation")
 	}
 }
 
@@ -111,6 +113,89 @@ func TestSameNativeTurnSteerCompletesWithRoot(t *testing.T) {
 	}
 	if a.active != nil || a.receipts["root-message"] != "completed" || a.receipts["steer-message"] != "completed" {
 		t.Fatal("same-turn steer did not complete with matching root")
+	}
+}
+
+func TestSameNativeTurnModelEventsFollowExactFIFOInputBoundaries(t *testing.T) {
+	a, output := correlationAdapter(t)
+	a.steers[0].text = "repeated steer"
+	a.steers = append(a.steers, &activeInput{
+		request: runtimeprotocol.ParentMessage{RequestID: "steer-2", MessageID: "steer-2-message"},
+		text:    "repeated steer",
+		sent:    time.Now(),
+	})
+	if err := a.consumeEvents([]nativetranscript.Event{
+		{Kind: nativetranscript.KindUser, TurnID: "same-turn", Text: "first"},
+		{Kind: nativetranscript.KindCommentary, TurnID: "same-turn", Text: "before first steer"},
+		{Kind: nativetranscript.KindUser, TurnID: "same-turn", Text: "repeated steer"},
+		{Kind: nativetranscript.KindCommentary, TurnID: "same-turn", Text: "after first steer"},
+		{Kind: nativetranscript.KindUser, TurnID: "same-turn", Text: "repeated steer"},
+		{Kind: nativetranscript.KindThinking, TurnID: "same-turn", Text: "after second steer"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var got []string
+	decoder := json.NewDecoder(output)
+	for decoder.More() {
+		var message runtimeprotocol.AdapterMessage
+		if err := decoder.Decode(&message); err != nil {
+			t.Fatal(err)
+		}
+		if message.Type == runtimeprotocol.TypeEvent {
+			got = append(got, message.RequestID+":"+message.Text)
+		}
+	}
+	want := []string{
+		"root:before first steer",
+		"steer:after first steer",
+		"steer-2:after second steer",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("model event count=%d, want=%d: %v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("model event %d=%q, want %q; all=%v", i, got[i], want[i], got)
+		}
+	}
+}
+
+func TestClaudeUsesExactNativeUserBoundaryWhenAvailable(t *testing.T) {
+	a, output := correlationAdapter(t)
+	a.config.Provider = domain.ProviderClaude
+	a.steers = append(a.steers, &activeInput{
+		request: runtimeprotocol.ParentMessage{RequestID: "steer-2", MessageID: "steer-2-message"},
+		text:    "third",
+		sent:    time.Now(),
+	})
+	if err := a.consumeEvents([]nativetranscript.Event{
+		{Kind: nativetranscript.KindUser, TurnID: "claude-root", Text: "first"},
+		{Kind: nativetranscript.KindUser, TurnID: "claude-root", Text: "second"},
+		{Kind: nativetranscript.KindUser, TurnID: "claude-root", Text: "third"},
+		{Kind: nativetranscript.KindCommentary, TurnID: "foreign", Text: "must not leak"},
+		{Kind: nativetranscript.KindCommentary, TurnID: "claude-root", Text: "stream after applied input"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	decoder := json.NewDecoder(output)
+	var messages []runtimeprotocol.AdapterMessage
+	for decoder.More() {
+		var message runtimeprotocol.AdapterMessage
+		if err := decoder.Decode(&message); err != nil {
+			t.Fatal(err)
+		}
+		if message.Type == runtimeprotocol.TypeEvent {
+			messages = append(messages, message)
+		}
+	}
+	if len(messages) != 1 {
+		t.Fatalf("fallback emitted %d events, want one bound event: %+v", len(messages), messages)
+	}
+	message := messages[0]
+	if message.Type != runtimeprotocol.TypeEvent || message.RequestID != "steer-2" || message.Text != "stream after applied input" {
+		t.Fatalf("Claude event=%+v, want latest applied input", message)
 	}
 }
 

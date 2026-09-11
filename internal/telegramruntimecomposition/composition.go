@@ -361,6 +361,15 @@ func projectSemanticCard(card telegramcontroller.SemanticCard, effect telegramui
 		pages[index] = telegramui.ContentPage{Content: page.Content, Anchors: append([]string(nil), page.Anchors...), FinalStart: page.FinalStart, FinalOperationID: page.FinalOperationID}
 	}
 	view := telegramui.PageView{Page: card.View.Page, Pages: card.View.Pages, Anchor: card.View.Anchor, FollowLatest: card.View.FollowLatest}
+	if card.OpenLatest {
+		view.Page = len(pages)
+		view.Pages = len(pages)
+		view.FollowLatest = true
+		view.Anchor = ""
+		if len(pages) != 0 && len(pages[len(pages)-1].Anchors) != 0 {
+			view.Anchor = pages[len(pages)-1].Anchors[0]
+		}
+	}
 	keyboard, err := telegramui.ProjectCardKeyboard(telegramui.CardKeyboardInput{View: view, Working: card.Working, Archived: card.Archived, Recovery: card.Recovery, CloseConfirmation: card.CloseConfirmation, DeleteConfirmation: card.DeleteConfirmation, OptionsExpanded: card.OptionsExpanded, SessionRowSizes: append([]int(nil), card.SessionRowSizes...), SessionLabels: append([]string(nil), card.SelectableSessionLabels...)})
 	if err != nil {
 		return nil, fmt.Errorf("project semantic card keyboard: %w", err)
