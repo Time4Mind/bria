@@ -2150,6 +2150,7 @@ func (controller *Controller) awaitCreatedSession(intent app.ConfirmedSessionInt
 			controller.asyncStartFailed(pending.Session.ID(), "Не удалось подтвердить запуск сессии.", previousActive)
 			return
 		}
+		telegramturnhelpers.WakeReadyInput(controller.durableInput, outcome.Session)
 		controller.notify(context.WithoutCancel(controller.rootContext), Notification{
 			OperationID:    "session-start:" + string(outcome.Session.ID()) + ":state",
 			ConversationID: controller.ownerPrivateChatID,
@@ -2691,8 +2692,7 @@ func (controller *Controller) ProcessDurableInput(
 	}()
 	ctx = processContext
 	if worker == nil || !usable || session.ID() != input.SessionID {
-		controller.publishPromptState(ctx, input.SessionID, input.MessageID, promptText, "🙅‍♂")
-		return receipt, errors.New("durable input session is not live")
+		return receipt, turnprocessing.ErrInputDeferred
 	}
 	worker.mu.Lock()
 	observingBatch := worker.continuation != nil && !worker.continuation.Done

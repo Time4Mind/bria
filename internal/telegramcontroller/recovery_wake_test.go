@@ -6,7 +6,9 @@ import (
 	"testing"
 	"time"
 
+	"bria/internal/app"
 	"bria/internal/domain"
+	"bria/internal/sessionruntime"
 	"bria/internal/telegramcontroller"
 	"bria/internal/turnprocessing"
 )
@@ -17,6 +19,64 @@ func (w wakingCustody) Accept(context.Context, turnprocessing.SessionInput) (tur
 	return turnprocessing.InputReceipt{}, errors.New("unexpected new incoming input")
 }
 func (w wakingCustody) WakeSession(id domain.SessionID) { w.wake(id) }
+
+type startingWakingCustody struct{ wake chan domain.SessionID }
+
+func (w startingWakingCustody) Accept(_ context.Context, input turnprocessing.SessionInput) (turnprocessing.InputReceipt, error) {
+	return turnprocessing.InputReceipt{Inserted: true, SessionID: input.SessionID, MessageID: input.MessageID, Sequence: 1}, nil
+}
+func (w startingWakingCustody) WakeSession(id domain.SessionID) { w.wake <- id }
+
+func TestAsyncCreateWakesInputQueuedWhileStartingAfterReady(t *testing.T) {
+	workdir := t.TempDir()
+	starting, err := domain.NewStartingSession("bbbbbbbb-bbbb-4bbb-9bbb-bbbbbbbbbbbb", "telegram-update:9100", "local", domain.ProviderCodex, workdir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ready, err := starting.Ready(domain.ProviderBinding{Provider: domain.ProviderCodex, SessionID: "provider-ready", Generation: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := newLockedSessions(starting)
+	outcomes := make(chan telegramcontroller.SessionStartOutcome, 1)
+	wakes := make(chan domain.SessionID, 1)
+	controller := newController(t, nil, store, submitterFunc(nil), nil, telegramcontroller.Options{
+		AsyncCreator: asyncCreatorFunc(func(context.Context, app.ConfirmedSessionIntent) (telegramcontroller.PendingSessionStart, error) {
+			return telegramcontroller.PendingSessionStart{Session: starting, Outcome: outcomes}, nil
+		}),
+		DurableInput: startingWakingCustody{wake: wakes},
+	})
+	t.Cleanup(func() { _ = controller.Close(context.Background()) })
+	mustStatus(t, controller, message(9100, "/new codex "+workdir))
+	mustStatus(t, controller, message(9101, "queued while starting"))
+	store.Set(ready)
+	outcomes <- telegramcontroller.SessionStartOutcome{Session: ready}
+	close(outcomes)
+	select {
+	case id := <-wakes:
+		if id != ready.ID() {
+			t.Fatalf("woke session %q, want %q", id, ready.ID())
+		}
+	case <-time.After(time.Second):
+		t.Fatal("ready async-created session did not wake its queued durable input")
+	}
+}
+
+func TestDurableInputDefersAcrossReadyStoreToLiveControllerGap(t *testing.T) {
+	ready := readySession(t, "cccccccc-cccc-4ccc-9ccc-cccccccccccc", domain.ProviderCodex, t.TempDir(), "provider-ready", 1)
+	provider := &interactiveSubmitter{submitWithCallbacks: func(context.Context, domain.SessionID, string, sessionruntime.TurnCallbacks) (sessionruntime.TurnResult, error) {
+		t.Fatal("transient not-live input reached provider")
+		return sessionruntime.TurnResult{}, nil
+	}}
+	controller := newController(t, nil, newLockedSessions(ready), provider, nil, telegramcontroller.Options{})
+	t.Cleanup(func() { _ = controller.Close(context.Background()) })
+	receipt, err := controller.ProcessDurableInput(context.Background(), telegramcontroller.DurableLeasedInput{
+		SessionID: ready.ID(), MessageID: "queued", Sequence: 1, Payload: []byte("queued"),
+	}, telegramcontroller.DurableInputCallbacks{OnAccepted: func(context.Context, telegramcontroller.DurableInputAcceptance) error { return nil }})
+	if receipt.Accepted || receipt.SessionID != ready.ID() || receipt.MessageID != "queued" || receipt.Sequence != 1 || !errors.Is(err, turnprocessing.ErrInputDeferred) {
+		t.Fatalf("transient live gap = (%#v, %v), want exact deferred receipt", receipt, err)
+	}
+}
 
 func TestRecoveryWakeCanProcessPendingInputOnlyAfterLiveReady(t *testing.T) {
 	for _, path := range []string{"resume", "async-resume", "refresh", "manual"} {

@@ -1180,8 +1180,12 @@ func TestSessionRuntimeHelperProcess(t *testing.T) {
 			}
 			emit(map[string]any{"protocol": 1, "type": "completed", "request_id": message.RequestID, "status": "interrupted", "error_code": "interrupted"})
 		case "submit":
-			if mode == "runtime-diagnostic" {
+			if mode == "runtime-diagnostic" || mode == "runtime-diagnostic-after-output-close" {
 				emit(map[string]any{"protocol": 1, "type": "accepted", "request_id": message.RequestID, "message_id": message.MessageID})
+				if mode == "runtime-diagnostic-after-output-close" {
+					_ = os.Stdout.Close()
+					time.Sleep(25 * time.Millisecond)
+				}
 				fmt.Fprintln(os.Stderr, "private-payload=never-log")
 				fmt.Fprintln(os.Stderr, "bria-native-startup:native_transcript_record_too_large")
 				os.Exit(1)

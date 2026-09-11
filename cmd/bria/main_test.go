@@ -650,6 +650,11 @@ func TestRunAppliesEffectiveQueueLimitToController(t *testing.T) {
 	}
 	if err := preferenceStore.Update(context.Background(), func(current *settings.Settings) error {
 		current.QueueLimit = 1
+		// This regression owns the primary-session queue boundary only. Keep
+		// the independent preprocessing satellite out of the fixture so its
+		// synthetic adapter cannot race the assertion on a slow runner.
+		current.PreprocessingEnabled = false
+		current.SatellitePreprocessingMode = settings.SatellitePreprocessingDisabled
 		return nil
 	}); err != nil {
 		t.Fatal(err)
@@ -685,7 +690,7 @@ func TestRunAppliesEffectiveQueueLimitToController(t *testing.T) {
 			case 4:
 				select {
 				case <-runtime.entered:
-				case <-time.After(time.Second):
+				case <-time.After(3 * time.Second):
 					return nil, flowFixtureError(t, "configured runtime did not start the first turn")
 				}
 				return telegramResponse(`{"ok":true,"result":[{"update_id":33,"message":{"message_id":36,"from":{"id":42,"is_bot":false,"first_name":"A"},"chat":{"id":42,"type":"private"},"text":"second"}}]}`), nil

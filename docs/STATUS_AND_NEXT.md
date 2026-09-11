@@ -25,9 +25,16 @@
 > `34620999962` GREEN. Первый локальный deploy затем выявил две прежние
 > operational-ловушки: public `make release` требовал внешний evidence manifest,
 > а macOS service-control обращался к legacy label вместо Label точного plist.
-> Локальный follow-up добавляет отдельный `release-local`, plist-derived label,
-> shell regression и durable release guide. Далее - full gate/commit/exact-SHA
-> CI, повторная подписанная установка и штатный restart/postflight
+> Commit `02e096d` добавил отдельный `release-local`, plist-derived label, shell
+> regression и durable release guide. Commit `c766f59` убрал lifecycle copy из
+> header; Stage 1 `34625153423` GREEN, а Platform Matrix `34625153557` выявил
+> две macOS-регрессии тестового контура. Локально queue-limit fixture изолирован
+> от satellite preprocessing; Ready-store/live-controller gap теперь defers
+> unsent input и повторно будит FIFO; unexpected stdout EOF получил bounded
+> pre/post-stop drain безопасного stderr-класса до `Cmd.Wait`. Deterministic
+> RED/GREEN и single-CPU race-повторы GREEN.
+> Далее - full gate/commit/exact-SHA CI, повторная подписанная установка и
+> штатный restart/postflight
 > `gui/501/com.time4mind.bria.v2` и safe live postflight. Полный договор и
 > evidence: [UI_LATENCY_AND_SESSION_METADATA_TODO.md](UI_LATENCY_AND_SESSION_METADATA_TODO.md).
 

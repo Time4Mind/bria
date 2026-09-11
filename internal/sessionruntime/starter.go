@@ -22,6 +22,7 @@ import (
 	"bria/internal/orphanresume"
 	"bria/internal/processgroup"
 	"bria/internal/runtimecommand"
+	"bria/internal/runtimediagnostic"
 	"bria/internal/runtimeprotocol"
 )
 
@@ -105,6 +106,7 @@ type processRecord struct {
 	request            app.StartSessionRequest
 	command            *exec.Cmd
 	stdin              io.WriteCloser
+	stderr             io.ReadCloser
 	output             chan wireResult
 	outputEOF          chan struct{}
 	readerStop         chan struct{}
@@ -396,7 +398,7 @@ func (starter *Starter) start(ctx context.Context, request app.StartSessionReque
 	record := &processRecord{
 		persistentTerminal: commandSpec.PersistentTerminal,
 		stderrDone:         make(chan struct{}),
-		request:            request, command: command, stdin: stdin,
+		request:            request, command: command, stdin: stdin, stderr: stderr,
 		output: make(chan wireResult, 32), outputEOF: make(chan struct{}),
 		readerStop: make(chan struct{}), done: make(chan struct{}),
 		generation:   generation,
@@ -1247,15 +1249,11 @@ func (starter *Starter) reapOnOutputEnd(record *processRecord) {
 		return
 	}
 	record.reaping = true
-	// The protocol stream ended unexpectedly or because the adapter exited.
-	// Signal the still-unreaped group before Wait so no PID can be reused
-	// between reap and a later negative-PID signal.
-	_ = processgroup.KillTree(record.command)
+	runtimediagnostic.DrainBeforeWait(record.stderrDone, record.stderr, func() { _ = processgroup.KillTree(record.command) }, 100*time.Millisecond)
 	_ = record.command.Wait()
 	starter.finalizeReap(record)
 	record.lifecycleMu.Unlock()
 }
-
 func (starter *Starter) finalizeReap(record *processRecord) {
 	if record.stderrDone != nil {
 		<-record.stderrDone

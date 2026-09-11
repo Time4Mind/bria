@@ -65,6 +65,16 @@ safe logs и identity-only postflight; ручной Telegram tap агент не
 - Header regression: `default · Local · codex · gpt-5.6-sol · 17:10:37`
   сохраняет модель и московское время, но не содержит lifecycle copy `готова`
   или `не готова`; фоновые badges остаются без изменений.
+- Exact-SHA Platform Matrix `34625153557` выявил два macOS края: queue-limit
+  fixture не был изолирован от satellite preprocessing, а reaper мог убить
+  adapter между stdout EOF и финальным безопасным stderr-классом. Первый тест
+  теперь явно отключает preprocessing; второй имеет deterministic RED probe и
+  bounded 100 ms drain. Дополнительный single-CPU stress выявил промежуток,
+  когда durable session уже Ready, а controller ещё не установил live state:
+  он теперь безопасно defers точный unsent input, а Ready-переход повторно будит
+  очередь. Профильные race-повторы GREEN: runtime 100/100, queue-limit 50/50
+  при `GOMAXPROCS=1`, оба ready-gap seam 100/100; architecture GREEN без
+  расширения package budget.
 - Independent review обнаружил и закрыл обход через третий фрагмент ответа:
   `Fast name Кириллица` теперь целиком отклоняется до усечения. Повторный review
   актуального diff завершён `APPROVE`.
