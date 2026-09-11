@@ -73,6 +73,26 @@
    объёме; если нужно расширение, сообщить требуемое решение Артёму. Это правило
    дополняет реакцию на единичные существенные ошибки, а не заменяет её.
 
+## Локальный release gate
+
+Тяжёлые проверки выполнять локально на прогретом репозиторном Go cache; GitHub
+оставлять независимым clean-runner доказательством точного commit SHA. Перед
+полным gate сначала запускать focused regression и `make check-architecture`.
+Финальный локальный gate запускать сразу вне filesystem/network sandbox:
+native-terminal tests создают IPC, а `httptest` открывает loopback listener.
+Запуск их сначала в sandbox даёт ложные `operation not permitted` и не является
+полезной проверкой кода.
+
+```sh
+VERSION=YYYYMMDD-short-name make check-full
+```
+
+Makefile намеренно использует `.cache/go-build` и `.cache/go-mod` репозитория,
+не наследуя случайный пользовательский `GOCACHE`/`GOMODCACHE`. Отдельный cache
+можно задать только явным аргументом команды. После первого exact-SHA CI failure
+сначала воспроизвести конкретный тест локально с `-race -count=N`; повторять весь
+gate только после исправления либо доказанной классификации флейка.
+
 ## Сборка Bria
 
 Канонический сборочный хост проекта — `p1game-next` (P1Game Next). Исходники

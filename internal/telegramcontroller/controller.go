@@ -2421,8 +2421,15 @@ func (controller *Controller) selectSession(ctx context.Context, sessionID domai
 	controller.mu.Lock()
 	_, usable := controller.usableLocked(session)
 	pending, pendingSelectable := controller.pending[sessionID]
-	pendingSelectable = pendingSelectable && acceptsDurableInput(pending) &&
+	pendingSelectable = pendingSelectable && pending.AcceptsDurableInput() &&
 		sameSessionIdentity(pending, session)
+	if !pendingSelectable && session.AcceptsDurableInput() {
+		// A durable Starting/Resuming row can become visible before the async
+		// creator publishes its in-memory handle. Synchronize it here so an
+		// immediate selection and its first FIFO input cannot be lost.
+		controller.pending[sessionID] = session
+		pendingSelectable = true
+	}
 	controller.mu.Unlock()
 	if !usable && !pendingSelectable && session.Status() != domain.SessionAwaitingRecovery {
 		return session, false, nil
@@ -2508,7 +2515,7 @@ func (controller *Controller) enqueueSession(ctx context.Context, updateID, sour
 		return coordinator.Decision{Kind: coordinator.DecisionSkip}
 	}
 	if controller.durableInput != nil {
-		if sessionID == "" || (!live || !usable) && (!isPending || !acceptsDurableInput(pending)) {
+		if sessionID == "" || (!live || !usable) && (!isPending || !pending.AcceptsDurableInput()) {
 			controller.setPromptState(ctx, sessionID, messageID, input.Text, "🙅‍♂")
 			return coordinator.Decision{Kind: coordinator.DecisionSkip}
 		}
@@ -2646,16 +2653,6 @@ func (controller *Controller) publishProcessedPromptState(ctx context.Context, s
 		Text:           emoji,
 	})
 	return nil
-}
-func acceptsDurableInput(session domain.Session) bool {
-	if session.Status() == domain.SessionStarting || session.Status() == domain.SessionResuming {
-		return true
-	}
-	if session.Status() != domain.SessionAwaitingRecovery {
-		return false
-	}
-	target, recovering := session.RecoveryTarget()
-	return recovering && (target == domain.SessionStarting || target == domain.SessionResuming)
 }
 
 // ProcessDurableInput processes one exact leased journal input through the

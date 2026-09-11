@@ -67,8 +67,21 @@ safe logs и identity-only postflight; ручной Telegram tap агент не
   допускает только обязательное обновление `hh:mm:ss`, но не текста страницы.
 - `VERSION=20260911-ui-latency-session-metadata make check-full` GREEN, включая
   policy, secret scan, architecture, unit/integration, vet, packaging, global
-  race и executable trio acceptance. Exact-SHA CI и live postflight ещё не
-  завершены.
+  race и executable trio acceptance. Первый source SHA `80192c6` получил
+  GREEN Platform Matrix `34617434528`; Stage 1 `34617434877` выявил race, где
+  durable `Starting` уже видна в inventory, но async creator ещё не положил её
+  in-memory handle, поэтому немедленный выбор не закреплялся и первый FIFO input
+  мог потеряться. Контроллер теперь синхронизирует валидную durable row в pending
+  map при выборе; regression проходит 100 race-повторов, architecture GREEN.
+- Второй failure Stage 1 в старом synthetic A25 native-exit test сохранил
+  accepted receipt и model event, но не увидел диагностический stderr class.
+  Текущий код не воспроизвёл его за 1000 последовательных race-повторов
+  (70.8 s); assertions и runtime path не ослаблялись.
+- При финальном локальном gate обнаружен независимый race-флейк Claude
+  process-tree fixture: raw helper временно писал `ready` в тот же файл, из
+  которого parent ожидал PID adapter. Сигналы разделены; точный тест проходит
+  100 race-повторов. Финальный полный versioned gate исправленного дерева GREEN.
+- Exact-SHA CI исправленного commit и live postflight ещё не завершены.
 - Для New, browser, settings и pagination локально доказан один inventory/read
   path и regression latency seam. Физический callback-to-Telegram receipt для
   этих четырёх flow не создавался искусственно и остаётся на ближайшие обычные

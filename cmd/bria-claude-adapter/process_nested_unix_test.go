@@ -23,10 +23,12 @@ import (
 )
 
 const nestedWorkdir = "BRIA_CLAUDE_NESTED_WORKDIR"
+const nestedRawReadyPath = "BRIA_CLAUDE_NESTED_RAW_READY_PATH"
 
 func TestSessionRuntimeForcedKillReachesStoppedClaudeAdapterRawAndGrandchild(t *testing.T) {
 	directory := t.TempDir()
 	ready := filepath.Join(directory, "nested-ready")
+	rawReady := filepath.Join(directory, "nested-raw-ready")
 	beat := filepath.Join(directory, "nested-beat")
 	executable, err := os.Executable()
 	if err != nil {
@@ -34,6 +36,7 @@ func TestSessionRuntimeForcedKillReachesStoppedClaudeAdapterRawAndGrandchild(t *
 	}
 	environment := replaceEnvironment(os.Environ(), treeHelperMode, "nested-adapter")
 	environment = replaceEnvironment(environment, treeReadyPath, ready)
+	environment = replaceEnvironment(environment, nestedRawReadyPath, rawReady)
 	environment = replaceEnvironment(environment, treeBeatPath, beat)
 	environment = replaceEnvironment(environment, nestedWorkdir, directory)
 	credentialPath := filepath.Join(directory, "credentials", "claude-api-key.json")
@@ -108,7 +111,7 @@ func runNestedProcessHelper(mode string) {
 		if _, err := factory.Start(context.Background(), spec); err != nil {
 			os.Exit(94)
 		}
-		if waitForHelperPath(os.Getenv(treeReadyPath), 2*time.Second) != nil {
+		if waitForHelperPath(os.Getenv(nestedRawReadyPath), 2*time.Second) != nil {
 			os.Exit(95)
 		}
 		if err := os.WriteFile(os.Getenv(treeReadyPath), []byte(strconv.Itoa(os.Getpid())), 0o600); err != nil {
@@ -141,7 +144,7 @@ func runNestedProcessHelper(mode string) {
 		if waitForHelperPath(os.Getenv(treeBeatPath), 2*time.Second) != nil {
 			os.Exit(101)
 		}
-		if err := os.WriteFile(os.Getenv(treeReadyPath), []byte("ready"), 0o600); err != nil {
+		if err := os.WriteFile(os.Getenv(nestedRawReadyPath), []byte("ready"), 0o600); err != nil {
 			os.Exit(102)
 		}
 		for {

@@ -7,8 +7,11 @@ REVISION ?=
 RELEASE_KEY_ID ?=
 RELEASE_SIGNING_KEY_FILE ?=
 RELEASE_TRUST_FILE ?=
-GOCACHE ?= $(CURDIR)/.cache/go-build
-GOMODCACHE ?= $(CURDIR)/.cache/go-mod
+# Keep normal invocations independent of an ambient user-level Go cache.
+# Command-line assignments still override these paths when a dedicated cache is
+# useful for an isolated run.
+GOCACHE := $(CURDIR)/.cache/go-build
+GOMODCACHE := $(CURDIR)/.cache/go-mod
 export GOCACHE GOMODCACHE
 export VERSION DIST_DIR SOURCE_DATE_EPOCH REVISION RELEASE_KEY_ID RELEASE_SIGNING_KEY_FILE RELEASE_TRUST_FILE GO
 

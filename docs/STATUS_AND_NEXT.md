@@ -8,9 +8,15 @@
 > primary turn. Локально также закрыты repeatable callbacks, bounded ledgers,
 > один inventory read для New/browser, durable page plan без write из
 > `ProjectCurrent`, rollback-compatible activity sidecar и safe recovery cutoff.
-> `VERSION=20260911-ui-latency-session-metadata make check-full` GREEN, включая
-> architecture, global race и executable trio. Далее - финальный independent
-> review, exact manifest, commit/push, exact-SHA CI, install/restart
+> architecture, global race и executable trio. Первый source commit `80192c6`
+> отправлен в `origin/main`: Platform Matrix `34617434528` GREEN, Stage 1
+> `34617434877` выявил race выбора только что сохранённой `Starting`-сессии.
+> Локально исправлена синхронизация durable row с pending FIFO; regression
+> проходит 100 race-повторов, architecture GREEN. Второй A25 failure из того же
+> job не воспроизведён в 1000 race-повторах и не относится к A48 path. Отдельный
+> race-флейк Claude process-tree fixture устранён разделением raw-ready и PID
+> handshakes; 100 повторов и полный исправленный `make check-full` GREEN. Далее -
+> commit/push, exact-SHA CI, install/restart
 > `gui/501/com.time4mind.bria.v2` и safe live postflight. Полный договор и
 > evidence: [UI_LATENCY_AND_SESSION_METADATA_TODO.md](UI_LATENCY_AND_SESSION_METADATA_TODO.md).
 

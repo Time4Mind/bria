@@ -25,7 +25,7 @@ func (controller *Controller) restoreNodeSelection(ctx context.Context) error {
 				return clearErr
 			}
 			active = ""
-		} else if acceptsDurableInput(session) {
+		} else if session.AcceptsDurableInput() {
 			// A process restart loses the ephemeral async-creation handle, but the
 			// persisted Starting/Resuming session must remain the FIFO target until
 			// supervision commits Ready and wakes its durable input.

@@ -501,6 +501,18 @@ func (s Session) RecoveryTarget() (SessionStatus, bool) {
 	return *s.recoveryTarget, true
 }
 
+// AcceptsDurableInput reports whether a not-yet-live session can safely keep
+// FIFO input while its initial start or resume is still in progress.
+func (s Session) AcceptsDurableInput() bool {
+	if s.status == SessionStarting || s.status == SessionResuming {
+		return true
+	}
+	if s.status != SessionAwaitingRecovery || s.recoveryTarget == nil {
+		return false
+	}
+	return *s.recoveryTarget == SessionStarting || *s.recoveryTarget == SessionResuming
+}
+
 func (s Session) Rename(name string, source SessionNameSource) (Session, error) {
 	snapshot := s.Snapshot()
 	snapshot.Name = name

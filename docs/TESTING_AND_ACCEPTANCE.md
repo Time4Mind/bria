@@ -28,6 +28,10 @@ make check-full
 ```
 
 Он проверяет policy и ссылки репозитория, форматирование и архитектурные границы, выполняет `go test ./...`, `go vet ./...`, race tests и собирает исполняемые файлы `bin/bria`, `bin/bria-codex-adapter`, `bin/bria-claude-adapter`.
+Локальный запуск требует разрешённых IPC и loopback listener: в агентной среде
+его нужно сразу выполнять вне filesystem/network sandbox. Makefile использует
+репозиторные `.cache/go-build` и `.cache/go-mod`, чтобы ambient cache другого
+пользователя не создавал ложный отказ доступа.
 
 Перед рабочим запуском применяются три разные команды с разными последствиями:
 

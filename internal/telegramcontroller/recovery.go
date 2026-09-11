@@ -31,7 +31,7 @@ func (c *Controller) RefreshRecoveryCard(ctx context.Context, id domain.SessionI
 		delete(c.pending, id)
 		c.live[id] = current
 		c.ensureWorkerLocked(id)
-	case acceptsDurableInput(current):
+	case current.AcceptsDurableInput():
 		// Startup recovery is composed after the controller so output consumers
 		// are already bound. Re-register background creation/resume targets here;
 		// otherwise only the foreground selection survives the process restart.
