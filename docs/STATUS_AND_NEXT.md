@@ -1,5 +1,14 @@
 # Handoff: статус и следующий план
 
+> Текущий дополнительный запрос A45 - проверить сообщение о Git credentials и
+> очистить источник. Actual secret в 84 reachable commit и GitHub
+> secret-scanning alerts не найден. Начальный commit `a5c79ff` оставил default
+> `actions/checkout persist-credentials=true`: GitHub временно помещал job token
+> в runner git-config и удалял post-job. Все 10 checkout steps теперь явно
+> `false`, добавлен fail-closed policy test. Также устранён повторяемый false
+> positive сканера на raw bytes собранного `bin/bria` без ослабления source scan.
+> Договор и evidence: [GIT_CREDENTIAL_CLEANUP_TODO.md](GIT_CREDENTIAL_CLEANUP_TODO.md).
+
 > Текущий запрос A44 - реализовать и выпустить
 > порядок `запрос -> ответ` и режимы `следование / фиксированная страница`.
 > Live RCA подтвердил: два Telegram-запроса `783531733`/`783531735` приняты как

@@ -483,7 +483,49 @@ func checkFilenames(root string) []string {
 			problems = append(problems, "tracked secret or runtime filename: "+filename)
 		}
 	}
+	problems = append(problems, checkWorkflowCheckoutCredentials(root, files)...)
 	return append(problems, checkSecretContents(root)...)
+}
+
+func checkWorkflowCheckoutCredentials(root string, files []string) []string {
+	var problems []string
+	for _, relative := range files {
+		if !strings.HasPrefix(relative, ".github/workflows/") ||
+			!(strings.HasSuffix(relative, ".yml") || strings.HasSuffix(relative, ".yaml")) {
+			continue
+		}
+		contents, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(relative)))
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			problems = append(problems, "read workflow credential policy: "+relative)
+			continue
+		}
+		lines := strings.Split(string(contents), "\n")
+		for index, line := range lines {
+			if !strings.Contains(line, "uses: actions/checkout@") {
+				continue
+			}
+			indent := len(line) - len(strings.TrimLeft(line, " \t"))
+			disabled := false
+			for next := index + 1; next < len(lines); next++ {
+				trimmed := strings.TrimSpace(lines[next])
+				nextIndent := len(lines[next]) - len(strings.TrimLeft(lines[next], " \t"))
+				if strings.HasPrefix(trimmed, "- ") && nextIndent <= indent {
+					break
+				}
+				if trimmed == "persist-credentials: false" {
+					disabled = true
+					break
+				}
+			}
+			if !disabled {
+				problems = append(problems, fmt.Sprintf("workflow checkout persists Git credentials: %s:%d", relative, index+1))
+			}
+		}
+	}
+	return problems
 }
 
 var mandatoryReleaseEvidence = []string{
@@ -518,6 +560,8 @@ var secretContentPatterns = []struct {
 	{name: "Telegram bot token", pattern: regexp.MustCompile(`[0-9]{8,12}:[A-Za-z0-9_-]{30,}`)},
 	{name: "literal bearer credential", pattern: regexp.MustCompile(`(?i)bearer[ \t]+[A-Za-z0-9._~+/-]{24,}`)},
 }
+
+var artifactBearerPattern = regexp.MustCompile(`(?i)authorization[ \t]*[:=][ \t]*bearer[ \t]+[A-Za-z0-9._~+/-]{24,}`)
 
 func checkSecretContents(root string) []string {
 	tracked, err := trackedFiles(root)
@@ -590,7 +634,11 @@ func checkSecretContents(root string) []string {
 			problems = append(problems, "read secret-scan candidate: "+displayPath(root, candidate))
 			continue
 		}
-		if secret := findSecret(contents); secret != "" {
+		secret := findSecret(contents)
+		if candidates[candidate] {
+			secret = findSecretInArtifact(contents)
+		}
+		if secret != "" {
 			kind := "probable secret content"
 			if candidates[candidate] {
 				kind += " in release artifact"
@@ -654,7 +702,7 @@ func scanReleaseArchive(root, archivePath string) []string {
 			return []string{"unreadable release archive member during secret scan: " + displayPath(root, archivePath)}
 		}
 		remaining -= header.Size
-		if secret := findSecret(contents); secret != "" {
+		if secret := findSecretInArtifact(contents); secret != "" {
 			return []string{fmt.Sprintf(
 				"probable secret content in release archive: %s!%s (%s)",
 				displayPath(root, archivePath), header.Name, secret,
@@ -665,6 +713,21 @@ func scanReleaseArchive(root, archivePath string) []string {
 
 func findSecret(contents []byte) string {
 	for _, candidate := range secretContentPatterns {
+		if candidate.pattern.FindIndex(contents) != nil {
+			return candidate.name
+		}
+	}
+	return ""
+}
+
+func findSecretInArtifact(contents []byte) string {
+	for _, candidate := range secretContentPatterns {
+		if candidate.name == "literal bearer credential" {
+			if artifactBearerPattern.FindIndex(contents) != nil {
+				return candidate.name
+			}
+			continue
+		}
 		if candidate.pattern.FindIndex(contents) != nil {
 			return candidate.name
 		}

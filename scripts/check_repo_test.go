@@ -507,11 +507,36 @@ func TestSecretContentCheckerRejectsCredentialInsideReleaseArchive(t *testing.T)
 	assertErrorContains(t, checkSecretContents(repo), "probable secret content in release archive")
 }
 
+func TestReleaseArtifactBearerScanRequiresAuthorizationContext(t *testing.T) {
+	repo := makeRepo(t, readProjectPolicy(t))
+	artifact := filepath.Join(repo, "bin", "bria")
+	writeFile(t, artifact, "linked binary text\x00Bearer "+strings.Repeat("adjacent", 4))
+	if errors := checkSecretContents(repo); len(errors) != 0 {
+		t.Fatalf("checkSecretContents() errors = %v, want no generic binary Bearer false positive", errors)
+	}
+
+	writeFile(t, artifact, "Authorization: Bearer "+strings.Repeat("sensitive", 4))
+	assertErrorContains(t, checkSecretContents(repo), "literal bearer credential")
+}
+
 func TestSecretContentCheckerAllowsPlaceholdersAndOrdinarySource(t *testing.T) {
 	repo := makeRepo(t, readProjectPolicy(t))
 	writeFile(t, filepath.Join(repo, "config.example.json"), "{\"telegram_token\":\"${TELEGRAM_TOKEN}\"}\n")
 	if errors := checkSecretContents(repo); len(errors) != 0 {
 		t.Fatalf("checkSecretContents() errors = %v, want none", errors)
+	}
+}
+
+func TestWorkflowCheckoutCredentialsAreNeverPersisted(t *testing.T) {
+	repo := makeRepo(t, readProjectPolicy(t))
+	workflow := filepath.Join(repo, ".github/workflows/check.yml")
+	writeFile(t, workflow, "jobs:\n  check:\n    steps:\n      - uses: actions/checkout@pinned\n")
+	runGit(t, repo, "add", ".github/workflows/check.yml")
+	assertErrorContains(t, checkFilenames(repo), "workflow checkout persists Git credentials")
+
+	writeFile(t, workflow, "jobs:\n  check:\n    steps:\n      - uses: actions/checkout@pinned\n        with:\n          persist-credentials: false\n")
+	if errors := checkFilenames(repo); len(errors) != 0 {
+		t.Fatalf("checkFilenames() errors = %v, want none", errors)
 	}
 }
 
