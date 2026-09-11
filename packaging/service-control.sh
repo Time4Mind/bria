@@ -16,7 +16,16 @@ case "$service_file" in /*) ;; *) usage ;; esac
 test -f "$service_file" || { printf '%s\n' 'service-control: rendered service file is unavailable' >&2; exit 1; }
 
 if test "$platform" = macos; then
-	label=com.time4mind.bria
+	label=$(plutil -extract Label raw -o - "$service_file") || {
+		printf '%s\n' 'service-control: macOS service Label is unavailable' >&2
+		exit 1
+	}
+	case "$label" in
+		""|.*|*..*|*[!0-9A-Za-z._-]*)
+			printf '%s\n' 'service-control: macOS service Label is invalid' >&2
+			exit 1
+			;;
+	esac
 	domain=gui/$(id -u)
 	case "$action" in
 		start)

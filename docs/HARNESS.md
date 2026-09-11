@@ -84,6 +84,12 @@ filesystem/network sandbox:
 native-terminal tests создают IPC, а `httptest` открывает loopback listener.
 Запуск их сначала в sandbox даёт ложные `operation not permitted` и не является
 полезной проверкой кода.
+Для поиска по отслеживаемому исходному дереву использовать `git grep`; не
+сканировать корневым `rg` каталоги `.cache` и `dist`, иначе бинарные build-cache
+records создают большой нерелевантный вывод.
+Repository-check fixtures должны переопределять exported `DIST_DIR` своим
+временным каталогом; иначе каждый fixture повторно сканирует настоящие release
+archives, а `scripts` под `-race` упирается в общий timeout.
 
 ```sh
 VERSION=YYYYMMDD-short-name make check-full
@@ -94,6 +100,19 @@ Makefile намеренно использует `.cache/go-build` и `.cache/go
 можно задать только явным аргументом команды. После первого exact-SHA CI failure
 сначала воспроизвести конкретный тест локально с `-race -count=N`; повторять весь
 gate только после исправления либо доказанной классификации флейка.
+
+Для локальной установки использовать `make release-local`, а не `make release`.
+`release-local` создаёт и проверяет подписанный cross-platform bundle;
+`release` дополнительно требует заранее собранный абсолютный
+`BRIA_RELEASE_EVIDENCE_MANIFEST` для публикационного workflow. До тяжёлой сборки
+должны быть заданы `VERSION`, `REVISION`, `SOURCE_DATE_EPOCH`, `RELEASE_KEY_ID`,
+абсолютные `RELEASE_SIGNING_KEY_FILE` и `RELEASE_TRUST_FILE`; trust-файл должен
+быть каноническим compact JSON без завершающего переноса строки. Встроенный
+preflight до cross-build проверяет формат файлов, права private key и совпадение
+выбранного key ID с trust-файлом. Для macOS
+штатные restart/status выполнять через `service-control.sh`: он обязан читать
+точный `Label` из переданного plist, а release-шаблон обязан задавать разрешённый
+`com.time4mind.bria.v2`, а не историческое имя сервиса.
 
 ## Сборка Bria
 

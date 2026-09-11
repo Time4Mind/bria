@@ -72,6 +72,36 @@ func TestSigningRequiresTrustedMatchingKey(t *testing.T) {
 	}
 }
 
+func TestSigningPreflightRejectsNonCanonicalTrustAndMismatchedKey(t *testing.T) {
+	_, privatePath, trustPath := releaseFixture(t, "1.2.3", "primary")
+	t.Setenv("RELEASE_SIGNING_KEY_FILE", privatePath)
+	args := []string{"preflight", "-key-id", "primary", "-trust-file", trustPath}
+	if err := run(args); err != nil {
+		t.Fatalf("preflight valid signing inputs: %v", err)
+	}
+	canonical, err := os.ReadFile(trustPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(trustPath, append(canonical, '\n'), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := run(args); err == nil || err.Error() != "public trust file must be canonical JSON" {
+		t.Fatalf("non-canonical trust preflight error = %v", err)
+	}
+	if err := os.WriteFile(trustPath, canonical, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, unrelatedPrivate, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writePrivateKey(t, privatePath, unrelatedPrivate)
+	if err := run(args); !errors.Is(err, update.ErrInvalidSignature) {
+		t.Fatalf("mismatched signing preflight error = %v, want ErrInvalidSignature", err)
+	}
+}
+
 func TestPrivateKeyErrorsRedactPathAndRejectLoosePermissions(t *testing.T) {
 	t.Parallel()
 	secretPath := filepath.Join(t.TempDir(), "do-not-leak-private-key-name.pem")

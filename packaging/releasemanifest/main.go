@@ -69,6 +69,16 @@ func run(args []string) error {
 		return errors.New("invalid command arguments")
 	}
 	switch args[0] {
+	case "preflight":
+		if !filepath.IsAbs(*trustFile) || *keyID == "" || *releaseDir != "" || *version != "" ||
+			*manifestPath != "" || *artifactPath != "" || *installedPath != "" || *platform != "" || *arch != "" {
+			return errors.New("absolute trust path and key_id are required")
+		}
+		privateKeyFile := os.Getenv("RELEASE_SIGNING_KEY_FILE")
+		if !filepath.IsAbs(privateKeyFile) {
+			return errors.New("RELEASE_SIGNING_KEY_FILE is required")
+		}
+		return validateSigningInputs(*keyID, privateKeyFile, *trustFile)
 	case "sign":
 		if !filepath.IsAbs(*releaseDir) || !filepath.IsAbs(*trustFile) || *version == "" ||
 			*manifestPath != "" || *artifactPath != "" || *installedPath != "" || *platform != "" || *arch != "" {
@@ -263,6 +273,9 @@ func selectedArtifactMetadata(manifestPath, artifactPath, expectedVersion, platf
 }
 
 func signRelease(releaseDir, version, keyID, privateKeyPath, trustPath string) error {
+	if err := validateSigningInputs(keyID, privateKeyPath, trustPath); err != nil {
+		return err
+	}
 	sources, closeSources, err := artifactSources(releaseDir, version)
 	if err != nil {
 		return err
@@ -293,6 +306,24 @@ func signRelease(releaseDir, version, keyID, privateKeyPath, trustPath string) e
 		return update.ErrInvalidSignature
 	}
 	return writeExclusive(filepath.Join(releaseDir, signedManifestName), signed)
+}
+
+func validateSigningInputs(keyID, privateKeyPath, trustPath string) error {
+	privateKey, err := loadPrivateKey(privateKeyPath)
+	if err != nil {
+		return err
+	}
+	defer clear(privateKey)
+	trustedKeys, err := loadTrustedKeys(trustPath)
+	if err != nil {
+		return err
+	}
+	trustedKey, found := trustedKeys[keyID]
+	publicKey := privateKey.Public().(ed25519.PublicKey)
+	if !found || !bytes.Equal(trustedKey, publicKey) {
+		return update.ErrInvalidSignature
+	}
+	return nil
 }
 
 func verifyRelease(releaseDir, expectedVersion, trustPath string) error {

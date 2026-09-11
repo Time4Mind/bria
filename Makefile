@@ -21,7 +21,7 @@ GO_ENV = env GOENV=off GOTOOLCHAIN=local GOWORK=off GOPROXY=off GOSUMDB=off \
 	CGO_ENABLED=0
 GO_RACE_ENV = $(GO_ENV) CGO_ENABLED=1 GORACE=atexit_sleep_ms=0
 
-.PHONY: prepare-deps check check-policy check-format check-architecture check-test check-race check-vet check-operational check-executable check-full-no-race check-full build release release-evidence release-supply-chain release-verify
+.PHONY: prepare-deps check check-policy check-format check-architecture check-test check-race check-vet check-operational check-executable check-full-no-race check-full build release-local release release-evidence release-supply-chain release-verify
 
 # Explicit online preparation. All check/build targets remain offline and use
 # the same cache; go.sum verification is never disabled during acquisition.
@@ -102,6 +102,13 @@ check-executable: build
 check-full-no-race: check check-executable
 
 check-full: check check-race check-executable
+
+# Signed bundle for the standing-authorized local service install. The stricter
+# release target additionally requires independently collected publication
+# evidence through BRIA_RELEASE_EVIDENCE_MANIFEST.
+release-local:
+	@./packaging/verify-supply-chain.sh
+	@./packaging/build-release.sh
 
 release:
 	@./packaging/verify-supply-chain.sh

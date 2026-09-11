@@ -38,6 +38,12 @@ case "$dist_root" in /*) ;; *) printf '%s\n' 'build-release: DIST_DIR must be ab
 
 output=$dist_root/$version
 test ! -e "$output" || { printf '%s\n' "build-release: output already exists: $output" >&2; exit 1; }
+(
+	cd "$repo_dir"
+	env GOENV=off GOTOOLCHAIN=local GOWORK=off GOPROXY=off GOSUMDB=off CGO_ENABLED=0 GOCACHE="$go_cache" GOMODCACHE="$go_mod_cache" \
+		"$go_command" run -mod=readonly ./packaging/releasemanifest preflight \
+		-key-id "$release_key_id" -trust-file "$trust_file"
+)
 mkdir -p "$dist_root"
 staging=$(mktemp -d "${TMPDIR:-/tmp}/bria-release.XXXXXX")
 cleanup() { rm -rf -- "$staging"; }

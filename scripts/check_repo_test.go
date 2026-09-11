@@ -2245,6 +2245,10 @@ func TestArchitectureCheckerAllowsApprovedDependencies(t *testing.T) {
 func makeRepo(t *testing.T, policy string) string {
 	t.Helper()
 	repo := t.TempDir()
+	// Keep repository-check fixtures isolated from the caller's real release
+	// directory. Make exports an absolute DIST_DIR for production checks; without
+	// this override every fixture rescans all real release archives under -race.
+	t.Setenv("DIST_DIR", filepath.Join(repo, "dist"))
 	writeFile(t, filepath.Join(repo, "AGENTS.md"), policy)
 	writeFile(t, filepath.Join(repo, "docs", "HARNESS.md"), "# Harness fixture\n")
 	runGit(t, repo, "init", "--quiet")

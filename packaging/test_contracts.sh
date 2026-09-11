@@ -62,6 +62,7 @@ do
 	grep -q '@BRIA_CONFIG@' "$repo_dir/$template" || fail "$template lacks config placeholder"
 done
 grep -q '<string>/dev/null</string>' "$repo_dir/packaging/macos/com.time4mind.bria.plist.tmpl" || fail "launchd raw stdout/stderr must not be persisted"
+grep -q '<string>com.time4mind.bria.v2</string>' "$repo_dir/packaging/macos/com.time4mind.bria.plist.tmpl" || fail "macOS release template must target the v2 service"
 for template in packaging/linux/bria.service.tmpl packaging/wsl/bria.service.tmpl; do
 	grep -q '^StandardOutput=null$' "$repo_dir/$template" || fail "$template must discard raw stdout"
 	grep -q '^StandardError=null$' "$repo_dir/$template" || fail "$template must discard raw stderr"
@@ -95,6 +96,43 @@ for platform in macos linux wsl; do
 	grep -q '/opt/bria/bria' "$output" || fail "$platform renderer lost the binary path"
 	grep -q '/etc/bria/config.json' "$output" || fail "$platform renderer lost the config path"
 done
+
+# The macOS controller must address the Label rendered in the exact plist; a
+# hard-coded legacy label can silently leave the installed v2 service running.
+fake_bin=$temporary/fake-bin
+mkdir -p "$fake_bin"
+printf '%s\n' \
+	'#!/bin/sh' \
+	'set -eu' \
+	'test "$#" -eq 6 && test "$1" = -extract && test "$2" = Label && test "$3" = raw && test "$4" = -o && test "$5" = -' \
+	'test "$6" = "$BRIA_EXPECTED_SERVICE_FILE"' \
+	'case "${BRIA_PLUTIL_MODE:-valid}" in' \
+	'  valid) awk '\''/<key>Label<\/key>/{getline; sub(/^.*<string>/, ""); sub(/<\/string>.*$/, ""); print; exit}'\'' "$6" ;;' \
+	'  unavailable) exit 1 ;;' \
+	'  empty) printf "\\n" ;;' \
+	'  invalid) printf "../legacy\\n" ;;' \
+	'  *) exit 2 ;;' \
+	'esac' >"$fake_bin/plutil"
+printf '#!/bin/sh\nprintf "501\\n"\n' >"$fake_bin/id"
+printf '#!/bin/sh\nprintf "%%s\\n" "$*" >"$BRIA_SERVICE_CONTROL_RECEIPT"\n' >"$fake_bin/launchctl"
+chmod 0755 "$fake_bin/plutil" "$fake_bin/id" "$fake_bin/launchctl"
+service_receipt=$temporary/service-control-receipt
+PATH="$fake_bin:$PATH" BRIA_EXPECTED_SERVICE_FILE="$temporary/macos.service" BRIA_SERVICE_CONTROL_RECEIPT="$service_receipt" \
+	"$repo_dir/packaging/service-control.sh" macos status "$temporary/macos.service"
+test "$(cat "$service_receipt")" = "print gui/501/com.time4mind.bria.v2" || \
+	fail "macOS service control ignored the rendered plist Label"
+for plutil_mode in unavailable empty invalid; do
+	rm -f "$service_receipt"
+	set +e
+	PATH="$fake_bin:$PATH" BRIA_PLUTIL_MODE="$plutil_mode" BRIA_EXPECTED_SERVICE_FILE="$temporary/macos.service" \
+		BRIA_SERVICE_CONTROL_RECEIPT="$service_receipt" \
+		"$repo_dir/packaging/service-control.sh" macos status "$temporary/macos.service" >/dev/null 2>&1
+	service_status=$?
+	set -e
+	test "$service_status" -ne 0 || fail "macOS service control accepted $plutil_mode Label"
+	test ! -e "$service_receipt" || fail "macOS service control invoked launchctl for $plutil_mode Label"
+done
+
 set +e
 "$repo_dir/packaging/render-service.sh" macos \
 	'/unsafe path/bria' /etc/bria/config.json /var/log/bria "$temporary/unsafe.service" >/dev/null 2>&1
@@ -129,6 +167,15 @@ grep -q 'actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c' "$r
 grep -q 'run-id:.*inputs.evidence_run_id' "$repo_dir/.github/workflows/release.yml" || fail "release workflow does not identify the evidence-producing run"
 grep -q 'BRIA_RELEASE_EVIDENCE_MANIFEST=' "$repo_dir/.github/workflows/release.yml" || fail "release workflow does not bind the evidence manifest"
 grep -q 'packaging/verify-supply-chain.sh' "$repo_dir/Makefile" || fail "release target does not enforce immutable dependencies"
+grep -q '^release-local:' "$repo_dir/Makefile" || fail "local signed release target is missing"
+local_release_recipe=$(make -n -C "$repo_dir" release-local)
+printf '%s\n' "$local_release_recipe" | grep -q 'packaging/build-release.sh' || fail "local release does not build a signed bundle"
+if printf '%s\n' "$local_release_recipe" | grep -Eq 'release-evidence|BRIA_RELEASE_EVIDENCE_MANIFEST'; then
+	fail "local release incorrectly invokes publication evidence"
+fi
+preflight_line=$(grep -n 'releasemanifest preflight' "$repo_dir/packaging/build-release.sh" | cut -d: -f1)
+build_line=$(grep -n '^for target in ' "$repo_dir/packaging/build-release.sh" | cut -d: -f1)
+test -n "$preflight_line" && test "$preflight_line" -lt "$build_line" || fail "release signing inputs are not validated before cross-build"
 
 supply_fixture=$temporary/supply-chain
 mkdir -p "$supply_fixture/.github/workflows"

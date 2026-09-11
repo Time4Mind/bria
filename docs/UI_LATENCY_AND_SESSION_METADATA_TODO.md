@@ -89,6 +89,19 @@ safe logs и identity-only postflight; ручной Telegram tap агент не
   `GO_IMAGE` закреплён полным digest, а supply-chain validation добавлен в
   `check-operational`, чтобы любой обычный full gate находил такой дефект до
   release. Follow-up exact-SHA CI и live postflight ещё не завершены.
+- Первый локальный deploy подтвердил ещё две исторические ловушки: public
+  `make release` требует внешний evidence manifest, а `service-control.sh`
+  hard-code-ил legacy label `com.time4mind.bria` вместо plist label
+  `com.time4mind.bria.v2`. Цель follow-up: явный signed `release-local`, полный
+  signing preflight до cross-build и plist-derived fail-closed macOS service target с
+  shell regression. Установленный runtime уже healthy; финальный bundle должен
+  включать исправленные operational scripts и пройти штатный postflight.
+- Финальный full gate выявил не product race, а не изолированный test fixture:
+  exported `DIST_DIR` заставлял каждый временный repository-check повторно
+  сканировать настоящие release archives и доводил `scripts` под `-race` до
+  10-минутного timeout. Fixture теперь направляет `DIST_DIR` внутрь своего temp
+  repo; сначала проверяется точный race-тест, полный gate повторяется только
+  после его GREEN.
 - Для New, browser, settings и pagination локально доказан один inventory/read
   path и regression latency seam. Физический callback-to-Telegram receipt для
   этих четырёх flow не создавался искусственно и остаётся на ближайшие обычные

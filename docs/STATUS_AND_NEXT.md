@@ -18,9 +18,14 @@
 > handshakes; 100 повторов и полный исправленный `make check-full` GREEN. Commit
 > `26a36a1` в `origin/main`, Stage 1 `34620133344` и Platform Matrix
 > `34620133235` GREEN. Release preflight обнаружил прежний mutable `GO_IMAGE`;
-> локально добавлен официальный OCI digest и supply-chain check перенесён в
-> обычный full gate, чтобы дефект не откладывался до deploy. Далее - follow-up
-> gate/commit/CI, install/restart
+> commit `e293bfd` закрепил официальный OCI digest и перенёс supply-chain check
+> в обычный full gate. Его Stage 1 `34620999826` и Platform Matrix
+> `34620999962` GREEN. Первый локальный deploy затем выявил две прежние
+> operational-ловушки: public `make release` требовал внешний evidence manifest,
+> а macOS service-control обращался к legacy label вместо Label точного plist.
+> Локальный follow-up добавляет отдельный `release-local`, plist-derived label,
+> shell regression и durable release guide. Далее - full gate/commit/exact-SHA
+> CI, повторная подписанная установка и штатный restart/postflight
 > `gui/501/com.time4mind.bria.v2` и safe live postflight. Полный договор и
 > evidence: [UI_LATENCY_AND_SESSION_METADATA_TODO.md](UI_LATENCY_AND_SESSION_METADATA_TODO.md).
 
