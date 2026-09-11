@@ -1,5 +1,19 @@
 # Handoff: статус и следующий план
 
+> Текущий запрос A50 - провести измеренный аудит CPU/RSS/wakeups/I/O и latency
+> Bria в простое и при работе, автоматически исправить очевидные локальные
+> причины без изменения продуктовой семантики, а концептуальные развилки вынести
+> Артёму после диагностики. Live baseline отделяет основной процесс от provider
+> children: idle parent доказан на `46.7%` одного ядра, пять native adapters -
+> ещё `8.9%`. Output sweep теперь читает journal один раз на все сессии
+> (`40 -> 2` reads в regression seam), stable screen соблюдает существующий
+> `300 ms` throttle. Focused/race и полный
+> `VERSION=20260912-performance-efficiency make check-full` GREEN; впереди
+> exact-SHA CI, deploy и live after-profile. Config/state/secrets и
+> искусственные Telegram inputs исключены.
+> Coverage и acceptance:
+> [PERFORMANCE_EFFICIENCY_AUDIT_TODO.md](PERFORMANCE_EFFICIENCY_AUDIT_TODO.md).
+
 > Текущий запрос A49 - убрать задержку голосового preprocessing относительно
 > ccbot. Live update `783532007` доказал: Luna завершила работу за `3356 ms`,
 > но primary Codex получил запрос на `19.271 s` позже. Recognized-card и

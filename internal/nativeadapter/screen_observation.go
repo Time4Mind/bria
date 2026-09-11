@@ -46,6 +46,7 @@ func (a *adapter) emitScreenObservation(text string, now time.Time) error {
 	}
 	previous := a.observation
 	if previous.hash != "" && previous.model == a.model && previous.interactive == parsed.Interactive && previous.hash == hash {
+		a.observation.sentAt = now
 		return nil
 	}
 	if err := a.emit(runtimeprotocol.AdapterMessage{Type: runtimeprotocol.TypeNativeObservation, ProviderSessionID: a.id, Text: text, FullText: fullText, Hash: hash, Model: a.model, Interactive: parsed.Interactive}); err != nil {

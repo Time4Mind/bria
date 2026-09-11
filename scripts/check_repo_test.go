@@ -682,7 +682,7 @@ func TestArchitectureCheckerRegistersCurrentCompositionBoundaries(t *testing.T) 
 			path:           "internal/durablecomposition",
 			responsibility: "compose durable message custody, accepted-turn reconciliation and recovery finalization",
 			imports:        []string{"internal/turncontinuation", "internal/acceptedrecovery", "internal/domain", "internal/durableflow", "internal/durableinputbridge", "internal/durableoutputwait", "internal/messagejournal", "internal/sessionruntime", "internal/sessionsupervisor", "internal/telegramcontroller", "internal/telegramnotify", "internal/turnprocessing"},
-			limit:          550,
+			limit:          575,
 		},
 		{
 			path:           "internal/acceptedinput",
@@ -1006,7 +1006,7 @@ func TestArchitectureCheckerCapsCoherentCustodyResponsibilities(t *testing.T) {
 	}{
 		{path: "internal/authflow", limit: 1500},
 		{path: "internal/mediaflow", limit: 350},
-		{path: "internal/messagejournal", limit: 1700},
+		{path: "internal/messagejournal", limit: 1725},
 		{path: "internal/sessionsupervisor", limit: 500},
 		{path: "internal/telegramflow", limit: 2900},
 		{path: "internal/telegramcallbackack", limit: 200},

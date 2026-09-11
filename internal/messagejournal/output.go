@@ -100,38 +100,74 @@ func (journal *Journal) LeaseNextOutput(
 	now time.Time,
 	duration time.Duration,
 ) (Output, error) {
-	if err := journal.validateLeaseRequest(ctx, sessionID, owner, now, duration); err != nil {
+	return journal.LeaseNextOutputForSessions(ctx, []string{sessionID}, owner, now, duration)
+}
+
+// LeaseNextOutputForSessions scans one journal snapshot in caller-provided
+// session order. It avoids decoding the complete journal once per idle session.
+func (journal *Journal) LeaseNextOutputForSessions(
+	ctx context.Context,
+	sessionIDs []string,
+	owner string,
+	now time.Time,
+	duration time.Duration,
+) (Output, error) {
+	if len(sessionIDs) == 0 {
+		return Output{}, ErrNoAvailable
+	}
+	if err := journal.validateLeaseRequest(ctx, sessionIDs[0], owner, now, duration); err != nil {
 		return Output{}, err
+	}
+	for _, sessionID := range sessionIDs[1:] {
+		if err := validateOpaqueID(sessionID, journal.limits.MaxIDBytes, "session id"); err != nil {
+			return Output{}, err
+		}
 	}
 	var result Output
 	err := journal.mutate(func(loaded *document) error {
-		session, err := sessionAt(loaded, sessionID, false, journal.limits)
-		if err != nil {
-			return ErrNoAvailable
-		}
-		for index := range session.Outputs {
-			record := &session.Outputs[index]
-			switch record.Phase {
-			case OutputConfirmed:
+		for _, sessionID := range sessionIDs {
+			session, sessionErr := sessionAt(loaded, sessionID, false, journal.limits)
+			if errors.Is(sessionErr, ErrNotFound) {
 				continue
-			case OutputFailed, OutputUnknown, OutputSuperseded:
-				// Terminal unconfirmed writes are never replayed implicitly,
-				// but they do not block independent later state/results.
-				continue
-			case OutputPending:
-				if record.Lease.Owner != "" && now.UnixNano() < record.Lease.UntilUnix {
-					return ErrNoAvailable
-				}
-				record.Lease = leaseRecord{Owner: owner, UntilUnix: now.Add(duration).UnixNano()}
-				result = outputFromRecord(sessionID, *record)
+			}
+			if sessionErr != nil {
+				return sessionErr
+			}
+			leased, available, leaseErr := leaseNextOutput(sessionID, session, owner, now, duration)
+			if leaseErr != nil {
+				return leaseErr
+			}
+			if available {
+				result = leased
 				return nil
-			default:
-				return ErrInvalidFormat
 			}
 		}
 		return ErrNoAvailable
 	})
 	return result, err
+}
+
+func leaseNextOutput(sessionID string, session *sessionRecord, owner string, now time.Time, duration time.Duration) (Output, bool, error) {
+	for index := range session.Outputs {
+		record := &session.Outputs[index]
+		switch record.Phase {
+		case OutputConfirmed:
+			continue
+		case OutputFailed, OutputUnknown, OutputSuperseded:
+			// Terminal unconfirmed writes are never replayed implicitly,
+			// but they do not block independent later state/results.
+			continue
+		case OutputPending:
+			if record.Lease.Owner != "" && now.UnixNano() < record.Lease.UntilUnix {
+				return Output{}, false, nil
+			}
+			record.Lease = leaseRecord{Owner: owner, UntilUnix: now.Add(duration).UnixNano()}
+			return outputFromRecord(sessionID, *record), true, nil
+		default:
+			return Output{}, false, ErrInvalidFormat
+		}
+	}
+	return Output{}, false, nil
 }
 
 // SupersedePendingOutputs retains durable history while collapsing unleased

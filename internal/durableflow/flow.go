@@ -90,6 +90,10 @@ type Journal interface {
 	RetryOutput(context.Context, string, string) (messagejournal.Output, error)
 }
 
+type batchOutputJournal interface {
+	LeaseNextOutputForSessions(context.Context, []string, string, time.Time, time.Duration) (messagejournal.Output, error)
+}
+
 type HandoffState string
 
 const (
@@ -566,14 +570,32 @@ func (flow *Flow) SupersedePendingOutputs(ctx context.Context, sessionID, keepOp
 
 // DeliverNextOutput attempts only the oldest unresolved output. An invalid or
 // errored sender result is ambiguous and is durably sealed as Unknown.
-func (flow *Flow) DeliverNextOutput(ctx context.Context, sessionID string) (DeliveryResult, error) {
+func (flow *Flow) DeliverNextOutput(ctx context.Context, sessionIDs ...string) (DeliveryResult, error) {
 	if flow.sender == nil {
 		return DeliveryResult{}, ErrOutputSenderRequired
 	}
-	output, err := flow.journal.LeaseNextOutput(ctx, sessionID, flow.owner, flow.now(), flow.leaseDuration)
+	if len(sessionIDs) == 0 {
+		return DeliveryResult{}, messagejournal.ErrNoAvailable
+	}
+	var output messagejournal.Output
+	var err error
+	if journal, ok := flow.journal.(batchOutputJournal); ok && len(sessionIDs) > 1 {
+		output, err = journal.LeaseNextOutputForSessions(ctx, sessionIDs, flow.owner, flow.now(), flow.leaseDuration)
+	} else {
+		for _, sessionID := range sessionIDs {
+			output, err = flow.journal.LeaseNextOutput(ctx, sessionID, flow.owner, flow.now(), flow.leaseDuration)
+			if !errors.Is(err, messagejournal.ErrNoAvailable) {
+				break
+			}
+		}
+	}
 	if err != nil {
 		return DeliveryResult{}, err
 	}
+	return flow.deliverLeasedOutput(ctx, output)
+}
+
+func (flow *Flow) deliverLeasedOutput(ctx context.Context, output messagejournal.Output) (DeliveryResult, error) {
 	request := ProviderOutput{
 		SessionID:   output.SessionID,
 		OperationID: output.OperationID,
@@ -619,8 +641,8 @@ func (flow *Flow) DeliverNextOutput(ctx context.Context, sessionID string) (Deli
 			persistErr := flow.markOutputUnknown(custodyCtx, output)
 			return result, errors.Join(ErrInvalidDelivery, persistErr)
 		}
-		_, err = flow.journal.ConfirmOutput(custodyCtx, output.SessionID, output.OperationID, flow.owner, delivered.Receipt)
-		if err == nil {
+		_, confirmErr := flow.journal.ConfirmOutput(custodyCtx, output.SessionID, output.OperationID, flow.owner, delivered.Receipt)
+		if confirmErr == nil {
 			return result, nil
 		}
 		// The transport receipt is exact, but the durable confirmation did
@@ -629,13 +651,13 @@ func (flow *Flow) DeliverNextOutput(ctx context.Context, sessionID string) (Deli
 		result.State = DeliveryUnknown
 		result.Receipt = ""
 		sealErr := flow.markOutputUnknown(custodyCtx, output)
-		return result, errors.Join(err, sealErr)
+		return result, errors.Join(confirmErr, sealErr)
 	case DeliveryFailed:
-		_, err = flow.journal.MarkOutputFailed(custodyCtx, output.SessionID, output.OperationID, flow.owner)
-		return result, err
+		_, markErr := flow.journal.MarkOutputFailed(custodyCtx, output.SessionID, output.OperationID, flow.owner)
+		return result, markErr
 	case DeliveryUnknown:
-		_, err = flow.journal.MarkOutputUnknown(custodyCtx, output.SessionID, output.OperationID, flow.owner)
-		return result, err
+		_, markErr := flow.journal.MarkOutputUnknown(custodyCtx, output.SessionID, output.OperationID, flow.owner)
+		return result, markErr
 	default:
 		result.State = DeliveryUnknown
 		result.Receipt = ""

@@ -357,6 +357,26 @@ func TestOutputJournalSupersedesOnlyUnleasedPendingKinds(t *testing.T) {
 	}
 }
 
+func TestLeaseNextOutputForSessionsPreservesOrderAndSkipsActiveLease(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	journal := openJournal(t, filepath.Join(t.TempDir(), "messages.json"), testLimits())
+	for _, sessionID := range []string{"session-b", "session-a"} {
+		if _, _, err := journal.EnqueueOutput(ctx, sessionID, "output-"+sessionID, "commentary", []byte(sessionID)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	base := time.Unix(10, 0)
+	leased, err := journal.LeaseNextOutputForSessions(ctx, []string{"session-a", "session-b"}, "worker-a", base, time.Minute)
+	if err != nil || leased.SessionID != "session-a" {
+		t.Fatalf("ordered batch lease = (%#v, %v)", leased, err)
+	}
+	leased, err = journal.LeaseNextOutputForSessions(ctx, []string{"session-a", "session-b"}, "worker-b", base.Add(time.Second), time.Minute)
+	if err != nil || leased.SessionID != "session-b" {
+		t.Fatalf("batch lease behind active session = (%#v, %v)", leased, err)
+	}
+}
+
 func TestConcurrentStoresAssignUniqueMonotonicSequences(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

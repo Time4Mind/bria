@@ -273,20 +273,42 @@ func (dispatcher OutputDispatcher) Run(ctx context.Context) error {
 	if ctx == nil || dispatcher.Flow == nil || dispatcher.Sessions == nil || dispatcher.Wake == nil || dispatcher.Report == nil {
 		return errors.New("durable output dispatcher dependencies are required")
 	}
-	deliver := func(id domain.SessionID) {
+	deliver := func(ids ...domain.SessionID) {
+		sessionIDs := make([]string, len(ids))
+		for index, id := range ids {
+			sessionIDs[index] = string(id)
+		}
+		drop := func(sessionID string) bool {
+			remaining := sessionIDs[:0]
+			found := false
+			for _, candidate := range sessionIDs {
+				if candidate == sessionID {
+					found = true
+					continue
+				}
+				remaining = append(remaining, candidate)
+			}
+			sessionIDs = remaining
+			return found && len(sessionIDs) > 0
+		}
 		for {
-			result, err := dispatcher.Flow.DeliverNextOutput(ctx, string(id))
+			result, err := dispatcher.Flow.DeliverNextOutput(ctx, sessionIDs...)
 			if errors.Is(err, messagejournal.ErrNoAvailable) {
 				return
 			}
 			if err != nil {
 				if !errors.Is(err, context.Canceled) {
-					dispatcher.Report(fmt.Errorf("deliver durable output for session %s: %w", id, err))
+					dispatcher.Report(fmt.Errorf("deliver durable output %v: %w", ids, err))
 				}
-				return
+				if !drop(result.SessionID) {
+					return
+				}
+				continue
 			}
 			if result.State != durableflow.DeliveryConfirmed {
-				return
+				if !drop(result.SessionID) {
+					return
+				}
 			}
 		}
 	}
@@ -298,9 +320,11 @@ func (dispatcher OutputDispatcher) Run(ctx context.Context) error {
 			}
 			return
 		}
-		for _, session := range sessions {
-			deliver(session.ID())
+		ids := make([]domain.SessionID, len(sessions))
+		for index, session := range sessions {
+			ids[index] = session.ID()
 		}
+		deliver(ids...)
 	}
 	deliverAll()
 	sweep := time.NewTicker(outputDispatchSweepInterval)

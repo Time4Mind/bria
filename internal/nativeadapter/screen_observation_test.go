@@ -35,3 +35,22 @@ func TestObservationCarriesChangedOrdinaryScreenAndModel(t *testing.T) {
 		t.Fatalf("frame=%#v %v", frame, err)
 	}
 }
+
+func TestUnchangedObservationAdvancesCaptureThrottle(t *testing.T) {
+	output := &bytes.Buffer{}
+	a := &adapter{id: fixtureSession, model: "model-a", output: output}
+	first := time.Unix(10, 0)
+	if err := a.emitScreenObservation("stable screen", first); err != nil {
+		t.Fatal(err)
+	}
+	second := first.Add(time.Second)
+	if err := a.emitScreenObservation("stable screen", second); err != nil {
+		t.Fatal(err)
+	}
+	if !a.observation.sentAt.Equal(second) {
+		t.Fatalf("unchanged capture timestamp = %s, want %s", a.observation.sentAt, second)
+	}
+	if lines := bytes.Count(output.Bytes(), []byte{'\n'}); lines != 1 {
+		t.Fatalf("unchanged screen emitted %d frames, want 1", lines)
+	}
+}

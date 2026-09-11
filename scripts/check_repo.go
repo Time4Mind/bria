@@ -1602,7 +1602,7 @@ var packagePolicies = map[string]packagePolicy{
 			"internal/turncontinuation",
 			"internal/acceptedrecovery", "internal/domain", "internal/durableflow", "internal/durableinputbridge", "internal/durableoutputwait", "internal/messagejournal", "internal/sessionruntime", "internal/sessionsupervisor", "internal/telegramcontroller", "internal/telegramnotify", "internal/turnprocessing",
 		},
-		maxProductionLines: 550,
+		maxProductionLines: 575,
 	},
 	"internal/coordinator": {
 		responsibility:     "serialize coordinator commands and durable effects",
@@ -1639,7 +1639,7 @@ var packagePolicies = map[string]packagePolicy{
 	"internal/durableflow": {
 		responsibility:     "process durable ordered message journal work",
 		allowedImports:     []string{"internal/acceptedinput", "internal/messagejournal"},
-		maxProductionLines: 700,
+		maxProductionLines: 725,
 	},
 	"internal/durableoutputwait": {
 		responsibility:     "observe one exact durable output delivery phase without mutation",
@@ -1728,7 +1728,7 @@ var packagePolicies = map[string]packagePolicy{
 		// This budget includes the versioned attachment custody schema and its
 		// ordered input/output journal; execution remains in durableflow.
 		responsibility:     "persist ordered inbound and outbound messages and atomic recovery cutoffs",
-		maxProductionLines: 1700,
+		maxProductionLines: 1725,
 	},
 	"internal/multinodecomposition": {
 		responsibility:       "compose durable multi-computer coordinator roles and manual cutover",
