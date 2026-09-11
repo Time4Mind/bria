@@ -73,6 +73,12 @@ func Recover(ctx context.Context, awaiting domain.Session, prior domain.Provider
 	for _, turn := range result.Reconciliation.Turns {
 		active = active || turn.Outcome == AcceptedTurnUnknown
 	}
+	if active && options.CommitInputRecovery != nil {
+		// A durable recovery cutoff means the user has chosen to abandon every
+		// unresolved request captured by the proven total failure, regardless
+		// of its former acceptance phase. Do not resurrect or observe it.
+		active = false
+	}
 	if active && options.ShouldContinueAcceptedTurns != nil {
 		active, err = options.ShouldContinueAcceptedTurns(ctx, recovered, prior, result.Reconciliation)
 		if err != nil {

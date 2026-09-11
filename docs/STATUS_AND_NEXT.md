@@ -17,6 +17,12 @@
 > синхронный recovery finalizer и fail-closed rollback несовместимого бинарника.
 > Ручной state edit/replay запрещён; после полного gate действует standing
 > release sequence.
+> Первый live postflight `a13d5ae` подтвердил `workdir7` Ready и exact
+> 721/724/727=`skipped`, но выявил старую `d61...` с open cutoff и древним
+> `accepted`. Финальное уточнение A43: при доказанном total failure старый
+> accepted-turn также не наблюдается и не оживляется, а skip-ится вместе со
+> всем captured prefix. Регрессионный тест и полный v2 gate PASS; второй release
+> выполняется автоматически.
 
 > Текущий запрос A42 - определить происхождение live-сессии `ab396f5b...` и
 > исключить устойчивый статус `awaiting_recovery`: ранее открытая и физически

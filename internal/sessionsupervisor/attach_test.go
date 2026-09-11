@@ -168,6 +168,58 @@ func TestAttachedRecoveryRetrySkipsOnlyOriginalBoundaryAndDispatchesSuccessorOnc
 	}
 }
 
+func TestPersistedTotalFailureSkipsOldAcceptedTurnWithoutContinuation(t *testing.T) {
+	ctx := context.Background()
+	journal, err := messagejournal.Open(filepath.Join(t.TempDir(), "journal.json"), messagejournal.DefaultLimits())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err = journal.EnqueueInput(ctx, "accepted-recovery-skip", "old-accepted", []byte("private")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = journal.LeaseNextInput(ctx, "accepted-recovery-skip", "old-worker", time.Unix(1, 0), time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = journal.MarkInputAccepted(ctx, "accepted-recovery-skip", "old-accepted", "old-worker"); err != nil {
+		t.Fatal(err)
+	}
+	ready := readySession(t, "accepted-recovery-skip")
+	running, err := ready.StartWork(ready.StateChangedAt().Add(time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	awaiting, err := running.AwaitRecoveryAt(running.StateChangedAt().Add(time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	prior, _ := awaiting.Binding()
+	next := prior
+	next.Generation++
+	store := &memoryStore{session: awaiting}
+	runtime := &attachRuntime{binding: next}
+	continued := false
+	supervisor, err := sessionsupervisor.New(store, waitFunc(func(context.Context, domain.SessionID, domain.ProviderBinding) error { return nil }), runtime, sessionsupervisor.Options{
+		MaxRestartAttempts: 1, WaitBeforeRetry: func(context.Context, int) error { return nil }, Now: time.Now,
+		AcceptedTurns: &fakeReconciler{reconciliation: sessionsupervisor.AcceptedTurnReconciliation{Turns: []sessionsupervisor.ReconciledAcceptedTurn{{MessageID: "old-accepted", TurnID: "old-turn", Outcome: sessionsupervisor.AcceptedTurnUnknown}}}},
+		ContinueAcceptedTurns: func(context.Context, domain.Session, domain.ProviderBinding, sessionsupervisor.AcceptedTurnReconciliation) error {
+			continued = true
+			return nil
+		},
+		InputRecovery: journal,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := supervisor.RecoverPersisted(ctx, awaiting.ID(), prior)
+	if err != nil || !result.Recovered || result.AwaitingRecovery || continued || store.session.Status() != domain.SessionReady {
+		t.Fatalf("accepted recovery skip = %+v err=%v continued=%t status=%s", result, err, continued, store.session.Status())
+	}
+	inputs, err := journal.Inputs(ctx, string(awaiting.ID()))
+	if err != nil || len(inputs) != 1 || inputs[0].Phase != messagejournal.InputSkipped {
+		t.Fatalf("old accepted input was not skipped: %+v, %v", inputs, err)
+	}
+}
+
 func (*attachRuntime) SupportsAttach(domain.Provider) bool { return true }
 func (runtime *attachRuntime) Attach(_ context.Context, request app.StartSessionRequest) (domain.ProviderBinding, error) {
 	if request.PriorBinding == nil || request.PriorBinding.SessionID != runtime.binding.SessionID {
