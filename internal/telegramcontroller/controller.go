@@ -1285,7 +1285,7 @@ func (controller *Controller) Handle(
 		controller.setPromptState(ctx, activeSession, messageID, promptText, "🙋‍♂")
 	}
 	payload := controller.preparation.Payload(ctx, prepared.Text)
-	return controller.enqueue(ctx, update.ID, update.SourceMessageID, prepared, payload), nil
+	return controller.enqueueSession(ctx, update.ID, update.SourceMessageID, activeSession, prepared, payload), nil
 }
 
 func (controller *Controller) prepareAndEnqueueVoice(ctx context.Context, update coordinator.Update, sessionID domain.SessionID, messageID, promptText string) {
@@ -1314,7 +1314,7 @@ func (controller *Controller) prepareAndEnqueueVoice(ctx context.Context, update
 		controller.notifyPromptCard(ctx, sessionID, messageID, "🙋‍♂")
 	}
 	payload := controller.preparation.Payload(ctx, prepared.Text)
-	controller.enqueue(ctx, update.ID, update.SourceMessageID, prepared, payload)
+	controller.enqueueSession(ctx, update.ID, update.SourceMessageID, sessionID, prepared, payload)
 }
 
 func (controller *Controller) notifyPromptCard(ctx context.Context, sessionID domain.SessionID, messageID, emoji string) {
@@ -2530,12 +2530,6 @@ func (controller *Controller) listSessions(ctx context.Context) (coordinator.Dec
 	decision := controller.status(text.String())
 	decision.Keyboard = &keyboard
 	return decision, nil
-}
-func (controller *Controller) enqueue(ctx context.Context, updateID, sourceMessageID int64, input PreparedInput, payload []byte) coordinator.Decision {
-	controller.mu.Lock()
-	active := controller.active
-	controller.mu.Unlock()
-	return controller.enqueueSession(ctx, updateID, sourceMessageID, active, input, payload)
 }
 func (controller *Controller) enqueueSession(ctx context.Context, updateID, sourceMessageID int64, sessionID domain.SessionID, input PreparedInput, payload []byte) coordinator.Decision {
 	messageID := "telegram-update:" + strconv.FormatInt(updateID, 10)

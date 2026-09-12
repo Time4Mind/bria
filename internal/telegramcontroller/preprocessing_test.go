@@ -5,9 +5,11 @@ import (
 	"errors"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"bria/internal/app"
 	"bria/internal/coordinator"
 	"bria/internal/domain"
 	"bria/internal/promptpreprocess"
@@ -34,6 +36,38 @@ type preprocessingCompletionFunc func(context.Context)
 func (function preprocessingCompletionFunc) Accept(ctx context.Context) error {
 	function(ctx)
 	return nil
+}
+
+type blockingStructuredPreparer struct {
+	entered  chan struct{}
+	release  chan struct{}
+	prepared telegramcontroller.PreparedInput
+}
+
+type rejectedPromptObserver struct {
+	projectionUIState
+	rejected chan struct{}
+	once     sync.Once
+}
+
+func (observer *rejectedPromptObserver) SetCardPrompt(ctx context.Context, id domain.SessionID, messageID, item string) error {
+	if err := observer.projectionUIState.SetCardPrompt(ctx, id, messageID, item); err != nil {
+		return err
+	}
+	if strings.HasPrefix(item, "🙅‍♂") {
+		observer.once.Do(func() { close(observer.rejected) })
+	}
+	return nil
+}
+
+func (preparer blockingStructuredPreparer) Prepare(context.Context, telegramcontroller.IncomingInput) (string, error) {
+	return "", errors.New("legacy string preparer must not be used")
+}
+
+func (preparer blockingStructuredPreparer) PrepareStructured(context.Context, telegramcontroller.IncomingInput) (telegramcontroller.PreparedInput, error) {
+	close(preparer.entered)
+	<-preparer.release
+	return preparer.prepared, nil
 }
 
 type preprocessingBarrierCustody struct {
@@ -489,6 +523,172 @@ func TestVoiceTranscriptEntersDurablePreprocessingEnvelope(t *testing.T) {
 	state, err := promptpreprocess.DecodeState(accepted.Payload)
 	if err != nil || !state.Enabled || state.Instruction != promptpreprocess.DefaultInstruction || state.Original != "контекст\n\nраспознанный текст" {
 		t.Fatalf("voice preprocessing state = %#v, %v", state, err)
+	}
+}
+
+func TestVoiceTranscriptStaysBoundToSessionSelectedAtIngress(t *testing.T) {
+	first := readySession(t, "11111111-1111-4111-8111-111111111111", domain.ProviderCodex, t.TempDir(), "provider-first", 1)
+	second := readySession(t, "22222222-2222-4222-8222-222222222222", domain.ProviderCodex, t.TempDir(), "provider-second", 2)
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	acceptedInputs := make(chan telegramcontroller.SessionInput, 1)
+	controller := newController(t, nil, &memorySessions{byID: map[domain.SessionID]domain.Session{
+		first.ID():  first,
+		second.ID(): second,
+	}}, nil, nil, telegramcontroller.Options{
+		Recovered: []domain.Session{first, second},
+		InputPreparer: inputPreparerFunc(func(_ context.Context, input telegramcontroller.IncomingInput) (string, error) {
+			if input.Kind != "voice" {
+				t.Fatalf("prepared kind = %q", input.Kind)
+			}
+			close(entered)
+			<-release
+			return "recognized for first", nil
+		}),
+		DurableInput: durableInputFunc(func(_ context.Context, input telegramcontroller.SessionInput) (telegramcontroller.InputReceipt, error) {
+			acceptedInputs <- input
+			return telegramcontroller.InputReceipt{Inserted: true, SessionID: input.SessionID, MessageID: input.MessageID, Sequence: 1}, nil
+		}),
+	})
+	t.Cleanup(func() { _ = controller.Close(context.Background()) })
+	mustStatus(t, controller, message(810, "/use "+string(first.ID())))
+	voice := message(811, "")
+	voice.MediaKind = "voice"
+	voice.MediaFileID = "voice-file"
+	voice.MediaDownloadAllowed = true
+	mustStatus(t, controller, voice)
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("voice recognition did not start")
+	}
+	mustStatus(t, controller, message(812, "/use "+string(second.ID())))
+	close(release)
+	select {
+	case accepted := <-acceptedInputs:
+		if accepted.SessionID != first.ID() {
+			t.Fatalf("voice session = %q, want ingress session %q", accepted.SessionID, first.ID())
+		}
+	case <-time.After(time.Second):
+		t.Fatal("recognized voice did not reach durable input")
+	}
+}
+
+func TestVoiceTranscriptDoesNotRedirectAfterIngressSessionCloses(t *testing.T) {
+	first := readySession(t, "55555555-5555-4555-8555-555555555555", domain.ProviderCodex, t.TempDir(), "provider-first", 1)
+	second := readySession(t, "66666666-6666-4666-8666-666666666666", domain.ProviderCodex, t.TempDir(), "provider-second", 2)
+	archived := archivedSession(t, string(first.ID()), first.Provider(), first.Workdir(), "provider-first", 1)
+	store := &memorySessions{byID: map[domain.SessionID]domain.Session{
+		first.ID():  first,
+		second.ID(): second,
+	}, listed: []domain.Session{first, second}}
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	acceptedInputs := make(chan telegramcontroller.SessionInput, 1)
+	ui := &rejectedPromptObserver{rejected: make(chan struct{})}
+	controller := newController(t, nil, store, nil, nil, telegramcontroller.Options{
+		Recovered: []domain.Session{first, second},
+		UIState:   ui,
+		InputPreparer: inputPreparerFunc(func(context.Context, telegramcontroller.IncomingInput) (string, error) {
+			close(entered)
+			<-release
+			return "recognized after close", nil
+		}),
+		DurableInput: durableInputFunc(func(_ context.Context, input telegramcontroller.SessionInput) (telegramcontroller.InputReceipt, error) {
+			acceptedInputs <- input
+			return telegramcontroller.InputReceipt{Inserted: true, SessionID: input.SessionID, MessageID: input.MessageID, Sequence: 1}, nil
+		}),
+		SessionCloser: sessionCloserFunc(func(_ context.Context, id domain.SessionID) (app.CloseSessionResult, error) {
+			if id != first.ID() {
+				t.Fatalf("closed session = %q, want %q", id, first.ID())
+			}
+			store.byID[id] = archived
+			store.listed = []domain.Session{second, archived}
+			return app.CloseSessionResult{Session: archived}, nil
+		}),
+	})
+	t.Cleanup(func() { _ = controller.Close(context.Background()) })
+	mustStatus(t, controller, message(816, "/use "+string(first.ID())))
+	voice := message(817, "")
+	voice.MediaKind = "voice"
+	voice.MediaFileID = "voice-file"
+	voice.MediaDownloadAllowed = true
+	mustStatus(t, controller, voice)
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("voice recognition did not start")
+	}
+	if _, err := controller.CloseSession(context.Background(), first.ID()); err != nil {
+		t.Fatal(err)
+	}
+	close(release)
+	select {
+	case <-ui.rejected:
+	case <-time.After(time.Second):
+		t.Fatal("closed ingress request did not reach terminal rejection")
+	}
+	select {
+	case accepted := <-acceptedInputs:
+		t.Fatalf("closed voice request was redirected to %q", accepted.SessionID)
+	default:
+	}
+}
+
+func TestPreparedAttachmentStaysBoundToSessionSelectedAtIngress(t *testing.T) {
+	first := readySession(t, "33333333-3333-4333-8333-333333333333", domain.ProviderClaude, t.TempDir(), "provider-first", 1)
+	second := readySession(t, "44444444-4444-4444-8444-444444444444", domain.ProviderClaude, t.TempDir(), "provider-second", 2)
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	acceptedInputs := make(chan telegramcontroller.SessionInput, 1)
+	wantAttachment := telegramcontroller.AttachmentRef{
+		Reference: "photo-custody-813", Size: 2048,
+		SHA256: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+	}
+	controller := newController(t, nil, &memorySessions{byID: map[domain.SessionID]domain.Session{
+		first.ID():  first,
+		second.ID(): second,
+	}}, nil, nil, telegramcontroller.Options{
+		Recovered: []domain.Session{first, second},
+		InputPreparer: blockingStructuredPreparer{
+			entered: entered, release: release,
+			prepared: telegramcontroller.PreparedInput{Text: "prepared for first", Attachments: []telegramcontroller.AttachmentRef{wantAttachment}},
+		},
+		DurableInput: durableInputFunc(func(_ context.Context, input telegramcontroller.SessionInput) (telegramcontroller.InputReceipt, error) {
+			acceptedInputs <- input
+			return telegramcontroller.InputReceipt{Inserted: true, SessionID: input.SessionID, MessageID: input.MessageID, Sequence: 1}, nil
+		}),
+	})
+	t.Cleanup(func() { _ = controller.Close(context.Background()) })
+	mustStatus(t, controller, message(813, "/use "+string(first.ID())))
+	photo := message(814, "inspect")
+	photo.MediaKind = "photo"
+	photo.MediaFileID = "photo-file"
+	photo.MediaDownloadAllowed = true
+	done := make(chan struct{})
+	go func() {
+		_, _ = controller.HandleSemanticMessage(context.Background(), photo)
+		close(done)
+	}()
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("attachment preparation did not start")
+	}
+	mustStatus(t, controller, message(815, "/use "+string(second.ID())))
+	close(release)
+	select {
+	case accepted := <-acceptedInputs:
+		if accepted.SessionID != first.ID() || !reflect.DeepEqual(accepted.Attachments, []telegramcontroller.AttachmentRef{wantAttachment}) {
+			t.Fatalf("prepared input = %#v, want ingress session %q and exact attachment", accepted, first.ID())
+		}
+	case <-time.After(time.Second):
+		t.Fatal("prepared attachment did not reach durable input")
+	}
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("prepared attachment handler did not finish")
 	}
 }
 
