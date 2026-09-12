@@ -6,7 +6,10 @@
 > уже показывают, что значимая часть времени остаётся внутри Bria, а не в
 > Telegram transport. Локальный фикс устраняет повторную durable-обвязку callback
 > и объединяет card projection в один state snapshot; focused tests, три review и
-> полный `make check-full` GREEN. Договор, coverage и текущие измерения:
+> полный `make check-full` GREEN. Source commit `0552914`, Stage 1
+> `34688585550` и Platform Matrix `34688585553` GREEN; signed release
+> `20260912-session-switch-latency` установлен с GREEN postflight. Открыт только
+> замер следующего реального пользовательского tap. Договор и evidence:
 > [SESSION_SWITCH_LATENCY_TODO.md](SESSION_SWITCH_LATENCY_TODO.md).
 
 > Текущий запрос A51 - исправить потерю request custody активной сессии,

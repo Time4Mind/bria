@@ -28,7 +28,7 @@
 | A52.1 | Разложить свежую задержку по стадиям | verified | Три `select_session`: ingress -> edit success `1021/1337/1440 ms`; до edit `800-901 ms`, из них controller `226-305 ms`, Telegram edit `187-538 ms`. Ошибок и polling delay нет. |
 | A52.2 | Сопоставить с быстрым Python-флоу | verified | Исторический ccbot: одна crash-safe state write до edit и один Telegram edit; новая Bria выполняла около 14 atomic file commits до edit. |
 | A52.3 | Исправить корневую причину без потери гарантий | implemented, focused/race/review GREEN | Уже fenced `CallbackPrepared` доставляется без второго status-outbox и без outer checkpoint перед edit; transcript/page/session-list читаются одним joined snapshot. RED доказал, что раньше edit ждал outer checkpoint; GREEN - direct edit начинается до него. Stale definitely-unsent callback durably завершается без блокировки очереди; send-unknown сохраняет `ErrDeliveryUnknown`. Три независимых review - APPROVE. |
-| A52.4 | Выпустить и проверить новую версию | release pending | Финальный `VERSION=20260912-session-switch-latency-v2 make check-full` GREEN: policy, architecture, tests, vet, supply-chain, packaging и global race. Далее - exact manifest, commit/push, exact-SHA CI, signed local release и live postflight. |
+| A52.4 | Выпустить и проверить новую версию | deployed; live tap pending | Source commit `0552914` в `origin/main`; Stage 1 `34688585550` и Platform Matrix `34688585553` GREEN. Signed release `20260912-session-switch-latency` установлен, state/journal и Telegram postflight GREEN. Остался пользовательский tap для post-change latency. |
 
 ## Проверенная причина
 
@@ -65,3 +65,23 @@ projection трижды перечитывал общий `state.json` разм�
 
 Integration owner объединяет evidence и единолично выполняет изменения Git и
 release. Агенты работают read-only в непересекающихся областях.
+
+## Release receipt
+
+- Полный локальный gate `VERSION=20260912-session-switch-latency-v2 make
+  check-full` завершился с exit code `0`.
+- `origin/main` и source commit совпали на
+  `0552914ec2437ceaa738bf2a0e96bc4b4887a174`; обязательные GitHub workflows
+  `34688585550` и `34688585553` завершились успешно.
+- Подписанный bundle `20260912-session-switch-latency` содержит этот exact
+  revision; release verification и `postflight.sh --telegram` GREEN.
+- После restart сервис `gui/501/com.time4mind.bria.v2` перешёл `runs 19 -> 20`,
+  PID `70226 -> 42262`; один parent использует новый `current`, native adapters
+  запущены из той же release directory.
+- Хэши `config.json` и `state.json.settings.json` до/после совпали; state и
+  message journal совместимы. В state остались `6 ready` и `13 archived`,
+  `awaiting recovery` нет. После startup зафиксированы `flow_ready` и готовый
+  Luna preprocessing satellite, новых critical errors нет.
+- Непроверенная граница: post-change `tap -> edit` будет измерен по следующему
+  реальному пользовательскому переключению; искусственный Telegram input не
+  создавался.
