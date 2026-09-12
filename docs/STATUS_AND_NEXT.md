@@ -1,5 +1,17 @@
 # Handoff: статус и следующий план
 
+> Текущий диагностический запрос A51 - разобрать request flow активной сессии
+> `KidAccess` и причину, по которой второй запрос не дошёл до Codex. Проверено:
+> `783532031` был принят provider-ом и начал выполняться, `783532032` был только
+> сохранён и показан в карточке. После provider failure recovery generation
+> `9 -> 10` зафиксировал cutoff `through_sequence=315` и ошибочно перевёл оба
+> input в `skipped`: уже принятый sequence 308 и гарантированно неотправленный
+> sequence 311. Код подтверждает, что `CommitInputRecoverySkip` без различия
+> tombstone-ит все unresolved input до cutoff. Диагностика завершена; исправление
+> не входило в запрос и остаётся неавторизованным пунктом A51.F.
+> Договор и evidence:
+> [REQUEST_RECOVERY_FIFO_INCIDENT_TODO.md](REQUEST_RECOVERY_FIFO_INCIDENT_TODO.md).
+
 > Текущий запрос A50 - провести измеренный аудит CPU/RSS/wakeups/I/O и latency
 > Bria в простое и при работе, автоматически исправить очевидные локальные
 > причины без изменения продуктовой семантики, а концептуальные развилки вынести
@@ -8,12 +20,13 @@
 > ещё `8.9%`. Output sweep теперь читает journal один раз на все сессии
 > (`40 -> 2` reads в regression seam), stable screen соблюдает существующий
 > `300 ms` throttle. Live after: parent `13.9%` CPU, то есть `-70.3%`; пять
-> adapters `6.1%`, то есть `-31.5%`. Source `62b5a47` прошёл полный gate и оба
-> exact-SHA CI, signed release установлен с GREEN postflight и без новых
-> service/critical errors. Финальный docs-only SHA с этими receipts ещё должен
-> пройти сокращённый release flow. Config/state и искусственные Telegram inputs
-> исключены; создан отдельный persistent local signing keypair с правами
-> `0700/0600` после явного разрешения Артёма.
+> adapters `6.1%`, то есть `-31.5%`. Финальный commit `7f741e4` прошёл полный
+> gate, Stage 1 `34651941097` и Platform Matrix `34651941178`; signed release
+> `20260912-performance-efficiency-v2` установлен с GREEN postflight и без
+> новых service/critical errors. Концептуальные вопросы A50.D1-A50.D5 отложены
+> Артёмом 2026-09-12 и не являются активным scope или блокерами. Config/state и
+> искусственные Telegram inputs исключены; создан отдельный persistent local
+> signing keypair с правами `0700/0600` после явного разрешения Артёма.
 > Coverage и acceptance:
 > [PERFORMANCE_EFFICIENCY_AUDIT_TODO.md](PERFORMANCE_EFFICIENCY_AUDIT_TODO.md).
 

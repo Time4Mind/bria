@@ -34,7 +34,7 @@
 | A50.2 | Timers, polling, retries, I/O | read-only agent; source inventory | все recurring loops ранжированы по частоте и стоимости, названы простые кандидаты | verified |
 | A50.3 | Allocation/concurrency seams | read-only agent; tests/benchmarks/architecture | найдены измеримые hot paths и безопасные regression seams | verified |
 | A50.4 | Synthesis and simple fixes | integration owner; непересекающиеся файлы назначаются после RCA | причина доказана before/after, концептуальные развилки отделены | local verified |
-| A50.R | Release | integration owner | full gate, exact-SHA CI, verified install и postflight | verified for source commit; final docs-only SHA pending |
+| A50.R | Release | integration owner | full gate, exact-SHA CI, verified install и postflight | verified |
 
 ## Гипотезы первого прохода
 
@@ -100,19 +100,21 @@ median `112 ms`, p95 `214 ms`. Это end-to-end этапы с сетевым Te
    существующих responsibilities после уплотнения API package budgets подняты
    стандартными шагами по 25 строк: `550 -> 575`, `700 -> 725` и
    `1700 -> 1725`; machine checks обновлены вместе.
-   Live after-замер и release остаются в A50.R.
+   Live after-замер и release зафиксированы ниже в A50.R.
 
-## Концептуальные развилки после локальных исправлений
+## Отложенные решения
 
-1. Idle cadence native CLI: `150 ms` даёт быстрое обнаружение закрытия, но пять
-   adapters вместе используют около `8.6% CPU`. Переход к `1 s` добавит до
-   `850 ms` к обнаружению закрытия.
-2. Journal compaction уменьшит стоимость каждой рабочей mutation, но требует
-   отдельного срока хранения подтверждённой истории и rollback contract.
-3. Safe-log batching уменьшит `fsync`, но потребует согласовать допустимую
-   потерю последних `100-250 ms` detailed telemetry при hard crash.
-4. Directory activity можно считать lazy при открытии browser вместо полного
-   рекурсивного scan каждые две минуты; это меняет freshness сортировки.
+Артём отложил эти вопросы 2026-09-12. Они сохранены в контексте A50, не
+блокируют завершённый release и не разрешают менять продукт без нового
+возврата к соответствующему ID.
+
+| ID | Контекст и вопрос | Компромисс, который нужно согласовать |
+|---|---|---|
+| A50.D1 | Output dispatcher: переводить ли периодический sweep на событие с recovery-проверкой раз в `5 s`? | В штатном потоке обновление остаётся немедленным; потерянное wake-событие может быть обнаружено на `0-5 s` позже. |
+| A50.D2 | Native CLI: включать ли адаптивный poll `150 ms` во время активности и `1 s` в простое? | Снижается idle CPU адаптеров; закрытие терминала в простое может определиться на срок до `850 ms` позже. |
+| A50.D3 | Journal: какой объём подтверждённой истории сохранять при compaction? | Меньший retention ускоряет рабочие mutation, но сокращает доступную историю для recovery и rollback. Нужен точный срок или число записей. |
+| A50.D4 | Safe logs: разрешать ли batching записей на `100-250 ms`? | Меньше `fsync`; при hard crash может не сохраниться последний короткий интервал подробной телеметрии. |
+| A50.D5 | Directory activity: считать ли её только при открытии browser вместо рекурсивного scan каждые две минуты? | Меньше фонового I/O; сортировка может быть неактуальной до следующего открытия browser. |
 
 ## Live after и первый release receipt
 
@@ -142,3 +144,9 @@ Message journal, settings и preprocessing satellite hashes до/после rest
 естественного пользовательского запроса, а synthetic Telegram input исключён
 договором. Исторические safe timings и component regression seams приведены
 выше; новый live work sample остаётся наблюдением, а не блокером выпуска.
+
+Финальный commit `7f741e4bd78ea4dc2f4e35614b0d3159e01233b6` прошёл Stage 1
+`34651941097` и Platform build matrix `34651941178`, оба `success`. Signed
+release `20260912-performance-efficiency-v2` установлен; process/lock,
+артефактные hashes и safe postflight проверены на запущенном сервисе
+`gui/501/com.time4mind.bria.v2`.
