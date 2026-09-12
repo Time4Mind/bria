@@ -25,10 +25,10 @@
 | A51.1 | Разобрать текущий request flow | verified | `783532031` появился в карточке, прошёл Luna preprocessing, был принят Codex и породил commentary/tool events. |
 | A51.2 | Объяснить, почему следующее сообщение не дошло | verified | `783532032` появился в карточке и прошёл preprocessing, но provider submit отсутствует; journal phase - `skipped`. |
 | A51.3 | Найти failing boundary | verified | После provider failure generation сменилась `9 -> 10`; committed input-recovery cutoff `through_sequence=315` перевёл input sequences `308` и `311` в `skipped`. |
-| A51.4 | Свежий непринятый запрос активной сессии | verified locally, release pending | `783532061`: Codex записал `task_started` через 0.5 s, но user transcript из-за compaction появился только через 63.7 s; прежний adapter завершал submit через 20.072 s. RED/GREEN использует `task_started.turn_id` только как provisional liveness без receipt и снимает ложный timeout; durable acceptance возникает лишь после exact text match. Exact attach отдельно сохраняет accepted и definitely-unsent pending. |
-| A51.5 | Ошибка открытия «Настройки», «CLI», «Создание сессии» | verified locally, release pending | Category 7 не имела wire mapping `settings_rename_node`; category 8 не имела callback-token/presenter mapping `settings_auto_approve_commands`. Оба action проходят focused signed-boundary tests и полный gate. |
-| A51.6 | Задержка переключения сессий и смежных callback-флоу | verified locally, live latency pending | До исправления card projection выполнял 12 reload файла 2.7 MB, включая семь N+1 standby reads. Теперь список сессий и empty eligibility читаются одним snapshot; regression требует ровно один batch read независимо от числа standby. Пользовательский tap после deploy остаётся live acceptance. |
-| A51.F | Исправление, выпуск и live acceptance | release pending | `VERSION=20260912-request-recovery-callback-latency make check-full` GREEN, включая architecture, все tests, global race и executable trio. Артём явно поручил исправить; действует standing release authorization. |
+| A51.4 | Свежий непринятый запрос активной сессии | released, live input pending | `783532061`: Codex записал `task_started` через 0.5 s, но user transcript из-за compaction появился только через 63.7 s; прежний adapter завершал submit через 20.072 s. RED/GREEN использует `task_started.turn_id` только как provisional liveness без receipt и снимает ложный timeout; durable acceptance возникает лишь после exact text match. Exact attach отдельно сохраняет accepted и definitely-unsent pending. |
+| A51.5 | Ошибка открытия «Настройки», «CLI», «Создание сессии» | released, live tap pending | Category 7 не имела wire mapping `settings_rename_node`; category 8 не имела callback-token/presenter mapping `settings_auto_approve_commands`. Оба action проходят focused signed-boundary tests и полный gate. |
+| A51.6 | Задержка переключения сессий и смежных callback-флоу | released, live latency pending | До исправления card projection выполнял 12 reload файла 2.7 MB, включая семь N+1 standby reads. Теперь список сессий и empty eligibility читаются одним snapshot; regression требует ровно один batch read независимо от числа standby. Пользовательский tap после deploy остаётся live acceptance. |
+| A51.F | Исправление, выпуск и live acceptance | verified except user input/tap | Source commit `2b982bb` прошёл local `check-full`, Stage 1 `34686134830` и Platform Matrix `34686134814`; signed release установлен, service `runs 17 -> 18`, PID `44095 -> 31751`, config/settings сохранены, state/journal compatible. Финальная receipt-only revision выпускается как `-v2`. |
 
 ## Проверенная причина
 
@@ -85,3 +85,17 @@ window: следующий queued turn может стартовать, а ве�
   trio. Release/CI/live postflight ещё не зафиксированы.
 - Три независимых post-implementation review закрыты APPROVE; два найденных
   риска provisional acceptance исправлены до финального gate.
+
+## Release receipt
+
+- Source commit: `2b982bb55c1bc8ef5fac64dcd63c711a04324ac0`; origin/main перечитан после push.
+- GitHub: Stage 1 `34686134830` GREEN, Platform Matrix `34686134814` GREEN.
+- Первый signed release `20260912-request-recovery-callback-latency` установлен;
+  service `gui/501/com.time4mind.bria.v2` перешёл `runs 17 -> 18`, PID
+  `44095 -> 31751`, postflight GREEN.
+- Config и settings hashes не изменились; `check-state` подтвердил совместимость
+  state и message journal. После startup активная `KidAccess` имеет status
+  `ready`, awaiting-recovery сессий нет, shared Luna satellite готов за `628 ms`,
+  новых critical/service errors нет.
+- Реальный новый Telegram input и пользовательские taps не создавались в
+  postflight; их latency/acceptance остаётся внешней границей проверки.

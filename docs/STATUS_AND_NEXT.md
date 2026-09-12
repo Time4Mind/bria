@@ -10,9 +10,12 @@
 > `task_started.turn_id` как provisional liveness без receipt и exact user text
 > как единственный acceptance proof, полный callback wire
 > contract двух settings actions и один state snapshot вместо семи N+1 standby
-> reads. `VERSION=20260912-request-recovery-callback-latency make check-full`
-> GREEN, включая global race и executable trio; впереди exact-SHA CI, deploy и
-> live пользовательская проверка нового input/callback latency.
+> reads. Source commit `2b982bb` прошёл полный local gate, Stage 1
+> `34686134830` и Platform Matrix `34686134814`; первый signed release установлен,
+> postflight GREEN, service `runs 17 -> 18`, PID `44095 -> 31751`, config/settings
+> сохранены, state/journal compatible, `KidAccess` recovered `ready`, awaiting
+> recovery отсутствуют. Финальная receipt-only revision выпускается как `-v2`;
+> после неё остаётся только пользовательская проверка нового input и tap latency.
 > Договор и evidence:
 > [REQUEST_RECOVERY_FIFO_INCIDENT_TODO.md](REQUEST_RECOVERY_FIFO_INCIDENT_TODO.md).
 
