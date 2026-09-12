@@ -39,6 +39,10 @@ func TestScreenImageProfilePublicAdapterPreservesSemanticAndSettingsSurface(t *t
 	testPublicSettingsAdapter(t, "settings_screen_image_profile")
 }
 
+func TestScreenCaptureLimitPublicAdapterPreservesSemanticAndSettingsSurface(t *testing.T) {
+	testPublicSettingsAdapter(t, "settings_screen_capture_limit")
+}
+
 func testPublicSettingsAdapter(t *testing.T, name string) {
 	t.Helper()
 	action := telegramui.Action(name)

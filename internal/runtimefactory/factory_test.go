@@ -183,6 +183,7 @@ func TestCommandSetExposesExactImmutableAdapterSpecsForRuntimeAndRecovery(t *tes
 		"RUNTIMEFACTORY_SAFE=preserved",
 		"BRIA_PARENT_SECRET=must-not-enter-command",
 		"BRIA_NATIVE_STATE_DIR=must-not-enter-command",
+		"BRIA_SCREEN_CAPTURE_KIB=48",
 	), briaExecutable)
 	if err != nil {
 		t.Fatalf("NewCommandSet() error = %v", err)
@@ -201,17 +202,23 @@ func TestCommandSetExposesExactImmutableAdapterSpecsForRuntimeAndRecovery(t *tes
 		t.Fatalf("Claude command contract mismatch, ok=%v", ok)
 	}
 	for _, spec := range []sessionruntime.CommandSpec{codexSpec, claudeSpec} {
-		count := 0
+		stateCount, captureCount := 0, 0
 		for _, entry := range spec.Env {
 			if strings.HasPrefix(entry, "BRIA_NATIVE_STATE_DIR=") {
-				count++
+				stateCount++
 				if entry != "BRIA_NATIVE_STATE_DIR="+configuration.StatePath+".native" {
 					t.Fatal("native state directory differs from configuration")
 				}
 			}
+			if strings.HasPrefix(entry, "BRIA_SCREEN_CAPTURE_KIB=") {
+				captureCount++
+				if entry != "BRIA_SCREEN_CAPTURE_KIB=86" {
+					t.Fatalf("native screen capture bound = %q", entry)
+				}
+			}
 		}
-		if count != 1 {
-			t.Fatalf("native state directory entries = %d, want 1", count)
+		if stateCount != 1 || captureCount != 1 {
+			t.Fatalf("trusted native entries = state:%d capture:%d, want one each", stateCount, captureCount)
 		}
 	}
 	for _, value := range append(append([]string(nil), codexSpec.Env...), claudeSpec.Env...) {

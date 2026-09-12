@@ -321,7 +321,7 @@ func callbackEffectForAction(action telegramui.Action) telegrampipeline.Callback
 		return telegrampipeline.EffectToggleSettingsScreen
 	case telegramui.ActionSettingsDetail:
 		return telegrampipeline.EffectToggleSettingsDetail
-	case telegramui.ActionSettingsPageLimit, telegramui.ActionSettingsScreenImageProfile, telegramui.ActionSettingsAutoApproveCommands, telegramui.ActionSettingsContinueExisting,
+	case telegramui.ActionSettingsPageLimit, telegramui.ActionSettingsScreenCaptureLimit, telegramui.ActionSettingsScreenImageProfile, telegramui.ActionSettingsAutoApproveCommands, telegramui.ActionSettingsContinueExisting,
 		telegramui.ActionSettingsTechnicalActions, telegramui.ActionSettingsTechnicalOutputLines, telegramui.ActionSettingsTechnicalCommandLines, telegramui.ActionSettingsBackgroundQuestions,
 		telegramui.ActionSettingsBackgroundErrors, telegramui.ActionSettingsLifetimeNever,
 		telegramui.ActionSettingsArchiveRecommendations, telegramui.ActionSettingsHiddenDirectories,

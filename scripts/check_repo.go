@@ -1162,7 +1162,7 @@ var processInfrastructureRoots = []string{
 }
 
 var runtimeFactoryAllowedImports = []string{
-	"internal/app", "internal/config", "internal/domain", "internal/processenv", "internal/sessionruntime",
+	"internal/app", "internal/config", "internal/domain", "internal/nativecapture", "internal/processenv", "internal/sessionruntime",
 }
 
 var sessionRuntimeAllowedImports = []string{
@@ -1845,7 +1845,7 @@ var packagePolicies = map[string]packagePolicy{
 	"internal/runtimefactory": {
 		responsibility: "construct provider runtimes behind application ports",
 		allowedImports: []string{
-			"internal/app", "internal/config", "internal/domain", "internal/processenv",
+			"internal/app", "internal/config", "internal/domain", "internal/nativecapture", "internal/processenv",
 			"internal/sessionruntime",
 		},
 		maxProductionLines: 700,
@@ -2263,7 +2263,7 @@ var packagePolicies = map[string]packagePolicy{
 	"internal/telegramsettingsview": {
 		responsibility:     "render escaped grouped settings tables through neutral preferences ports",
 		allowedImports:     []string{"internal/domain", "internal/settingsport"},
-		maxProductionLines: 350,
+		maxProductionLines: 375,
 	},
 	"internal/telegramstatus": {
 		responsibility:     "render read-only provider quota summaries for Telegram status surfaces",

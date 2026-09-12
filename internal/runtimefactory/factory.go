@@ -4,6 +4,7 @@ package runtimefactory
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -11,6 +12,7 @@ import (
 
 	"bria/internal/config"
 	"bria/internal/domain"
+	"bria/internal/nativecapture"
 	"bria/internal/processenv"
 	"bria/internal/sessionruntime"
 )
@@ -73,7 +75,10 @@ func newCommandSet(configuration config.Config, parentEnvironment []string, bria
 			PersistentTerminal: true,
 			Path:               adapterPath,
 			Args:               append([]string{"--native", "--", rawCommand.Exec}, rawCommand.Argv...),
-			Env:                append(append([]string(nil), safeEnvironment...), "BRIA_NATIVE_STATE_DIR="+configuration.StatePath+".native"),
+			Env: append(append([]string(nil), safeEnvironment...),
+				"BRIA_NATIVE_STATE_DIR="+configuration.StatePath+".native",
+				fmt.Sprintf("BRIA_SCREEN_CAPTURE_KIB=%d", nativecapture.MaxLimitKiB),
+			),
 		}
 		if provider == domain.ProviderClaude {
 			spec.ProviderCredentialFile = configuration.StatePath + ".claude-api-key.json"

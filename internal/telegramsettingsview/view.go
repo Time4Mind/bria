@@ -83,8 +83,8 @@ func instructionLiteral(instruction string) string {
 }
 func Render() Surface {
 	surface := table("Настройки", "Раздел", "Содержимое",
-		Field{"Содержимое карточки", "Детализация, страницы и технические действия"},
-		Field{"Кнопки сессии", "Отображение Screen"}, Field{"Распознавание речи", "Движок распознавания"},
+		Field{"Содержимое карточки", "Детализация, страницы, технические действия и изображение"},
+		Field{"Кнопки сессии", "Отображение скрина"}, Field{"Распознавание речи", "Движок распознавания"},
 		Field{"Препроцессинг", "Режим сателлита и инструкция"}, Field{"Сессии и архив", "Рекомендации, срок жизни и очередь"},
 		Field{"Уведомления", "Фоновые вопросы и ошибки"}, Field{"Создание сессии", "Автоимя и значения по умолчанию"}, Field{"CLI", "Включение и авторизация"})
 	surface.Rows = [][]Button{
@@ -129,17 +129,24 @@ func RenderCategory(ctx context.Context, preferences settingsport.Preferences, p
 		if _, ok := preferences.(settingsport.TechnicalOutputPreferences); ok {
 			rows = append(rows, []Button{{Label: "Строки технического вывода", Action: "settings_technical_output_lines"}})
 		}
-	case CategorySessionButtons:
-		text = "🎛 Кнопки сессии"
 		captureLimit := current.ScreenCaptureLimitKiB
 		if captureLimit == 0 {
 			captureLimit = 48
 		}
-		fields = []Field{{"Screen", state(current.ScreenEnabled, false)}, {"Размер захвата", fmt.Sprintf("%d KiB", captureLimit)}, {"Изображение Screen", screenImageProfileLabel(current.ScreenImageProfile)}}
-		rows = onePerRow(Button{Label: "Screen", Action: "settings_screen"}, Button{Label: "Размер захвата", Action: "settings_screen_capture_limit"})
-		if _, ok := preferences.(settingsport.ScreenImagePreferences); ok {
-			rows = append(rows, []Button{{Label: "Изображение Screen", Action: "settings_screen_image_profile"}})
+		fields = append(fields,
+			Field{"Размер захвата скрина", fmt.Sprintf("%d KiB", captureLimit)},
+			Field{"Качество скрина", screenImageProfileLabel(current.ScreenImageProfile)},
+		)
+		if _, ok := preferences.(settingsport.ScreenCapturePreferences); ok {
+			rows = append(rows, []Button{{Label: "Размер захвата скрина", Action: "settings_screen_capture_limit"}})
 		}
+		if _, ok := preferences.(settingsport.ScreenImagePreferences); ok {
+			rows = append(rows, []Button{{Label: "Качество скрина", Action: "settings_screen_image_profile"}})
+		}
+	case CategorySessionButtons:
+		text = "🎛 Кнопки сессии"
+		fields = []Field{{"Скрин", state(current.ScreenEnabled, false)}}
+		rows = onePerRow(Button{Label: "Скрин", Action: "settings_screen"})
 	case CategoryVoice:
 		text = "🎙 Распознавание речи"
 		fields = []Field{{"Движок", current.VoiceRecognition}}
@@ -231,9 +238,9 @@ func defaultWorkdirValue(values map[domain.ComputerID]string) string {
 }
 func CategoryForAction(action string) (Category, bool) {
 	switch action {
-	case "settings_detail", "settings_page_limit", "settings_technical_actions", "settings_technical_output_lines", "settings_technical_command_lines":
+	case "settings_detail", "settings_page_limit", "settings_technical_actions", "settings_technical_output_lines", "settings_technical_command_lines", "settings_screen_capture_limit", "settings_screen_image_profile":
 		return CategoryCard, true
-	case "settings_screen", "settings_screen_capture_limit", "settings_screen_image_profile":
+	case "settings_screen":
 		return CategorySessionButtons, true
 	case "settings_preprocessing", "settings_preprocessing_disabled", "settings_preprocessing_shared", "settings_preprocessing_per_session", "settings_preprocessing_instruction", "settings_preprocessing_reset":
 		return CategoryPreprocessing, true

@@ -41,8 +41,8 @@ func TestRenderCategoryKeepsEveryCurrentSettingInOneIntuitiveGroup(t *testing.T)
 		contains []string
 		actions  []string
 	}{
-		{CategoryCard, []string{"Содержимое карточки", "| Детализация карточки | standard |", "| Лимит страниц | 64 |", "| Технические действия | включены |"}, []string{"settings_detail", "settings_page_limit", "settings_technical_actions", "menu_settings"}},
-		{CategorySessionButtons, []string{"Кнопки сессии", "| Screen | выключено |", "| Размер захвата | 48 KiB |"}, []string{"settings_screen", "settings_screen_capture_limit", "menu_settings"}},
+		{CategoryCard, []string{"Содержимое карточки", "| Детализация карточки | standard |", "| Лимит страниц | 64 |", "| Технические действия | включены |", "| Размер захвата скрина | 48 KiB |", "| Качество скрина | 100%, 8 цветов |"}, []string{"settings_detail", "settings_page_limit", "settings_technical_actions", "settings_screen_capture_limit", "settings_screen_image_profile", "menu_settings"}},
+		{CategorySessionButtons, []string{"Кнопки сессии", "| Скрин | выключено |"}, []string{"settings_screen", "menu_settings"}},
 		{CategoryVoice, []string{"Распознавание речи", "| Движок | parakeet |"}, []string{"menu_settings"}},
 		{CategoryPreprocessing, []string{"Препроцессинг", "| Режим сателлита | Выключен |", "| Инструкция | встроенная |"}, []string{"settings_preprocessing_disabled", "settings_preprocessing_shared", "settings_preprocessing_per_session", "settings_preprocessing_instruction", "settings_preprocessing_reset", "menu_settings"}},
 		{CategoryArchive, []string{"Сессии и архив", "| Продолжать текущую | включено |", "| Рекомендации архива | выключены |", "| Срок жизни сессий | never |", "| Очередь | 16 |"}, []string{"settings_continue_existing", "settings_archive_recommendations", "settings_lifetime_never", "settings_lifetime_6h", "settings_lifetime_12h", "settings_lifetime_24h", "settings_lifetime_48h", "menu_settings"}},
@@ -121,6 +121,8 @@ func (settingsPreferencesStub) Snapshot(context.Context) (settingsport.Snapshot,
 }
 func (settingsPreferencesStub) ToggleContinueExisting(context.Context) error     { return nil }
 func (settingsPreferencesStub) ToggleScreen(context.Context) error               { return nil }
+func (settingsPreferencesStub) CycleScreenCaptureLimit(context.Context) error    { return nil }
+func (settingsPreferencesStub) CycleScreenImageProfile(context.Context) error    { return nil }
 func (settingsPreferencesStub) ToggleCardDetail(context.Context) error           { return nil }
 func (settingsPreferencesStub) CycleCardPageLimit(context.Context) error         { return nil }
 func (settingsPreferencesStub) ToggleTechnicalActions(context.Context) error     { return nil }

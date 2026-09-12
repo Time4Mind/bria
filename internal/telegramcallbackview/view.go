@@ -60,7 +60,7 @@ func PresentButton(button telegramui.Button) (string, callbacktoken.Action, int,
 		if button.Target != (telegramui.ButtonTarget{}) {
 			return "", 0, 0, errors.New("screen button must not contain a target")
 		}
-		return "Screen", callbacktoken.ActionScreen, 0, nil
+		return "Скрин", callbacktoken.ActionScreen, 0, nil
 	case telegramui.ActionResume:
 		if button.Target.Page != 0 || button.Target.FollowLatest || button.Target.SessionSlot < 0 ||
 			button.Target.SessionSlot > callbacktoken.MaxTarget || button.Target.InteractionChoice != 0 || button.Target.Choice != 0 {
@@ -178,11 +178,11 @@ func PresentButton(button telegramui.Button) (string, callbacktoken.Action, int,
 		}
 		return button.Label, callbacktoken.ActionSettingsCategory, button.Target.Choice, nil
 	case telegramui.ActionSettingsScreen:
-		return presentGlobalButton(button, "Screen", callbacktoken.ActionSettingsScreen)
+		return presentGlobalButton(button, "Скрин", callbacktoken.ActionSettingsScreen)
 	case telegramui.ActionSettingsScreenCaptureLimit:
-		return presentGlobalButton(button, "Размер захвата", callbacktoken.ActionSettingsScreenCaptureLimit)
+		return presentGlobalButton(button, "Размер захвата скрина", callbacktoken.ActionSettingsScreenCaptureLimit)
 	case telegramui.ActionSettingsScreenImageProfile:
-		return presentGlobalButton(button, "Изображение Screen", callbacktoken.ActionSettingsScreenImageProfile)
+		return presentGlobalButton(button, "Качество скрина", callbacktoken.ActionSettingsScreenImageProfile)
 	case telegramui.ActionSettingsAutoApproveCommands:
 		return presentGlobalButton(button, "Автоподтверждение Codex", callbacktoken.ActionSettingsAutoApproveCommands)
 	case telegramui.ActionSettingsDetail:

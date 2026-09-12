@@ -8,7 +8,10 @@ import (
 	"unicode/utf8"
 )
 
-const DefaultLimitKiB = 48
+const (
+	DefaultLimitKiB = 48
+	MaxLimitKiB     = 86
+)
 
 // Bound retains the UTF-8-aligned terminal tail at a supported capture budget.
 func Bound(text string, limitKiB int) string {

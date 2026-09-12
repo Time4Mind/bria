@@ -23,7 +23,7 @@ func TestHiddenDirectoriesSignedCallbackRoutesAndRejectsUnauthorizedOrStale(t *t
 }
 
 func TestScreenImageProfileSignedCallbackRoutesAndRejectsUnauthorizedOrStale(t *testing.T) {
-	testSignedSettingsCallback(t, "settings_screen_image_profile", "Изображение Screen", 95)
+	testSignedSettingsCallback(t, "settings_screen_image_profile", "Качество скрина", 95)
 }
 
 func testSignedSettingsCallback(t *testing.T, name, label string, wireID callbacktoken.Action) {

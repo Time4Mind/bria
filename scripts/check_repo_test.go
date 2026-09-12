@@ -1042,7 +1042,7 @@ func TestArchitectureCheckerCapsCoherentCustodyResponsibilities(t *testing.T) {
 		{path: "internal/settingscomposition", limit: 250},
 		{path: "internal/runtimeprotocol", limit: 1150},
 		{path: "internal/telegrampromptcomposition", limit: 225},
-		{path: "internal/telegramsettingsview", limit: 350},
+		{path: "internal/telegramsettingsview", limit: 375},
 		{path: "internal/nativeterminal", limit: 510},
 		{path: "internal/nativetranscript", limit: 1100},
 		{path: "internal/providerquota", limit: 350},
@@ -1540,7 +1540,7 @@ func TestArchitectureCheckerAllowsProviderProcessGroupAndLandedOneWayDependencie
 		testPackage("internal/processenv"),
 		testPackage("internal/processgroup"),
 		testPackage("internal/instancelock"),
-		testPackage("internal/runtimefactory", "internal/app", "internal/config", "internal/domain", "internal/processenv", "internal/sessionruntime"),
+		testPackage("internal/runtimefactory", "internal/app", "internal/config", "internal/domain", "internal/nativecapture", "internal/processenv", "internal/sessionruntime"),
 		testPackage("internal/sessionruntime", "internal/app", "internal/domain", "internal/processgroup"),
 		testPackage("internal/provider/codex", "internal/processgroup"),
 		testPackage("internal/provider/claude", "internal/runtimeprotocol"),
@@ -1987,7 +1987,7 @@ func TestArchitectureCheckerRegistersSettingsAndProviderInputPolicies(t *testing
 			path:           "internal/telegramsettingsview",
 			responsibility: "render escaped grouped settings tables through neutral preferences ports",
 			imports:        []string{"internal/domain", "internal/settingsport"},
-			limit:          350,
+			limit:          375,
 		},
 	}
 

@@ -373,7 +373,6 @@ func runTelegramController(
 	}
 	checkpoints := state.CoordinatorCheckpoints()
 	runtimeEnvironment := append([]string(nil), dependencies.Environment()...)
-	runtimeEnvironment = append(runtimeEnvironment, fmt.Sprintf("BRIA_SCREEN_CAPTURE_KIB=%d", effectiveSettings.ScreenCaptureLimitKiB))
 	starter, err := dependencies.ComposeRuntime(
 		configuration,
 		runtimeEnvironment,

@@ -47,7 +47,7 @@ func TestPresenterPreservesCanonicalRowsLabelsAndSignedSemanticCallbacks(t *test
 	wantLabels := [][]string{
 		{"‹", "1/3", "›"},
 		{"Остановить", "Опции"},
-		{"Screen"},
+		{"Скрин"},
 		{"Сессия 1", "Сессия 2"},
 		{"Сессия 3"},
 		{"➕ Новая", "Ноды", "≡ Меню"},

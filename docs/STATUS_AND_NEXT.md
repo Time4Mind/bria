@@ -1,5 +1,10 @@
 # Handoff: статус и следующий план
 
+> Текущий запрос A55 - оставить в «Настройки → Кнопки сессии» только «Скрин»,
+> перенести объём terminal capture и профиль PNG в «Содержимое карточки» и
+> исправить их применение к уже работающей native-сессии. Договор и coverage:
+> [SESSION_SCREEN_SETTINGS_TODO.md](SESSION_SCREEN_SETTINGS_TODO.md).
+
 > Текущий запрос A54 - показывать текущую preprocessing instruction как
 > многострочный копируемый fenced-блок без language tag и разобрать текущий
 > Codex approval, который не обработало автоподтверждение. Live evidence и
