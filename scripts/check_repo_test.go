@@ -28,7 +28,8 @@ func TestNativeMigrationKeepsExactPackageBoundaries(t *testing.T) {
 		{"internal/nativeapproval", nil},
 		{"internal/nativecontrolport", []string{"internal/domain"}},
 		{"internal/nativeapprovalflow", []string{"internal/domain", "internal/nativeapproval", "internal/nativecontrolport"}},
-		{"internal/nativeterminal", []string{"internal/terminalbinding"}},
+		{"internal/nativeterminal", []string{"internal/terminalbinding", "internal/tmuxobserver"}},
+		{"internal/tmuxobserver", nil},
 		{"internal/nativetranscript", []string{"internal/assistanttext", "internal/nativejsonline", "internal/runtimeprotocol", "internal/tooltext"}},
 	} {
 		policy, ok := packagePolicies[test.path]
@@ -1017,7 +1018,7 @@ func TestArchitectureCheckerCapsCoherentCustodyResponsibilities(t *testing.T) {
 		{path: "internal/sessionruntime", limit: 1850},
 		{path: "internal/orphanresume", limit: 150},
 		{path: "internal/coordinator", limit: 850},
-		{path: "internal/nativeadapter", limit: 875},
+		{path: "internal/nativeadapter", limit: 1050},
 		{path: "internal/nativeattachment", limit: 100},
 		{path: "internal/nativecli", limit: 600},
 		{path: "internal/nativeapproval", limit: 450},
@@ -1044,7 +1045,8 @@ func TestArchitectureCheckerCapsCoherentCustodyResponsibilities(t *testing.T) {
 		{path: "internal/runtimeprotocol", limit: 1150},
 		{path: "internal/telegrampromptcomposition", limit: 225},
 		{path: "internal/telegramsettingsview", limit: 375},
-		{path: "internal/nativeterminal", limit: 510},
+		{path: "internal/nativeterminal", limit: 550},
+		{path: "internal/tmuxobserver", limit: 350},
 		{path: "internal/nativetranscript", limit: 1100},
 		{path: "internal/providerquota", limit: 350},
 		{path: "internal/promptpreprocessbinding", limit: 450},

@@ -1430,7 +1430,11 @@ var packagePolicies = map[string]packagePolicy{
 	"internal/nativeadapter": {
 		responsibility:     "bridge exact native CLI terminal sessions, validated photo attachments, transcripts and throttled unsolicited screen observations",
 		allowedImports:     []string{"internal/domain", "internal/nativeacceptance", "internal/nativeattachment", "internal/nativecapture", "internal/nativecli", "internal/nativeeventkind", "internal/nativeinputowner", "internal/nativephotostaging", "internal/nativereceiptstore", "internal/nativestartupdiagnostic", "internal/nativeterminal", "internal/nativetranscript", "internal/runtimediagnostic", "internal/runtimeprotocol"},
-		maxProductionLines: 875,
+		maxProductionLines: 1050,
+	},
+	"internal/tmuxobserver": {
+		responsibility:     "coalesce payload-free read-only tmux control-mode terminal change notifications",
+		maxProductionLines: 350,
 	},
 	"internal/nativeeventkind": {
 		responsibility:     "project displayable native transcript kinds onto provider-neutral runtime event kinds",
@@ -1481,8 +1485,8 @@ var packagePolicies = map[string]packagePolicy{
 	},
 	"internal/nativeterminal": {
 		responsibility:     "own isolated native terminal process lifecycle and bounded screen and input operations",
-		allowedImports:     []string{"internal/terminalbinding"},
-		maxProductionLines: 510,
+		allowedImports:     []string{"internal/terminalbinding", "internal/tmuxobserver"},
+		maxProductionLines: 550,
 	},
 	"internal/nativetranscript": {
 		responsibility:     "read bounded exact-session native transcripts and correlate accepted prompts, questions and final output",

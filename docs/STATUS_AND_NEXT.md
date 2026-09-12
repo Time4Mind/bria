@@ -1,5 +1,12 @@
 # Handoff: статус и следующий план
 
+> Текущий запрос A58 - полноценно снизить idle wakeups/CPU/disk I/O Bria без
+> изменения пользовательского поведения или текущих границ реакции на output,
+> approval, terminal exit, recovery и user input. Baseline: `0.94%` одного ядра,
+> disk I/O `0` в 30-секундном idle-окне, но `2428.4 wakeups/s` у parent и шести
+> adapters. Договор и coverage:
+> [IDLE_RESOURCE_EFFICIENCY_TODO.md](IDLE_RESOURCE_EFFICIENCY_TODO.md).
+
 > Текущий запрос A57 - исправить GitHub issues #4 и #3. #4: полная история
 > карточки не должна ломать вставку live runtime-события и зацикливать recovery.
 > #3: финал фоновой B не должен менять keyboard/text/revision/carrier активной

@@ -41,6 +41,11 @@ type activeInput struct {
 	completed         bool
 	sent              time.Time
 }
+type terminalObserver interface {
+	Updates() <-chan struct{}
+	Done() <-chan error
+	Close() error
+}
 type adapter struct {
 	mediaDir    string
 	config      Config
@@ -173,14 +178,95 @@ func Run(ctx context.Context, input io.ReadCloser, output io.Writer, config Conf
 		readErr <- scanner.Err()
 	}()
 	defer func() { stopRead(); _ = input.Close(); <-done }()
+	type observerStartResult struct {
+		observer terminalObserver
+		err      error
+	}
+	observerCtx, stopObserver := context.WithCancel(ctx)
+	observerStarted := make(chan observerStartResult, 1)
+	go func() {
+		observer, observerErr := term.Observe(observerCtx)
+		observerStarted <- observerStartResult{observer: observer, err: observerErr}
+	}()
+	var observer terminalObserver
+	observerHealthy := false
+	var observerUpdates <-chan struct{}
+	var observerDone <-chan error
+	defer func() {
+		stopObserver()
+		if observer != nil {
+			_ = observer.Close()
+			return
+		}
+		if observerStarted != nil {
+			result := <-observerStarted
+			if result.observer != nil {
+				_ = result.observer.Close()
+			}
+		}
+	}()
 	tick := time.NewTicker(150 * time.Millisecond)
 	defer tick.Stop()
+	polling := true
+	var tickC <-chan time.Time = tick.C
+	setPolling := func(enabled bool) {
+		if enabled == polling {
+			return
+		}
+		polling = enabled
+		if enabled {
+			tick.Reset(150 * time.Millisecond)
+			tickC = tick.C
+			return
+		}
+		tick.Stop()
+		tickC = nil
+	}
+	screenTimer := time.NewTimer(time.Hour)
+	if !screenTimer.Stop() {
+		<-screenTimer.C
+	}
+	defer screenTimer.Stop()
+	var screenTimerC <-chan time.Time
+	stopScreenTimer := func() {
+		if !screenTimer.Stop() {
+			select {
+			case <-screenTimer.C:
+			default:
+			}
+		}
+		screenTimerC = nil
+	}
+	resetScreenTimer := func(delay time.Duration) {
+		stopScreenTimer()
+		screenTimer.Reset(delay)
+		screenTimerC = screenTimer.C
+	}
+	observeAfterHint := func(now time.Time) error {
+		if delay := a.screenObservationDelay(now); delay > 0 {
+			resetScreenTimer(delay)
+			return nil
+		}
+		screenTimerC = nil
+		return a.observeScreen(ctx, now)
+	}
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case err := <-readErr:
 			return err
+		case result := <-observerStarted:
+			observerStarted = nil
+			if result.err != nil || result.observer == nil {
+				setPolling(true)
+				continue
+			}
+			observer = result.observer
+			observerHealthy = true
+			observerUpdates = observer.Updates()
+			observerDone = observer.Done()
+			setPolling(a.active != nil)
 		case r := <-requests:
 			if r.Type == runtimeprotocol.TypeDetach && bound {
 				return nil
@@ -198,7 +284,58 @@ func Run(ctx context.Context, input io.ReadCloser, output io.Writer, config Conf
 			if err = a.handle(ctx, r); err != nil {
 				return err
 			}
-		case <-tick.C:
+			if a.active != nil {
+				// Preserve the established active-turn order: transcript
+				// receipts are emitted before the screen from the same tick.
+				stopScreenTimer()
+			}
+			setPolling(a.active != nil || !observerHealthy)
+		case _, ok := <-observerUpdates:
+			if !ok {
+				observerUpdates = nil
+				continue
+			}
+			if a.active != nil {
+				// The 150 ms active path owns poll -> screen ordering. The
+				// coalesced hint is only needed to wake stable idle screens.
+				continue
+			}
+			if err = observeAfterHint(time.Now()); err != nil {
+				return err
+			}
+		case _, ok := <-observerDone:
+			observerDone = nil
+			observerUpdates = nil
+			observerHealthy = false
+			if !ok {
+				// Done always publishes one result before closing. Treat an
+				// invalid stream conservatively by returning to exact polling.
+			}
+			alive, e := term.Alive(ctx)
+			if e != nil {
+				return e
+			}
+			if !alive {
+				return errors.New("native CLI exited")
+			}
+			if a.active == nil {
+				// The observer may have stalled after terminal output. Capture
+				// immediately (or at the existing 300 ms screen deadline)
+				// before the fallback ticker starts a fresh interval.
+				if err = observeAfterHint(time.Now()); err != nil {
+					return err
+				}
+			}
+			setPolling(true)
+		case now := <-screenTimerC:
+			screenTimerC = nil
+			if a.active != nil {
+				continue
+			}
+			if err = a.observeScreen(ctx, now); err != nil {
+				return err
+			}
+		case <-tickC:
 			alive, e := term.Alive(ctx)
 			if e != nil {
 				return e
@@ -213,6 +350,9 @@ func Run(ctx context.Context, input io.ReadCloser, output io.Writer, config Conf
 			}
 			if err = a.observeScreen(ctx, time.Now()); err != nil {
 				return err
+			}
+			if a.active == nil && observerHealthy {
+				setPolling(false)
 			}
 		}
 	}

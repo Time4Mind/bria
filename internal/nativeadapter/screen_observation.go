@@ -16,9 +16,20 @@ type nativeObservationState struct {
 	sentAt      time.Time
 }
 
+func (a *adapter) screenObservationDelay(now time.Time) time.Duration {
+	if a.observation.sentAt.IsZero() {
+		return 0
+	}
+	remaining := 300*time.Millisecond - now.Sub(a.observation.sentAt)
+	if remaining < 0 {
+		return 0
+	}
+	return remaining
+}
+
 // Screen observations are transport UI state, never transcript events.
 func (a *adapter) observeScreen(ctx context.Context, now time.Time) error {
-	if !a.observation.sentAt.IsZero() && now.Sub(a.observation.sentAt) < 300*time.Millisecond {
+	if a.screenObservationDelay(now) > 0 {
 		return nil
 	}
 	text, err := a.term.Capture(ctx)
