@@ -32,7 +32,7 @@ func (store *SessionStore) LoadCardTranscriptSnapshot(ctx context.Context, id do
 }
 
 // LoadCardProjectionSnapshot returns every durable input needed for one card
-// projection after a single state-file reload.
+// projection after a single state-file generation check.
 func (store *SessionStore) LoadCardProjectionSnapshot(ctx context.Context, id domain.SessionID) (cardtranscript.Snapshot, int, int, string, bool, bool, []domain.Session, map[domain.SessionID]bool, error) {
 	if err := ctx.Err(); err != nil {
 		return cardtranscript.Snapshot{}, 0, 0, "", false, false, nil, nil, err

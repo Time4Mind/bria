@@ -151,13 +151,14 @@ func acceptCallback(
 		return AcceptedCallback{}, callbackdiagnostic.Wrap(err, "callback_origin_invalid")
 	}
 	claim := CallbackClaim{
-		SessionID:       domain.SessionID(decoded.Callback.SessionID),
-		Carrier:         telegramstate.Carrier{ChatID: update.ConversationID, MessageID: update.SourceMessageID},
-		TokenID:         decoded.TokenID,
-		ExpiresAt:       decoded.ExpiresAt,
-		UpdateID:        update.ID,
-		CallbackQueryID: update.CallbackQueryID,
-		Repeatable:      repeatableVisibleAction(decoded.Callback.Action),
+		SessionID:        domain.SessionID(decoded.Callback.SessionID),
+		Carrier:          telegramstate.Carrier{ChatID: update.ConversationID, MessageID: update.SourceMessageID},
+		TokenID:          decoded.TokenID,
+		ExpiresAt:        decoded.ExpiresAt,
+		UpdateID:         update.ID,
+		CallbackQueryID:  update.CallbackQueryID,
+		Repeatable:       repeatableVisibleAction(decoded.Callback.Action),
+		DurableOperation: allowExactRecovery,
 	}
 	claimResult, err := registry.Claim(ctx, claim)
 	details.PresentationID, details.Retired = string(claimResult.PresentationSessionID), claimResult.Retired

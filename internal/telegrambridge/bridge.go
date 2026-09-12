@@ -236,7 +236,7 @@ func (sender *Sender) SendStatus(
 	operationID string,
 	status coordinator.Status,
 ) (coordinator.Receipt, error) {
-	sender.acknowledgeCallback(ctx, operationID, status.CallbackQueryID)
+	sender.acknowledgeCallback(ctx, operationID, status.CallbackQueryID, true)
 	rich, png, screenReceipt, err := sender.screenMessage(ctx, status)
 	if err != nil {
 		return coordinator.Receipt{}, err
@@ -264,7 +264,7 @@ func (sender *Sender) SendStatusWithKeyboard(
 	if keyboard == nil {
 		return sender.SendStatus(ctx, operationID, status)
 	}
-	sender.acknowledgeCallback(ctx, operationID, status.CallbackQueryID)
+	sender.acknowledgeCallback(ctx, operationID, status.CallbackQueryID, true)
 	markup := coordinatorMarkup(keyboard)
 	rich, png, screenReceipt, err := sender.screenMessage(ctx, status)
 	if err != nil {
@@ -293,7 +293,7 @@ func (sender *Sender) EditStatusWithKeyboard(
 	if status.SourceMessageID <= 0 {
 		return coordinator.Receipt{}, errors.New("source message id is required for card edit")
 	}
-	sender.acknowledgeCallback(ctx, operationID, status.CallbackQueryID)
+	sender.acknowledgeCallback(ctx, operationID, status.CallbackQueryID, true)
 	markup := coordinatorMarkup(keyboard)
 	request := telegram.EditMessageTextRequest{ChatID: telegram.ChatID(status.ConversationID), MessageID: telegram.MessageID(status.SourceMessageID), ReplyMarkup: markup, Priority: callbackPriority(status.CallbackQueryID)}
 	rich, png, screenshotReceipt, err := sender.screenMessage(ctx, status)
@@ -341,7 +341,7 @@ func (sender *Sender) DeactivateInlineKeyboard(ctx context.Context, _ string, ch
 	return nil
 }
 
-func (sender *Sender) acknowledgeCallback(ctx context.Context, operationID, callbackQueryID string) {
+func (sender *Sender) acknowledgeCallback(ctx context.Context, operationID, callbackQueryID string, trackDurably bool) {
 	if callbackQueryID == "" {
 		return
 	}
@@ -351,7 +351,10 @@ func (sender *Sender) acknowledgeCallback(ctx context.Context, operationID, call
 		return
 	}
 	sender.ackActive++
-	recorder := sender.acknowledgements
+	var recorder CallbackAcknowledgementRecorder
+	if trackDurably {
+		recorder = sender.acknowledgements
+	}
 	sender.ackMu.Unlock()
 	started := make(chan struct{})
 	// Callback acknowledgement is independent from the visible card transition:
@@ -383,7 +386,14 @@ func (sender *Sender) acknowledgeCallback(ctx context.Context, operationID, call
 }
 
 func (sender *Sender) AcknowledgeCallback(ctx context.Context, operationID, callbackQueryID string) {
-	sender.acknowledgeCallback(ctx, operationID, callbackQueryID)
+	sender.acknowledgeCallback(ctx, operationID, callbackQueryID, true)
+}
+
+// AcknowledgeAcceptedCallback uses the already-persisted callback operation as
+// its restart fence. Telegram acknowledgement has no user-visible effect to
+// replay, so a second durable ledger entry would only delay the card edit.
+func (sender *Sender) AcknowledgeAcceptedCallback(ctx context.Context, operationID, callbackQueryID string) {
+	sender.acknowledgeCallback(ctx, operationID, callbackQueryID, false)
 }
 
 func callbackPriority(callbackQueryID string) telegram.MutationPriority {

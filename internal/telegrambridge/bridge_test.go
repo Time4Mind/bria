@@ -598,6 +598,45 @@ func TestSenderDirectCallbackAcknowledgementDoesNotMutateTelegramMessages(t *tes
 	}
 }
 
+func TestAcceptedCallbackAcknowledgementUsesCallbackOperationInsteadOfRecorder(t *testing.T) {
+	t.Parallel()
+
+	acknowledged := make(chan struct{}, 1)
+	client := mustTelegramClient(t, func(request *http.Request) (*http.Response, error) {
+		if !strings.HasSuffix(request.URL.Path, "/answerCallbackQuery") {
+			t.Fatalf("unexpected Telegram mutation %q", request.URL.Path)
+		}
+		acknowledged <- struct{}{}
+		return response(http.StatusOK, `{"ok":true,"result":true}`), nil
+	})
+	sender, err := telegrambridge.NewSender(client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recorderCalls := 0
+	if err := sender.BindCallbackAcknowledgements(callbackAcknowledgementRecorder{
+		begin: func(string, string) (bool, error) {
+			recorderCalls++
+			return true, nil
+		},
+		complete: func(string, string, telegrambridge.CallbackAcknowledgementState) error {
+			recorderCalls++
+			return nil
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	sender.AcknowledgeAcceptedCallback(context.Background(), "status:94", "callback-3")
+	select {
+	case <-acknowledged:
+	case <-time.After(time.Second):
+		t.Fatal("accepted callback was not acknowledged")
+	}
+	if recorderCalls != 0 {
+		t.Fatalf("accepted callback touched acknowledgement recorder %d times", recorderCalls)
+	}
+}
+
 type callbackAcknowledgementRecorder struct {
 	begin    func(string, string) (bool, error)
 	complete func(string, string, telegrambridge.CallbackAcknowledgementState) error

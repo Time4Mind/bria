@@ -60,6 +60,44 @@ func TestFileCallbackRegistryRequiresDirectorySyncAndReopensWholePostRenameSnaps
 	}
 }
 
+func TestRepeatableCallbackClaimDoesNotRewriteDurableRegistry(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0).UTC()
+	path := filepath.Join(t.TempDir(), "callback-registry.json")
+	registry, err := OpenFileCallbackRegistry(path, func() time.Time { return now })
+	if err != nil {
+		t.Fatal(err)
+	}
+	presentation := CallbackPresentation{
+		SessionID: "123e4567-e89b-12d3-a456-426614174000",
+		Carrier:   telegramstate.Carrier{ChatID: 42, MessageID: 99},
+		TokenIDs:  []string{"repeatable-token"},
+		ExpiresAt: now.Add(time.Minute),
+	}
+	if err := registry.Replace(context.Background(), presentation); err != nil {
+		t.Fatal(err)
+	}
+	syncCalls := 0
+	registry.syncDirectory = func(string) error { syncCalls++; return nil }
+	claim := CallbackClaim{
+		SessionID: presentation.SessionID, Carrier: presentation.Carrier,
+		TokenID: "repeatable-token", ExpiresAt: presentation.ExpiresAt,
+		UpdateID: 101, CallbackQueryID: "query-101", Repeatable: true, DurableOperation: true,
+	}
+	if result, err := registry.Claim(context.Background(), claim); err != nil || result.Outcome != ClaimAccepted {
+		t.Fatalf("initial repeatable claim = %#v, %v", result, err)
+	}
+	if syncCalls != 0 {
+		t.Fatalf("repeatable claim rewrote durable registry: sync calls = %d", syncCalls)
+	}
+	reopened, err := OpenFileCallbackRegistry(path, func() time.Time { return now })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result, err := reopened.Claim(context.Background(), claim); err != nil || result.Outcome != ClaimAccepted {
+		t.Fatalf("reopened repeatable claim = %#v, %v", result, err)
+	}
+}
+
 func TestFileCallbackRegistryRecoversOnlyExactClaimAfterRestart(t *testing.T) {
 	now := time.Unix(1_800_000_000, 0).UTC()
 	path := filepath.Join(t.TempDir(), "callback-registry.json")

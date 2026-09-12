@@ -208,6 +208,15 @@ func (registry *FileCallbackRegistry) Claim(ctx context.Context, claim CallbackC
 	if !found {
 		return CallbackClaimResult{Outcome: ClaimStale}, nil
 	}
+	// Repeatable visible navigation has no one-shot effect to protect. The
+	// callback operation journal still fences execution and replay, so rewriting
+	// the large presentation registry for its first tap adds latency without an
+	// additional safety guarantee.
+	if claim.DurableOperation && claim.Repeatable && repeatableFilePresentation(presentation) {
+		result := fileCallbackClaimResult(ClaimAccepted, ownerSessionID, presentation)
+		result.Retired = retired
+		return result, nil
+	}
 	if presentation.Tokens[claim.TokenID] {
 		identity, known := presentation.Claims[claim.TokenID]
 		if known && identity.UpdateID == claim.UpdateID && identity.CallbackQueryID == claim.CallbackQueryID {

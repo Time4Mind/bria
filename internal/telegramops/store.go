@@ -20,10 +20,12 @@ import (
 )
 
 const (
-	Version                    = 1
-	maxSize                    = 16 << 20
-	maxList                    = 100
-	maxFinalizedHistoryRecords = 256
+	Version = 1
+	maxSize = 16 << 20
+	maxList = 100
+	// Finalized history is a replay cushion, not active recovery state. Every
+	// non-finalized record and its coupled committed counterpart bypass this cap.
+	maxFinalizedHistoryRecords = 64
 )
 
 func StatusSequence(operationID string) (uint64, error) {

@@ -36,7 +36,7 @@ func (store *SessionStore) CoordinatorCheckpoints() *CoordinatorCheckpointStore 
 	return &CoordinatorCheckpointStore{state: store}
 }
 
-// Load rereads the durable state document before returning its checkpoint.
+// Load returns the checkpoint from the latest verified state-file generation.
 func (store *CoordinatorCheckpointStore) Load(
 	ctx context.Context,
 ) (coordinator.StoredCheckpoint, bool, error) {
@@ -105,7 +105,7 @@ func (store *CoordinatorCheckpointStore) Save(
 		Checkpoint: cloneCheckpoint(next),
 	}
 	nextRecord := recordFromStoredCheckpoint(want)
-	if err := writeSessionFile(store.state.path, store.state.byIntent, nextRecord, store.state.telegramUI); err != nil {
+	if err := store.state.persist(store.state.byIntent, nextRecord, store.state.telegramUI); err != nil {
 		if reloadErr := store.state.reload(); reloadErr != nil {
 			return coordinator.StoredCheckpoint{}, errors.Join(
 				fmt.Errorf("persist coordinator checkpoint: %w", err),
@@ -115,7 +115,7 @@ func (store *CoordinatorCheckpointStore) Save(
 		return coordinator.StoredCheckpoint{}, fmt.Errorf("persist coordinator checkpoint: %w", err)
 	}
 
-	byIntent, byID, persistedRecord, persistedUI, err := readSessionFile(store.state.path, true)
+	byIntent, byID, persistedRecord, persistedUI, generation, err := readVerifiedSessionFile(store.state.path, true)
 	if err != nil {
 		return coordinator.StoredCheckpoint{}, fmt.Errorf("reread coordinator checkpoint: %w", err)
 	}
@@ -133,6 +133,7 @@ func (store *CoordinatorCheckpointStore) Save(
 	store.state.byID = byID
 	store.state.checkpoint = persistedRecord
 	store.state.telegramUI = persistedUI
+	store.state.generation = generation
 	return persisted, nil
 }
 

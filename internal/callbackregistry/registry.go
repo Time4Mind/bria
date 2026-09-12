@@ -40,13 +40,14 @@ type Presentation struct {
 	ArtifactRetry        *ArtifactRetryBinding
 }
 type Claim struct {
-	SessionID       domain.SessionID
-	Carrier         telegramstate.Carrier
-	TokenID         string
-	ExpiresAt       time.Time
-	UpdateID        int64
-	CallbackQueryID string
-	Repeatable      bool
+	SessionID        domain.SessionID
+	Carrier          telegramstate.Carrier
+	TokenID          string
+	ExpiresAt        time.Time
+	UpdateID         int64
+	CallbackQueryID  string
+	Repeatable       bool
+	DurableOperation bool
 }
 type Outcome string
 
@@ -204,6 +205,9 @@ func (registry *Memory) Claim(ctx context.Context, claim Claim) (ClaimResult, er
 	}
 	if owner == "" {
 		return ClaimResult{Outcome: Stale}, nil
+	}
+	if claim.DurableOperation && claim.Repeatable && repeatable(current.presentation) {
+		return result(Accepted, owner, current.presentation, retired), nil
 	}
 	if identity, used := current.claimed[claim.TokenID]; used {
 		if identity.UpdateID == claim.UpdateID && identity.CallbackQueryID == claim.CallbackQueryID {

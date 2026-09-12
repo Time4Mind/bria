@@ -154,7 +154,7 @@ func (store *SessionStore) deleteProven(ctx context.Context, expected domain.Ses
 	if err := ui.Validate(); err != nil {
 		return false, err
 	}
-	if err := writeSessionFile(store.path, sessions, store.checkpoint, &ui); err != nil {
+	if err := store.persist(sessions, store.checkpoint, &ui); err != nil {
 		return false, fmt.Errorf("persist empty session deletion: %w", err)
 	}
 	store.byIntent = sessions

@@ -2,6 +2,7 @@
 package cardactivity
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -77,6 +78,12 @@ func Save(statePath string, state *telegramstate.State) (returnErr error) {
 		return errors.New("encode card activity sidecar")
 	}
 	path := sidecarPath(statePath)
+	if info, statErr := os.Lstat(path); statErr == nil && info.Mode().IsRegular() &&
+		info.Mode()&os.ModeSymlink == 0 && info.Mode().Perm() == 0o600 && info.Size() == int64(len(data)) {
+		if current, readErr := os.ReadFile(path); readErr == nil && bytes.Equal(current, data) {
+			return nil
+		}
+	}
 	directory := filepath.Dir(path)
 	temporary, err := os.CreateTemp(directory, "."+filepath.Base(path)+".tmp-*")
 	if err != nil {

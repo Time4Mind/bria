@@ -17,6 +17,7 @@ import (
 	"bria/internal/coordinator"
 	"bria/internal/domain"
 	"bria/internal/telegrambridge"
+	"bria/internal/telegramcallbackack"
 	"bria/internal/telegramflow"
 	"bria/internal/telegrampipeline"
 	"bria/internal/telegramrecovery"
@@ -852,6 +853,97 @@ type sender struct {
 	sends            int
 	edits            int
 	acknowledgements int
+}
+
+type acceptedCallbackSender struct {
+	*sender
+	operations telegramflow.CallbackOperationStore
+	accepted   int
+	phase      telegramflow.CallbackOperationPhase
+}
+
+func (sender *acceptedCallbackSender) AcknowledgeAcceptedCallback(ctx context.Context, operationID, _ string) {
+	sender.accepted++
+	operation, found, err := sender.operations.Load(ctx, operationID)
+	if err == nil && found {
+		sender.phase = operation.Phase
+	}
+}
+
+type countingAcknowledgementStore struct {
+	telegramflow.CallbackOperationStore
+	acknowledgements telegramflow.CallbackAcknowledgementStore
+	creates          int
+}
+
+func newCountingAcknowledgementStore() *countingAcknowledgementStore {
+	operations := telegramflow.NewMemoryCallbackOperationStore()
+	return &countingAcknowledgementStore{CallbackOperationStore: operations, acknowledgements: operations}
+}
+
+func (store *countingAcknowledgementStore) CreateCallbackAcknowledgement(ctx context.Context, operationID, queryID string) error {
+	store.creates++
+	return store.acknowledgements.CreateCallbackAcknowledgement(ctx, operationID, queryID)
+}
+
+func (store *countingAcknowledgementStore) BeginCallbackAcknowledgement(ctx context.Context, operationID, queryID string) (bool, error) {
+	return store.acknowledgements.BeginCallbackAcknowledgement(ctx, operationID, queryID)
+}
+
+func (store *countingAcknowledgementStore) CompleteCallbackAcknowledgement(ctx context.Context, operationID, queryID string, state telegrambridge.CallbackAcknowledgementState) error {
+	return store.acknowledgements.CompleteCallbackAcknowledgement(ctx, operationID, queryID, state)
+}
+
+func (store *countingAcknowledgementStore) LoadCallbackAcknowledgement(ctx context.Context, operationID string) (telegramcallbackack.Acknowledgement, bool, error) {
+	return store.acknowledgements.LoadCallbackAcknowledgement(ctx, operationID)
+}
+
+func TestAcceptedCallbackUsesClaimAsAckFenceWithoutSeparateAcknowledgementRecord(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0).UTC()
+	presenter := newPresenter(t, now)
+	registry := telegrampipeline.NewMemoryCallbackRegistry(func() time.Time { return now })
+	uiStore := telegramstate.NewMemoryStore()
+	card := telegramstate.Card{
+		SessionID: flowSessionID,
+		Carrier:   telegramstate.Carrier{ChatID: 42, MessageID: 99},
+		Page:      telegramstate.Page{Current: 2, Total: 2, Anchor: "new", FollowLatest: true},
+		History:   []string{"old", "new"},
+	}
+	if err := uiStore.Update(context.Background(), func(state *telegramstate.State) error {
+		state.ActiveSession = flowSessionID
+		return state.SetCard(card)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	presentation, err := presenter.PresentKeyboardWithManifest(string(flowSessionID), nil, telegramui.CardKeyboard{Rows: []telegramui.ButtonRow{{
+		{Action: telegramui.ActionPagePrevious, Target: telegramui.ButtonTarget{Page: 1}},
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := telegrampipeline.BindPresentation(context.Background(), registry, card.Carrier, presentation); err != nil {
+		t.Fatal(err)
+	}
+	operations := newCountingAcknowledgementStore()
+	base := &acceptedCallbackSender{sender: &sender{receipt: coordinator.Receipt{MessageID: 99}}, operations: operations}
+	handler, _, err := telegramflow.New(telegramflow.Config{
+		OwnerUserID: 7, OwnerPrivateChatID: 42, Presenter: presenter, CallbackRegistry: registry,
+		UIState: uiStore, Messages: &messageHandler{}, Callbacks: &callbackExecutor{}, Operations: operations, Sender: base,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = handler.Handle(context.Background(), coordinator.Update{
+		ID: 901, Kind: coordinator.UpdateCallback, ActorID: 7, ConversationID: 42, ConversationKind: "private",
+		Text: presentation.Markup.InlineKeyboard[0][0].CallbackData, CallbackQueryID: "query-901", SourceMessageID: 99,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if operations.creates != 0 || base.accepted != 1 || base.acknowledgements != 0 || base.phase != telegramflow.CallbackClaimed {
+		t.Fatalf("ack path: records=%d accepted=%d legacy=%d phase=%q; want 0/1/0/claimed",
+			operations.creates, base.accepted, base.acknowledgements, base.phase)
+	}
 }
 
 type barrierOperationStore struct {

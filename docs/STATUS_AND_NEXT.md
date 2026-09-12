@@ -1,15 +1,14 @@
 # Handoff: статус и следующий план
 
-> Текущий запрос A52 - после выпуска A51 пользователь подтвердил, что settings
-> заработали, но переключение сессий всё ещё имеет очень большую задержку;
-> сопоставимый Python-проект работает заметно быстрее. Свежие live callbacks
-> уже показывают, что значимая часть времени остаётся внутри Bria, а не в
-> Telegram transport. Локальный фикс устраняет повторную durable-обвязку callback
-> и объединяет card projection в один state snapshot; focused tests, три review и
-> полный `make check-full` GREEN. Source commit `0552914`, Stage 1
-> `34688585550` и Platform Matrix `34688585553` GREEN; signed release
-> `20260912-session-switch-latency` установлен с GREEN postflight. Открыт только
-> замер следующего реального пользовательского tap. Договор и evidence:
+> Текущий запрос A52 - первая выпущенная оптимизация улучшила средний pre-edit с
+> `845` до `486 ms`, но четыре live tap дали `722-1333 ms`, поэтому пользователь
+> не принял результат. Итерация 2 локально убирает отдельные ack/registry writes,
+> кэширует проверенное поколение неизменного `state.json`, не пишет неизменившийся
+> healthy scheduler result и сокращает backward-compatible finalized callback
+> history с `256` до `64`. WAL отклонён: предыдущий бинарник не читает sidecar и
+> мог повторить stale effect после rollback. Focused/race, architecture/policy,
+> supply-chain, независимое review и полный versioned `make check-full` GREEN;
+> впереди exact-SHA CI, signed release, restart и новые реальные tap. Договор:
 > [SESSION_SWITCH_LATENCY_TODO.md](SESSION_SWITCH_LATENCY_TODO.md).
 
 > Текущий запрос A51 - исправить потерю request custody активной сессии,

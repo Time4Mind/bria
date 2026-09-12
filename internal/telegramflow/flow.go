@@ -118,6 +118,12 @@ func (sender *Sender) retirePreviousCard(ctx context.Context, operationID string
 type CallbackAcknowledger interface {
 	AcknowledgeCallback(context.Context, string, string)
 }
+type AcceptedCallbackAcknowledger interface {
+	// AcknowledgeAcceptedCallback starts Telegram acknowledgement after the
+	// callback operation itself is durable. The operation is the restart fence,
+	// so a second acknowledgement ledger record is intentionally unnecessary.
+	AcknowledgeAcceptedCallback(context.Context, string, string)
+}
 type SessionDeliveryGate interface {
 	Lock(domain.SessionID) func()
 }
@@ -343,19 +349,6 @@ func (handler *Handler) Handle(ctx context.Context, update coordinator.Update) (
 	} else if found {
 		return handler.resumeOperation(ctx, update, digest, existing)
 	}
-	if acknowledgements, ok := handler.operations.(CallbackAcknowledgementStore); ok {
-		stageStarted = time.Now()
-		err := acknowledgements.CreateCallbackAcknowledgement(ctx, operationID, update.CallbackQueryID)
-		handler.trace(ctx, completedTrace("callback.ack.persist", operationID, update, "", "", stageStarted, err))
-		if err != nil {
-			return coordinator.Decision{}, fmt.Errorf("persist callback acknowledgement: %w", err)
-		}
-	}
-	if handler.acknowledger != nil {
-		stageStarted = time.Now()
-		handler.acknowledger.AcknowledgeCallback(ctx, operationID, update.CallbackQueryID)
-		handler.trace(ctx, completedTrace("callback.ack.start", operationID, update, "", "", stageStarted, nil))
-	}
 	stageStarted = time.Now()
 	accepted, err := telegrampipeline.AcceptCallbackForDurableOperation(
 		ctx,
@@ -369,6 +362,9 @@ func (handler *Handler) Handle(ctx context.Context, update coordinator.Update) (
 	acceptTrace := telegramtrace.Callback(operationID, update, accepted, stageStarted, err)
 	handler.trace(ctx, acceptTrace)
 	if err != nil {
+		if ackErr := handler.persistAndAcknowledgeCallback(ctx, operationID, update); ackErr != nil {
+			return coordinator.Decision{}, ackErr
+		}
 		if recoverableCallbackError(err) {
 			acceptTrace.Stage, acceptTrace.Result = "callback.discard", "skipped"
 			handler.trace(ctx, acceptTrace)
@@ -380,6 +376,9 @@ func (handler *Handler) Handle(ctx context.Context, update coordinator.Update) (
 	plan, err := telegrampipeline.PlanAcceptedCallback(accepted)
 	handler.trace(ctx, completedTrace("callback.plan", operationID, update, accepted.Action, "", stageStarted, err))
 	if err != nil {
+		if ackErr := handler.persistAndAcknowledgeCallback(ctx, operationID, update); ackErr != nil {
+			return coordinator.Decision{}, ackErr
+		}
 		return coordinator.Decision{}, err
 	}
 	operation := CallbackOperation{
@@ -399,7 +398,37 @@ func (handler *Handler) Handle(ctx context.Context, update coordinator.Update) (
 		}
 		return handler.resumeOperation(ctx, update, digest, existing)
 	}
+	if err := handler.acknowledgeAcceptedCallback(ctx, operationID, update); err != nil {
+		return coordinator.Decision{}, err
+	}
 	return handler.executeClaimed(ctx, update, operation)
+}
+
+func (handler *Handler) persistAndAcknowledgeCallback(ctx context.Context, operationID string, update coordinator.Update) error {
+	if acknowledgements, ok := handler.operations.(CallbackAcknowledgementStore); ok {
+		stageStarted := time.Now()
+		err := acknowledgements.CreateCallbackAcknowledgement(ctx, operationID, update.CallbackQueryID)
+		handler.trace(ctx, completedTrace("callback.ack.persist", operationID, update, "", "", stageStarted, err))
+		if err != nil {
+			return fmt.Errorf("persist callback acknowledgement: %w", err)
+		}
+	}
+	if handler.acknowledger != nil {
+		stageStarted := time.Now()
+		handler.acknowledger.AcknowledgeCallback(ctx, operationID, update.CallbackQueryID)
+		handler.trace(ctx, completedTrace("callback.ack.start", operationID, update, "", "", stageStarted, nil))
+	}
+	return nil
+}
+
+func (handler *Handler) acknowledgeAcceptedCallback(ctx context.Context, operationID string, update coordinator.Update) error {
+	stageStarted := time.Now()
+	if acknowledger, ok := any(handler.acknowledger).(AcceptedCallbackAcknowledger); ok {
+		acknowledger.AcknowledgeAcceptedCallback(ctx, operationID, update.CallbackQueryID)
+		handler.trace(ctx, completedTrace("callback.ack.accepted", operationID, update, "", "", stageStarted, nil))
+		return nil
+	}
+	return handler.persistAndAcknowledgeCallback(ctx, operationID, update)
 }
 func (handler *Handler) executeClaimed(ctx context.Context, update coordinator.Update, operation CallbackOperation) (coordinator.Decision, error) {
 	snapshot, err := handler.uiState.Load(ctx)

@@ -2063,14 +2063,14 @@ var packagePolicies = map[string]packagePolicy{
 		maxProductionLines: 300,
 	},
 	"internal/storage": {
-		responsibility: "persist coordinator and session state, joined card projection snapshots, typed technical history, model preferences, atomic proven-empty deletion and exact finalization receipts",
+		responsibility: "persist coordinator and session state with verified file-generation caching, joined card projection snapshots, typed technical history, model preferences, atomic proven-empty deletion and exact finalization receipts",
 		allowedImports: []string{
 			"internal/cardactivity",
 			"internal/cardeventhistory",
 			"internal/statejson",
 			"internal/archiveimport", "internal/cardhistory", "internal/cardtranscript", "internal/coordinator", "internal/domain", "internal/sessionlabel", "internal/telegramhistory", "internal/telegramstate",
 		},
-		maxProductionLines: 1975,
+		maxProductionLines: 2100,
 	},
 	"internal/statecompatibility": {
 		responsibility:     "validate all durable runtime documents offline before update or rollback",
@@ -2108,8 +2108,8 @@ var packagePolicies = map[string]packagePolicy{
 		maxProductionLines: 1550,
 	},
 	"internal/mutationscheduler": {
-		responsibility:     "persist and schedule Telegram mutation admission and cooldown",
-		maxProductionLines: 650,
+		responsibility:     "persist and schedule Telegram mutation admission and cooldown while eliding unchanged successful completion writes",
+		maxProductionLines: 700,
 	},
 	"internal/telegramcards": {
 		responsibility:       "render Telegram session cards",
@@ -2161,12 +2161,12 @@ var packagePolicies = map[string]packagePolicy{
 		maxProductionLines: 5900,
 	},
 	"internal/telegramflow": {
-		responsibility: "join Telegram callback, presentation, current-global-surface fencing, direct prepared delivery, durable card boundaries, and crash-safe coupled receipts",
+		responsibility: "join Telegram callback and acknowledgement fencing, presentation, current-global-surface fencing, direct prepared delivery, durable card boundaries, and crash-safe coupled receipts",
 		allowedImports: []string{
 			"internal/callbackdiagnostic", "internal/callbacktoken", "internal/carddeliveryguard", "internal/coordinator", "internal/domain", "internal/telegram", "internal/telegrambridge", "internal/telegramcallbackack", "internal/telegramcardretirement", "internal/telegramtrace",
 			"internal/telegramops", "internal/telegrampipeline", "internal/telegramrecovery", "internal/telegramrecovery/statusrecovery", "internal/telegramstate", "internal/telegramui",
 		},
-		maxProductionLines: 2975,
+		maxProductionLines: 3000,
 	},
 	"internal/telegramnotify": {
 		responsibility: "deliver final and background Telegram notifications",

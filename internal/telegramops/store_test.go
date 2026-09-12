@@ -114,7 +114,7 @@ func TestFileStoreBoundsFinalizedHistoryWithoutDroppingRecoveryState(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(snapshot.Operations) > 258 || len(snapshot.Statuses) > 257 || len(snapshot.Acknowledgements) > 257 {
+	if len(snapshot.Operations) > 66 || len(snapshot.Statuses) > 65 || len(snapshot.Acknowledgements) > 65 {
 		t.Fatalf("unbounded finalized history: callbacks=%d statuses=%d acknowledgements=%d", len(snapshot.Operations), len(snapshot.Statuses), len(snapshot.Acknowledgements))
 	}
 	for namespace, id := range map[telegramops.Namespace]string{

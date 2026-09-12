@@ -90,6 +90,7 @@ type MutationScheduler struct {
 	wait          func(context.Context, time.Duration) error
 	jitter        func(time.Duration) time.Duration
 	report        func(Diagnostic)
+	persist       func() error
 	state         mutationDiskState
 	globalStarts  []globalStart
 	cadence       map[int64]cadenceState
@@ -103,12 +104,13 @@ type MutationScheduler struct {
 }
 
 type Lease struct {
-	scheduler *MutationScheduler
-	mutation  Mutation
-	heavy     bool
-	probe     bool
-	epoch     uint64
-	once      sync.Once
+	scheduler      *MutationScheduler
+	mutation       Mutation
+	heavy          bool
+	probe          bool
+	epoch          uint64
+	persistedState mutationDiskState
+	once           sync.Once
 }
 
 var ErrStopped = errors.New("Telegram mutations are stopped")
@@ -145,6 +147,7 @@ func Open(options Options) (*MutationScheduler, error) {
 		cadence: make(map[int64]cadenceState), heavy: make(chan struct{}, 1), notify: make(chan struct{}),
 		cardVersions: make(map[string]uint64), waiters: make(map[uint64]waiter),
 	}
+	scheduler.persist = scheduler.persistStateLocked
 	if options.StatePath != "" {
 		absolute, err := filepath.Abs(options.StatePath)
 		if err != nil {
@@ -233,9 +236,13 @@ func (scheduler *MutationScheduler) Acquire(ctx context.Context, mutation Mutati
 				releaseHeavy()
 				return nil, err
 			}
+			persistedState := cloneMutationDiskState(scheduler.state)
 			scheduler.broadcastLocked()
 			scheduler.mu.Unlock()
-			return &Lease{scheduler: scheduler, mutation: mutation, heavy: heavy, probe: probe, epoch: epoch}, nil
+			return &Lease{
+				scheduler: scheduler, mutation: mutation, heavy: heavy, probe: probe, epoch: epoch,
+				persistedState: persistedState,
+			}, nil
 		}
 		notify := scheduler.notify
 		scheduler.mu.Unlock()
@@ -342,7 +349,10 @@ func (scheduler *MutationScheduler) complete(lease *Lease, outcome Outcome) erro
 	}
 	diagnostic := scheduler.diagnosticLocked(now, lease.mutation.Method, outcome)
 	scheduler.broadcastLocked()
-	persistErr := scheduler.persistLocked()
+	var persistErr error
+	if !isDefinitiveSuccess(outcome) || !mutationDiskStatesEqual(lease.persistedState, scheduler.state) {
+		persistErr = scheduler.persistLocked()
+	}
 	report := scheduler.report
 	scheduler.mu.Unlock()
 	if report != nil && diagnostic.ErrorClass != "" {
@@ -517,6 +527,38 @@ func isStatus(outcome Outcome, status int) bool {
 	return outcome.HTTPStatus == status || outcome.ErrorCode == status
 }
 
+func isDefinitiveSuccess(outcome Outcome) bool {
+	return outcome.Err == nil && isSuccessfulCode(outcome.HTTPStatus) && isSuccessfulCode(outcome.ErrorCode)
+}
+
+func isSuccessfulCode(code int) bool {
+	return code == 0 || (code >= 200 && code < 300)
+}
+
+func cloneMutationDiskState(state mutationDiskState) mutationDiskState {
+	cloned := state
+	cloned.BlockedChats = make(map[string]bool, len(state.BlockedChats))
+	for chatID, blocked := range state.BlockedChats {
+		cloned.BlockedChats[chatID] = blocked
+	}
+	return cloned
+}
+
+func mutationDiskStatesEqual(left, right mutationDiskState) bool {
+	if left.Version != right.Version || !left.CooldownUntil.Equal(right.CooldownUntil) ||
+		left.CooldownCause != right.CooldownCause || !left.LastMutationAt.Equal(right.LastMutationAt) ||
+		left.ServerFailures != right.ServerFailures || left.ProbeRequired != right.ProbeRequired ||
+		left.BlockedAll != right.BlockedAll || len(left.BlockedChats) != len(right.BlockedChats) {
+		return false
+	}
+	for chatID, blocked := range left.BlockedChats {
+		if right.BlockedChats[chatID] != blocked {
+			return false
+		}
+	}
+	return true
+}
+
 func waitDuration(ctx context.Context, delay time.Duration) error {
 	if delay <= 0 {
 		return nil
@@ -600,6 +642,10 @@ func (scheduler *MutationScheduler) load() error {
 }
 
 func (scheduler *MutationScheduler) persistLocked() error {
+	return scheduler.persist()
+}
+
+func (scheduler *MutationScheduler) persistStateLocked() error {
 	if scheduler.path == "" {
 		return nil
 	}

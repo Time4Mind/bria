@@ -49,7 +49,29 @@ type SessionStore struct {
 	checkpoint   *coordinatorRecord
 	telegramUI   *telegramstate.State
 	deletedEmpty map[domain.SessionID]domain.Session
+	// fullReloads is a deterministic work counter used by package tests. It
+	// counts physical state-document decodes, not public Load calls.
+	fullReloads uint64
+	generation  storeFileGeneration
+	writeFile   sessionFileWriter
 }
+
+type pathGeneration struct {
+	exists bool
+	info   os.FileInfo
+}
+
+type storeFileGeneration struct {
+	state    pathGeneration
+	activity pathGeneration
+}
+
+type sessionFileWriter func(
+	string,
+	map[domain.IntentID]domain.Session,
+	*coordinatorRecord,
+	*telegramstate.State,
+) (storeFileGeneration, error)
 
 // OpenSessionStore opens and validates path. A missing file represents an empty
 // store and is created by the first successful write.
@@ -64,7 +86,7 @@ func OpenSessionStore(path string) (*SessionStore, error) {
 	mu := mutexForPath(canonicalPath)
 	mu.Lock()
 	defer mu.Unlock()
-	byIntent, byID, checkpoint, ui, err := readSessionFile(canonicalPath, true)
+	byIntent, byID, checkpoint, ui, generation, err := readVerifiedSessionFile(canonicalPath, true)
 	if err != nil {
 		return nil, err
 	}
@@ -75,6 +97,8 @@ func OpenSessionStore(path string) (*SessionStore, error) {
 		byID:       byID,
 		checkpoint: checkpoint,
 		telegramUI: ui,
+		generation: generation,
+		writeFile:  writeSessionFile,
 	}, nil
 }
 
@@ -149,7 +173,7 @@ func (store *SessionStore) PutStartingIfAbsent(
 	}
 	// Only insertion of a new local session establishes known-empty evidence.
 	ui.Cards[session.ID()] = telegramstate.Card{SessionID: session.ID(), EmptyCloseEligible: true, Page: telegramstate.Page{Current: 1, Total: 1, FollowLatest: true}}
-	if err := writeSessionFile(store.path, next, store.checkpoint, &ui); err != nil {
+	if err := store.persist(next, store.checkpoint, &ui); err != nil {
 		if reloadErr := store.reload(); reloadErr != nil {
 			return domain.Session{}, false, errors.Join(
 				fmt.Errorf("persist starting session: %w", err),
@@ -190,7 +214,7 @@ func (store *SessionStore) RenameSession(ctx context.Context, id domain.SessionI
 	}
 	sessions := cloneSessions(store.byIntent)
 	sessions[intent] = next
-	if err := writeSessionFile(store.path, sessions, store.checkpoint, store.telegramUI); err != nil {
+	if err := store.persist(sessions, store.checkpoint, store.telegramUI); err != nil {
 		_ = store.reload()
 		return domain.Session{}, fmt.Errorf("persist session name: %w", err)
 	}
@@ -248,7 +272,7 @@ func (store *SessionStore) CompareAndSwap(
 
 	sessions := cloneSessions(store.byIntent)
 	sessions[next.IntentID()] = next
-	if err := writeSessionFile(store.path, sessions, store.checkpoint, store.telegramUI); err != nil {
+	if err := store.persist(sessions, store.checkpoint, store.telegramUI); err != nil {
 		if reloadErr := store.reload(); reloadErr != nil {
 			return errors.Join(
 				fmt.Errorf("persist session transition: %w", err),
@@ -303,7 +327,7 @@ func (store *SessionStore) Replace(ctx context.Context, expected domain.Session,
 		}
 		ui = &copy
 	}
-	if err := writeSessionFile(store.path, sessions, store.checkpoint, ui); err != nil {
+	if err := store.persist(sessions, store.checkpoint, ui); err != nil {
 		return fmt.Errorf("persist session replacement: %w", err)
 	}
 	store.byIntent = sessions
@@ -315,7 +339,7 @@ func hasWorkStatus(status domain.SessionStatus) bool {
 	return status == domain.SessionRunning || status == domain.SessionStopping || status == domain.SessionClosingAfterWork
 }
 
-// Load rereads the durable file and returns the session with id.
+// Load returns the session with id from the latest verified file generation.
 func (store *SessionStore) Load(
 	ctx context.Context,
 	id domain.SessionID,
@@ -335,8 +359,8 @@ func (store *SessionStore) Load(
 	return store.byIntent[intentID], nil
 }
 
-// GetByIntent rereads the durable file and returns the session stored for
-// intentID. It is the exported physical acceptance seam for intent replay.
+// GetByIntent returns the session stored for intentID from the latest verified
+// file generation. It is the exported physical acceptance seam for intent replay.
 func (store *SessionStore) GetByIntent(
 	ctx context.Context,
 	intentID domain.IntentID,
@@ -353,9 +377,9 @@ func (store *SessionStore) GetByIntent(
 	return session, ok, nil
 }
 
-// List rereads the durable document and returns all sessions in ascending
-// IntentID order. IntentID order is the stable persisted order used by the
-// state document; insertion or map iteration order is never observable.
+// List returns the latest verified generation in ascending IntentID order.
+// IntentID order is the stable persisted order used by the state document;
+// insertion or map iteration order is never observable.
 func (store *SessionStore) List(ctx context.Context) ([]domain.Session, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -409,10 +433,10 @@ func (store *SessionStore) ImportArchived(ctx context.Context, candidates []doma
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if err := writeSessionFile(store.path, next, store.checkpoint, store.telegramUI); err != nil {
+	if err := store.persist(next, store.checkpoint, store.telegramUI); err != nil {
 		return fmt.Errorf("persist archived import: %w", err)
 	}
-	verifiedByIntent, verifiedByID, checkpoint, ui, err := readSessionFile(store.path, true)
+	verifiedByIntent, verifiedByID, checkpoint, ui, generation, err := readVerifiedSessionFile(store.path, true)
 	if err != nil {
 		return fmt.Errorf("verify archived import: %w", err)
 	}
@@ -423,11 +447,20 @@ func (store *SessionStore) ImportArchived(ctx context.Context, candidates []doma
 	store.byID = verifiedByID
 	store.checkpoint = checkpoint
 	store.telegramUI = ui
+	store.generation = generation
 	return nil
 }
 
 func (store *SessionStore) reload() error {
-	byIntent, byID, checkpoint, ui, err := readSessionFile(store.path, true)
+	current, err := inspectStoreGeneration(store.path)
+	if err != nil {
+		return fmt.Errorf("inspect session store generation: %w", err)
+	}
+	if sameStoreGeneration(store.generation, current) {
+		return nil
+	}
+	store.fullReloads++
+	byIntent, byID, checkpoint, ui, generation, err := readVerifiedSessionFile(store.path, true)
 	if err != nil {
 		return fmt.Errorf("reload session store: %w", err)
 	}
@@ -435,11 +468,25 @@ func (store *SessionStore) reload() error {
 	store.byID = byID
 	store.checkpoint = checkpoint
 	store.telegramUI = ui
+	store.generation = generation
 	return nil
 }
 
-// LoadTelegramUI rereads and returns the durable Telegram presentation state.
-// A missing field in an older session document is migrated to an empty state.
+func (store *SessionStore) persist(
+	sessions map[domain.IntentID]domain.Session,
+	checkpoint *coordinatorRecord,
+	ui *telegramstate.State,
+) error {
+	generation, err := store.writeFile(store.path, sessions, checkpoint, ui)
+	if err != nil {
+		return err
+	}
+	store.generation = generation
+	return nil
+}
+
+// LoadTelegramUI returns the durable Telegram state from the latest verified
+// file generation. A missing field in an older document migrates to empty.
 func (store *SessionStore) LoadTelegramUI(ctx context.Context) (telegramstate.State, error) {
 	if err := ctx.Err(); err != nil {
 		return telegramstate.State{}, err
@@ -519,7 +566,7 @@ func (store *SessionStore) UpdateTelegramUI(ctx context.Context, fn func(*telegr
 	if err := next.Validate(); err != nil {
 		return fmt.Errorf("validate Telegram UI state: %w", err)
 	}
-	if err := writeSessionFile(store.path, store.byIntent, store.checkpoint, &next); err != nil {
+	if err := store.persist(store.byIntent, store.checkpoint, &next); err != nil {
 		return fmt.Errorf("persist Telegram UI state: %w", err)
 	}
 	store.telegramUI = &next
@@ -933,6 +980,71 @@ func ValidateSessionFile(path string) error {
 	return err
 }
 
+func readVerifiedSessionFile(
+	path string, repairPermissions bool,
+) (map[domain.IntentID]domain.Session, map[domain.SessionID]domain.IntentID, *coordinatorRecord, *telegramstate.State, storeFileGeneration, error) {
+	const maxAttempts = 4
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		before, err := inspectStoreGeneration(path)
+		if err != nil {
+			return nil, nil, nil, nil, storeFileGeneration{}, err
+		}
+		byIntent, byID, checkpoint, ui, err := readSessionFile(path, repairPermissions)
+		if err != nil {
+			return nil, nil, nil, nil, storeFileGeneration{}, err
+		}
+		after, err := inspectStoreGeneration(path)
+		if err != nil {
+			return nil, nil, nil, nil, storeFileGeneration{}, err
+		}
+		if sameStoreGeneration(before, after) {
+			return byIntent, byID, checkpoint, ui, after, nil
+		}
+	}
+	return nil, nil, nil, nil, storeFileGeneration{}, errors.New("session store changed while it was being read")
+}
+
+func inspectStoreGeneration(path string) (storeFileGeneration, error) {
+	state, err := inspectPathGeneration(path)
+	if err != nil {
+		return storeFileGeneration{}, fmt.Errorf("inspect state document: %w", err)
+	}
+	activity, err := inspectPathGeneration(path + ".card-activity.json")
+	if err != nil {
+		return storeFileGeneration{}, fmt.Errorf("inspect card activity: %w", err)
+	}
+	return storeFileGeneration{state: state, activity: activity}, nil
+}
+
+func inspectPathGeneration(path string) (pathGeneration, error) {
+	info, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return pathGeneration{}, nil
+	}
+	if err != nil {
+		return pathGeneration{}, err
+	}
+	return pathGeneration{exists: true, info: info}, nil
+}
+
+func sameStoreGeneration(left, right storeFileGeneration) bool {
+	return samePathGeneration(left.state, right.state) &&
+		samePathGeneration(left.activity, right.activity)
+}
+
+func samePathGeneration(left, right pathGeneration) bool {
+	if left.exists != right.exists {
+		return false
+	}
+	if !left.exists {
+		return true
+	}
+	return os.SameFile(left.info, right.info) &&
+		left.info.Size() == right.info.Size() &&
+		left.info.ModTime().Equal(right.info.ModTime()) &&
+		left.info.Mode() == right.info.Mode()
+}
+
 func readSessionFile(
 	path string, repairPermissions bool,
 ) (map[domain.IntentID]domain.Session, map[domain.SessionID]domain.IntentID, *coordinatorRecord, *telegramstate.State, error) {
@@ -1038,7 +1150,7 @@ func writeSessionFile(
 	sessions map[domain.IntentID]domain.Session,
 	checkpoint *coordinatorRecord,
 	telegramUI *telegramstate.State,
-) (returnErr error) {
+) (generation storeFileGeneration, returnErr error) {
 	records := make([]sessionRecord, 0, len(sessions))
 	for _, session := range sessions {
 		records = append(records, recordFromSession(session))
@@ -1053,14 +1165,14 @@ func writeSessionFile(
 		TelegramUI:  cardactivity.MainState(telegramUI),
 	}, "", "  ")
 	if err != nil {
-		return fmt.Errorf("encode session store: %w", err)
+		return storeFileGeneration{}, fmt.Errorf("encode session store: %w", err)
 	}
 	data = append(data, '\n')
 
 	directory := filepath.Dir(path)
 	temporary, err := os.CreateTemp(directory, "."+filepath.Base(path)+".tmp-*")
 	if err != nil {
-		return fmt.Errorf("create session store candidate: %w", err)
+		return storeFileGeneration{}, fmt.Errorf("create session store candidate: %w", err)
 	}
 	temporaryPath := temporary.Name()
 	temporaryOpen := true
@@ -1073,36 +1185,53 @@ func writeSessionFile(
 		_ = os.Remove(temporaryPath)
 	}()
 	if err := temporary.Chmod(0o600); err != nil {
-		return fmt.Errorf("secure session store candidate: %w", err)
+		return storeFileGeneration{}, fmt.Errorf("secure session store candidate: %w", err)
 	}
 	if _, err := temporary.Write(data); err != nil {
-		return fmt.Errorf("write session store candidate: %w", err)
+		return storeFileGeneration{}, fmt.Errorf("write session store candidate: %w", err)
 	}
 	if err := temporary.Sync(); err != nil {
-		return fmt.Errorf("sync session store candidate: %w", err)
+		return storeFileGeneration{}, fmt.Errorf("sync session store candidate: %w", err)
+	}
+	writtenInfo, err := temporary.Stat()
+	if err != nil {
+		return storeFileGeneration{}, fmt.Errorf("inspect session store candidate: %w", err)
 	}
 	if err := temporary.Close(); err != nil {
-		return fmt.Errorf("close session store candidate: %w", err)
+		return storeFileGeneration{}, fmt.Errorf("close session store candidate: %w", err)
 	}
 	temporaryOpen = false
 	if err := cardactivity.Save(path, telegramUI); err != nil {
-		return fmt.Errorf("persist card activity: %w", err)
+		return storeFileGeneration{}, fmt.Errorf("persist card activity: %w", err)
+	}
+	writtenActivity, err := inspectPathGeneration(path + ".card-activity.json")
+	if err != nil {
+		return storeFileGeneration{}, fmt.Errorf("inspect persisted card activity: %w", err)
 	}
 	if err := os.Rename(temporaryPath, path); err != nil {
-		return fmt.Errorf("replace session store: %w", err)
+		return storeFileGeneration{}, fmt.Errorf("replace session store: %w", err)
 	}
 	directoryFile, err := os.Open(directory)
 	if err != nil {
-		return fmt.Errorf("open session store directory: %w", err)
+		return storeFileGeneration{}, fmt.Errorf("open session store directory: %w", err)
 	}
 	if err := directoryFile.Sync(); err != nil {
 		_ = directoryFile.Close()
-		return fmt.Errorf("sync session store directory: %w", err)
+		return storeFileGeneration{}, fmt.Errorf("sync session store directory: %w", err)
 	}
 	if err := directoryFile.Close(); err != nil {
-		return fmt.Errorf("close session store directory: %w", err)
+		return storeFileGeneration{}, fmt.Errorf("close session store directory: %w", err)
 	}
-	return nil
+	current, err := inspectStoreGeneration(path)
+	if err != nil {
+		return storeFileGeneration{}, fmt.Errorf("verify persisted session store generation: %w", err)
+	}
+	writtenState := pathGeneration{exists: true, info: writtenInfo}
+	if !samePathGeneration(writtenState, current.state) ||
+		!samePathGeneration(writtenActivity, current.activity) {
+		return storeFileGeneration{}, errors.New("session store changed before write verification completed")
+	}
+	return current, nil
 }
 
 func cloneCoordinatorRecord(source *coordinatorRecord) *coordinatorRecord {

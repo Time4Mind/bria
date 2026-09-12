@@ -35,7 +35,7 @@ func (store *SessionStore) SetModelPreferences(ctx context.Context, id domain.Se
 	}
 	sessions := cloneSessions(store.byIntent)
 	sessions[intent] = next
-	if err := writeSessionFile(store.path, sessions, store.checkpoint, store.telegramUI); err != nil {
+	if err := store.persist(sessions, store.checkpoint, store.telegramUI); err != nil {
 		_ = store.reload()
 		return fmt.Errorf("persist model preferences: %w", err)
 	}
