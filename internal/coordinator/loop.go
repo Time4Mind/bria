@@ -139,6 +139,13 @@ type DurableOutboundReceipt struct {
 type DurableStatusSender interface {
 	EnqueueStatus(context.Context, string, Status, *KeyboardMarkup) (DurableOutboundReceipt, error)
 }
+
+// PreparedDurableStatusSender owns an already persisted, crash-recoverable
+// status operation. A handled result may be delivered before the generic outer
+// checkpoint is written because replay is fenced by that inner operation.
+type PreparedDurableStatusSender interface {
+	DeliverPreparedStatus(context.Context, string, Status, *KeyboardMarkup) (Receipt, bool, error)
+}
 type CarrierEditor interface {
 	EditStatusWithKeyboard(context.Context, string, Status, *KeyboardMarkup) (Receipt, error)
 }
@@ -485,6 +492,24 @@ func (loop *Loop) sendStatus(
 	keyboard *KeyboardMarkup,
 ) (StoredCheckpoint, error) {
 	operationID := "status:" + strconv.FormatInt(update.ID, 10)
+	if preparedSender, ok := loop.sender.(PreparedDurableStatusSender); ok {
+		receipt, handled, deliveryErr := preparedSender.DeliverPreparedStatus(ctx, operationID, status, keyboard)
+		if handled {
+			if deliveryErr != nil || receipt.MessageID <= 0 {
+				if deliveryErr != nil {
+					return StoredCheckpoint{}, deliveryErr
+				}
+				return StoredCheckpoint{}, fmt.Errorf("%w for prepared operation %q", ErrDeliveryUnknown, operationID)
+			}
+			next := cloneCheckpoint(stored.Checkpoint)
+			next.NextUpdateID = update.ID + 1
+			next.Outbound = &Outbound{
+				OperationID: operationID, UpdateID: update.ID, Status: status, Keyboard: cloneKeyboard(keyboard),
+				Phase: OutboundConfirmed, Receipt: &Receipt{MessageID: receipt.MessageID},
+			}
+			return loop.saveVerified(context.WithoutCancel(ctx), stored, next)
+		}
+	}
 	next := cloneCheckpoint(stored.Checkpoint)
 	next.Outbound = &Outbound{
 		OperationID: operationID,

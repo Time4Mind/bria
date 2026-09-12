@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"testing"
 
+	"bria/internal/cardtranscript"
 	"bria/internal/domain"
 	"bria/internal/telegramcontroller"
 )
@@ -14,6 +15,7 @@ type countingSessionStore struct {
 	loads            int
 	lists            int
 	eligibilityLoads int
+	projectionLoads  int
 	empty            map[domain.SessionID]bool
 }
 
@@ -28,7 +30,16 @@ func (store *countingSessionStore) List(ctx context.Context) ([]domain.Session, 
 }
 
 func (store *countingSessionStore) reset() {
-	store.loads, store.lists, store.eligibilityLoads = 0, 0, 0
+	store.loads, store.lists, store.eligibilityLoads, store.projectionLoads = 0, 0, 0, 0
+}
+
+func (store *countingSessionStore) LoadCardProjectionSnapshot(ctx context.Context, _ domain.SessionID) (cardtranscript.Snapshot, int, int, string, bool, bool, []domain.Session, map[domain.SessionID]bool, error) {
+	store.projectionLoads++
+	sessions, err := store.SessionStore.List(ctx)
+	if err != nil {
+		return cardtranscript.Snapshot{}, 0, 0, "", false, false, nil, nil, err
+	}
+	return cardtranscript.Snapshot{}, 1, 1, "", true, true, sessions, store.empty, nil
 }
 
 func (store *countingSessionStore) ListWithEmptyCloseEligibility(ctx context.Context) ([]domain.Session, map[domain.SessionID]bool, error) {
@@ -71,11 +82,11 @@ func TestSemanticNavigationBuildsSessionCardOncePerCallback(t *testing.T) {
 	if err != nil || selected.Card == nil || selected.Card.SessionID != second.ID() {
 		t.Fatalf("select callback = (%#v, %v)", selected, err)
 	}
-	if store.loads > 2 || store.lists != 0 {
-		t.Fatalf("select projection reads = load:%d list:%d, want at most 2/0", store.loads, store.lists)
+	if store.loads > 1 || store.lists != 0 {
+		t.Fatalf("select projection reads = load:%d list:%d, want at most 1/0", store.loads, store.lists)
 	}
-	if store.eligibilityLoads != 1 {
-		t.Fatalf("select eligibility snapshots = %d, want 1", store.eligibilityLoads)
+	if store.projectionLoads != 1 || store.eligibilityLoads != 0 {
+		t.Fatalf("select projection snapshots/legacy eligibility = %d/%d, want 1/0", store.projectionLoads, store.eligibilityLoads)
 	}
 
 	store.reset()
@@ -86,7 +97,7 @@ func TestSemanticNavigationBuildsSessionCardOncePerCallback(t *testing.T) {
 	if store.loads != 1 || store.lists != 0 {
 		t.Fatalf("page projection reads = load:%d list:%d, want 1/0", store.loads, store.lists)
 	}
-	if store.eligibilityLoads != 1 {
-		t.Fatalf("page eligibility snapshots = %d, want 1", store.eligibilityLoads)
+	if store.projectionLoads != 1 || store.eligibilityLoads != 0 {
+		t.Fatalf("page projection snapshots/legacy eligibility = %d/%d, want 1/0", store.projectionLoads, store.eligibilityLoads)
 	}
 }

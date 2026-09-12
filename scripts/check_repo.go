@@ -1288,9 +1288,9 @@ var packagePolicies = map[string]packagePolicy{
 		maxProductionLines: 120,
 	},
 	"internal/controllerhistory": {
-		responsibility:     "persist typed runtime history and project display blocks through controller-owned ports",
+		responsibility:     "persist typed runtime history and project display blocks from storage or a joined projection snapshot through controller-owned ports",
 		allowedImports:     []string{"internal/cardtranscript", "internal/domain", "internal/sessionruntime", "internal/telegramcontrolport"},
-		maxProductionLines: 250,
+		maxProductionLines: 275,
 	},
 	"internal/turncontinuation": {
 		responsibility:     "coordinate accepted-turn observation and idempotent continuation without resubmission",
@@ -1605,9 +1605,9 @@ var packagePolicies = map[string]packagePolicy{
 		maxProductionLines: 575,
 	},
 	"internal/coordinator": {
-		responsibility:     "serialize coordinator commands and durable effects",
+		responsibility:     "serialize coordinator commands and durable effects while recognizing already fenced prepared outputs",
 		allowedImports:     []string{"internal/coordinator/recoverycontrol"},
-		maxProductionLines: 825,
+		maxProductionLines: 850,
 	},
 	"internal/coordinatorbundle": {
 		responsibility: "define the complete credential-free state moved during coordinator handoff",
@@ -2063,14 +2063,14 @@ var packagePolicies = map[string]packagePolicy{
 		maxProductionLines: 300,
 	},
 	"internal/storage": {
-		responsibility: "persist coordinator and session state, typed technical history, model preferences, atomic proven-empty deletion and exact finalization receipts",
+		responsibility: "persist coordinator and session state, joined card projection snapshots, typed technical history, model preferences, atomic proven-empty deletion and exact finalization receipts",
 		allowedImports: []string{
 			"internal/cardactivity",
 			"internal/cardeventhistory",
 			"internal/statejson",
 			"internal/archiveimport", "internal/cardhistory", "internal/cardtranscript", "internal/coordinator", "internal/domain", "internal/sessionlabel", "internal/telegramhistory", "internal/telegramstate",
 		},
-		maxProductionLines: 1950,
+		maxProductionLines: 1975,
 	},
 	"internal/statecompatibility": {
 		responsibility:     "validate all durable runtime documents offline before update or rollback",
@@ -2158,15 +2158,15 @@ var packagePolicies = map[string]packagePolicy{
 			"internal/nativeapprovalflow",
 			"internal/app", "internal/cardtranscript", "internal/coordinator", "internal/domain", "internal/promptpreprocess", "internal/runtimeprotocol", "internal/sessioncreation", "internal/sessionruntime", "internal/settingsport", "internal/telegramcreationview", "internal/telegramnodes", "internal/telegramsettings", "internal/telegramsettingsview", "internal/telegramsessions", "internal/telegramstatus", "internal/turnfailure", "internal/turnprocessing",
 		},
-		maxProductionLines: 5850,
+		maxProductionLines: 5900,
 	},
 	"internal/telegramflow": {
-		responsibility: "join Telegram callback, presentation, current-global-surface fencing, durable card boundaries, and crash-safe coupled receipts",
+		responsibility: "join Telegram callback, presentation, current-global-surface fencing, direct prepared delivery, durable card boundaries, and crash-safe coupled receipts",
 		allowedImports: []string{
 			"internal/callbackdiagnostic", "internal/callbacktoken", "internal/carddeliveryguard", "internal/coordinator", "internal/domain", "internal/telegram", "internal/telegrambridge", "internal/telegramcallbackack", "internal/telegramcardretirement", "internal/telegramtrace",
 			"internal/telegramops", "internal/telegrampipeline", "internal/telegramrecovery", "internal/telegramrecovery/statusrecovery", "internal/telegramstate", "internal/telegramui",
 		},
-		maxProductionLines: 2900,
+		maxProductionLines: 2975,
 	},
 	"internal/telegramnotify": {
 		responsibility: "deliver final and background Telegram notifications",

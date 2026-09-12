@@ -120,27 +120,16 @@ func (h *History) Display(ctx context.Context, id domain.SessionID, history []st
 }
 
 func (h *History) DisplayWithActivity(ctx context.Context, id domain.SessionID, history []string) ([]cardtranscript.Block, int64, error) {
-	show, lines, commandLines := true, 10, 10
-	if h.Settings != nil {
-		settings, err := h.Settings.Snapshot(ctx)
-		if err != nil {
-			return nil, 0, err
-		}
-		show = settings.ShowTechnicalActions
-		lines = settings.TechnicalOutputLines
-		commandLines = settings.TechnicalCommandLines
+	show, lines, commandLines, err := h.displaySettings(ctx)
+	if err != nil {
+		return nil, 0, err
 	}
 	if store, ok := h.Store.(telegramcontrolport.TypedTranscriptSnapshotStore); ok {
 		snapshot, err := store.LoadCardTranscriptSnapshot(ctx, id, show)
 		if err != nil {
 			return nil, 0, err
 		}
-		blocks := append([]cardtranscript.Block(nil), snapshot.Blocks...)
-		for i := range blocks {
-			blocks[i].ToolLines = lines
-			blocks[i].CommandLines = commandLines
-		}
-		return cardtranscript.RenderBlocks(blocks), snapshot.LastEventUnixNano, nil
+		return displaySnapshot(snapshot, show, lines, commandLines)
 	}
 	if store, ok := h.Store.(telegramcontrolport.TypedTranscriptStore); ok {
 		blocks, err := store.LoadCardTranscript(ctx, id, show)
@@ -179,4 +168,39 @@ func (h *History) DisplayWithActivity(ctx context.Context, id domain.SessionID, 
 		blocks = append(blocks, cardtranscript.Block{Kind: kind, Text: text, ToolLines: lines, CommandLines: commandLines})
 	}
 	return cardtranscript.RenderBlocks(blocks), 0, nil
+}
+
+// DisplaySnapshotWithActivity renders a caller-provided durable snapshot using
+// the same settings as the ordinary storage-backed path.
+func (h *History) DisplaySnapshotWithActivity(ctx context.Context, snapshot cardtranscript.Snapshot) ([]cardtranscript.Block, int64, error) {
+	show, lines, commandLines, err := h.displaySettings(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
+	return displaySnapshot(snapshot, show, lines, commandLines)
+}
+
+func (h *History) displaySettings(ctx context.Context) (bool, int, int, error) {
+	show, lines, commandLines := true, 10, 10
+	if h.Settings == nil {
+		return show, lines, commandLines, nil
+	}
+	settings, err := h.Settings.Snapshot(ctx)
+	if err != nil {
+		return false, 0, 0, err
+	}
+	return settings.ShowTechnicalActions, settings.TechnicalOutputLines, settings.TechnicalCommandLines, nil
+}
+
+func displaySnapshot(snapshot cardtranscript.Snapshot, show bool, lines, commandLines int) ([]cardtranscript.Block, int64, error) {
+	blocks := make([]cardtranscript.Block, 0, len(snapshot.Blocks))
+	for _, block := range snapshot.Blocks {
+		if block.Kind == "tool" && !show {
+			continue
+		}
+		block.ToolLines = lines
+		block.CommandLines = commandLines
+		blocks = append(blocks, block)
+	}
+	return cardtranscript.RenderBlocks(blocks), snapshot.LastEventUnixNano, nil
 }

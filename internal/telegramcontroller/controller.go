@@ -86,6 +86,10 @@ type AuthorizationMessageLookup = telegramcontrolport.AuthorizationMessageLookup
 type AuthorizationMessageBinding = telegramcontrolport.AuthorizationMessageBinding
 type AuthorizationFlow = telegramcontrolport.AuthorizationFlow
 
+type cardProjectionSnapshotReader interface {
+	LoadCardProjectionSnapshot(context.Context, domain.SessionID) (cardtranscript.Snapshot, int, int, string, bool, bool, []domain.Session, map[domain.SessionID]bool, error)
+}
+
 const (
 	DeliveryUnknown          = telegramcontrolport.DeliveryUnknown
 	NotificationCommentary   = telegramcontrolport.NotificationCommentary
@@ -1651,34 +1655,64 @@ func (controller *Controller) semanticCardForSession(ctx context.Context, sessio
 	closeConfirmation := controller.closeConfirmation[sessionID]
 	recoveryBusy := controller.recovering[sessionID]
 	controller.mu.Unlock()
-	_, snapshotStore := controller.uiState.(telegramcontrolport.TypedTranscriptSnapshotStore)
-	if len(items) == 0 && !snapshotStore {
-		if historyStore, ok := controller.uiState.(CardHistoryStore); ok {
-			items, _ = historyStore.LoadCardHistory(ctx, sessionID)
+	var (
+		blocks            []cardtranscript.Block
+		lastEventUnixNano int64
+		pages             []cardtranscript.Page
+		view              cardpageselection.View
+		sessions          []domain.Session
+		standbyLabels     map[domain.SessionID]string
+		err               error
+	)
+	if reader, ok := controller.sessions.(cardProjectionSnapshotReader); ok {
+		transcript, storedPage, storedPages, storedAnchor, storedFollow, pageFound, projectedSessions, empty, loadErr := reader.LoadCardProjectionSnapshot(ctx, sessionID)
+		if loadErr != nil {
+			return SemanticCard{}, fmt.Errorf("load semantic card projection: %w", loadErr)
+		}
+		blocks, lastEventUnixNano, err = controller.historyConsumer().DisplaySnapshotWithActivity(ctx, transcript)
+		if err != nil {
+			return SemanticCard{}, err
+		}
+		pageLimit, pageErr := controller.cardPageLimit(ctx)
+		if pageErr != nil {
+			return SemanticCard{}, pageErr
+		}
+		pages = cardtranscript.Paginate(blocks, pageLimit)
+		pageView.Pages = max(pageView.Page, len(pages))
+		if pageFound {
+			pageView = cardpageselection.View{Page: storedPage, Pages: storedPages, Anchor: storedAnchor, FollowLatest: storedFollow}
+		}
+		view, err = cardpageselection.Resolve(pageView, pages, navigationAction)
+		sessions, standbyLabels = projectedSessions, standbyLabelsFromEvidence(projectedSessions, empty)
+	} else {
+		_, snapshotStore := controller.uiState.(telegramcontrolport.TypedTranscriptSnapshotStore)
+		if len(items) == 0 && !snapshotStore {
+			if historyStore, ok := controller.uiState.(CardHistoryStore); ok {
+				items, _ = historyStore.LoadCardHistory(ctx, sessionID)
+			}
+		}
+		blocks, lastEventUnixNano, err = controller.historyConsumer().DisplayWithActivity(ctx, sessionID, items)
+		if err != nil {
+			return SemanticCard{}, err
+		}
+		pageLimit, pageErr := controller.cardPageLimit(ctx)
+		if pageErr != nil {
+			return SemanticCard{}, pageErr
+		}
+		pages = cardtranscript.Paginate(blocks, pageLimit)
+		pageView.Pages = max(pageView.Page, len(pages))
+		view, err = cardpageselection.Select(ctx, controller.uiState, sessionID, pageView, pages, navigationAction)
+		if err == nil {
+			sessions, standbyLabels, err = controller.sessionProjection(ctx)
 		}
 	}
-	blocks, lastEventUnixNano, err := controller.historyConsumer().DisplayWithActivity(ctx, sessionID, items)
 	if err != nil {
-		return SemanticCard{}, err
-	}
-	pageLimit, err := controller.cardPageLimit(ctx)
-	if err != nil {
-		return SemanticCard{}, err
-	}
-	pages := cardtranscript.Paginate(blocks, pageLimit)
-	pageView.Pages = max(pageView.Page, len(pages))
-	view, err := cardpageselection.Select(ctx, controller.uiState, sessionID, pageView, pages, navigationAction)
-	if err != nil {
-		return SemanticCard{}, err
+		return SemanticCard{}, fmt.Errorf("project semantic card: %w", err)
 	}
 	if navigationAction != "" {
 		if err := controller.commitCardPage(ctx, sessionID, view); err != nil {
 			return SemanticCard{}, err
 		}
-	}
-	sessions, standbyLabels, err := controller.sessionProjection(ctx)
-	if err != nil {
-		return SemanticCard{}, fmt.Errorf("list semantic card sessions: %w", err)
 	}
 	sort.Slice(sessions, func(i, j int) bool { return sessions[i].ID() < sessions[j].ID() })
 	selectable := make([]domain.SessionID, 0, len(sessions))

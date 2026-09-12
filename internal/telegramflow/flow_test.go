@@ -714,8 +714,8 @@ func TestCallbackPreparedBeforeCrashResumesWithoutRepeatingEffectAndCommitsAfter
 	if _, err := restartedPresenter.DecodeCallback(resumedToken); err != nil {
 		t.Fatalf("restart callback token is not currently valid: %v", err)
 	}
-	if _, err := secondSender.EditStatusWithKeyboard(context.Background(), "status:501", resumedDecision.Status, resumedDecision.Keyboard); err != nil {
-		t.Fatalf("send resumed prepared callback: %v", err)
+	if receipt, handled, err := secondSender.DeliverPreparedStatus(context.Background(), "status:501", resumedDecision.Status, resumedDecision.Keyboard); err != nil || !handled || receipt.MessageID != 99 {
+		t.Fatalf("send resumed prepared callback: receipt=%#v handled=%t err=%v", receipt, handled, err)
 	}
 	if base.edits != 1 {
 		t.Fatalf("carrier edits=%d want 1", base.edits)
@@ -772,8 +772,8 @@ func TestCallbackUnknownSendIsDurableAndNeverAutomaticallyRepeated(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := outbound.EditStatusWithKeyboard(context.Background(), "status:601", decision.Status, decision.Keyboard); err == nil {
-		t.Fatal("ambiguous carrier result returned no error")
+	if _, handled, err := outbound.DeliverPreparedStatus(context.Background(), "status:601", decision.Status, decision.Keyboard); !errors.Is(err, coordinator.ErrDeliveryUnknown) || !handled {
+		t.Fatalf("ambiguous carrier result error=%v handled=%t, want delivery unknown", err, handled)
 	}
 
 	reopened, err := telegramflow.OpenFileCallbackOperationStore(operationsPath)
@@ -792,7 +792,7 @@ func TestCallbackUnknownSendIsDurableAndNeverAutomaticallyRepeated(t *testing.T)
 	if _, err := secondHandler.Handle(context.Background(), update); !errors.Is(err, telegrampipeline.ErrUnknownOperation) {
 		t.Fatalf("restart callback error=%v want unknown operation", err)
 	}
-	if _, err := secondSender.EditStatusWithKeyboard(context.Background(), "status:601", decision.Status, decision.Keyboard); !errors.Is(err, telegrampipeline.ErrUnknownOperation) {
+	if _, handled, err := secondSender.DeliverPreparedStatus(context.Background(), "status:601", decision.Status, decision.Keyboard); !errors.Is(err, coordinator.ErrDeliveryUnknown) || !errors.Is(err, telegrampipeline.ErrUnknownOperation) || !handled {
 		t.Fatalf("direct durable resend error=%v want unknown operation", err)
 	}
 	if secondExecutor.calls != 0 || safeBase.edits != 0 {

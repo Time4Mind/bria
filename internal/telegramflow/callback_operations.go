@@ -388,7 +388,7 @@ func validCallbackOperationTransition(old, next CallbackOperationPhase) bool {
 	case CallbackEffectRetryUnknown:
 		return next == CallbackEffectResolved
 	case CallbackPrepared:
-		return next == CallbackPrepared || next == CallbackSendUnknown
+		return next == CallbackPrepared || next == CallbackSendUnknown || next == CallbackEffectResolved
 	case CallbackSendUnknown:
 		return next == CallbackPrepared || next == CallbackReceiptConfirmed
 	case CallbackReceiptConfirmed:

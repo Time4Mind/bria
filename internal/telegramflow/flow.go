@@ -183,12 +183,13 @@ type UnknownCallbackOperation struct {
 }
 
 var (
-	_ coordinator.Handler                 = (*Handler)(nil)
-	_ coordinator.Sender                  = (*Sender)(nil)
-	_ coordinator.KeyboardSender          = (*Sender)(nil)
-	_ coordinator.CarrierEditor           = (*Sender)(nil)
-	_ coordinator.DurableStatusSender     = (*Sender)(nil)
-	_ coordinator.OutboundReceiptResolver = (*Sender)(nil)
+	_ coordinator.Handler                     = (*Handler)(nil)
+	_ coordinator.Sender                      = (*Sender)(nil)
+	_ coordinator.KeyboardSender              = (*Sender)(nil)
+	_ coordinator.CarrierEditor               = (*Sender)(nil)
+	_ coordinator.DurableStatusSender         = (*Sender)(nil)
+	_ coordinator.PreparedDurableStatusSender = (*Sender)(nil)
+	_ coordinator.OutboundReceiptResolver     = (*Sender)(nil)
 )
 
 func New(config Config) (*Handler, *Sender, error) {
@@ -903,6 +904,65 @@ func (sender *Sender) Register(prepared Prepared) error {
 }
 func (sender *Sender) EnqueueStatus(ctx context.Context, operationID string, status coordinator.Status, keyboard *coordinator.KeyboardMarkup) (coordinator.DurableOutboundReceipt, error) {
 	return sender.enqueueStatus(ctx, operationID, status, keyboard, nil)
+}
+
+// DeliverPreparedStatus uses the callback operation itself as the durable
+// outbox. It avoids wrapping one physical edit in a second status state machine
+// while retaining the callback send-unknown and receipt fences.
+func (sender *Sender) DeliverPreparedStatus(ctx context.Context, operationID string, status coordinator.Status, keyboard *coordinator.KeyboardMarkup) (coordinator.Receipt, bool, error) {
+	if sender == nil || sender.operations == nil || operationID == "" {
+		return coordinator.Receipt{}, false, errors.New("durable Telegram status sender is required")
+	}
+	operation, found, err := sender.operations.Load(ctx, operationID)
+	if err != nil || !found {
+		return coordinator.Receipt{}, found, err
+	}
+	if operation.Phase == CallbackCommitted {
+		if operation.Receipt <= 0 {
+			return coordinator.Receipt{}, true, errors.New("committed callback operation has no receipt")
+		}
+		return coordinator.Receipt{MessageID: operation.Receipt}, true, nil
+	}
+	if operation.Phase == CallbackEffectUnknown || operation.Phase == CallbackEffectRetryUnknown || operation.Phase == CallbackSendUnknown {
+		unknown := fmt.Errorf("%w: %s is %s", telegrampipeline.ErrUnknownOperation, operation.ID, operation.Phase)
+		if operation.Phase == CallbackSendUnknown {
+			unknown = errors.Join(coordinator.ErrDeliveryUnknown, unknown)
+		}
+		return coordinator.Receipt{}, true, unknown
+	}
+	if operation.Phase != CallbackPrepared || operation.Prepared == nil {
+		return coordinator.Receipt{}, true, fmt.Errorf("callback operation %s is not prepared for delivery: %s", operationID, operation.Phase)
+	}
+	prepared := clonePrepared(*operation.Prepared)
+	if !reflect.DeepEqual(prepared.Status, status) || !reflect.DeepEqual(prepared.Keyboard, keyboard) {
+		return coordinator.Receipt{}, true, errors.New("prepared callback operation does not match sender input")
+	}
+	unlock := sender.lockPreparedDelivery(&prepared)
+	defer unlock()
+	if err := sender.pending.register(prepared); err != nil {
+		return coordinator.Receipt{}, true, err
+	}
+	receipt, err := sender.sendPrepared(ctx, operationID, status, keyboard, prepared.Edit, true)
+	if errors.Is(err, carddeliveryguard.ErrNotCurrent) {
+		resolved := operation
+		resolved.Phase, resolved.Prepared = CallbackEffectResolved, nil
+		changed, settleErr := sender.operations.CompareAndSwap(context.WithoutCancel(ctx), operationID, CallbackPrepared, resolved)
+		if settleErr != nil || !changed {
+			return coordinator.Receipt{}, true, errors.Join(settleErr, errors.New("settle stale prepared callback"))
+		}
+		sender.pending.remove(operationID)
+		return coordinator.Receipt{MessageID: status.SourceMessageID}, true, nil
+	}
+	if err != nil {
+		current, currentFound, loadErr := sender.operations.Load(context.WithoutCancel(ctx), operationID)
+		if loadErr != nil {
+			return coordinator.Receipt{}, true, errors.Join(err, loadErr)
+		}
+		if currentFound && current.Phase == CallbackSendUnknown {
+			return coordinator.Receipt{}, true, errors.Join(coordinator.ErrDeliveryUnknown, err)
+		}
+	}
+	return receipt, true, err
 }
 func (sender *Sender) EnqueuePrepared(ctx context.Context, sequence uint64, prepared Prepared) (coordinator.DurableOutboundReceipt, error) {
 	if sender == nil || sequence == 0 || prepared.OperationID == "" {

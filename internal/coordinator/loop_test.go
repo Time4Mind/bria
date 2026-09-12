@@ -367,6 +367,67 @@ func TestDurableSenderAcceptanceAdvancesCheckpointBeforeTelegramDelivery(t *test
 	}
 }
 
+func TestPreparedDurableStatusIsDeliveredBeforeOuterCheckpointIO(t *testing.T) {
+	base := newMemoryStoreWith(coordinator.Checkpoint{Initialized: true, NextUpdateID: 320})
+	store := &blockingSaveStore{memoryStore: base, started: make(chan struct{}), release: make(chan struct{})}
+	source := &fakeSource{batches: [][]coordinator.Update{{{
+		ID: 320, Kind: coordinator.UpdateCallback, ActorID: 1,
+		ConversationID: 7, ConversationKind: "private", Text: "signed",
+		CallbackQueryID: "callback-320", SourceMessageID: 700,
+	}}}, pollErr: context.Canceled}
+	handler := &fakeHandler{decisions: map[int64]coordinator.Decision{
+		320: {Kind: coordinator.DecisionStatus, Status: coordinator.Status{ConversationID: 7, Text: "card"}},
+	}}
+	sender := &preparedDurableSender{delivered: make(chan struct{})}
+	done := make(chan error, 1)
+	go func() { done <- newLoop(t, source, store, handler, sender, &fakeReadiness{}).Run(context.Background()) }()
+
+	<-store.started
+	select {
+	case <-sender.delivered:
+		// The callback operation already owns the crash fence, so the visible
+		// Telegram edit must not wait for the large outer checkpoint file.
+	default:
+		close(store.release)
+		<-done
+		t.Fatal("prepared durable status waited for outer checkpoint before delivery")
+	}
+	close(store.release)
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("Run() error = %v", err)
+	}
+}
+
+func TestPreparedDurableStatusSurvivesOuterCheckpointFailureWithoutDuplicateDelivery(t *testing.T) {
+	store := newMemoryStoreWith(coordinator.Checkpoint{Initialized: true, NextUpdateID: 321})
+	store.saveErr = errors.New("checkpoint unavailable")
+	update := coordinator.Update{ID: 321, Kind: coordinator.UpdateCallback, ActorID: 1, ConversationID: 7, ConversationKind: "private", Text: "signed", CallbackQueryID: "callback-321", SourceMessageID: 700}
+	handler := &fakeHandler{decisions: map[int64]coordinator.Decision{321: {Kind: coordinator.DecisionStatus, Status: coordinator.Status{ConversationID: 7, Text: "card"}}}}
+	sender := &preparedDurableSender{delivered: make(chan struct{})}
+	err := newLoop(t, &fakeSource{batches: [][]coordinator.Update{{update}}}, store, handler, sender, &fakeReadiness{}).Run(context.Background())
+	if err == nil || sender.calls != 1 || store.checkpoint().NextUpdateID != 321 {
+		t.Fatalf("failed checkpoint = err:%v deliveries:%d checkpoint:%#v", err, sender.calls, store.checkpoint())
+	}
+
+	store.saveErr = nil
+	replay := &fakeHandler{decisions: map[int64]coordinator.Decision{321: {Kind: coordinator.DecisionSkip}}}
+	err = newLoop(t, &fakeSource{batches: [][]coordinator.Update{{update}}, pollErr: context.Canceled}, store, replay, sender, &fakeReadiness{}).Run(context.Background())
+	if !errors.Is(err, context.Canceled) || sender.calls != 1 || store.checkpoint().NextUpdateID != 322 {
+		t.Fatalf("replay = err:%v deliveries:%d checkpoint:%#v", err, sender.calls, store.checkpoint())
+	}
+}
+
+func TestPreparedDurableUnknownKeepsDeliveryUnknownClass(t *testing.T) {
+	store := newMemoryStoreWith(coordinator.Checkpoint{Initialized: true, NextUpdateID: 322})
+	update := coordinator.Update{ID: 322, Kind: coordinator.UpdateCallback, ActorID: 1, ConversationID: 7, ConversationKind: "private", Text: "signed", CallbackQueryID: "callback-322", SourceMessageID: 700}
+	handler := &fakeHandler{decisions: map[int64]coordinator.Decision{322: {Kind: coordinator.DecisionStatus, Status: coordinator.Status{ConversationID: 7, Text: "card"}}}}
+	sender := &preparedDurableSender{delivered: make(chan struct{}), err: errors.Join(coordinator.ErrDeliveryUnknown, errors.New("transport timeout"))}
+	err := newLoop(t, &fakeSource{batches: [][]coordinator.Update{{update}}}, store, handler, sender, &fakeReadiness{}).Run(context.Background())
+	if !errors.Is(err, coordinator.ErrDeliveryUnknown) || store.saveCount() != 0 {
+		t.Fatalf("prepared unknown = err:%v saves:%d", err, store.saveCount())
+	}
+}
+
 func TestConfirmedDurableOutboundAndNextUpdateAreSerializedWithoutLostState(t *testing.T) {
 	store := newMemoryStoreWith(coordinator.Checkpoint{
 		Initialized:  true,
@@ -712,6 +773,24 @@ type fakeDurableSender struct {
 	resolvedReceipt coordinator.Receipt
 }
 
+type preparedDurableSender struct {
+	fakeSender
+	delivered chan struct{}
+	once      sync.Once
+	calls     int
+	err       error
+}
+
+func (sender *preparedDurableSender) EnqueueStatus(_ context.Context, operationID string, _ coordinator.Status, _ *coordinator.KeyboardMarkup) (coordinator.DurableOutboundReceipt, error) {
+	return coordinator.DurableOutboundReceipt{OperationID: operationID, Sequence: 1}, nil
+}
+
+func (sender *preparedDurableSender) DeliverPreparedStatus(_ context.Context, _ string, _ coordinator.Status, _ *coordinator.KeyboardMarkup) (coordinator.Receipt, bool, error) {
+	sender.calls++
+	sender.once.Do(func() { close(sender.delivered) })
+	return coordinator.Receipt{MessageID: 903}, true, sender.err
+}
+
 func (sender *fakeDurableSender) ResolveStatusReceipt(_ context.Context, _ string) (coordinator.Receipt, bool, error) {
 	return sender.resolvedReceipt, sender.resolved, nil
 }
@@ -767,6 +846,25 @@ type memoryStore struct {
 	loads         int
 	saves         int
 	corruptReread bool
+	saveErr       error
+}
+
+type blockingSaveStore struct {
+	*memoryStore
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (store *blockingSaveStore) Save(ctx context.Context, expectedRevision uint64, next coordinator.Checkpoint) (coordinator.StoredCheckpoint, error) {
+	store.once.Do(func() {
+		close(store.started)
+		select {
+		case <-store.release:
+		case <-ctx.Done():
+		}
+	})
+	return store.memoryStore.Save(ctx, expectedRevision, next)
 }
 
 func newMemoryStore() *memoryStore { return &memoryStore{} }
@@ -790,6 +888,9 @@ func (store *memoryStore) Save(_ context.Context, expectedRevision uint64, next 
 	store.mu.Lock()
 	defer store.mu.Unlock()
 	store.saves++
+	if store.saveErr != nil {
+		return coordinator.StoredCheckpoint{}, store.saveErr
+	}
 	if store.found && store.stored.Revision != expectedRevision {
 		return coordinator.StoredCheckpoint{}, errors.New("revision conflict")
 	}

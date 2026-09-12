@@ -128,15 +128,16 @@ func TestDurableSelectedCardIsSuppressedWhenArchiveFallbackChangedActiveSession(
 		t.Fatal(err)
 	}
 
-	if _, err := outbound.EditStatusWithKeyboard(ctx, prepared.OperationID, prepared.Status, prepared.Keyboard); !errors.Is(err, carddeliveryguard.ErrNotCurrent) {
-		t.Fatalf("stale durable select error = %v, want ErrNotCurrent", err)
+	receipt, handled, err := outbound.DeliverPreparedStatus(ctx, prepared.OperationID, prepared.Status, prepared.Keyboard)
+	if err != nil || !handled || receipt.MessageID != prepared.Status.SourceMessageID {
+		t.Fatalf("stale durable select settlement = receipt:%#v handled:%t err:%v", receipt, handled, err)
 	}
 	if len(base.edits) != 0 {
 		t.Fatalf("stale durable select reached Telegram: %v", base.edits)
 	}
 	operation, found, err := operations.Load(ctx, prepared.OperationID)
-	if err != nil || !found || operation.Phase != telegramflow.CallbackPrepared {
-		t.Fatalf("stale durable operation = (%#v, %v, %v), want prepared for safe resolution", operation, found, err)
+	if err != nil || !found || operation.Phase != telegramflow.CallbackEffectResolved || operation.Prepared != nil {
+		t.Fatalf("stale durable operation = (%#v, %v, %v), want durably resolved without send", operation, found, err)
 	}
 }
 

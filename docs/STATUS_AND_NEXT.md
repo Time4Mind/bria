@@ -1,5 +1,14 @@
 # Handoff: статус и следующий план
 
+> Текущий запрос A52 - после выпуска A51 пользователь подтвердил, что settings
+> заработали, но переключение сессий всё ещё имеет очень большую задержку;
+> сопоставимый Python-проект работает заметно быстрее. Свежие live callbacks
+> уже показывают, что значимая часть времени остаётся внутри Bria, а не в
+> Telegram transport. Локальный фикс устраняет повторную durable-обвязку callback
+> и объединяет card projection в один state snapshot; focused tests, три review и
+> полный `make check-full` GREEN. Договор, coverage и текущие измерения:
+> [SESSION_SWITCH_LATENCY_TODO.md](SESSION_SWITCH_LATENCY_TODO.md).
+
 > Текущий запрос A51 - исправить потерю request custody активной сессии,
 > ошибки открытия «CLI»/«Создание сессии» и задержку переключения. Проверено:
 > exact attach ошибочно применял destructive recovery skip к accepted и
