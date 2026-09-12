@@ -1446,8 +1446,8 @@ var packagePolicies = map[string]packagePolicy{
 		maxProductionLines: 600,
 	},
 	"internal/nativeapproval": {
-		responsibility:     "extract native interactive menus, classify approvals and answer independently authorized one-shot decisions",
-		maxProductionLines: 380,
+		responsibility:     "extract native interactive menus, classify command and file-edit approvals including bounded terminal reflow, and answer independently authorized one-shot decisions",
+		maxProductionLines: 450,
 	},
 	"internal/telegramnativeview": {
 		responsibility:     "render bounded native CLI interactions as transport-neutral Telegram Rich Markdown",
@@ -2161,12 +2161,12 @@ var packagePolicies = map[string]packagePolicy{
 		maxProductionLines: 5900,
 	},
 	"internal/telegramflow": {
-		responsibility: "join Telegram callback and acknowledgement fencing, presentation, current-global-surface fencing, direct prepared delivery, durable card boundaries, and crash-safe coupled receipts",
+		responsibility: "join Telegram callback and acknowledgement fencing, replay-safe navigation fast paths, presentation, current-global-surface fencing, direct prepared delivery, durable card boundaries, and crash-safe coupled receipts",
 		allowedImports: []string{
 			"internal/callbackdiagnostic", "internal/callbacktoken", "internal/carddeliveryguard", "internal/coordinator", "internal/domain", "internal/telegram", "internal/telegrambridge", "internal/telegramcallbackack", "internal/telegramcardretirement", "internal/telegramtrace",
 			"internal/telegramops", "internal/telegrampipeline", "internal/telegramrecovery", "internal/telegramrecovery/statusrecovery", "internal/telegramstate", "internal/telegramui",
 		},
-		maxProductionLines: 3000,
+		maxProductionLines: 3150,
 	},
 	"internal/telegramnotify": {
 		responsibility: "deliver final and background Telegram notifications",

@@ -731,7 +731,7 @@ func TestCallbackPreparedBeforeCrashResumesWithoutRepeatingEffectAndCommitsAfter
 	}
 }
 
-func TestCallbackUnknownSendIsDurableAndNeverAutomaticallyRepeated(t *testing.T) {
+func TestRepeatableCallbackEditRetriesAutomaticallyAfterAmbiguousDelivery(t *testing.T) {
 	now := time.Unix(1_800_000_000, 0).UTC()
 	presenter := newPresenter(t, now)
 	root := t.TempDir()
@@ -752,7 +752,7 @@ func TestCallbackUnknownSendIsDurableAndNeverAutomaticallyRepeated(t *testing.T)
 	}); err != nil {
 		t.Fatal(err)
 	}
-	presentation, err := presenter.PresentKeyboardWithManifest(string(flowSessionID), nil, telegramui.CardKeyboard{Rows: []telegramui.ButtonRow{{{Action: telegramui.ActionPagePrevious, Target: telegramui.ButtonTarget{Page: 1}}}}})
+	presentation, err := presenter.PresentKeyboardWithManifest(string(flowSessionID), nil, telegramui.CardKeyboard{Rows: []telegramui.ButtonRow{{{Action: telegramui.ActionPageLatest, Target: telegramui.ButtonTarget{Page: 2, FollowLatest: true}, Indicator: &telegramui.PageIndicator{Current: 2, Total: 2}}}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -773,10 +773,13 @@ func TestCallbackUnknownSendIsDurableAndNeverAutomaticallyRepeated(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, handled, err := outbound.DeliverPreparedStatus(context.Background(), "status:601", decision.Status, decision.Keyboard); !errors.Is(err, coordinator.ErrDeliveryUnknown) || !handled {
-		t.Fatalf("ambiguous carrier result error=%v handled=%t, want delivery unknown", err, handled)
+	if _, handled, err := outbound.DeliverPreparedStatus(context.Background(), "status:601", decision.Status, decision.Keyboard); err == nil || !handled {
+		t.Fatalf("ambiguous carrier result error=%v handled=%t, want retryable transport error", err, handled)
 	}
-
+	pending, found, err := operations.Load(context.Background(), "status:601")
+	if err != nil || !found || pending.Phase != telegramflow.CallbackPrepared {
+		t.Fatalf("repeatable callback after ambiguous edit = %#v found=%t err=%v, want prepared", pending, found, err)
+	}
 	reopened, err := telegramflow.OpenFileCallbackOperationStore(operationsPath)
 	if err != nil {
 		t.Fatal(err)
@@ -790,26 +793,138 @@ func TestCallbackUnknownSendIsDurableAndNeverAutomaticallyRepeated(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := secondHandler.Handle(context.Background(), update); !errors.Is(err, telegrampipeline.ErrUnknownOperation) {
-		t.Fatalf("restart callback error=%v want unknown operation", err)
+	retryDecision, err := secondHandler.Handle(context.Background(), update)
+	if err != nil {
+		t.Fatalf("restart repeatable callback: %v", err)
 	}
-	if _, handled, err := secondSender.DeliverPreparedStatus(context.Background(), "status:601", decision.Status, decision.Keyboard); !errors.Is(err, coordinator.ErrDeliveryUnknown) || !errors.Is(err, telegrampipeline.ErrUnknownOperation) || !handled {
-		t.Fatalf("direct durable resend error=%v want unknown operation", err)
+	if _, handled, err := secondSender.DeliverPreparedStatus(context.Background(), "status:601", retryDecision.Status, retryDecision.Keyboard); err != nil || !handled {
+		t.Fatalf("automatic durable retry error=%v handled=%t", err, handled)
 	}
-	if secondExecutor.calls != 0 || safeBase.edits != 0 {
-		t.Fatalf("automatic replay occurred: effects=%d carrier edits=%d", secondExecutor.calls, safeBase.edits)
+	if secondExecutor.calls != 0 || safeBase.edits != 1 {
+		t.Fatalf("repeatable retry repeated semantic effect or skipped carrier edit: effects=%d carrier edits=%d", secondExecutor.calls, safeBase.edits)
 	}
-	if err := secondSender.ConfirmUnknownSend(context.Background(), "status:601", coordinator.Receipt{MessageID: 100}); err == nil {
-		t.Fatal("unknown callback edit accepted a receipt for a different carrier")
+	committed, found, err := reopened.Load(context.Background(), "status:601")
+	if err != nil || !found || committed.Phase != telegramflow.CallbackCommitted || committed.Receipt != 99 {
+		t.Fatalf("repeatable retry commit = %#v found=%t err=%v", committed, found, err)
 	}
-	if err := secondSender.RetryUnknownSend(context.Background(), "status:601"); err != nil {
-		t.Fatalf("explicit verified-not-delivered resolution: %v", err)
+}
+
+func TestStaleRepeatableRetryNeverReachesTelegram(t *testing.T) {
+	ctx := context.Background()
+	now := time.Unix(1_800_000_000, 0).UTC()
+	presenter := newPresenter(t, now)
+	uiStore := telegramstate.NewMemoryStore()
+	oldCard := telegramstate.Card{SessionID: flowSessionID, Carrier: telegramstate.Carrier{ChatID: 42, MessageID: 99}, Page: telegramstate.Page{Current: 1, Total: 1, Anchor: "old", FollowLatest: true}, History: []string{"old"}}
+	if err := uiStore.Update(ctx, func(state *telegramstate.State) error {
+		state.ActiveSession = flowSessionID
+		return state.SetCard(oldCard)
+	}); err != nil {
+		t.Fatal(err)
 	}
-	if _, err := secondSender.EditStatusWithKeyboard(context.Background(), "status:601", decision.Status, decision.Keyboard); err != nil {
-		t.Fatalf("explicitly authorized carrier retry: %v", err)
+	snapshot, err := uiStore.Load(ctx)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if safeBase.edits != 1 {
-		t.Fatalf("explicit retry carrier edits=%d want 1", safeBase.edits)
+	stored, _ := snapshot.Card(flowSessionID)
+	prepared, err := telegramflow.PrepareCardRefresh("status:602", flowSessionID, 42, 99, telegramui.CardProjectionInput{
+		Pages: []telegramui.ContentPage{{Content: "latest", Anchors: []string{"latest"}}},
+		View:  telegramui.PageView{Page: 1, Pages: 1, Anchor: "latest", FollowLatest: true},
+	}, "", false, nil, presenter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prepared.Card.ExpectedCarrierRevision = &stored.CarrierRevision
+	prepared.Card.ExpectedPresentationOperation = &stored.LastPresentationOperation
+	operations := telegramflow.NewMemoryCallbackOperationStore()
+	operation := telegramflow.CallbackOperation{
+		ID: "status:602", UpdateID: 602, CallbackQueryID: "query-602", CallbackDigest: strings.Repeat("d", 64),
+		Plan: telegrampipeline.CallbackPlan{OperationID: "status:602", UpdateID: 602, SessionID: flowSessionID,
+			Carrier: stored.Carrier, Action: telegramui.ActionPageLatest, Target: telegramui.ButtonTarget{FollowLatest: true}, Effect: telegrampipeline.EffectProjectPage},
+		Phase: telegramflow.CallbackPrepared, Prepared: &prepared,
+	}
+	if err := operations.Create(ctx, operation); err != nil {
+		t.Fatal(err)
+	}
+	if err := uiStore.Update(ctx, func(state *telegramstate.State) error {
+		card, _ := state.Card(flowSessionID)
+		card.Carrier.MessageID = 100
+		return state.SetCard(card)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	base := &sender{receipt: coordinator.Receipt{MessageID: 99}}
+	_, outbound, err := telegramflow.New(telegramflow.Config{OwnerUserID: 7, OwnerPrivateChatID: 42, Presenter: presenter,
+		CallbackRegistry: telegrampipeline.NewMemoryCallbackRegistry(func() time.Time { return now }), UIState: uiStore,
+		Messages: &messageHandler{}, Callbacks: &callbackExecutor{}, Operations: operations, Sender: base})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, handled, err := outbound.DeliverPreparedStatus(ctx, operation.ID, prepared.Status, prepared.Keyboard); err != nil || !handled {
+		t.Fatalf("stale repeatable settlement error=%v handled=%t", err, handled)
+	}
+	settled, found, err := operations.Load(ctx, operation.ID)
+	if err != nil || !found || settled.Phase != telegramflow.CallbackEffectResolved || base.edits != 0 {
+		t.Fatalf("stale repeatable operation=%#v found=%t edits=%d err=%v", settled, found, base.edits, err)
+	}
+}
+
+func TestStaleNativeSurfaceSelectRetryNeverReachesTelegram(t *testing.T) {
+	ctx := context.Background()
+	now := time.Unix(1_800_000_000, 0).UTC()
+	presenter := newPresenter(t, now)
+	uiStore := telegramstate.NewMemoryStore()
+	card := telegramstate.Card{SessionID: flowSessionID, Carrier: telegramstate.Carrier{ChatID: 42, MessageID: 99},
+		CarrierOperation: "carrier:old", LastPresentationOperation: "presentation:old",
+		Page: telegramstate.Page{Current: 1, Total: 1, FollowLatest: true}}
+	if err := uiStore.Update(ctx, func(state *telegramstate.State) error {
+		state.ActiveSession = flowSessionID
+		return state.SetCard(card)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := uiStore.Load(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, _ := snapshot.Card(flowSessionID)
+	surface := telegramflow.SurfaceOutput{Text: "native", NativeSessionID: flowSessionID,
+		SelectableSessionIDs: []domain.SessionID{flowSessionID}, Keyboard: telegramui.CardKeyboard{Rows: []telegramui.ButtonRow{{{
+			Action: telegramui.ActionNativeKey, Label: "↑", Target: telegramui.ButtonTarget{SessionSlot: 1, Choice: 1},
+		}}}}}
+	prepared, err := telegramflow.PrepareSurface("status:603", 42, "query-603", 99, true, surface, presenter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prepared.Surface.ExpectedCarrierRevision = &stored.CarrierRevision
+	prepared.Surface.ExpectedPresentationOperation = &stored.LastPresentationOperation
+	operations := telegramflow.NewMemoryCallbackOperationStore()
+	operation := telegramflow.CallbackOperation{ID: "status:603", UpdateID: 603, CallbackQueryID: "query-603", CallbackDigest: strings.Repeat("e", 64),
+		Plan: telegrampipeline.CallbackPlan{OperationID: "status:603", UpdateID: 603, SessionID: flowSessionID,
+			Carrier: stored.Carrier, Action: telegramui.ActionSelectSession, Effect: telegrampipeline.EffectSelectSession},
+		Phase: telegramflow.CallbackPrepared, Prepared: &prepared}
+	if err := operations.Create(ctx, operation); err != nil {
+		t.Fatal(err)
+	}
+	if err := uiStore.Update(ctx, func(state *telegramstate.State) error {
+		newer, _ := state.Card(flowSessionID)
+		newer.LastPresentationOperation = "presentation:newer"
+		return state.SetCard(newer)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	base := &sender{receipt: coordinator.Receipt{MessageID: 99}}
+	_, outbound, err := telegramflow.New(telegramflow.Config{OwnerUserID: 7, OwnerPrivateChatID: 42, Presenter: presenter,
+		CallbackRegistry: telegrampipeline.NewMemoryCallbackRegistry(func() time.Time { return now }), UIState: uiStore,
+		Messages: &messageHandler{}, Callbacks: &callbackExecutor{}, Operations: operations, Sender: base})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, handled, err := outbound.DeliverPreparedStatus(ctx, operation.ID, prepared.Status, prepared.Keyboard); err != nil || !handled {
+		t.Fatalf("stale native surface settlement error=%v handled=%t", err, handled)
+	}
+	settled, found, err := operations.Load(ctx, operation.ID)
+	if err != nil || !found || settled.Phase != telegramflow.CallbackEffectResolved || base.edits != 0 {
+		t.Fatalf("stale native surface operation=%#v found=%t edits=%d err=%v", settled, found, base.edits, err)
 	}
 }
 
@@ -874,6 +989,8 @@ type countingAcknowledgementStore struct {
 	telegramflow.CallbackOperationStore
 	acknowledgements telegramflow.CallbackAcknowledgementStore
 	creates          int
+	operationCreates int
+	operationSwaps   int
 }
 
 func newCountingAcknowledgementStore() *countingAcknowledgementStore {
@@ -884,6 +1001,16 @@ func newCountingAcknowledgementStore() *countingAcknowledgementStore {
 func (store *countingAcknowledgementStore) CreateCallbackAcknowledgement(ctx context.Context, operationID, queryID string) error {
 	store.creates++
 	return store.acknowledgements.CreateCallbackAcknowledgement(ctx, operationID, queryID)
+}
+
+func (store *countingAcknowledgementStore) Create(ctx context.Context, operation telegramflow.CallbackOperation) error {
+	store.operationCreates++
+	return store.CallbackOperationStore.Create(ctx, operation)
+}
+
+func (store *countingAcknowledgementStore) CompareAndSwap(ctx context.Context, id string, old telegramflow.CallbackOperationPhase, next telegramflow.CallbackOperation) (bool, error) {
+	store.operationSwaps++
+	return store.CallbackOperationStore.CompareAndSwap(ctx, id, old, next)
 }
 
 func (store *countingAcknowledgementStore) BeginCallbackAcknowledgement(ctx context.Context, operationID, queryID string) (bool, error) {
@@ -916,7 +1043,7 @@ func TestAcceptedCallbackUsesClaimAsAckFenceWithoutSeparateAcknowledgementRecord
 		t.Fatal(err)
 	}
 	presentation, err := presenter.PresentKeyboardWithManifest(string(flowSessionID), nil, telegramui.CardKeyboard{Rows: []telegramui.ButtonRow{{
-		{Action: telegramui.ActionPagePrevious, Target: telegramui.ButtonTarget{Page: 1}},
+		{Action: telegramui.ActionPageLatest, Target: telegramui.ButtonTarget{Page: 2, FollowLatest: true}, Indicator: &telegramui.PageIndicator{Current: 2, Total: 2}},
 	}}})
 	if err != nil {
 		t.Fatal(err)
@@ -926,7 +1053,7 @@ func TestAcceptedCallbackUsesClaimAsAckFenceWithoutSeparateAcknowledgementRecord
 	}
 	operations := newCountingAcknowledgementStore()
 	base := &acceptedCallbackSender{sender: &sender{receipt: coordinator.Receipt{MessageID: 99}}, operations: operations}
-	handler, _, err := telegramflow.New(telegramflow.Config{
+	handler, outbound, err := telegramflow.New(telegramflow.Config{
 		OwnerUserID: 7, OwnerPrivateChatID: 42, Presenter: presenter, CallbackRegistry: registry,
 		UIState: uiStore, Messages: &messageHandler{}, Callbacks: &callbackExecutor{}, Operations: operations, Sender: base,
 	})
@@ -940,9 +1067,24 @@ func TestAcceptedCallbackUsesClaimAsAckFenceWithoutSeparateAcknowledgementRecord
 	if err != nil {
 		t.Fatal(err)
 	}
-	if operations.creates != 0 || base.accepted != 1 || base.acknowledgements != 0 || base.phase != telegramflow.CallbackClaimed {
-		t.Fatalf("ack path: records=%d accepted=%d legacy=%d phase=%q; want 0/1/0/claimed",
-			operations.creates, base.accepted, base.acknowledgements, base.phase)
+	if operations.creates != 0 || operations.operationCreates != 1 || operations.operationSwaps != 0 ||
+		base.accepted != 1 || base.acknowledgements != 0 || base.phase != telegramflow.CallbackPrepared {
+		t.Fatalf("repeatable preparation: ack_records=%d creates=%d swaps=%d accepted=%d legacy=%d phase=%q; want 0/1/0/1/0/prepared",
+			operations.creates, operations.operationCreates, operations.operationSwaps, base.accepted, base.acknowledgements, base.phase)
+	}
+	operation, found, err := operations.Load(context.Background(), "status:901")
+	if err != nil || !found || operation.Prepared == nil {
+		t.Fatalf("prepared operation = %#v, found=%t err=%v", operation, found, err)
+	}
+	if _, err := outbound.EditStatusWithKeyboard(context.Background(), operation.ID, operation.Prepared.Status, operation.Prepared.Keyboard); err != nil {
+		t.Fatalf("deliver repeatable callback: %v", err)
+	}
+	if operations.operationSwaps != 2 {
+		t.Fatalf("repeatable delivery swaps=%d want 2 (receipt + commit, without send-unknown fence)", operations.operationSwaps)
+	}
+	committed, found, err := operations.Load(context.Background(), operation.ID)
+	if err != nil || !found || committed.Phase != telegramflow.CallbackCommitted || base.edits != 1 {
+		t.Fatalf("committed repeatable callback = %#v found=%t edits=%d err=%v", committed, found, base.edits, err)
 	}
 }
 

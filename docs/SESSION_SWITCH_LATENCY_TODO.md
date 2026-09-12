@@ -5,10 +5,10 @@
 - Результат: сократить видимую задержку `tap -> обновлённая карточка` при
   переключении сессии до минимально достижимой без потери порядка, защиты от
   дублей и восстановления после сбоя.
-- Источники: safe detailed logs установленной revision `55cbf823`, текущий код
+- Источники: safe detailed logs установленной revision `b27b57de`, текущий код
   callback/delivery/state paths, локальный Python-проект как сравнительный
   ориентир при обнаружении его точного пути, затем regression tests.
-- Период: свежие callbacks после deploy 2026-09-12 12:42:25 MSK; timezone -
+- Период: свежие callbacks после deploy 2026-09-12 14:44 MSK; timezone -
   Europe/Moscow.
 - Grain/population: один callback `select_session` от приёма Telegram до
   успешного edit карточки; минимум три свежих переключения. Настройки и другие
@@ -30,7 +30,9 @@
 | A52.3 | Исправить корневую причину без потери гарантий | partial; iteration 2 active | Уже fenced `CallbackPrepared` доставляется без второго status-outbox и без outer checkpoint перед edit; transcript/page/session-list читаются одним joined snapshot. RED доказал, что раньше edit ждал outer checkpoint; GREEN - direct edit начинается до него. Stale definitely-unsent callback durably завершается без блокировки очереди; send-unknown сохраняет `ErrDeliveryUnknown`. Live улучшение недостаточно, поэтому оставшиеся последовательные pre-edit writes исследуются отдельно. |
 | A52.4 | Выпустить и проверить новую версию | deployed; acceptance failed | Source commit `0552914` в `origin/main`; Stage 1 `34688585550` и Platform Matrix `34688585553` GREEN. Signed release `20260912-session-switch-latency` установлен, state/journal и Telegram postflight GREEN. Четыре реальных tap показали до `1.33 s`; Артём не принял задержку. |
 | A52.5 | Убрать оставшиеся storage/ack commits интерактивного пути | implemented; full gate and review GREEN | Repeatable durable callback больше не переписывает registry; RED/GREEN подтверждает `CallbackClaimed` как ack restart-fence без acknowledgement record. Generation cache убирает повторный parse неизменного state; healthy scheduler не делает второй no-op fsync. Finalized history `256 -> 64`, при этом все non-finalized и coupled records обходят cap. Append-only WAL отклонён из-за небезопасного rollback. Полный `VERSION=20260912-session-switch-latency-v3 make check-full` и независимое review завершились успешно. |
-| A52.6 | Выпустить iteration 2 и повторить live acceptance | release pending | Локальный полный gate и независимое review GREEN. Остались exact-SHA CI, signed release, postflight и новые реальные tap. |
+| A52.6 | Выпустить iteration 2 и повторить live acceptance | deployed; acceptance failed | `b27b57de` выпущен и перезапущен. Пять свежих `select_session` дали ingress -> transport complete `357-805 ms`, но вместе с Telegram/client delivery Артём всё ещё наблюдает больше секунды. Один `menu_sessions` совпал с background edit и занял `1172 ms`. |
+| A52.7 | Убрать оставшиеся callback commits до edit и приоритизировать пользовательский tap | implemented; full gate and independent re-review GREEN | `select_session` и переход на актуальную страницу сохраняют сразу replay-safe `Prepared`, выполняют edit без `SendUnknown`, затем фиксируют receipt/commit. Previous/next теперь используют подписанную абсолютную страницу, но сохраняют полный durable flow. Card/native/global retry проверяет revision, presentation owner и active session до Telegram. Routine mutation не стартует во время активного interactive lease; heavy serialization, rate limits, cancellation и supersession сохранены. |
+| A52.8 | Восстановить автоподтверждение зависшей живой CLI-сессии | implemented; full gate, exact live parser probe and independent re-review GREEN | `Awaiting Recovery` TokenAudit вызван не падением: Codex жив и ждёт меню `Would you like to make the following edits?`. Добавлен строгий file-edit parser: полный экран или bounded tail только из `Description`/`Destination`, exact options/footer. Full/reflowed экран имеет один one-shot identity, разные destination остаются различимы; file-edit receipt проверяется отдельно. Настройка auto-approval остаётся обязательным gate. |
 
 ## Проверенная причина
 
@@ -43,9 +45,12 @@ projection трижды перечитывал общий `state.json` разм�
 
 ## Реализованная граница
 
-1. Callback effect и prepared output по-прежнему фиксируются до внешнего edit.
-2. Перед edit остаётся единственный `CallbackSendUnknown`; неоднозначный
-   transport result автоматически не повторяется.
+1. Для one-shot callback effect и prepared output по-прежнему фиксируются до
+   внешнего edit полным набором fences.
+2. Replay-safe `select_session` и переход к актуальной странице сначала
+   сохраняют exact `Prepared`, а затем выполняют
+   идемпотентный edit без `CallbackSendUnknown`; неоднозначный результат можно
+   безопасно повторить с тем же payload. One-shot операции не изменены.
 3. После receipt выполняются binding/state commit и callback commit.
 4. Outer coordinator checkpoint сохраняется один раз после видимого edit;
    crash до него безопасно replay-ится через committed callback без дубля.
@@ -131,3 +136,29 @@ healthy scheduler persistence calls `2 -> 1`, finalized namespace history
 registry обновлён ровно под добавленные обязанности; `check-architecture`,
 `check-policy` и `release-supply-chain` GREEN. Live latency новой версии ещё не
 проверена.
+
+## Итерация 3
+
+1. `select_session` и переход к актуальной странице больше не делают `claimed ->
+   effect_unknown -> prepared` тремя синхронными CAS. Их детерминированный effect выполняется до
+   единственной durable-вставки `Prepared`; crash до неё безопасно повторяет
+   только projection, crash после неё переиспользует exact output. Previous/next
+   используют подписанную абсолютную страницу, но сохраняют полный crash-fence.
+2. Идемпотентный edit repeatable callback не переходит в `send_unknown`.
+   Неоднозначный transport оставляет `Prepared`, restart повторяет exact edit;
+   stale carrier/revision guard не позволяет старому retry заменить новую
+   карточку. Receipt и commit остаются durable после ответа Telegram.
+3. Routine Telegram mutation ждёт завершения уже активного interactive lease.
+   Пользовательский callback не ждёт routine waiter; heavy mutations, global
+   rate limit, cooldown, cancellation и card supersession покрыты race-тестами.
+4. Парсер автоподтверждений теперь распознаёт command и file-edit menus, включая
+   bounded tail без заголовка только при строгой структуре `Description`/
+   `Destination` и exact options/footer. Full и reflowed экран используют один
+   one-shot identity. При выключенной настройке
+   `auto_approve_commands` ключ не отправляется. Точный экран проблемной сессии
+   распознан read-only, но фактическое продолжение требует deploy/postflight.
+
+Полный `VERSION=20260912-session-switch-latency-v4 make check-full`, focused
+race и два независимых re-review завершились GREEN/APPROVE. Scheduler может
+откладывать routine update только пока действительно активны пользовательские
+mutations; при конечной последовательности tap starvation не воспроизводится.

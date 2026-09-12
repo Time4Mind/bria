@@ -23,6 +23,7 @@ func TestResolveKeepsReadingIntentAndNavigatesCurrentPages(t *testing.T) {
 		{"notice", "status notice", cardpageselection.View{Page: 2, Pages: 3, Anchor: "b"}, cardpageselection.View{Page: 1, Pages: 3, Anchor: "b"}},
 		{"previous_tail", "pg:prev", cardpageselection.View{Page: 2, Pages: 2, Anchor: "b", FollowLatest: true}, cardpageselection.View{Page: 2, Pages: 3, Anchor: "c"}},
 		{"next_tail", "pg:next", cardpageselection.View{Page: 2, Pages: 3, Anchor: "c"}, cardpageselection.View{Page: 3, Pages: 3, Anchor: "d", FollowLatest: true}},
+		{"absolute_previous", "pg:target:1", cardpageselection.View{Page: 3, Pages: 3, Anchor: "d", FollowLatest: true}, cardpageselection.View{Page: 1, Pages: 3, Anchor: "b"}},
 		{"expired_anchor", "", cardpageselection.View{Page: 1, Pages: 3, Anchor: "a"}, cardpageselection.View{Page: 1, Pages: 3, Anchor: "b"}},
 	}
 	for _, tc := range cases {

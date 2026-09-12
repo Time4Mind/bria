@@ -18,7 +18,7 @@ func InteractiveContent(text string) (string, bool) {
 	for i := range lines {
 		lines[i] = strings.TrimSpace(strings.Trim(strings.TrimSpace(lines[i]), "│┃║"))
 		line := lines[i]
-		if interactiveHeading.MatchString(line) && !strings.HasPrefix(line, "✔ You approved codex to run ") {
+		if interactiveHeading.MatchString(line) && !strings.HasPrefix(line, "✔ You approved codex to ") {
 			top, bottom = i, -1
 		}
 		if option < 0 && interactiveOption.MatchString(line) {

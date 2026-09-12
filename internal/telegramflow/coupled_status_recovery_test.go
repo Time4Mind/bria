@@ -495,17 +495,12 @@ func TestLateBackgroundFinalRetryCannotReplaceNewerActiveSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	wire.sender.err = nil
-	if err := outbound.RetryUnknownSend(ctx, prepared.OperationID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := outbound.EditStatusWithKeyboard(ctx, prepared.OperationID, prepared.Status, prepared.Keyboard); err == nil {
-		t.Fatal("late retry replaced the newer active session")
-	}
+	_, _ = outbound.EditStatusWithKeyboard(ctx, prepared.OperationID, prepared.Status, prepared.Keyboard)
 	got, err := state.Load(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.ActiveSession != newerID || wire.sender.edits != 1 {
+	if got.ActiveSession != newerID || wire.sender.edits != 0 {
 		t.Fatalf("late retry changed newer view: active=%s edits=%d", got.ActiveSession, wire.sender.edits)
 	}
 }

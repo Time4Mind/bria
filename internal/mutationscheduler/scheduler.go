@@ -30,8 +30,7 @@ const (
 	Interactive
 )
 
-// Mutation identifies only scheduling metadata. It never contains Telegram
-// text, callback payloads, tokens, or upload content.
+// Mutation contains scheduling metadata only, never Telegram payloads or credentials.
 type Mutation struct {
 	Method   string
 	ChatID   int64
@@ -48,8 +47,7 @@ type Options struct {
 	Report    func(Diagnostic)
 }
 
-// Diagnostic is bounded operational metadata. It deliberately excludes
-// Telegram identifiers, payloads, callback data, and credentials.
+// Diagnostic contains bounded metadata only, never Telegram payloads or credentials.
 type Diagnostic struct {
 	Method        string
 	ErrorClass    string
@@ -85,6 +83,7 @@ type waiter struct{ queuedAt time.Time }
 
 type MutationScheduler struct {
 	mu            sync.Mutex
+	interactive   sync.RWMutex
 	path          string
 	now           func() time.Time
 	wait          func(context.Context, time.Duration) error
@@ -175,15 +174,6 @@ func (scheduler *MutationScheduler) Acquire(ctx context.Context, mutation Mutati
 		delete(scheduler.waiters, waiterID)
 		scheduler.mu.Unlock()
 	}()
-	heavy := false
-	if mutation.Heavy {
-		select {
-		case scheduler.heavy <- struct{}{}:
-			heavy = true
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		}
-	}
 	cardKey := mutationCardKey(mutation)
 	var cardVersion uint64
 	if cardKey != "" {
@@ -193,36 +183,45 @@ func (scheduler *MutationScheduler) Acquire(ctx context.Context, mutation Mutati
 		scheduler.broadcastLocked()
 		scheduler.mu.Unlock()
 	}
-	releaseHeavy := func() {
-		if heavy {
-			<-scheduler.heavy
-		}
-	}
 	for {
 		scheduler.mu.Lock()
 		if cardKey != "" && scheduler.cardVersions[cardKey] != cardVersion {
 			scheduler.mu.Unlock()
-			releaseHeavy()
 			return nil, ErrSuperseded
 		}
 		now := scheduler.now().UTC()
 		if scheduler.state.BlockedAll || (mutation.ChatID != 0 && scheduler.state.BlockedChats[strconv.FormatInt(int64(mutation.ChatID), 10)]) {
 			scheduler.mu.Unlock()
-			releaseHeavy()
 			return nil, ErrStopped
+		}
+		if mutation.Priority != Interactive && !scheduler.interactive.TryLock() {
+			if err := scheduler.waitForChange(ctx); err != nil {
+				return nil, err
+			}
+			continue
+		}
+		if mutation.Priority != Interactive {
+			scheduler.interactive.Unlock()
 		}
 		delay := scheduler.delayLocked(now, mutation)
 		probe := scheduler.state.ProbeRequired && mutation.Priority != Interactive
 		if probe && scheduler.probeInFlight {
-			notify := scheduler.notify
-			scheduler.mu.Unlock()
-			if err := waitForSchedulerChange(ctx, notify); err != nil {
-				releaseHeavy()
+			if err := scheduler.waitForChange(ctx); err != nil {
 				return nil, err
 			}
 			continue
 		}
 		if delay <= 0 {
+			if mutation.Heavy {
+				select {
+				case scheduler.heavy <- struct{}{}:
+				default:
+					if err := scheduler.waitForChange(ctx); err != nil {
+						return nil, err
+					}
+					continue
+				}
+			}
 			if probe {
 				scheduler.probeInFlight = true
 			}
@@ -232,30 +231,33 @@ func (scheduler *MutationScheduler) Acquire(ctx context.Context, mutation Mutati
 				if probe {
 					scheduler.probeInFlight = false
 				}
+				if mutation.Heavy {
+					<-scheduler.heavy
+				}
+				scheduler.broadcastLocked()
 				scheduler.mu.Unlock()
-				releaseHeavy()
 				return nil, err
 			}
 			persistedState := cloneMutationDiskState(scheduler.state)
+			if mutation.Priority == Interactive {
+				scheduler.interactive.RLock()
+			}
 			scheduler.broadcastLocked()
 			scheduler.mu.Unlock()
 			return &Lease{
-				scheduler: scheduler, mutation: mutation, heavy: heavy, probe: probe, epoch: epoch,
+				scheduler: scheduler, mutation: mutation, heavy: mutation.Heavy, probe: probe, epoch: epoch,
 				persistedState: persistedState,
 			}, nil
 		}
 		notify := scheduler.notify
 		scheduler.mu.Unlock()
 		if err := scheduler.waitDelay(ctx, delay, notify); err != nil {
-			releaseHeavy()
 			return nil, err
 		}
 	}
 }
 
-// ConfirmAuthorization clears only the global 401 stop after the same client
-// has successfully authenticated through getMe. Recipient-specific 403 stops
-// remain explicit because bot authentication cannot prove a chat is writable.
+// ConfirmAuthorization clears global 401 after this client authenticates; recipient 403 stops remain explicit.
 func (scheduler *MutationScheduler) ConfirmAuthorization() error {
 	if scheduler == nil {
 		return nil
@@ -270,8 +272,7 @@ func (scheduler *MutationScheduler) ConfirmAuthorization() error {
 	return scheduler.persistLocked()
 }
 
-// SetReporter binds a local diagnostic sink. It is safe to call before or
-// during runtime; reporting never holds the scheduler lock.
+// SetReporter safely binds a local diagnostic sink without reporting under the scheduler lock.
 func (scheduler *MutationScheduler) SetReporter(report func(Diagnostic)) {
 	if scheduler == nil {
 		return
@@ -305,6 +306,9 @@ func (scheduler *MutationScheduler) complete(lease *Lease, outcome Outcome) erro
 	}
 	scheduler.mu.Lock()
 	now := scheduler.now().UTC()
+	if lease.mutation.Priority == Interactive {
+		scheduler.interactive.RUnlock()
+	}
 	if lease.probe {
 		scheduler.probeInFlight = false
 	}
@@ -573,7 +577,9 @@ func waitDuration(ctx context.Context, delay time.Duration) error {
 	}
 }
 
-func waitForSchedulerChange(ctx context.Context, notify <-chan struct{}) error {
+func (scheduler *MutationScheduler) waitForChange(ctx context.Context) error {
+	notify := scheduler.notify
+	scheduler.mu.Unlock()
 	select {
 	case <-ctx.Done():
 		return ctx.Err()

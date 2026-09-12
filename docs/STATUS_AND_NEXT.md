@@ -1,14 +1,19 @@
 # Handoff: статус и следующий план
 
-> Текущий запрос A52 - первая выпущенная оптимизация улучшила средний pre-edit с
-> `845` до `486 ms`, но четыре live tap дали `722-1333 ms`, поэтому пользователь
-> не принял результат. Итерация 2 локально убирает отдельные ack/registry writes,
-> кэширует проверенное поколение неизменного `state.json`, не пишет неизменившийся
-> healthy scheduler result и сокращает backward-compatible finalized callback
-> history с `256` до `64`. WAL отклонён: предыдущий бинарник не читает sidecar и
-> мог повторить stale effect после rollback. Focused/race, architecture/policy,
-> supply-chain, независимое review и полный versioned `make check-full` GREEN;
-> впереди exact-SHA CI, signed release, restart и новые реальные tap. Договор:
+> Текущий запрос A52 - выпущенная iteration 2 (`b27b57de`) всё ещё воспринимается
+> медленной: пять live `select_session` заняли `357-805 ms` внутри Bria/Telegram,
+> а с доставкой клиенту остались выше секунды. Iteration 3 локально убирает три
+> operation CAS до `select_session`/latest-page edit и не ставит этот
+> replay-safe edit в `send_unknown`; carrier revision проверяется до Telegram.
+> Previous/next используют абсолютную подписанную страницу и полный durable
+> flow. Routine Telegram mutation не
+> стартует во время активного interactive lease. Параллельно точная проблемная
+> TokenAudit оказалась живой Codex-сессией на неподдержанном file-edit approval;
+> parser теперь распознаёт command/file-edit и только строгий bounded tail;
+> full/reflowed menu имеет один one-shot identity. Exact live screen probe и
+> full gate и два независимых re-review GREEN. Впереди
+> exact-SHA CI, signed release, restart, автоматическое продолжение TokenAudit и
+> новые реальные tap. Договор:
 > [SESSION_SWITCH_LATENCY_TODO.md](SESSION_SWITCH_LATENCY_TODO.md).
 
 > Текущий запрос A51 - исправить потерю request custody активной сессии,

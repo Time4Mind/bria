@@ -47,6 +47,78 @@ func TestCodexAllObservedApprovalFixtures(t *testing.T) {
 	}
 }
 
+func TestCodexFileEditApprovalIsParsedForOneShotAutoApproval(t *testing.T) {
+	body, err := os.ReadFile("testdata/codex-file-edits-approval.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	request, ok := ParseCodexCommandApproval(string(body))
+	if !ok {
+		t.Fatal("file-edit approval was not parsed")
+	}
+	if request.Environment != "local" || request.OptionCount != 3 || request.Incomplete ||
+		!strings.Contains(request.Preview, "Description: Apply proposed file edits") ||
+		!strings.Contains(request.Preview, "Destination: /work/project/AGENTS.md") || len(request.Fingerprint) != 64 || len(request.DecisionID) != 64 {
+		t.Fatalf("file-edit approval = %#v", request)
+	}
+	terminal := &approvalTerminal{screen: string(body), receipt: "✔ You approved codex to make the edits this time"}
+	if err := AcceptCodexCommandOnce(context.Background(), terminal, request.Fingerprint); err != nil {
+		t.Fatalf("file-edit approval was not accepted once: %v", err)
+	}
+	if strings.Join(terminal.keys, ",") != "Enter" {
+		t.Fatalf("file-edit approval keys = %v", terminal.keys)
+	}
+}
+
+func TestCodexApprovalParsesVisibleTailWhenHeadingExceedsTerminalWindow(t *testing.T) {
+	fileBody, err := os.ReadFile("testdata/codex-file-edits-approval.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fileTail := string(fileBody[strings.Index(string(fileBody), "  Destination:"):])
+	fileRequest, ok := ParseCodexCommandApproval(fileTail)
+	if !ok || !fileRequest.Incomplete || !strings.Contains(fileRequest.Preview, "/work/project/docs/HARNESS.md") {
+		t.Fatalf("incomplete file-edit approval = %#v, %v", fileRequest, ok)
+	}
+
+	commandBody, err := os.ReadFile("testdata/codex-command-approval-collapsed.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	commandTail := string(commandBody[strings.Index(string(commandBody), "› 1."):])
+	commandRequest, ok := ParseCodexCommandApproval(commandTail)
+	if !ok || !commandRequest.Incomplete || commandRequest.OptionCount != 3 {
+		t.Fatalf("incomplete command approval = %#v, %v", commandRequest, ok)
+	}
+	if fileRequest.DecisionID != requestDecisionID(t, string(fileBody)) {
+		t.Fatal("full and reflowed file-edit approval do not share the one-shot identity")
+	}
+	other := strings.Replace(string(fileBody), "/work/project/docs/SESSION_SWITCH_LATENCY_TODO.md", "/work/project/docs/OTHER.md", 1)
+	if requestDecisionID(t, other) == fileRequest.DecisionID {
+		t.Fatal("distinct file-edit destinations share the one-shot identity")
+	}
+}
+
+func requestDecisionID(t *testing.T, screen string) string {
+	t.Helper()
+	request, ok := ParseCodexCommandApproval(screen)
+	if !ok {
+		t.Fatal("approval fixture was not parsed")
+	}
+	return request.DecisionID
+}
+
+func TestCodexApprovalRejectsHeadinglessLookalikeFilePicker(t *testing.T) {
+	lookalike := `model output copied from documentation
+› 1. Yes, proceed (y)
+2. Yes, and don't ask again for these files (a)
+3. No, and tell Codex what to do differently (esc)
+Press enter to confirm or esc to cancel`
+	if request, ok := ParseCodexCommandApproval(lookalike); ok {
+		t.Fatalf("headingless lookalike parsed as approval: %#v", request)
+	}
+}
+
 func TestCollapsedCommandApprovalCanBeAcceptedWithoutExpansion(t *testing.T) {
 	b, err := os.ReadFile("testdata/codex-command-approval-collapsed.txt")
 	if err != nil {
@@ -66,15 +138,20 @@ func TestCollapsedCommandApprovalCanBeAcceptedWithoutExpansion(t *testing.T) {
 }
 
 type approvalTerminal struct {
-	screen string
-	keys   []string
+	screen  string
+	keys    []string
+	receipt string
 }
 
 func (f *approvalTerminal) Capture(context.Context) (string, error) { return f.screen, nil }
 func (f *approvalTerminal) Input(context.Context, string) error     { panic("no prompt injection") }
 func (f *approvalTerminal) Key(_ context.Context, key string) error {
 	f.keys = append(f.keys, key)
-	f.screen = "✔ You approved codex to run the command this time\n• Running command\n• Working (1s • esc to interrupt)\n› Ask Codex to do anything"
+	receipt := f.receipt
+	if receipt == "" {
+		receipt = "✔ You approved codex to run the command this time"
+	}
+	f.screen = receipt + "\n• Working (1s • esc to interrupt)\n› Ask Codex to do anything"
 	return nil
 }
 

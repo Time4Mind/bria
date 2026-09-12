@@ -156,8 +156,10 @@ func (store *MemoryCallbackOperationStore) Load(ctx context.Context, id string) 
 	return loadCallback(ctx, store.backend(), id)
 }
 func createCallback(ctx context.Context, backend telegramops.Store, operation CallbackOperation) error {
-	if backend == nil || operation.Phase != CallbackClaimed {
-		return errors.New("new callback operation must be claimed")
+	replaySafePrepared := operation.Phase == CallbackPrepared && operation.Prepared != nil &&
+		operation.Prepared.Edit && telegrampipeline.IsReplaySafePreparedAction(operation.Plan.Action)
+	if backend == nil || operation.Phase != CallbackClaimed && !replaySafePrepared {
+		return errors.New("new callback operation must be claimed or replay-safe prepared")
 	}
 	if err := validateCallbackOperation(operation); err != nil {
 		return err
@@ -188,6 +190,10 @@ func swapCallback(ctx context.Context, backend telegramops.Store, id string, old
 	}
 	if !sameCallbackOperationIdentity(current, next) {
 		return false, errors.New("callback operation immutable identity changed")
+	}
+	if old == CallbackPrepared && next.Phase == CallbackReceiptConfirmed &&
+		(current.Prepared == nil || !current.Prepared.Edit || !telegrampipeline.IsReplaySafePreparedAction(current.Plan.Action)) {
+		return false, errors.New("direct callback receipt transition is not replay-safe")
 	}
 	raw, _ := json.Marshal(next)
 	return backend.CompareAndSwap(ctx, telegramops.Callbacks, id, string(old), raw)
@@ -388,7 +394,7 @@ func validCallbackOperationTransition(old, next CallbackOperationPhase) bool {
 	case CallbackEffectRetryUnknown:
 		return next == CallbackEffectResolved
 	case CallbackPrepared:
-		return next == CallbackPrepared || next == CallbackSendUnknown || next == CallbackEffectResolved
+		return next == CallbackPrepared || next == CallbackSendUnknown || next == CallbackEffectResolved || next == CallbackReceiptConfirmed
 	case CallbackSendUnknown:
 		return next == CallbackPrepared || next == CallbackReceiptConfirmed
 	case CallbackReceiptConfirmed:

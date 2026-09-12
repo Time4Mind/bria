@@ -12,7 +12,8 @@ type expandableTerminal interface {
 }
 
 func NeedsExpansion(screen string) bool {
-	return strings.Contains(screen, "Would you like to run the following command?") &&
+	return (strings.Contains(screen, "Would you like to run the following command?") ||
+		strings.Contains(screen, "Would you like to make the following edits?")) &&
 		strings.Contains(screen, "ctrl + a view all") && strings.Contains(screen, "Press enter to confirm or esc to cancel")
 }
 

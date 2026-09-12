@@ -157,7 +157,7 @@ func acceptCallback(
 		ExpiresAt:        decoded.ExpiresAt,
 		UpdateID:         update.ID,
 		CallbackQueryID:  update.CallbackQueryID,
-		Repeatable:       repeatableVisibleAction(decoded.Callback.Action),
+		Repeatable:       IsRepeatableVisibleAction(decoded.Callback.Action),
 		DurableOperation: allowExactRecovery,
 	}
 	claimResult, err := registry.Claim(ctx, claim)
@@ -278,12 +278,25 @@ func acceptCallback(
 	}, nil
 }
 
-func repeatableVisibleAction(action telegramui.Action) bool {
+// IsRepeatableVisibleAction reports visible navigation controls that may be
+// tapped repeatedly from one still-current keyboard.
+func IsRepeatableVisibleAction(action telegramui.Action) bool {
 	switch action {
 	case telegramui.ActionPagePrevious, telegramui.ActionPageLatest, telegramui.ActionPageNext,
 		telegramui.ActionSelectSession,
 		telegramui.ActionCreatePrevious, telegramui.ActionCreateFirst, telegramui.ActionCreateNext,
 		telegramui.ActionMenuArchive:
+		return true
+	default:
+		return false
+	}
+}
+
+// IsReplaySafePreparedAction is the narrower set whose semantic output can be
+// persisted directly after projection and retried without repeating an effect.
+func IsReplaySafePreparedAction(action telegramui.Action) bool {
+	switch action {
+	case telegramui.ActionPageLatest, telegramui.ActionSelectSession:
 		return true
 	default:
 		return false

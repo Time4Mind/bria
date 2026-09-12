@@ -59,9 +59,10 @@ type MessageResult struct {
 	Surface  *SurfaceOutput
 }
 type SurfaceOutput struct {
-	Text                    string
-	ExpectedCarrierRevision *uint64
-	ExpectedCarrierAbsent   bool
+	Text                          string
+	ExpectedCarrierRevision       *uint64
+	ExpectedPresentationOperation *string
+	ExpectedCarrierAbsent         bool
 	// NativeSessionID rebinds only an existing session's carrier on receipt;
 	// the keyboard remains a global surface with signed selectable targets.
 	NativeSessionID      domain.SessionID
@@ -385,6 +386,9 @@ func (handler *Handler) Handle(ctx context.Context, update coordinator.Update) (
 		ID: operationID, UpdateID: update.ID, CallbackQueryID: update.CallbackQueryID,
 		CallbackDigest: digest, Plan: plan, Phase: CallbackClaimed,
 	}
+	if telegrampipeline.IsReplaySafePreparedAction(plan.Action) {
+		return handler.executeReplaySafe(ctx, update, operation)
+	}
 	stageStarted = time.Now()
 	err = handler.operations.Create(ctx, operation)
 	handler.trace(ctx, completedTrace("callback.claim.persist", operationID, update, plan.Action, plan.Effect, stageStarted, err))
@@ -402,6 +406,48 @@ func (handler *Handler) Handle(ctx context.Context, update coordinator.Update) (
 		return coordinator.Decision{}, err
 	}
 	return handler.executeClaimed(ctx, update, operation)
+}
+
+func (handler *Handler) executeReplaySafe(ctx context.Context, update coordinator.Update, operation CallbackOperation) (coordinator.Decision, error) {
+	snapshot, err := handler.uiState.Load(ctx)
+	if err != nil {
+		return coordinator.Decision{}, fmt.Errorf("load repeatable callback target: %w", err)
+	}
+	prepared, err := handler.executeCallbackEffect(ctx, update, operation, snapshot)
+	if err != nil {
+		return coordinator.Decision{}, err
+	}
+	captureExpectedCallbackTarget(snapshot, &prepared)
+	if prepared.Card.SessionID == "" && (prepared.Surface == nil || prepared.Surface.NativeSessionID == "") {
+		current, loadErr := handler.uiState.Load(ctx)
+		if loadErr != nil {
+			return coordinator.Decision{}, fmt.Errorf("load repeatable callback active target: %w", loadErr)
+		}
+		prepared.ExpectedActiveSessionID = clonePointer(&current.ActiveSession)
+	}
+	preparedOperation := operation
+	preparedOperation.Phase = CallbackPrepared
+	preparedOperation.Prepared = &prepared
+	stageStarted := time.Now()
+	err = handler.operations.Create(ctx, preparedOperation)
+	handler.trace(ctx, completedTrace("callback.output.persist", operation.ID, update, operation.Plan.Action, operation.Plan.Effect, stageStarted, err))
+	if err != nil {
+		if !errors.Is(err, ErrCallbackOperationExists) {
+			return coordinator.Decision{}, fmt.Errorf("persist repeatable callback output: %w", err)
+		}
+		existing, found, loadErr := handler.operations.Load(ctx, operation.ID)
+		if loadErr != nil || !found {
+			return coordinator.Decision{}, fmt.Errorf("reload concurrent repeatable callback operation: %w", loadErr)
+		}
+		return handler.resumeOperation(ctx, update, operation.CallbackDigest, existing)
+	}
+	if err := handler.acknowledgeAcceptedCallback(ctx, operation.ID, update); err != nil {
+		return coordinator.Decision{}, err
+	}
+	if err := handler.pending.register(prepared); err != nil {
+		return coordinator.Decision{}, err
+	}
+	return decisionFromPrepared(prepared), nil
 }
 
 func (handler *Handler) persistAndAcknowledgeCallback(ctx context.Context, operationID string, update coordinator.Update) error {
@@ -450,37 +496,11 @@ func (handler *Handler) executeClaimed(ctx context.Context, update coordinator.U
 		}
 		return handler.resumeOperation(ctx, update, operation.CallbackDigest, existing)
 	}
-	stageStarted = time.Now()
-	result, err := handler.callbacks.HandleCallback(ctx, operation.Plan)
-	handler.trace(ctx, completedTrace("controller.callback", operation.ID, update, operation.Plan.Action, operation.Plan.Effect, stageStarted, err))
+	prepared, err := handler.executeCallbackEffect(ctx, update, operation, snapshot)
 	if err != nil {
-		return coordinator.Decision{}, fmt.Errorf("%w: callback effect: %v", telegrampipeline.ErrUnknownOperation, err)
+		return coordinator.Decision{}, err
 	}
-	if callbackResultCount(result) != 1 {
-		return coordinator.Decision{}, fmt.Errorf("%w: callback result must contain exactly one card, surface, or terminal output", telegrampipeline.ErrUnknownOperation)
-	}
-	if result.OperationID != operation.ID {
-		return coordinator.Decision{}, fmt.Errorf("%w: callback executor did not acknowledge operation %s", telegrampipeline.ErrUnknownOperation, operation.ID)
-	}
-	stageStarted = time.Now()
-	prepared, err := handler.prepareCallbackResult(operation, result)
-	handler.trace(ctx, completedTrace("projection.callback", operation.ID, update, operation.Plan.Action, operation.Plan.Effect, stageStarted, err))
-	if err != nil {
-		return coordinator.Decision{}, fmt.Errorf("%w: callback effect output: %v", telegrampipeline.ErrUnknownOperation, err)
-	}
-	prepared.PreviousActiveSessionID, prepared.PreviousActiveCarrier = previousActiveCardForBackgroundFinal(snapshot, operation.Plan, prepared)
-	id, revision, absent := prepared.Card.SessionID, &prepared.Card.ExpectedCarrierRevision, &prepared.Card.ExpectedCarrierAbsent
-	if prepared.Surface != nil {
-		id, revision, absent = prepared.Surface.NativeSessionID, &prepared.Surface.ExpectedCarrierRevision, &prepared.Surface.ExpectedCarrierAbsent
-	}
-	if id != "" {
-		target, exists := snapshot.Card(id)
-		*absent = !exists
-		*revision = nil
-		if exists {
-			*revision = &target.CarrierRevision
-		}
-	}
+	captureExpectedCallbackTarget(snapshot, &prepared)
 	preparedOperation := effectUnknown
 	preparedOperation.Phase = CallbackPrepared
 	preparedOperation.Prepared = &prepared
@@ -501,6 +521,52 @@ func (handler *Handler) executeClaimed(ctx context.Context, update coordinator.U
 		Status:   prepared.Status,
 		Keyboard: prepared.Keyboard,
 	}, nil
+}
+
+func captureExpectedCallbackTarget(snapshot telegramstate.State, prepared *Prepared) {
+	if prepared == nil {
+		return
+	}
+	id, revision, expectedOperation, absent := prepared.Card.SessionID, &prepared.Card.ExpectedCarrierRevision,
+		&prepared.Card.ExpectedPresentationOperation, &prepared.Card.ExpectedCarrierAbsent
+	if prepared.Surface != nil {
+		id, revision, expectedOperation, absent = prepared.Surface.NativeSessionID, &prepared.Surface.ExpectedCarrierRevision,
+			&prepared.Surface.ExpectedPresentationOperation, &prepared.Surface.ExpectedCarrierAbsent
+	}
+	if id == "" {
+		return
+	}
+	target, exists := snapshot.Card(id)
+	*absent = !exists
+	*revision = nil
+	*expectedOperation = nil
+	if exists {
+		*revision = &target.CarrierRevision
+		*expectedOperation = &target.LastPresentationOperation
+	}
+}
+
+func (handler *Handler) executeCallbackEffect(ctx context.Context, update coordinator.Update, operation CallbackOperation, snapshot telegramstate.State) (Prepared, error) {
+	stageStarted := time.Now()
+	result, err := handler.callbacks.HandleCallback(ctx, operation.Plan)
+	handler.trace(ctx, completedTrace("controller.callback", operation.ID, update, operation.Plan.Action, operation.Plan.Effect, stageStarted, err))
+	if err != nil {
+		return Prepared{}, fmt.Errorf("%w: callback effect: %v", telegrampipeline.ErrUnknownOperation, err)
+	}
+	if callbackResultCount(result) != 1 {
+		return Prepared{}, fmt.Errorf("%w: callback result must contain exactly one card, surface, or terminal output", telegrampipeline.ErrUnknownOperation)
+	}
+	if result.OperationID != operation.ID {
+		return Prepared{}, fmt.Errorf("%w: callback executor did not acknowledge operation %s", telegrampipeline.ErrUnknownOperation, operation.ID)
+	}
+	stageStarted = time.Now()
+	prepared, err := handler.prepareCallbackResult(operation, result)
+	handler.trace(ctx, completedTrace("projection.callback", operation.ID, update, operation.Plan.Action, operation.Plan.Effect, stageStarted, err))
+	if err != nil {
+		return Prepared{}, fmt.Errorf("%w: callback effect output: %v", telegrampipeline.ErrUnknownOperation, err)
+	}
+	prepared.PreviousActiveSessionID, prepared.PreviousActiveCarrier = previousActiveCardForBackgroundFinal(snapshot, operation.Plan, prepared)
+	return prepared, nil
 }
 func (handler *Handler) prepareCallbackResult(operation CallbackOperation, result CallbackResult) (Prepared, error) {
 	if result.Card != nil {
@@ -656,6 +722,9 @@ type Prepared struct {
 	Presentation telegrambridge.KeyboardPresentation
 	Card         CardOutput
 	Surface      *SurfaceOutput
+	// ExpectedActiveSessionID fences replay-safe global surfaces without a
+	// concrete card/native target, such as a stale archived session selection.
+	ExpectedActiveSessionID *domain.SessionID `json:",omitempty"`
 	// PreviousActiveCarrier is set only when a background-final notification
 	// selects its completed session. Its keyboard is removed before the
 	// notification carrier is edited into the new active card.
@@ -1471,7 +1540,18 @@ func (sender *Sender) sendPrepared(
 	if loadErr != nil {
 		return coordinator.Receipt{}, fmt.Errorf("load callback send operation: %w", loadErr)
 	}
-	if durable {
+	replaySafeEdit := durable && edit && operation.Phase == CallbackPrepared &&
+		telegrampipeline.IsReplaySafePreparedAction(operation.Plan.Action)
+	if durable && operation.Phase == CallbackPrepared {
+		if operation.Prepared == nil {
+			return coordinator.Receipt{}, errors.New("durable callback operation has no prepared output")
+		}
+		if !found {
+			prepared = clonePrepared(*operation.Prepared)
+			found = true
+		}
+	}
+	if durable && !replaySafeEdit {
 		switch operation.Phase {
 		case CallbackReceiptConfirmed, CallbackCommitted:
 			if operation.Receipt <= 0 {
@@ -1481,13 +1561,6 @@ func (sender *Sender) sendPrepared(
 		case CallbackEffectUnknown, CallbackEffectRetryUnknown, CallbackSendUnknown:
 			return coordinator.Receipt{}, fmt.Errorf("%w: %s is %s", telegrampipeline.ErrUnknownOperation, operation.ID, operation.Phase)
 		case CallbackPrepared:
-			if operation.Prepared == nil {
-				return coordinator.Receipt{}, errors.New("durable callback operation has no prepared output")
-			}
-			if !found {
-				prepared = clonePrepared(*operation.Prepared)
-				found = true
-			}
 		case CallbackClaimed:
 			return coordinator.Receipt{}, errors.New("callback operation effect is not prepared")
 		default:
@@ -1547,6 +1620,35 @@ func (sender *Sender) sendPrepared(
 			return coordinator.Receipt{}, carddeliveryguard.ErrNotCurrent
 		}
 	}
+	if replaySafeEdit {
+		id, expectedRevision, expectedOperation, nativeSurface := prepared.Card.SessionID,
+			prepared.Card.ExpectedCarrierRevision, prepared.Card.ExpectedPresentationOperation, false
+		if prepared.Surface != nil && prepared.Surface.NativeSessionID != "" {
+			id, expectedRevision, expectedOperation, nativeSurface = prepared.Surface.NativeSessionID,
+				prepared.Surface.ExpectedCarrierRevision, prepared.Surface.ExpectedPresentationOperation, true
+		}
+		state, err := sender.uiState.Load(ctx)
+		if err != nil {
+			return coordinator.Receipt{}, err
+		}
+		if id == "" {
+			if prepared.ExpectedActiveSessionID == nil || state.ActiveSession != *prepared.ExpectedActiveSessionID {
+				return coordinator.Receipt{}, carddeliveryguard.ErrNotCurrent
+			}
+		} else {
+			if expectedRevision == nil || expectedOperation == nil {
+				return coordinator.Receipt{}, carddeliveryguard.ErrNotCurrent
+			}
+			carrier := telegramstate.Carrier{ChatID: status.ConversationID, MessageID: status.SourceMessageID}
+			card, found := state.Card(id)
+			if !found || card.CarrierRevision != *expectedRevision ||
+				card.LastPresentationOperation != *expectedOperation ||
+				(nativeSurface && state.ActiveSession != id) ||
+				(!nativeSurface && !prepared.Card.MakeActive && card.Carrier != carrier) {
+				return coordinator.Receipt{}, carddeliveryguard.ErrNotCurrent
+			}
+		}
+	}
 	if !retirementDone {
 		if err := sender.retirePreviousCard(ctx, operationID, prepared); err != nil {
 			return coordinator.Receipt{}, err
@@ -1572,7 +1674,7 @@ func (sender *Sender) sendPrepared(
 			return coordinator.Receipt{}, fmt.Errorf("invalidate previous Telegram card: %w", err)
 		}
 	}
-	if durable {
+	if durable && !replaySafeEdit {
 		sendUnknown := operation
 		sendUnknown.Phase = CallbackSendUnknown
 		changed, err := sender.operations.CompareAndSwap(ctx, operationID, CallbackPrepared, sendUnknown)
@@ -1613,7 +1715,11 @@ func (sender *Sender) sendPrepared(
 		confirmed := operation
 		confirmed.Phase = CallbackReceiptConfirmed
 		confirmed.Receipt = receipt.MessageID
-		changed, err := sender.operations.CompareAndSwap(ctx, operationID, CallbackSendUnknown, confirmed)
+		oldPhase := CallbackSendUnknown
+		if replaySafeEdit {
+			oldPhase = CallbackPrepared
+		}
+		changed, err := sender.operations.CompareAndSwap(ctx, operationID, oldPhase, confirmed)
 		if err != nil {
 			return coordinator.Receipt{}, fmt.Errorf("persist callback carrier receipt: %w", err)
 		}
@@ -1783,12 +1889,14 @@ func finalizePreparedWithCallbackPolicy(
 		}
 		return nil
 	}
-	id, expected, absent := prepared.Card.SessionID, prepared.Card.ExpectedCarrierRevision, prepared.Card.ExpectedCarrierAbsent
+	id, expected, expectedOperation, absent := prepared.Card.SessionID, prepared.Card.ExpectedCarrierRevision,
+		prepared.Card.ExpectedPresentationOperation, prepared.Card.ExpectedCarrierAbsent
 	if prepared.Surface != nil && prepared.Surface.NativeSessionID != "" {
 		if err := validateNativeSurface(*prepared.Surface); err != nil {
 			return err
 		}
-		id, expected, absent = prepared.Surface.NativeSessionID, prepared.Surface.ExpectedCarrierRevision, prepared.Surface.ExpectedCarrierAbsent
+		id, expected, expectedOperation, absent = prepared.Surface.NativeSessionID, prepared.Surface.ExpectedCarrierRevision,
+			prepared.Surface.ExpectedPresentationOperation, prepared.Surface.ExpectedCarrierAbsent
 	}
 	var want telegramstate.Card
 	var verify bool
@@ -1814,7 +1922,7 @@ func finalizePreparedWithCallbackPolicy(
 			}
 			return nil
 		}
-		if expectedOperation := prepared.Card.ExpectedPresentationOperation; expectedOperation != nil &&
+		if expectedOperation != nil &&
 			exists && current.LastPresentationOperation != *expectedOperation && current.LastPresentationOperation != prepared.OperationID {
 			return nil
 		}
@@ -2007,6 +2115,7 @@ func clonePrepared(prepared Prepared) Prepared {
 	clone.Presentation.StatusRecovery = clonePointer(prepared.Presentation.StatusRecovery)
 	clone.Presentation.ArtifactRetry = clonePointer(prepared.Presentation.ArtifactRetry)
 	clone.PreviousActiveCarrier = clonePointer(prepared.PreviousActiveCarrier)
+	clone.ExpectedActiveSessionID = clonePointer(prepared.ExpectedActiveSessionID)
 	clone.CardRetirement = clonePointer(prepared.CardRetirement)
 	clone.Card = cloneCardOutput(prepared.Card)
 	if prepared.Surface != nil {
@@ -2031,6 +2140,7 @@ func previousActiveCardForBackgroundFinal(state telegramstate.State, plan telegr
 func cloneSurfaceOutput(output SurfaceOutput) SurfaceOutput {
 	clone := output
 	clone.ExpectedCarrierRevision = clonePointer(output.ExpectedCarrierRevision)
+	clone.ExpectedPresentationOperation = clonePointer(output.ExpectedPresentationOperation)
 	clone.Recovery = clonePointer(output.Recovery)
 	clone.AcceptedTurnRecovery = clonePointer(output.AcceptedTurnRecovery)
 	clone.StatusRecovery = clonePointer(output.StatusRecovery)

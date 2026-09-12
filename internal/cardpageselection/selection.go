@@ -3,6 +3,9 @@ package cardpageselection
 
 import (
 	"context"
+	"fmt"
+	"strconv"
+	"strings"
 	"sync"
 
 	"bria/internal/cardtranscript"
@@ -96,6 +99,13 @@ func Resolve(view View, pages []cardtranscript.Page, action string) (View, error
 	case "card:latest", "pg:jump", "page_latest":
 		return Navigate(view, "page_latest", anchors)
 	default:
+		if raw, ok := strings.CutPrefix(action, "pg:target:"); ok {
+			page, err := strconv.Atoi(raw)
+			if err != nil || page < 1 || page > len(anchors) {
+				return View{}, fmt.Errorf("target page %q is outside current pages", raw)
+			}
+			return viewAt(anchors, page, page == len(anchors)), nil
+		}
 		return Reflow(view, anchors)
 	}
 }

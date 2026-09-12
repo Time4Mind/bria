@@ -329,11 +329,11 @@ func (controller *Controller) handleSemanticAction(ctx context.Context, action S
 	case SemanticModelMenu, SemanticModelChoice, SemanticEffortMenu, SemanticEffortChoice:
 		return controller.modelNotice(action.SessionID, "Старый выбор модели больше не используется. Отправь /model в CLI."), nil
 	case SemanticPagePrevious:
-		navigationAction = "pg:prev"
+		navigationAction = fmt.Sprintf("pg:target:%d", action.Page)
 	case SemanticPageLatest:
 		navigationAction = "pg:jump"
 	case SemanticPageNext:
-		navigationAction = "pg:next"
+		navigationAction = fmt.Sprintf("pg:target:%d", action.Page)
 	case SemanticStop:
 		decision = controller.stopSession(ctx, action.SessionID)
 	case SemanticClose:
