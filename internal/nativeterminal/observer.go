@@ -6,7 +6,7 @@ import (
 	"bria/internal/tmuxobserver"
 )
 
-// Observe starts a read-only event stream for the exact owned pane. The
+// Observe starts a non-mutating event stream for the exact owned pane. The
 // terminal remains the authority for proving that the socket and process still
 // match the persisted binding; the observer only supplies change hints.
 func (t *Terminal) Observe(ctx context.Context) (*tmuxobserver.Observer, error) {

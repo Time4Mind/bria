@@ -52,9 +52,10 @@
 
 ## Confirmed design
 
-- Stable idle is driven by one persistent `tmux -u -N -C ... attach-session
-  -r` client per native adapter. It emits only coalesced opaque change hints;
-  terminal payload is neither retained nor exposed by the observer.
+- Stable idle is driven by one persistent non-mutating `tmux -u -N -C ...
+  attach-session -f ignore-size` client per native adapter. It emits only
+  coalesced opaque change hints; terminal payload is neither retained nor
+  exposed by the observer, and its API cannot issue arbitrary tmux commands.
 - Active turns keep the existing 150 ms transcript/liveness polling path.
   User input remains request-channel driven, and screen capture keeps the
   existing 300 ms throttle with a one-shot deadline so a coalesced hint cannot
@@ -69,12 +70,12 @@
 
 ## Verification evidence
 
-- RED: `TestStartUsesReadOnlyControlModeAndPublishesInitialHint` timed out
+- RED: `TestStartUsesNonMutatingControlModeAndPublishesInitialHint` timed out
   against the initial observer stub on 2026-09-13.
 - Existing real native terminal and adapter suites pass outside the filesystem
   sandbox after integration; the sandbox itself cannot create their IPC sockets.
-- Isolated real-tmux probe confirmed read-only control mode preserves `120x40`
-  geometry and reports output/pane exit. An ambient `TMUX` duplicate was found
+- Isolated real-tmux probe confirmed control mode preserves `120x40` geometry
+  and reports output/pane exit. An ambient `TMUX` duplicate was found
   in the test environment and is being removed by the fixture, not hidden in
   product behavior.
 - Public-seam tests pass three consecutive runs for healthy idle observation,
@@ -87,9 +88,14 @@
   is GREEN for ten consecutive runs. A late-stall test reproduced an extra
   fallback interval; exact Alive is now followed by immediate throttled capture
   before polling resumes, GREEN for five runs.
-- A 75 ms payload-free read-only heartbeat detects two missing control replies
+- A 75 ms payload-free non-mutating heartbeat detects two missing control replies
   within the existing 150 ms liveness bound. It launches no helper process and
   a post-attach stall deterministically returns to the old polling path.
+- Exact macOS CI on tmux 3.7c reproduced that `attach-session -r` makes external
+  Bria `send-keys` fail with `client is read-only`. RED/GREEN compatibility
+  probes on tmux 3.6a and 3.7c use `-f ignore-size`: geometry remains `120x40`,
+  input remains available and the observer itself still issues only the fixed
+  `display-message` heartbeat.
 - Focused `-race` for `tmuxobserver`, `nativeterminal`, `nativeadapter` and
   architecture checks is GREEN after both review fixes. Independent re-review
   is APPROVE with no open blocker/high/medium findings. Final

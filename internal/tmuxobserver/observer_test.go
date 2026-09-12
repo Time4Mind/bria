@@ -95,7 +95,7 @@ func writePhase() {
 	}
 }
 
-func TestStartUsesReadOnlyControlModeAndPublishesInitialHint(t *testing.T) {
+func TestStartUsesNonMutatingControlModeAndPublishesInitialHint(t *testing.T) {
 	executable, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
@@ -133,7 +133,7 @@ func TestStartUsesReadOnlyControlModeAndPublishesInitialHint(t *testing.T) {
 	if err := json.Unmarshal(data, &arguments); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"-u", "-N", "-C", "-S", "/private/socket", "attach-session", "-r", "-t", "cli:0.0"}
+	want := []string{"-u", "-N", "-C", "-S", "/private/socket", "attach-session", "-f", "ignore-size", "-t", "cli:0.0"}
 	if !reflect.DeepEqual(arguments, want) {
 		t.Fatalf("argv=%v, want %v", arguments, want)
 	}

@@ -1,5 +1,6 @@
-// Package tmuxobserver provides read-only terminal change notifications from
-// a tmux control-mode client. It never exposes terminal payloads.
+// Package tmuxobserver provides non-mutating terminal change notifications
+// from a tmux control-mode client. It never exposes terminal payloads or an API
+// for issuing arbitrary tmux commands.
 package tmuxobserver
 
 import (
@@ -67,7 +68,11 @@ func Start(ctx context.Context, specification Spec) (*Observer, error) {
 	processContext, cancel := context.WithCancel(ctx)
 	command := exec.CommandContext(processContext, specification.Executable,
 		"-u", "-N", "-C", "-S", specification.Socket,
-		"attach-session", "-r", "-t", specification.Target,
+		// Do not use attach-session -r here. tmux 3.7 treats the attached
+		// read-only control client as send-keys' target client and rejects
+		// Bria's independent input commands. ignore-size retains the only
+		// observer property -r supplied that matters to screen behavior.
+		"attach-session", "-f", "ignore-size", "-t", specification.Target,
 	)
 	if specification.Environment != nil {
 		command.Env = append([]string{}, specification.Environment...)

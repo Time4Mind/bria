@@ -52,9 +52,12 @@ func TestRealTmuxObserverPreservesGeometryAndReportsOutputAndPaneExit(t *testing
 	after := strings.TrimSpace(runTmux(t, ctx, environment, tmux, "-u", "-N", "-S", socket,
 		"display-message", "-p", "-t", "cli:0.0", "#{window_width}x#{window_height}"))
 	if before != "120x40" || after != before {
-		t.Fatalf("geometry changed by read-only observer: before=%q after=%q", before, after)
+		t.Fatalf("geometry changed by observer: before=%q after=%q", before, after)
 	}
 	waitForUpdatesQuiet(t, ctx, observer.Updates(), 50*time.Millisecond)
+	// tmux 3.7 rejects external send-keys while any read-only client is the
+	// selected target client. The observer must preserve Bria's independent
+	// input path while still ignoring client size and issuing no mutations.
 	runTmux(t, ctx, environment, tmux, "-u", "-N", "-S", socket,
 		"send-keys", "-l", "-t", "cli:0.0", "--", "observer-output")
 	select {

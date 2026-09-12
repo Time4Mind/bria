@@ -28,9 +28,9 @@ func TestNativeAdapterHealthyObserverEliminatesIdleTmuxPolling(t *testing.T) {
 		t.Fatalf("Ready: %+v", ready)
 	}
 
-	observer := waitForTmuxInvocation(t, wrapper.log, idleObserverStartupBound, isReadOnlyObserverInvocation)
-	if !containsOrderedArguments(observer, "-N", "-C", "attach-session", "-r", "-t", "cli:0.0") {
-		t.Fatalf("tmux observer is not the exact read-only pane attach: %q", observer)
+	observer := waitForTmuxInvocation(t, wrapper.log, idleObserverStartupBound, isNonMutatingObserverInvocation)
+	if !containsOrderedArguments(observer, "-N", "-C", "attach-session", "-f", "ignore-size", "-t", "cli:0.0") {
+		t.Fatalf("tmux observer is not the exact non-mutating pane attach: %q", observer)
 	}
 	waitForObservationContaining(t, h, idleObserverStartupBound, "Claude Code")
 
@@ -48,7 +48,7 @@ func TestNativeAdapterObserverStartFailureFallsBackToPolling(t *testing.T) {
 	if ready := h.receive(t); ready.Type != runtimeprotocol.TypeReady {
 		t.Fatalf("Ready after observer failure: %+v", ready)
 	}
-	waitForTmuxInvocation(t, wrapper.log, idleObserverStartupBound, isReadOnlyObserverInvocation)
+	waitForTmuxInvocation(t, wrapper.log, idleObserverStartupBound, isNonMutatingObserverInvocation)
 	waitForTmuxInvocation(t, wrapper.log, idleObserverStartupBound, isPollingInvocation)
 
 	triggerTerminalOutput(t, trigger)
@@ -62,7 +62,7 @@ func TestNativeAdapterObserverDisconnectFallsBackToPolling(t *testing.T) {
 	if ready := h.receive(t); ready.Type != runtimeprotocol.TypeReady {
 		t.Fatalf("Ready after observer disconnect: %+v", ready)
 	}
-	waitForTmuxInvocation(t, wrapper.log, idleObserverStartupBound, isReadOnlyObserverInvocation)
+	waitForTmuxInvocation(t, wrapper.log, idleObserverStartupBound, isNonMutatingObserverInvocation)
 	waitForTmuxInvocation(t, wrapper.log, idleObserverStartupBound, isPollingInvocation)
 
 	triggerTerminalOutput(t, trigger)
@@ -76,7 +76,7 @@ func TestNativeAdapterObserverStallFallsBackToPolling(t *testing.T) {
 	if ready := h.receive(t); ready.Type != runtimeprotocol.TypeReady {
 		t.Fatalf("Ready after observer stall: %+v", ready)
 	}
-	waitForTmuxInvocation(t, wrapper.log, idleObserverStartupBound, isReadOnlyObserverInvocation)
+	waitForTmuxInvocation(t, wrapper.log, idleObserverStartupBound, isNonMutatingObserverInvocation)
 	waitForObservationContaining(t, h, idleObserverStartupBound, "Claude Code")
 	baseline := len(readTmuxInvocations(t, wrapper.log))
 	waitForNewTmuxInvocation(t, wrapper.log, baseline, idleObserverStartupBound, isPollingInvocation)
@@ -92,12 +92,14 @@ func TestNativeAdapterCapturesOutputImmediatelyWhenObserverStalls(t *testing.T) 
 	if ready := h.receive(t); ready.Type != runtimeprotocol.TypeReady {
 		t.Fatalf("Ready before late observer stall: %+v", ready)
 	}
-	waitForTmuxInvocation(t, wrapper.log, idleObserverStartupBound, isReadOnlyObserverInvocation)
+	waitForTmuxInvocation(t, wrapper.log, idleObserverStartupBound, isNonMutatingObserverInvocation)
 	waitForObservationContaining(t, h, idleObserverStartupBound, "Claude Code")
 	waitForPath(t, wrapper.phase, idleObserverStartupBound)
+	baseline := len(readTmuxInvocations(t, wrapper.log))
 
 	triggerTerminalOutput(t, trigger)
-	waitForObservationContaining(t, h, 300*time.Millisecond, "ASYNC-IDLE-OUTPUT")
+	waitForObservationContaining(t, h, idleScreenReactionBound, "ASYNC-IDLE-OUTPUT")
+	assertImmediateCaptureAfterObserverStall(t, readTmuxInvocations(t, wrapper.log)[baseline:])
 	h.send(t, runtimeprotocol.ParentMessage{Type: runtimeprotocol.TypeClose})
 }
 
@@ -493,13 +495,39 @@ func readTmuxInvocations(t *testing.T, path string) [][]string {
 	return result
 }
 
-func isReadOnlyObserverInvocation(arguments []string) bool {
-	return containsOrderedArguments(arguments, "-C", "attach-session", "-r")
+func isNonMutatingObserverInvocation(arguments []string) bool {
+	return containsOrderedArguments(arguments, "-C", "attach-session", "-f", "ignore-size")
 }
 
 func isPollingInvocation(arguments []string) bool {
 	for _, argument := range arguments {
 		if argument == "capture-pane" || argument == "#{pane_dead}" {
+			return true
+		}
+	}
+	return false
+}
+
+func assertImmediateCaptureAfterObserverStall(t *testing.T, invocations [][]string) {
+	t.Helper()
+	livenessChecks := 0
+	for _, invocation := range invocations {
+		switch {
+		case containsArgument(invocation, "#{pane_dead}"):
+			livenessChecks++
+		case containsArgument(invocation, "capture-pane"):
+			if livenessChecks != 1 {
+				t.Fatalf("capture followed %d liveness checks after observer stall, want exactly one: %q", livenessChecks, invocations)
+			}
+			return
+		}
+	}
+	t.Fatalf("observer stall did not produce an immediate capture: %q", invocations)
+}
+
+func containsArgument(arguments []string, want string) bool {
+	for _, argument := range arguments {
+		if argument == want {
 			return true
 		}
 	}
