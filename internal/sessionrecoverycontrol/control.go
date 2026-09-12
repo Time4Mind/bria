@@ -60,6 +60,14 @@ func (c *Control) lock(ctx context.Context) error {
 }
 
 func (c *Control) Watch(ctx context.Context, id domain.SessionID, binding domain.ProviderBinding) (sessionsupervisor.Result, error) {
+	return c.WatchWithRecoveryStarted(ctx, id, binding, nil)
+}
+
+// WatchWithRecoveryStarted reports the point after process waiting has ended
+// and before recovery may publish a replacement binding. The callback lets the
+// owner retain this exact in-flight recovery while its own durable handoff is
+// visible to concurrent supervision sweeps.
+func (c *Control) WatchWithRecoveryStarted(ctx context.Context, id domain.SessionID, binding domain.ProviderBinding, recoveryStarted func()) (sessionsupervisor.Result, error) {
 	if ctx == nil {
 		return sessionsupervisor.Result{}, ErrInvalidRequest
 	}
@@ -69,6 +77,9 @@ func (c *Control) Watch(ctx context.Context, id domain.SessionID, binding domain
 			return sessionsupervisor.Result{}, err
 		}
 		defer c.Unlock()
+		if recoveryStarted != nil {
+			recoveryStarted()
+		}
 		return c.manual.RecoverPersisted(ctx, id, binding)
 	}
 	// Retain the actual wait outcome, including uncertain exits. Never substitute
@@ -80,6 +91,9 @@ func (c *Control) Watch(ctx context.Context, id domain.SessionID, binding domain
 	defer c.Unlock()
 	if err := ctx.Err(); err != nil {
 		return sessionsupervisor.Result{}, err
+	}
+	if recoveryStarted != nil {
+		recoveryStarted()
 	}
 	supervisor, err := sessionsupervisor.New(c.store, observedExit{waitErr}, c.restarter, c.options)
 	if err != nil {

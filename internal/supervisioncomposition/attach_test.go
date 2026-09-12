@@ -9,6 +9,7 @@ import (
 
 	"bria/internal/app"
 	"bria/internal/domain"
+	"bria/internal/sessionsupervisor"
 	"bria/internal/supervisioncomposition"
 )
 
@@ -137,5 +138,159 @@ func TestShutdownCancelsPendingAttachWithoutStartingOrClosingCLI(t *testing.T) {
 	starts, _ := runtime.counts()
 	if err != nil || !current.Equal(awaiting) || starts != 0 {
 		t.Fatal("cancelled attach changed retained live-session identity")
+	}
+}
+
+type retainedRecoveryRuntime struct {
+	*runtimeStub
+	attaches  atomic.Int32
+	exitFirst atomic.Bool
+}
+
+func (*retainedRecoveryRuntime) SupportsAttach(domain.Provider) bool { return true }
+
+func (runtime *retainedRecoveryRuntime) Attach(_ context.Context, request app.StartSessionRequest) (domain.ProviderBinding, error) {
+	runtime.attaches.Add(1)
+	next := *request.PriorBinding
+	next.Generation++
+	return next, nil
+}
+
+func (*retainedRecoveryRuntime) Detach(context.Context, app.StartSessionRequest, domain.ProviderBinding) error {
+	return nil
+}
+
+func (runtime *retainedRecoveryRuntime) Wait(ctx context.Context, id domain.SessionID, binding domain.ProviderBinding) error {
+	if runtime.exitFirst.CompareAndSwap(true, false) {
+		return nil
+	}
+	return runtime.runtimeStub.Wait(ctx, id, binding)
+}
+
+func TestSweepDoesNotCancelAcceptedTurnRecoveryAfterInternalBindingHandoff(t *testing.T) {
+	for _, initial := range []string{"awaiting", "running"} {
+		t.Run(initial, func(t *testing.T) {
+			testSweepDoesNotCancelAcceptedTurnRecoveryAfterInternalBindingHandoff(t, initial)
+		})
+	}
+}
+
+func testSweepDoesNotCancelAcceptedTurnRecoveryAfterInternalBindingHandoff(t *testing.T, initial string) {
+	ready, prior := readySession(t)
+	current := ready
+	if initial == "running" {
+		current, _ = ready.StartWork(time.Now().UTC())
+	} else {
+		current, _ = ready.AwaitRecoveryAt(time.Now().UTC())
+	}
+	store := &memoryStore{session: current}
+	runtime := &retainedRecoveryRuntime{runtimeStub: &runtimeStub{waitStarted: make(chan struct{}, 1), waitCanceled: make(chan struct{}, 1)}}
+	runtime.exitFirst.Store(initial == "running")
+	entered := make(chan struct{}, 1)
+	release := make(chan struct{})
+	canceled := make(chan struct{}, 1)
+	manager, err := supervisioncomposition.New(supervisioncomposition.Options{
+		LocalComputerID: "computer", Store: store, Restarter: runtime, Waiter: runtime,
+		AcceptedTurns: &recoveryReconciler{unknown: true}, MaxRestartAttempts: 1, SweepInterval: 5 * time.Millisecond,
+		ShouldContinueAcceptedTurns: func(context.Context, domain.Session, domain.ProviderBinding, sessionsupervisor.AcceptedTurnReconciliation) (bool, error) {
+			return true, nil
+		},
+		ContinueAcceptedTurns: func(ctx context.Context, _ domain.Session, _ domain.ProviderBinding, _ sessionsupervisor.AcceptedTurnReconciliation) error {
+			select {
+			case entered <- struct{}{}:
+			default:
+			}
+			select {
+			case <-release:
+				return nil
+			case <-ctx.Done():
+				select {
+				case canceled <- struct{}{}:
+				default:
+				}
+				return ctx.Err()
+			}
+		},
+		Now: time.Now, WaitBeforeRetry: func(context.Context, int) error { return nil }, Report: func(error) {},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- manager.Run(ctx) }()
+	defer stopRecoveryManager(t, cancel, done)
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("accepted recovery did not start")
+	}
+	time.Sleep(40 * time.Millisecond)
+	select {
+	case <-canceled:
+		t.Fatal("sweep canceled accepted recovery after its own binding handoff")
+	default:
+	}
+	if got := runtime.attaches.Load(); got != 1 {
+		t.Fatalf("attach attempts = %d, want one retained recovery", got)
+	}
+	current, err = store.Load(ctx, ready.ID())
+	binding, bound := current.Binding()
+	if err != nil || current.Status() != domain.SessionRunning || !bound || binding.Generation != prior.Generation+1 {
+		t.Fatalf("recovery handoff = status %q binding %#v bound %t error %v", current.Status(), binding, bound, err)
+	}
+	close(release)
+	select {
+	case <-runtime.waitStarted:
+	case <-time.After(time.Second):
+		t.Fatal("settled recovery did not install the new binding watcher")
+	}
+}
+
+func TestFailedAcceptedRecoveryBackoffUsesReplacementBinding(t *testing.T) {
+	ready, prior := readySession(t)
+	awaiting, err := ready.AwaitRecoveryAt(time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := &memoryStore{session: awaiting}
+	runtime := &retainedRecoveryRuntime{runtimeStub: &runtimeStub{}}
+	failed := make(chan struct{}, 1)
+	clock := newRecoveryClock(time.Now().UTC())
+	manager, err := supervisioncomposition.New(supervisioncomposition.Options{
+		LocalComputerID: "computer", Store: store, Restarter: runtime, Waiter: runtime,
+		AcceptedTurns: &recoveryReconciler{unknown: true}, MaxRestartAttempts: 1, SweepInterval: 5 * time.Millisecond,
+		ShouldContinueAcceptedTurns: func(context.Context, domain.Session, domain.ProviderBinding, sessionsupervisor.AcceptedTurnReconciliation) (bool, error) {
+			return true, nil
+		},
+		ContinueAcceptedTurns: func(context.Context, domain.Session, domain.ProviderBinding, sessionsupervisor.AcceptedTurnReconciliation) error {
+			select {
+			case failed <- struct{}{}:
+			default:
+			}
+			return errors.New("synthetic accepted observation failure")
+		},
+		Now: clock.Now, WaitBeforeRetry: func(context.Context, int) error { return nil }, Report: func(error) {},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- manager.Run(ctx) }()
+	defer stopRecoveryManager(t, cancel, done)
+	select {
+	case <-failed:
+	case <-time.After(time.Second):
+		t.Fatal("accepted recovery failure was not reached")
+	}
+	time.Sleep(40 * time.Millisecond)
+	if got := runtime.attaches.Load(); got != 1 {
+		t.Fatalf("attach attempts before cooldown = %d, want one", got)
+	}
+	current, err := store.Load(ctx, ready.ID())
+	binding, bound := current.Binding()
+	if err != nil || current.Status() != domain.SessionAwaitingRecovery || !bound || binding.Generation != prior.Generation+1 {
+		t.Fatalf("failed recovery custody = status %q binding %#v bound %t error %v", current.Status(), binding, bound, err)
 	}
 }

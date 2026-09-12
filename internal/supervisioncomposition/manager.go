@@ -44,8 +44,9 @@ type Options struct {
 }
 
 type watchedBinding struct {
-	identity recoverybackoff.Identity
-	cancel   context.CancelFunc
+	identity   recoverybackoff.Identity
+	cancel     context.CancelFunc
+	recovering bool
 }
 
 type Manager struct {
@@ -268,7 +269,8 @@ func (manager *Manager) sweep(ctx context.Context) error {
 	defer manager.mu.Unlock()
 	now := manager.now()
 	for id, watched := range manager.workers {
-		if identity, ok := desired[id]; !ok || identity != watched.identity {
+		identity, ok := desired[id]
+		if !ok || identity != watched.identity && !watched.recovering {
 			watched.cancel()
 			delete(manager.workers, id)
 		}
@@ -299,7 +301,9 @@ func (manager *Manager) watch(ctx context.Context, id domain.SessionID, identity
 	if identity.Initial {
 		result, err = manager.control.RecoverUnboundInitial(ctx, manager.computer, id)
 	} else {
-		result, err = manager.control.Watch(ctx, id, identity.Binding)
+		result, err = manager.control.WatchWithRecoveryStarted(ctx, id, identity.Binding, func() {
+			manager.markRecovering(id, identity)
+		})
 	}
 	manager.observeRecovery(ctx, id, controllertelemetry.LiveRecovery, result, err)
 	shouldReport := err != nil && !errors.Is(err, context.Canceled)
@@ -310,6 +314,10 @@ func (manager *Manager) watch(ctx context.Context, id domain.SessionID, identity
 	if err != nil && ctx.Err() == nil {
 		if result.Session.ID() == id {
 			identity.Lifecycle = result.Session.StateChangedAt()
+			if binding, bound := result.Session.Binding(); bound {
+				identity.Binding = binding
+				identity.Initial = false
+			}
 		}
 		manager.recoveryGate.Failed(id, identity, err, manager.now())
 	} else if result.Recovered || result.Archived || result.Deleted || result.Stale {
@@ -327,8 +335,22 @@ func (manager *Manager) watch(ctx context.Context, id domain.SessionID, identity
 	}
 }
 
+func (manager *Manager) markRecovering(id domain.SessionID, identity recoverybackoff.Identity) {
+	manager.mu.Lock()
+	defer manager.mu.Unlock()
+	worker, exists := manager.workers[id]
+	if !exists || worker.identity != identity {
+		return
+	}
+	worker.recovering = true
+	manager.workers[id] = worker
+}
+
 func (manager *Manager) recordRecoveryFailure(id domain.SessionID, session domain.Session, binding domain.ProviderBinding, err error) {
 	identity := recoverybackoff.Identity{Binding: binding, Lifecycle: session.StateChangedAt()}
+	if current, bound := session.Binding(); bound {
+		identity.Binding = current
+	}
 	manager.recoveryGate.Failed(id, identity, err, manager.now())
 }
 

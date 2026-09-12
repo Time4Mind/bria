@@ -27,15 +27,17 @@
 | A54.AP | Live approval RCA и parser/flow | integration owner | safe live capture, verified cause, regression RED/GREEN |
 | A54.REL | Integration и release | integration owner | full gate, independent review, CI, deploy/postflight |
 | A54.REV | Read-only review | independent reviewer | findings устранены либо явно открыты |
+| A54.REC | Recovery liveness после deploy | integration owner, `sessionrecoverycontrol`/`supervisioncomposition` | active accepted-turn recovery переживает sweep без cancel/generation churn; regression и live postflight GREEN |
 
 ## Статус
 
 | ID | Состояние | Доказательство |
 |---|---|---|
 | A54.UI | done locally | пользователь подтвердил вариант 5; fenced no-language block сохраняется wire-level как `<pre><code>`, pagination/UTF-8/escaping и package race GREEN |
-| A54.AP | done locally; live postflight pending | exact ignored 2180-byte live screen parser GREEN, setting ON, но нового `native.approval` нет; production-shaped blocked-custody regression и split workers GREEN |
-| A54.REL | release pending | финальный `make check-full` GREEN |
+| A54.AP | done; re-release postflight pending | exact ignored 2180-byte live screen parser GREEN, setting ON; после первого release approval подтверждён, production-shaped blocked-custody regression и split workers GREEN |
+| A54.REL | release pending | финальный `make check-full` на итоговом recovery diff GREEN |
 | A54.REV | done | повторное независимое ревью: blocking findings нет; wire/production-shaped fixes приняты |
+| A54.REC | done locally; live postflight pending | postflight exact SHA выявил 16 `provider_failure` и 17 `recovery_unknown` за 5:10 UTC, generation 271 -> 288; RED/GREEN покрывает `awaiting_recovery`, `running -> Wait`, внутренний binding handoff и backoff replacement generation; focused race x50, полный gate и независимое ревью GREEN |
 
 ## Live evidence и причина
 
