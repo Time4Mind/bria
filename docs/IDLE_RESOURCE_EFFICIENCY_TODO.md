@@ -29,7 +29,7 @@
 | A58.2 | Parent recurring work | read-only investigator; parent timers/sweeps only | remaining parent wakeups mapped and safe candidates ranked | complete |
 | A58.3 | Behavioral/performance proof | read-only investigator; tests/benchmarks only | public seams cover active, approval, output, exit and idle cost | complete |
 | A58.4 | Integration | integration owner; implementation with disjoint file ownership | RED/GREEN and focused race pass without behavior changes | complete |
-| A58.5 | Release and live acceptance | integration owner | full gate, review, exact-SHA CI, signed deploy and repeat probe GREEN | in progress: candidate verified |
+| A58.5 | Release and live acceptance | integration owner | full gate, review, exact-SHA CI, signed deploy and repeat probe GREEN | complete |
 
 ## Baseline
 
@@ -102,3 +102,22 @@
   `VERSION=20260913-idle-event-observer make check-full` is GREEN on the exact
   release candidate, including global race, operational/supply-chain checks and
   executable trio.
+
+## Live acceptance
+
+- Exact SHA `f149b62ee1ae48544bd2779d22be2b06750acd75` is present in `origin/main`;
+  Stage 1 run `34723698897` and Platform run `34723698903` are GREEN, including
+  native Ubuntu and macOS tmux 3.7c jobs.
+- Signed release `20260913-idle-event-observer-f149b62` passed manifest and
+  install postflight. `gui/501/com.time4mind.bria.v2` restarted healthy as PID
+  `61502`, run 29. Config, settings and preprocessing-satellite mapping hashes
+  remained unchanged; state and journal remained valid with 19 sessions and
+  24 journal session records after startup reconciliation.
+- Stable idle window `2026-09-13 02:01-02:02 MSK`, 30 seconds: Bria parent plus
+  six adapters used `0.236%` of one core, `618.1 wakeups/s`, `77.8 MiB` physical
+  footprint and zero disk I/O. Against the same baseline population this is
+  `74.9%` less CPU, `74.5%` fewer wakeups and `20.6%` less footprint.
+- Supplemental 15-second boundary includes five persistent observer clients
+  and five private tmux servers omitted from the baseline population. Together
+  they add `0.036%` of one core, `0.2 wakeups/s`, `32.0 MiB` footprint and zero
+  disk I/O. No critical event was logged after restart.
