@@ -249,7 +249,12 @@ func TestFinalPublicationProducerCancelsBeforePhysicalWriteAndReleasesOnlyVisibl
 				t.Fatalf("final delivery: %+v %v", delivered, err)
 			}
 			packets := f.wire.snapshot()
-			finalCard := requireRetireThenNewRichCard(t, packets, before, oldCarrier)
+			var finalCard navigationFollowPacket
+			if name == "other-session" {
+				finalCard = requireNewRichCardWithoutRetirement(t, packets, before)
+			} else {
+				finalCard = requireRetireThenNewRichCard(t, packets, before, oldCarrier)
+			}
 			if finalCard.ID == oldCarrier || name != "other-session" && !strings.Contains(finalCard.Text, "RETENTION_FINAL") {
 				t.Fatal("actual producer final did not use a new Rich carrier")
 			}

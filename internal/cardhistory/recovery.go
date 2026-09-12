@@ -9,6 +9,7 @@ import (
 
 	"bria/internal/cardtranscript"
 	"bria/internal/telegramhistory"
+	"bria/internal/telegramhistorylimit"
 	"bria/internal/telegramstate"
 )
 
@@ -40,18 +41,25 @@ func RestoreFinal(card *telegramstate.Card, messageID, final string) error {
 	if !alreadyPending && len(card.PendingFinalOperations) >= 512 {
 		return ErrFinalCapacity
 	}
+	parts := make([]string, 0, 2)
 	for text := final; text != ""; {
 		size := min(len(text), 16<<10)
 		for !utf8.ValidString(text[:size]) {
 			size--
 		}
-		if len(card.History) >= 512 {
-			return ErrFinalCapacity
-		}
-		if err := telegramhistory.InsertAfterPrompt(card, messageID, text[:size], "final"); err != nil {
+		parts = append(parts, text[:size])
+		text = text[size:]
+	}
+	if err := telegramhistorylimit.EnsureRoomAfterPrompt(card, messageID, len(parts)); err != nil {
+		if errors.Is(err, telegramhistory.ErrPromptAnchorUnavailable) {
 			return ErrFinalAnchor
 		}
-		text = text[size:]
+		return ErrFinalCapacity
+	}
+	for _, part := range parts {
+		if err := telegramhistory.InsertAfterPrompt(card, messageID, part, "final"); err != nil {
+			return ErrFinalAnchor
+		}
 	}
 	if !alreadyPending {
 		card.PendingFinalOperations = append(card.PendingFinalsAfter(""), operation)

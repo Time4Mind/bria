@@ -1,7 +1,10 @@
 package cardhistory_test
 
 import (
+	"errors"
+	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -90,24 +93,33 @@ func TestA25RestoreFinalDuplicateAndConflictAreScopedToExactRequest(t *testing.T
 
 func TestA25RestoreFinalCapacityAndMaximumSupportedAnswer(t *testing.T) {
 	for _, entries := range []int{510, 511, 512} {
-		card := telegramstate.Card{History: make([]string, entries), HistoryKeys: make([]string, entries)}
+		card := telegramstate.Card{History: make([]string, entries), HistoryKeys: make([]string, entries), HistoryKinds: make([]string, entries)}
 		for i := range card.History {
 			card.History[i] = "retained"
 		}
-		card.HistoryKeys[0] = "first"
+		card.HistoryKeys[0], card.HistoryKinds[0] = "first", "prompt"
 		final := strings.Repeat("🙂", 8192) // Exactly 32 KiB, two valid history entries.
 		err := cardhistory.RestoreFinal(&card, "first", final)
-		if entries == 510 {
-			if err != nil || len(card.History) != 512 || card.History[1]+card.History[2] != final || !utf8.ValidString(card.History[1]) || !utf8.ValidString(card.History[2]) {
-				t.Fatalf("maximum supported final did not fit exactly: %v", err)
-			}
-			if err := cardhistory.RestoreFinal(&card, "first", final); err != nil || len(card.History) != 512 {
-				t.Fatalf("idempotent restore at capacity failed: %v", err)
-			}
-		} else if err == nil || len(card.History) > 512 {
-			t.Fatalf("capacity not enforced for %d original entries", entries)
+		if err != nil || len(card.History) != 512 || card.History[1]+card.History[2] != final || !utf8.ValidString(card.History[1]) || !utf8.ValidString(card.History[2]) {
+			t.Fatalf("maximum supported final did not fit from %d entries: %v", entries, err)
 		}
-		// Failure may mutate this caller-owned copy. Atomic rollback is checked
-		// through SessionStore.RestoreAcceptedFinal, the persistence boundary.
+		if err := cardhistory.RestoreFinal(&card, "first", final); err != nil || len(card.History) != 512 {
+			t.Fatalf("idempotent restore at capacity failed from %d entries: %v", entries, err)
+		}
+	}
+	card := telegramstate.Card{
+		History: make([]string, 512), HistoryKeys: make([]string, 512), HistoryKinds: make([]string, 512),
+	}
+	for index := range card.History {
+		card.History[index], card.HistoryKeys[index], card.HistoryKinds[index] = "prompt", fmt.Sprintf("prompt-%d", index), "prompt"
+	}
+	card.HistoryKeys[0] = "first"
+	before := card
+	before.History, before.HistoryKeys, before.HistoryKinds = slices.Clone(card.History), slices.Clone(card.HistoryKeys), slices.Clone(card.HistoryKinds)
+	if err := cardhistory.RestoreFinal(&card, "first", "answer"); !errors.Is(err, cardhistory.ErrFinalCapacity) {
+		t.Fatalf("all-prompt capacity error = %v", err)
+	}
+	if !reflect.DeepEqual(card, before) {
+		t.Fatal("all-prompt capacity failure partially mutated card")
 	}
 }

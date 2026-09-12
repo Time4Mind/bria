@@ -71,3 +71,62 @@ func TestCaptureAndExecuteRetireOnlyExactCarrier(t *testing.T) {
 		t.Fatal("ABA plan touched reused replacement carrier")
 	}
 }
+
+func TestCaptureDoesNotRetireCarrierOwnedByAnotherActiveSession(t *testing.T) {
+	ctx := context.Background()
+	const (
+		activeID     domain.SessionID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+		backgroundID domain.SessionID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+	)
+	shared := telegramstate.Carrier{ChatID: 42, MessageID: 7}
+	store := telegramstate.NewMemoryStore()
+	if err := store.Update(ctx, func(state *telegramstate.State) error {
+		state.ActiveSession = activeID
+		if err := state.SetCard(telegramstate.Card{SessionID: activeID, Carrier: shared, Page: telegramstate.Page{Current: 1, Total: 1}}); err != nil {
+			return err
+		}
+		return state.SetCard(telegramstate.Card{SessionID: backgroundID, Carrier: shared, Page: telegramstate.Page{Current: 1, Total: 1}})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := telegramcardretirement.Capture(ctx, store, backgroundID, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan != nil {
+		t.Fatalf("foreign active carrier was captured for retirement: %#v", plan)
+	}
+}
+
+func TestDelayedRetirementDoesNotTouchCarrierAdoptedByAnotherActiveSession(t *testing.T) {
+	ctx := context.Background()
+	const (
+		activeID     domain.SessionID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+		backgroundID domain.SessionID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+	)
+	shared := telegramstate.Carrier{ChatID: 42, MessageID: 7}
+	store := telegramstate.NewMemoryStore()
+	if err := store.Update(ctx, func(state *telegramstate.State) error {
+		state.ActiveSession = backgroundID
+		return state.SetCard(telegramstate.Card{SessionID: backgroundID, Carrier: shared, Page: telegramstate.Page{Current: 1, Total: 1}})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := telegramcardretirement.Capture(ctx, store, backgroundID, true)
+	if err != nil || plan == nil {
+		t.Fatalf("capture = %#v, %v", plan, err)
+	}
+	if err := store.Update(ctx, func(state *telegramstate.State) error {
+		state.ActiveSession = activeID
+		return state.SetCard(telegramstate.Card{SessionID: activeID, Carrier: shared, Page: telegramstate.Page{Current: 1, Total: 1}})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	deactivator, invalidator := &deactivatorStub{}, &invalidatorStub{}
+	if err := telegramcardretirement.Execute(ctx, store, deactivator, invalidator, "status:2", 42, backgroundID, true, plan); err != nil {
+		t.Fatalf("foreign active carrier must be skipped without blocking notification: %v", err)
+	}
+	if deactivator.calls != 0 || invalidator.calls != 0 {
+		t.Fatalf("foreign active carrier was touched: %d/%d", deactivator.calls, invalidator.calls)
+	}
+}

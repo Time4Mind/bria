@@ -195,10 +195,10 @@ func TestCompletionDelivererSeparatesActiveCardAndBackgroundNotice(t *testing.T)
 			if err != nil || receipt.State != "confirmed" || receipt.Parts[0].MessageID != 77 {
 				t.Fatalf("Deliver() = (%#v, %v)", receipt, err)
 			}
-			if sender.prepared.CardRetirement == nil || sender.prepared.CardRetirement.Carrier.MessageID != 55 {
-				t.Fatalf("completion did not capture previous card: %#v", sender.prepared)
-			}
 			if test.active {
+				if sender.prepared.CardRetirement == nil || sender.prepared.CardRetirement.Carrier.MessageID != 55 {
+					t.Fatalf("active completion did not capture previous card: %#v", sender.prepared)
+				}
 				if strings.Contains(sender.status.Text, "FULL FINAL") || !strings.Contains(sender.status.Text, "Архивировать сессию") || !sender.prepared.Card.MakeActive {
 					t.Fatalf("active completion = %#v / %#v", sender.status, sender.prepared.Card)
 				}
@@ -206,8 +206,13 @@ func TestCompletionDelivererSeparatesActiveCardAndBackgroundNotice(t *testing.T)
 				if len(keyboard.Rows) != 1 || keyboard.Rows[0][0].Label != "Архивировать" || keyboard.Rows[0][1].Label != "Отмена" {
 					t.Fatalf("active completion keyboard is not compact: %#v", keyboard)
 				}
-			} else if strings.Contains(sender.status.Text, "FULL FINAL") || sender.status.Text != "Фоновая сессия «workdir9» завершена." || sender.prepared.Card.MakeActive {
-				t.Fatalf("background completion leaked final = %#v / %#v", sender.status, sender.prepared.Card)
+			} else {
+				if sender.prepared.CardRetirement != nil {
+					t.Fatalf("background completion captured an active-card retirement: %#v", sender.prepared.CardRetirement)
+				}
+				if strings.Contains(sender.status.Text, "FULL FINAL") || sender.status.Text != "Фоновая сессия «workdir9» завершена." || sender.prepared.Card.MakeActive {
+					t.Fatalf("background completion leaked final = %#v / %#v", sender.status, sender.prepared.Card)
+				}
 			}
 		})
 	}

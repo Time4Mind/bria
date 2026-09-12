@@ -258,6 +258,28 @@ func requireRetireThenNewRichCard(t *testing.T, packets []navigationFollowPacket
 	return delta[sendIndex]
 }
 
+func requireNewRichCardWithoutRetirement(t *testing.T, packets []navigationFollowPacket, start int) navigationFollowPacket {
+	t.Helper()
+	if start < 0 || start > len(packets) {
+		t.Fatalf("invalid Telegram packet start %d for %d packets", start, len(packets))
+	}
+	delta := packets[start:]
+	var card navigationFollowPacket
+	sends := 0
+	for _, packet := range delta {
+		if packet.Method == "editMessageReplyMarkup" {
+			t.Fatalf("background Rich card unexpectedly retired a keyboard: %+v", delta)
+		}
+		if packet.Method == "sendRichMessage" {
+			card, sends = packet, sends+1
+		}
+	}
+	if sends != 1 {
+		t.Fatalf("new Rich cards = %d, want exactly one; mutations=%+v", sends, delta)
+	}
+	return card
+}
+
 func countRichMessages(packets []navigationFollowPacket) int {
 	count := 0
 	for _, packet := range packets {

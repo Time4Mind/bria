@@ -16,8 +16,12 @@ func CapturePreviousCarrier(ctx context.Context, store telegramcardretirement.St
 	}
 	var err error
 	prepared.CardRetirementCaptured = true
-	prepared.CardRetirement, err = telegramcardretirement.Capture(ctx, store, prepared.Card.SessionID, !prepared.Edit && prepared.Surface == nil && !prepared.Terminal)
+	prepared.CardRetirement, err = telegramcardretirement.Capture(ctx, store, prepared.Card.SessionID, retirementEligible(prepared))
 	return prepared, err
+}
+
+func retirementEligible(prepared Prepared) bool {
+	return prepared.Card.MakeActive && !prepared.Edit && prepared.Surface == nil && !prepared.Terminal
 }
 
 func (sender *Sender) captureLegacyRetirement(ctx context.Context, operation StatusOperation) (StatusOperation, bool, error) {
@@ -26,7 +30,7 @@ func (sender *Sender) captureLegacyRetirement(ctx context.Context, operation Sta
 	}
 	prepared := *operation.Prepared
 	prepared.CardRetirementCaptured = true
-	if !prepared.Edit && prepared.Surface == nil && !prepared.Terminal {
+	if retirementEligible(prepared) {
 		state, err := sender.uiState.Load(ctx)
 		if err != nil {
 			return StatusOperation{}, false, err

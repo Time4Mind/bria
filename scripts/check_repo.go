@@ -1279,12 +1279,12 @@ var packagePolicies = map[string]packagePolicy{
 	},
 	"internal/cardhistory": {
 		responsibility:     "restore exact accepted finals and project typed histories without I/O",
-		allowedImports:     []string{"internal/cardtranscript", "internal/telegramhistory", "internal/telegramstate"},
+		allowedImports:     []string{"internal/cardtranscript", "internal/telegramhistory", "internal/telegramhistorylimit", "internal/telegramstate"},
 		maxProductionLines: 100,
 	},
 	"internal/cardeventhistory": {
 		responsibility:     "atomically commit typed provider history with exact replay identity through a card-update port",
-		allowedImports:     []string{"internal/domain", "internal/telegramhistory", "internal/telegramstate"},
+		allowedImports:     []string{"internal/domain", "internal/telegramhistory", "internal/telegramhistorylimit", "internal/telegramstate"},
 		maxProductionLines: 120,
 	},
 	"internal/controllerhistory": {
@@ -1385,6 +1385,11 @@ var packagePolicies = map[string]packagePolicy{
 		responsibility:     "transform typed card history without persistence or I/O",
 		allowedImports:     []string{"internal/telegramstate"},
 		maxProductionLines: 100,
+	},
+	"internal/telegramhistorylimit": {
+		responsibility:     "reserve bounded card-history capacity while retaining prompt anchors and aligned metadata",
+		allowedImports:     []string{"internal/telegramhistory", "internal/telegramstate"},
+		maxProductionLines: 125,
 	},
 	"internal/telegramrich": {
 		responsibility:     "normalize rich Markdown without transport or product dependencies",

@@ -148,7 +148,7 @@ func TestLatePreparedFinalCannotStealNewlySelectedSession(t *testing.T) {
 		t.Fatal("late A final did not finish")
 	}
 	packets := f.wire.snapshot()
-	final := requireRetireThenNewRichCard(t, packets, len(before), oldA.ID)
+	final := requireNewRichCardWithoutRetirement(t, packets, len(before))
 	if final.ID == oldA.ID || final.ID == bCard.ID || !strings.Contains(final.Text, "A_FINAL_BEGIN") || strings.Contains(final.Text, "A_FINAL_END") {
 		t.Fatalf("late final edited old carrier or selected wrong content: %+v", final)
 	}

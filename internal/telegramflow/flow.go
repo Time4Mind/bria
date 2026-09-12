@@ -105,7 +105,7 @@ type InlineKeyboardDeactivator interface {
 }
 
 func (sender *Sender) retirePreviousCard(ctx context.Context, operationID string, prepared Prepared) error {
-	if prepared.CardRetirement == nil {
+	if prepared.CardRetirement == nil || !retirementEligible(prepared) {
 		return nil
 	}
 	deactivator, ok := sender.base.(InlineKeyboardDeactivator)
@@ -113,7 +113,7 @@ func (sender *Sender) retirePreviousCard(ctx context.Context, operationID string
 		return errors.New("Telegram transport cannot retire a previous inline keyboard")
 	}
 	return telegramcardretirement.Execute(ctx, sender.uiState, deactivator, sender.registry, operationID,
-		prepared.Status.ConversationID, prepared.Card.SessionID, !prepared.Edit && prepared.Surface == nil && !prepared.Terminal, prepared.CardRetirement)
+		prepared.Status.ConversationID, prepared.Card.SessionID, retirementEligible(prepared), prepared.CardRetirement)
 }
 
 type CallbackAcknowledger interface {

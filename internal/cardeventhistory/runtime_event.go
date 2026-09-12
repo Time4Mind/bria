@@ -11,6 +11,7 @@ import (
 
 	"bria/internal/domain"
 	"bria/internal/telegramhistory"
+	"bria/internal/telegramhistorylimit"
 	"bria/internal/telegramstate"
 )
 
@@ -45,7 +46,7 @@ func InsertTyped(ctx context.Context, store Store, id domain.SessionID, promptID
 		if !ok {
 			return ErrCardUnavailable
 		}
-		if err := telegramhistory.InsertAfterPrompt(&card, promptID, item, kind); err != nil {
+		if err := telegramhistorylimit.InsertAfterPrompt(&card, promptID, item, kind); err != nil {
 			return err
 		}
 		card.TouchEvent(time.Now())
@@ -87,7 +88,7 @@ func InsertRuntimeEvent(card *telegramstate.Card, promptID, eventID, item, kind 
 		}
 		return nil
 	}
-	if err := telegramhistory.InsertAfterPrompt(card, promptID, item, kind); err != nil {
+	if err := telegramhistorylimit.InsertAfterPrompt(card, promptID, item, kind); err != nil {
 		return err
 	}
 	if len(card.HistoryKeys) == 0 {

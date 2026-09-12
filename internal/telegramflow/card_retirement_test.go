@@ -3,10 +3,13 @@ package telegramflow_test
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 
 	"bria/internal/coordinator"
+	"bria/internal/domain"
+	"bria/internal/telegramcardretirement"
 	"bria/internal/telegramflow"
 	"bria/internal/telegrampipeline"
 	"bria/internal/telegramstate"
@@ -116,6 +119,133 @@ func TestActiveFinalRetiresPreviousCarrierBeforeNewCardSend(t *testing.T) {
 	}
 	if got, want := wire.events, []string{"retire", "send"}; !equalStrings(got, want) {
 		t.Fatalf("events = %v, want %v", got, want)
+	}
+}
+
+func TestBackgroundFinalDoesNotRetireSharedActiveCarrier(t *testing.T) {
+	ctx := context.Background()
+	const (
+		activeID     domain.SessionID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+		backgroundID domain.SessionID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+	)
+	shared := telegramstate.Carrier{ChatID: 42, MessageID: 100}
+	state := telegramstate.NewMemoryStore()
+	if err := state.Update(ctx, func(snapshot *telegramstate.State) error {
+		snapshot.ActiveSession = activeID
+		if err := snapshot.SetCard(telegramstate.Card{
+			SessionID: activeID, Carrier: shared, Page: telegramstate.Page{Current: 2, Total: 3, Anchor: "active", FollowLatest: false},
+			History: []string{"active history"}, LastPresentationOperation: "active:latest",
+		}); err != nil {
+			return err
+		}
+		return snapshot.SetCard(telegramstate.Card{
+			SessionID: backgroundID, Carrier: shared, Page: telegramstate.Page{Current: 1, Total: 1, FollowLatest: true},
+		})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	before, err := state.Load(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeActive, _ := before.Card(activeID)
+	now := time.Unix(1_800_000_000, 0).UTC()
+	presenter := newPresenter(t, now)
+	registry := telegrampipeline.NewMemoryCallbackRegistry(func() time.Time { return now })
+	activePresentation, err := presenter.PresentKeyboardWithManifest(string(activeID), nil, telegramui.CardKeyboard{Rows: []telegramui.ButtonRow{{{
+		Action: telegramui.ActionOptions,
+	}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := telegrampipeline.BindPresentation(ctx, registry, shared, activePresentation); err != nil {
+		t.Fatal(err)
+	}
+	wire := &cardRetirementWire{sender: &sender{}}
+	_, outbound, err := telegramflow.New(telegramflow.Config{
+		OwnerUserID: 7, OwnerPrivateChatID: 42, Presenter: presenter,
+		CallbackRegistry: registry, UIState: state, MessageUI: newCardMessageExecutor{card: newCardOutput(t)}, Callbacks: &callbackExecutor{},
+		Operations: telegramflow.NewMemoryCallbackOperationStore(), Sender: wire,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	prepared, err := telegramflow.PrepareCompletion("completion:background", backgroundID, 42, false, "background", telegramui.CardProjectionInput{
+		Pages: []telegramui.ContentPage{{Content: "background final", Anchors: []string{"final"}, FinalStart: true}},
+		View:  telegramui.PageView{Page: 1, Pages: 1, Anchor: "final", FollowLatest: true},
+	}, false, nil, presenter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prepared, err = telegramflow.CapturePreviousCarrier(ctx, state, prepared, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prepared.CardRetirement != nil {
+		t.Fatalf("background final captured retirement: %#v", prepared.CardRetirement)
+	}
+	if err := outbound.Register(prepared); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := outbound.SendStatusWithKeyboard(ctx, prepared.OperationID, prepared.Status, prepared.Keyboard); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := wire.events, []string{"send"}; !equalStrings(got, want) {
+		t.Fatalf("events = %v, want %v", got, want)
+	}
+	after, err := state.Load(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	afterActive, _ := after.Card(activeID)
+	if after.ActiveSession != activeID || !reflect.DeepEqual(afterActive, beforeActive) {
+		t.Fatalf("active card changed by background final: before=%#v after=%#v active=%s", beforeActive, afterActive, after.ActiveSession)
+	}
+	if current, found, err := registry.Current(ctx, activeID); err != nil || !found || current.Carrier != shared {
+		t.Fatalf("active keyboard registration changed: current=%#v found=%t err=%v", current, found, err)
+	}
+}
+
+func TestPersistedBackgroundRetirementPlanIsNoOpWithoutDeactivator(t *testing.T) {
+	ctx := context.Background()
+	const backgroundID domain.SessionID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+	state := telegramstate.NewMemoryStore()
+	if err := state.Update(ctx, func(snapshot *telegramstate.State) error {
+		return snapshot.SetCard(telegramstate.Card{
+			SessionID: backgroundID, Carrier: telegramstate.Carrier{ChatID: 42, MessageID: 100},
+			Page: telegramstate.Page{Current: 1, Total: 1, FollowLatest: true},
+		})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Unix(1_800_000_000, 0).UTC()
+	presenter := newPresenter(t, now)
+	transport := &sender{receipt: coordinator.Receipt{MessageID: 900}}
+	_, outbound, err := telegramflow.New(telegramflow.Config{
+		OwnerUserID: 7, OwnerPrivateChatID: 42, Presenter: presenter,
+		CallbackRegistry: telegrampipeline.NewMemoryCallbackRegistry(func() time.Time { return now }),
+		UIState:          state, MessageUI: newCardMessageExecutor{card: newCardOutput(t)}, Callbacks: &callbackExecutor{},
+		Operations: telegramflow.NewMemoryCallbackOperationStore(), Sender: transport,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	prepared, err := telegramflow.PrepareCompletion("completion:legacy-background", backgroundID, 42, false, "background", telegramui.CardProjectionInput{
+		Pages: []telegramui.ContentPage{{Content: "background final", Anchors: []string{"final"}, FinalStart: true}},
+		View:  telegramui.PageView{Page: 1, Pages: 1, Anchor: "final", FollowLatest: true},
+	}, false, nil, presenter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prepared.CardRetirementCaptured = true
+	prepared.CardRetirement = &telegramcardretirement.Plan{
+		SessionID: backgroundID, Carrier: telegramstate.Carrier{ChatID: 42, MessageID: 100}, CarrierRevision: 1,
+	}
+	if receipt, err := outbound.DeliverCompletionPrepared(ctx, 1, prepared); err != nil || receipt.MessageID != 900 {
+		t.Fatalf("persisted background delivery = %#v, %v", receipt, err)
+	}
+	if transport.sends != 1 {
+		t.Fatalf("background notification sends = %d", transport.sends)
 	}
 }
 

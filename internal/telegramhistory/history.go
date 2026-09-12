@@ -4,23 +4,28 @@
 package telegramhistory
 
 import (
+	"errors"
 	"fmt"
 
 	"bria/internal/telegramstate"
 )
 
+const maxEntries = 512
+
+var ErrPromptAnchorUnavailable = errors.New("prompt history anchor unavailable")
+
 // Append retains the latest 512 entries and aligns optional history metadata.
 func Append(card *telegramstate.Card, item, kind string) {
-	if len(card.History) >= 512 {
-		card.History = append([]string(nil), card.History[len(card.History)-511:]...)
+	if len(card.History) >= maxEntries {
+		card.History = append([]string(nil), card.History[len(card.History)-(maxEntries-1):]...)
 		if len(card.HistoryKeys) != 0 {
-			card.HistoryKeys = append([]string(nil), card.HistoryKeys[len(card.HistoryKeys)-511:]...)
+			card.HistoryKeys = append([]string(nil), card.HistoryKeys[len(card.HistoryKeys)-(maxEntries-1):]...)
 		}
 		if len(card.HistoryKinds) != 0 {
-			card.HistoryKinds = append([]string(nil), card.HistoryKinds[len(card.HistoryKinds)-511:]...)
+			card.HistoryKinds = append([]string(nil), card.HistoryKinds[len(card.HistoryKinds)-(maxEntries-1):]...)
 		}
 		if len(card.HistoryTurnKeys) != 0 {
-			card.HistoryTurnKeys = append([]string(nil), card.HistoryTurnKeys[len(card.HistoryTurnKeys)-511:]...)
+			card.HistoryTurnKeys = append([]string(nil), card.HistoryTurnKeys[len(card.HistoryTurnKeys)-(maxEntries-1):]...)
 		}
 	}
 	if kind != "" && len(card.HistoryKinds) == 0 {
@@ -59,7 +64,7 @@ func InsertAfterPrompt(card *telegramstate.Card, promptID, item, kind string) er
 		}
 	}
 	if index < 0 {
-		return fmt.Errorf("prompt history anchor %q not found", promptID)
+		return fmt.Errorf("%w: %q", ErrPromptAnchorUnavailable, promptID)
 	}
 	insert := index + 1
 	card.History = append(card.History, "")

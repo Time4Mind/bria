@@ -3,6 +3,7 @@ package storage_test
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -148,15 +149,15 @@ func TestA25RecoveredFinalFailuresLeavePhysicalStateAtomic(t *testing.T) {
 				final = strings.Repeat("界", 6000)
 				if err := store.UpdateTelegramUI(ctx, func(state *telegramstate.State) error {
 					card := state.Cards[id]
-					card.History = make([]string, 511)
-					card.HistoryKeys = make([]string, 511)
-					card.HistoryKinds = make([]string, 511)
-					card.HistoryTurnKeys = make([]string, 511)
+					card.History = make([]string, 512)
+					card.HistoryKeys = make([]string, 512)
+					card.HistoryKinds = make([]string, 512)
+					card.HistoryTurnKeys = make([]string, 512)
 					for i := range card.History {
-						card.History[i] = "retained history"
+						card.History[i], card.HistoryKeys[i], card.HistoryKinds[i] = "retained prompt", fmt.Sprintf("prompt-%d", i), "prompt"
 					}
 					card.History[0], card.HistoryKeys[0], card.HistoryKinds[0] = "first", "first", "prompt"
-					card.History[510], card.HistoryKeys[510], card.HistoryKinds[510] = "queued", "queued", "prompt"
+					card.History[511], card.HistoryKeys[511], card.HistoryKinds[511] = "queued", "queued", "prompt"
 					return state.SetCard(card)
 				}); err != nil {
 					t.Fatal(err)
@@ -186,7 +187,15 @@ func TestA25RecoveredFinalFailuresLeavePhysicalStateAtomic(t *testing.T) {
 				t.Fatalf("rejected restoration changed reopened UI state: err=%v", err)
 			}
 			if failure == "capacity" {
-				// The failed two-part write must not consume the last available slot.
+				// The failed two-part write must not alter the all-prompt card. Once
+				// one non-prompt entry exists, a short final can safely replace it.
+				if err := reopened.UpdateTelegramUI(ctx, func(state *telegramstate.State) error {
+					card := state.Cards[id]
+					card.History[510], card.HistoryKeys[510], card.HistoryKinds[510] = "evictable", "", "commentary"
+					return state.SetCard(card)
+				}); err != nil {
+					t.Fatal(err)
+				}
 				if err := reopened.RestoreAcceptedFinal(ctx, id, "first", "small proven final"); err != nil {
 					t.Fatal(err)
 				}

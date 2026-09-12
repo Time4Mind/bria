@@ -43,14 +43,17 @@ func Capture(ctx context.Context, store Store, sessionID domain.SessionID, eligi
 	if !exists || card.Carrier.ChatID <= 0 || card.Carrier.MessageID <= 0 {
 		return nil, nil
 	}
+	if foreignActiveOwnsCarrier(state, sessionID, card.Carrier) {
+		return nil, nil
+	}
 	return &Plan{SessionID: sessionID, Carrier: card.Carrier, CarrierRevision: card.CarrierRevision}, nil
 }
 
 func Execute(ctx context.Context, store Store, deactivator Deactivator, invalidator Invalidator, operationID string, conversationID int64, sessionID domain.SessionID, eligible bool, plan *Plan) error {
-	if plan == nil {
+	if plan == nil || !eligible {
 		return nil
 	}
-	if store == nil || deactivator == nil || invalidator == nil || !eligible || plan.SessionID == "" || plan.SessionID != sessionID ||
+	if store == nil || deactivator == nil || invalidator == nil || plan.SessionID == "" || plan.SessionID != sessionID ||
 		plan.Carrier.ChatID != conversationID || plan.Carrier.MessageID <= 0 {
 		return errors.New("previous Telegram card retirement identity is invalid")
 	}
@@ -62,6 +65,9 @@ func Execute(ctx context.Context, store Store, deactivator Deactivator, invalida
 	if !exists || current.Carrier != plan.Carrier || current.CarrierRevision != plan.CarrierRevision {
 		return ErrStale
 	}
+	if foreignActiveOwnsCarrier(state, plan.SessionID, plan.Carrier) {
+		return nil
+	}
 	if err := deactivator.DeactivateInlineKeyboard(ctx, operationID+":retire_previous", plan.Carrier.ChatID, plan.Carrier.MessageID); err != nil {
 		return fmt.Errorf("retire previous Telegram card: %w", err)
 	}
@@ -69,4 +75,12 @@ func Execute(ctx context.Context, store Store, deactivator Deactivator, invalida
 		return fmt.Errorf("invalidate previous Telegram card: %w", err)
 	}
 	return nil
+}
+
+func foreignActiveOwnsCarrier(state telegramstate.State, sessionID domain.SessionID, carrier telegramstate.Carrier) bool {
+	if state.ActiveSession == "" || state.ActiveSession == sessionID {
+		return false
+	}
+	active, exists := state.Card(state.ActiveSession)
+	return exists && active.Carrier == carrier
 }
