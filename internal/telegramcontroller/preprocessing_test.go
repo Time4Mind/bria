@@ -536,10 +536,12 @@ func TestPreprocessingInstructionEditConsumesOneTextMessageAndCanBeCancelled(t *
 	controller := newController(t, nil, &memorySessions{}, nil, nil, telegramcontroller.Options{Settings: preferences})
 	t.Cleanup(func() { _ = controller.Close(context.Background()) })
 	result, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticSettingsPreprocessingInstruction})
-	if err != nil || result.Surface == nil || result.Surface.RichMarkdown ||
-		!strings.Contains(result.Surface.Text, "Keep names, dates, and commands exactly.") ||
+	if err != nil || result.Surface == nil || !result.Surface.RichMarkdown ||
 		!strings.Contains(result.Surface.Text, "новую инструкцию") {
 		t.Fatalf("edit surface = (%#v, %v)", result, err)
+	}
+	if got := copyableInstructionBody(t, result.Surface.Text); got != "Keep names, dates, and commands exactly." {
+		t.Fatalf("copyable instruction = %q", got)
 	}
 	if _, err := controller.HandleSemanticMessage(context.Background(), coordinator.Update{ID: 701, Kind: coordinator.UpdateMessage, ActorID: 42, ConversationID: 42, ConversationKind: "private", Text: "  keep intent  "}); err != nil {
 		t.Fatal(err)
@@ -567,8 +569,11 @@ func TestPreprocessingInstructionEditShowsEffectiveBuiltInInstruction(t *testing
 	t.Cleanup(func() { _ = controller.Close(context.Background()) })
 
 	result, err := controller.HandleSemanticAction(context.Background(), telegramcontroller.SemanticAction{Kind: telegramcontroller.SemanticSettingsPreprocessingInstruction})
-	if err != nil || result.Surface == nil || result.Surface.RichMarkdown || !strings.Contains(result.Surface.Text, promptpreprocess.DefaultInstruction) {
+	if err != nil || result.Surface == nil || !result.Surface.RichMarkdown {
 		t.Fatalf("built-in instruction surface = (%#v, %v)", result, err)
+	}
+	if got := copyableInstructionBody(t, result.Surface.Text); got != promptpreprocess.DefaultInstruction {
+		t.Fatalf("copyable built-in instruction changed: %q", got)
 	}
 }
 
@@ -590,16 +595,10 @@ func TestPreprocessingInstructionEditPaginatesMaximumCopyableInstruction(t *test
 		if err != nil || result.Surface == nil {
 			t.Fatalf("instruction page %d = (%#v, %v)", page, result, err)
 		}
-		if result.Surface.RichMarkdown || len([]byte(result.Surface.Text)) > 4096 {
+		if !result.Surface.RichMarkdown || len([]byte(result.Surface.Text)) > 4096 {
 			t.Fatalf("instruction page %d shape: rich=%t bytes=%d", page, result.Surface.RichMarkdown, len([]byte(result.Surface.Text)))
 		}
-		const prefixEnd = ":\n\n"
-		start := strings.Index(result.Surface.Text, prefixEnd)
-		end := strings.LastIndex(result.Surface.Text, "\n\nОтправьте новую инструкцию")
-		if start < 0 || end < start {
-			t.Fatalf("instruction page %d has no copyable body: %q", page, result.Surface.Text)
-		}
-		rebuilt.WriteString(result.Surface.Text[start+len(prefixEnd) : end])
+		rebuilt.WriteString(copyableInstructionBody(t, result.Surface.Text))
 
 		nextChoice := 0
 		for _, row := range result.Surface.Rows {
@@ -617,6 +616,27 @@ func TestPreprocessingInstructionEditPaginatesMaximumCopyableInstruction(t *test
 	if rebuilt.String() != instruction {
 		t.Fatalf("paginated instruction changed: got %d bytes, want %d", rebuilt.Len(), len([]byte(instruction)))
 	}
+}
+
+func copyableInstructionBody(t *testing.T, text string) string {
+	t.Helper()
+	const prefixEnd = ":\n\n"
+	start := strings.Index(text, prefixEnd)
+	end := strings.LastIndex(text, "\n\nОтправьте новую инструкцию")
+	if start < 0 || end < start {
+		t.Fatalf("instruction surface has no copyable block: %q", text)
+	}
+	block := text[start+len(prefixEnd) : end]
+	firstNewline := strings.IndexByte(block, '\n')
+	lastNewline := strings.LastIndexByte(block, '\n')
+	if firstNewline < 3 || lastNewline <= firstNewline {
+		t.Fatalf("instruction surface is not fenced: %q", text)
+	}
+	fence := block[:firstNewline]
+	if strings.Trim(fence, "`") != "" || block[lastNewline+1:] != fence {
+		t.Fatalf("instruction surface fence is invalid: %q", text)
+	}
+	return block[firstNewline+1 : lastNewline]
 }
 
 func TestSatellitePreprocessingModeActionsReachSettingsAndRerenderCategory(t *testing.T) {

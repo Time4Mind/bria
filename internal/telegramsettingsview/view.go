@@ -5,6 +5,8 @@ package telegramsettingsview
 import (
 	"context"
 	"fmt"
+	"html"
+	"strings"
 
 	"bria/internal/domain"
 	"bria/internal/settingsport"
@@ -41,7 +43,16 @@ func PreprocessingInstructionEditor(instruction string, choice int) Surface {
 		for end < len(instruction) && end > 0 && instruction[end]&0xc0 == 0x80 {
 			end--
 		}
+		for !instructionChunkFits(instruction[:end]) {
+			end = end * 3 / 4
+			for end > 0 && instruction[end]&0xc0 == 0x80 {
+				end--
+			}
+		}
 		pages, instruction = append(pages, instruction[:end]), instruction[end:]
+	}
+	if len(pages) == 0 {
+		pages = append(pages, "")
 	}
 	page := min(max(choice-1, 0), len(pages)-1)
 	rows := [][]Button{{{Label: "Отмена", Action: "menu_settings"}}}
@@ -55,9 +66,21 @@ func PreprocessingInstructionEditor(instruction string, choice int) Surface {
 	if len(navigation) > 0 {
 		rows = append([][]Button{navigation}, rows...)
 	}
-	return Surface{Text: fmt.Sprintf("Текущая инструкция (%d/%d):\n\n%s\n\nОтправьте новую инструкцию препроцессинга одним текстовым сообщением.", page+1, len(pages), pages[page]), Rows: rows}
+	return Surface{Text: instructionFrame(page+1, len(pages), instructionLiteral(pages[page])), RichMarkdown: true, Rows: rows}
 }
-
+func instructionFrame(page, pages int, body string) string {
+	return fmt.Sprintf("Текущая инструкция (%d/%d):\n\n%s\n\nОтправьте новую инструкцию препроцессинга одним текстовым сообщением.", page, pages, body)
+}
+func instructionChunkFits(instruction string) bool {
+	return len(instructionFrame(16384, 16384, instructionLiteral(instruction))) <= 4096 && len(instructionFrame(16384, 16384, "<pre><code>"+html.EscapeString(instruction)+"</code></pre>")) <= 4096
+}
+func instructionLiteral(instruction string) string {
+	fence := "```"
+	for strings.Contains(instruction, fence) {
+		fence += "`"
+	}
+	return fence + "\n" + instruction + "\n" + fence
+}
 func Render() Surface {
 	surface := table("Настройки", "Раздел", "Содержимое",
 		Field{"Содержимое карточки", "Детализация, страницы и технические действия"},
@@ -77,7 +100,6 @@ func Render() Surface {
 	}
 	return surface
 }
-
 func RenderCategory(ctx context.Context, preferences settingsport.Preferences, providers settingsport.ProviderPreferences, queueLimit int, category Category) (Surface, error) {
 	current, err := snapshot(ctx, preferences, queueLimit)
 	if err != nil {
@@ -193,14 +215,12 @@ func RenderCategory(ctx context.Context, preferences settingsport.Preferences, p
 	surface.Rows = rows
 	return surface, nil
 }
-
 func defaultProviderValue(values map[domain.ComputerID]domain.Provider) string {
 	for _, provider := range values {
 		return string(provider)
 	}
 	return "не задан"
 }
-
 func defaultWorkdirValue(values map[domain.ComputerID]string) string {
 	for _, workdir := range values {
 		if workdir != "" {
@@ -209,7 +229,6 @@ func defaultWorkdirValue(values map[domain.ComputerID]string) string {
 	}
 	return "не задана"
 }
-
 func CategoryForAction(action string) (Category, bool) {
 	switch action {
 	case "settings_detail", "settings_page_limit", "settings_technical_actions", "settings_technical_output_lines", "settings_technical_command_lines":
@@ -230,7 +249,6 @@ func CategoryForAction(action string) (Category, bool) {
 		return 0, false
 	}
 }
-
 func screenImageProfileLabel(profile string) string {
 	switch profile {
 	case "current":
@@ -241,7 +259,6 @@ func screenImageProfileLabel(profile string) string {
 		return "100%, 8 цветов"
 	}
 }
-
 func satellitePreprocessingModeLabel(current settingsport.Snapshot) string {
 	switch current.SatellitePreprocessingMode {
 	case settingsport.SatellitePreprocessingPerSession:
@@ -257,14 +274,12 @@ func satellitePreprocessingModeLabel(current settingsport.Snapshot) string {
 		return "Выключен"
 	}
 }
-
 func snapshot(ctx context.Context, preferences settingsport.Preferences, queueLimit int) (settingsport.Snapshot, error) {
 	if preferences != nil {
 		return preferences.Snapshot(ctx)
 	}
 	return settingsport.Snapshot{ContinueExisting: true, CardDetail: "standard", CardPageLimit: 64, ShowTechnicalActions: true, NotifyBackgroundQuestions: false, NotifyBackgroundErrors: true, SessionLifetime: "never", QueueLimit: queueLimit, VoiceRecognition: "parakeet", PreprocessingEnabled: true, SatellitePreprocessingMode: settingsport.SatellitePreprocessingShared, AutoApproveCommands: true}, nil
 }
-
 func state(value, plural bool) string {
 	if value && plural {
 		return "включены"
@@ -277,7 +292,6 @@ func state(value, plural bool) string {
 	}
 	return "выключено"
 }
-
 func onePerRow(buttons ...Button) [][]Button {
 	rows := make([][]Button, len(buttons))
 	for index, button := range buttons {
@@ -285,7 +299,6 @@ func onePerRow(buttons ...Button) [][]Button {
 	}
 	return rows
 }
-
 func providerSurface(ctx context.Context, providers settingsport.ProviderPreferences) ([][]Button, []Field, error) {
 	preferences, err := providers.Snapshot(ctx)
 	if err != nil {

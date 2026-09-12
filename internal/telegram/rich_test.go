@@ -22,6 +22,14 @@ func TestNormalizeRichMarkdownConvertsShellFenceForRichClients(t *testing.T) {
 	}
 }
 
+func TestNormalizeRichMarkdownKeepsSingleLineFenceAsCopyableBlock(t *testing.T) {
+	input := "```\ncopy this line\n```"
+	want := "<pre><code>copy this line</code></pre>"
+	if got := telegram.NormalizeRichMarkdown(input); got != want {
+		t.Fatalf("normalized copyable block = %q, want %q", got, want)
+	}
+}
+
 func TestNormalizeRichMarkdownConvertsQuotesButPreservesLiteralMarkers(t *testing.T) {
 	input := "Before\n\n> quoted\n>\n> - item\n\n```markdown\n> literal\n```"
 	want := "Before\n\n<blockquote>quoted\n\n- item</blockquote>\n\n<pre><code class=\"language-markdown\">&gt; literal</code></pre>"

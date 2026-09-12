@@ -31,15 +31,11 @@ func normalizeRichCodeFences(text string) string {
 			continue
 		}
 		body := strings.Join(lines[index+1:closing], "\n")
-		if language == "" && !strings.Contains(body, "\n") && !strings.Contains(body, "`") {
-			normalized = append(normalized, "`"+body+"`")
-		} else {
-			attribute := ""
-			if language != "" {
-				attribute = ` class="language-` + language + `"`
-			}
-			normalized = append(normalized, "<pre><code"+attribute+">"+html.EscapeString(body)+"</code></pre>")
+		attribute := ""
+		if language != "" {
+			attribute = ` class="language-` + language + `"`
 		}
+		normalized = append(normalized, "<pre><code"+attribute+">"+html.EscapeString(body)+"</code></pre>")
 		index = closing + 1
 	}
 	return strings.Join(normalized, "\n")

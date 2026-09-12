@@ -1,5 +1,12 @@
 # Handoff: статус и следующий план
 
+> Текущий запрос A54 - показывать текущую preprocessing instruction как
+> многострочный копируемый fenced-блок без language tag и разобрать текущий
+> Codex approval, который не обработало автоподтверждение. Live evidence и
+> исправления не должны раскрывать command/reason или менять state/settings
+> вручную. Договор и coverage:
+> [PREPROCESS_COPY_AND_APPROVAL_TODO.md](PREPROCESS_COPY_AND_APPROVAL_TODO.md).
+
 > Текущий запрос A53 - добавить три глобальных профиля terminal screenshot:
 > `как сейчас` (100%, полная палитра), `100% / 8 цветов` и `75% / 8 цветов`.
 > Дефолт и миграция settings без нового поля - `100% / 8 цветов`; capture KiB и

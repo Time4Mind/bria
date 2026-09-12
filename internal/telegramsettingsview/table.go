@@ -18,7 +18,6 @@ func AppendFields(surface Surface, fields ...Field) Surface {
 	}
 	return surface
 }
-
 func tableCell(value string) string {
 	value = strings.NewReplacer("\r", " ", "\n", " ").Replace(value)
 	return strings.NewReplacer("\\", "\\\\", "|", "\\|", "`", "\\`", "*", "\\*", "_", "\\_", "~", "\\~", "[", "\\[", "]", "\\]").Replace(html.EscapeString(value))

@@ -9,8 +9,7 @@ import (
 	"bria/internal/sessionruntime"
 )
 
-// StartNativeObserver is called once after notification delivery has been
-// bound. The worker is owned by Controller.Close, not a detached watcher.
+// StartNativeObserver starts Close-owned workers after notification delivery is bound.
 func (c *Controller) StartNativeObserver() {
 	reader, ok := c.native.(sessionruntime.NativeScreenProvider)
 	if !ok {
@@ -22,8 +21,17 @@ func (c *Controller) StartNativeObserver() {
 		return
 	}
 	c.nativeObserverStarted = true
-	c.worker.Add(1)
+	c.worker.Add(3)
 	c.mu.Unlock()
+	approvalWake, screenWake := make(chan struct{}, 1), make(chan struct{}, 1)
+	wake := func(target chan<- struct{}) {
+		select {
+		case target <- struct{}{}:
+		default:
+		}
+	}
+	// Fan out coalesced hints: slow projection custody cannot stop approvals,
+	// while each boundary retains exactly one sequential owner.
 	go func() {
 		defer c.worker.Done()
 		ticker := time.NewTicker(time.Second)
@@ -39,10 +47,34 @@ func (c *Controller) StartNativeObserver() {
 				}
 			case <-ticker.C:
 			}
+			wake(approvalWake)
+			wake(screenWake)
+		}
+	}()
+	go func() {
+		defer c.worker.Done()
+		for {
+			select {
+			case <-c.rootContext.Done():
+				return
+			case <-approvalWake:
+			}
 			c.autoApproveNativeScreens(c.rootContext, reader)
+		}
+	}()
+	go func() {
+		defer c.worker.Done()
+		for {
+			select {
+			case <-c.rootContext.Done():
+				return
+			case <-screenWake:
+			}
 			c.refreshNativeObservation(c.rootContext, reader)
 		}
 	}()
+	wake(approvalWake)
+	wake(screenWake)
 }
 
 // NativeScreenVisible is rechecked at delivery time: queued observations must
