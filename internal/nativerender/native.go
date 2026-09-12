@@ -9,11 +9,22 @@ import (
 	"unicode/utf8"
 
 	"bria/internal/nativecapture"
+	"bria/internal/pngprofile"
 )
 
 const (
 	DefaultNativeCaptureKiB = nativecapture.DefaultLimitKiB
 	NativeMaxPNGBytes       = 1 << 20
+)
+
+// ImageProfile selects a deterministic terminal screenshot representation.
+// The zero value intentionally preserves the legacy full-colour output.
+type ImageProfile = pngprofile.Profile
+
+const (
+	ImageProfileCurrent  = pngprofile.ProfileCurrent
+	ImageProfileFull8    = pngprofile.ProfileFull8
+	ImageProfileCompact8 = pngprofile.ProfileCompact8
 )
 
 var (
@@ -22,10 +33,12 @@ var (
 	ErrEventTooLarge        = errors.New("screen typed runtime event exceeds its bound")
 )
 
-// NativeOptions controls only the bounded terminal payload. CaptureKiB is
-// intentionally limited to the three owner-approved settings values.
+// NativeOptions controls only the bounded terminal payload and its PNG image.
+// CaptureKiB is intentionally limited to the three owner-approved settings
+// values. A zero ImageProfile preserves the legacy image exactly.
 type NativeOptions struct {
-	CaptureKiB int
+	CaptureKiB   int
+	ImageProfile ImageProfile
 }
 
 // RenderNative rasterizes an explicitly selected native terminal capture. It
@@ -52,6 +65,9 @@ func RenderNativeWithOptions(ctx context.Context, text string, options NativeOpt
 	text = strings.ReplaceAll(text, "\r\n", "\n")
 	text = trimNativeCapture(text, limits.captureBytes)
 	png, _, _, err := renderNativeANSI(strings.TrimRight(text, "\n"), limits)
+	if err == nil {
+		png, err = applyNativeImageProfile(png, options.ImageProfile)
+	}
 	if contextErr := ctx.Err(); contextErr != nil {
 		return nil, contextErr
 	}

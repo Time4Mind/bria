@@ -58,6 +58,7 @@ func Inspect(document []byte) (map[string]struct{}, error) {
 	allowed["show_hidden_directories"] = struct{}{}
 	allowed["auto_approve_commands"] = struct{}{}
 	allowed["screen_capture_limit_kib"] = struct{}{}
+	allowed["screen_image_profile"] = struct{}{}
 	allowed["technical_output_lines"] = struct{}{}
 	allowed["technical_command_lines"] = struct{}{}
 	for _, field := range creationDocumentFields {

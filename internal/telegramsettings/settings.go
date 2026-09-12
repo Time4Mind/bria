@@ -74,6 +74,12 @@ func Apply(ctx context.Context, preferences settingsport.Preferences, providers 
 			return errors.New("screen capture settings are not configured")
 		}
 		return capture.CycleScreenCaptureLimit(ctx)
+	case "settings_screen_image_profile":
+		images, ok := preferences.(settingsport.ScreenImagePreferences)
+		if !ok {
+			return errors.New("screen image settings are not configured")
+		}
+		return images.CycleScreenImageProfile(ctx)
 	case "settings_detail":
 		return preferences.ToggleCardDetail(ctx)
 	case "settings_page_limit":

@@ -181,6 +181,8 @@ func PresentButton(button telegramui.Button) (string, callbacktoken.Action, int,
 		return presentGlobalButton(button, "Screen", callbacktoken.ActionSettingsScreen)
 	case telegramui.ActionSettingsScreenCaptureLimit:
 		return presentGlobalButton(button, "Размер захвата", callbacktoken.ActionSettingsScreenCaptureLimit)
+	case telegramui.ActionSettingsScreenImageProfile:
+		return presentGlobalButton(button, "Изображение Screen", callbacktoken.ActionSettingsScreenImageProfile)
 	case telegramui.ActionSettingsAutoApproveCommands:
 		return presentGlobalButton(button, "Автоподтверждение Codex", callbacktoken.ActionSettingsAutoApproveCommands)
 	case telegramui.ActionSettingsDetail:
@@ -411,6 +413,8 @@ func DecodeFields(fields callbacktoken.Fields) (telegramui.Action, telegramui.Bu
 		return telegramui.ActionSettingsScreen, telegramui.ButtonTarget{}, nil
 	case callbacktoken.ActionSettingsScreenCaptureLimit:
 		return telegramui.ActionSettingsScreenCaptureLimit, telegramui.ButtonTarget{}, nil
+	case callbacktoken.ActionSettingsScreenImageProfile:
+		return telegramui.ActionSettingsScreenImageProfile, telegramui.ButtonTarget{}, nil
 	case callbacktoken.ActionSettingsAutoApproveCommands:
 		return telegramui.ActionSettingsAutoApproveCommands, telegramui.ButtonTarget{}, nil
 	case callbacktoken.ActionSettingsDetail:

@@ -54,6 +54,7 @@ const (
 	SemanticSettingsCategory                 SemanticActionKind = "settings_category"
 	SemanticSettingsScreen                   SemanticActionKind = "settings_screen"
 	SemanticSettingsScreenCaptureLimit       SemanticActionKind = "settings_screen_capture_limit"
+	SemanticSettingsScreenImageProfile       SemanticActionKind = "settings_screen_image_profile"
 	SemanticSettingsAutoApproveCommands      SemanticActionKind = "settings_auto_approve_commands"
 	SemanticSettingsDetail                   SemanticActionKind = "settings_detail"
 	SemanticSettingsPageLimit                SemanticActionKind = "settings_page_limit"
@@ -94,7 +95,7 @@ func IsGlobal(kind SemanticActionKind) bool {
 		SemanticCreateWorkdir, SemanticCreateConfirm, SemanticCreateCodex, SemanticCreateClaude,
 		SemanticCreateChoice, SemanticCreatePrevious, SemanticCreateFirst, SemanticCreateNext,
 		SemanticCreateUp, SemanticCreatePick, SemanticCreateDirectoryNew, SemanticCreateBack, SemanticCreateFresh,
-		SemanticSettingsCategory, SemanticSettingsScreen, SemanticSettingsScreenCaptureLimit, SemanticSettingsAutoApproveCommands, SemanticSettingsDetail, SemanticSettingsPageLimit, SemanticSettingsContinueExisting,
+		SemanticSettingsCategory, SemanticSettingsScreen, SemanticSettingsScreenCaptureLimit, SemanticSettingsScreenImageProfile, SemanticSettingsAutoApproveCommands, SemanticSettingsDetail, SemanticSettingsPageLimit, SemanticSettingsContinueExisting,
 		SemanticSettingsTechnicalActions, SemanticSettingsTechnicalOutputLines, SemanticSettingsTechnicalCommandLines, SemanticSettingsBackgroundQuestions, SemanticSettingsBackgroundErrors,
 		SemanticSettingsArchiveRecommendations, SemanticSettingsHiddenDirectories,
 		SemanticSettingsDefaultProvider, SemanticSettingsDefaultWorkdir, SemanticSettingsClearCreationDefaults,

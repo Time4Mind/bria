@@ -22,6 +22,10 @@ func TestHiddenDirectoriesSignedCallbackRoutesAndRejectsUnauthorizedOrStale(t *t
 	testSignedSettingsCallback(t, "settings_hidden_directories", "Скрытые каталоги", 89)
 }
 
+func TestScreenImageProfileSignedCallbackRoutesAndRejectsUnauthorizedOrStale(t *testing.T) {
+	testSignedSettingsCallback(t, "settings_screen_image_profile", "Изображение Screen", 95)
+}
+
 func testSignedSettingsCallback(t *testing.T, name, label string, wireID callbacktoken.Action) {
 	t.Helper()
 	ctx := context.Background()

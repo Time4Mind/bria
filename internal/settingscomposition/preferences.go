@@ -18,6 +18,7 @@ type Preferences struct{ Store settings.Store }
 
 var _ settingsport.Preferences = Preferences{}
 var _ settingsport.AutoApprovalPreferences = Preferences{}
+var _ settingsport.ScreenImagePreferences = Preferences{}
 var _ settingsport.TechnicalOutputPreferences = Preferences{}
 var _ settingsport.TechnicalCommandPreferences = Preferences{}
 var _ settingsport.HiddenDirectoryPreferences = Preferences{}
@@ -32,7 +33,7 @@ func (p Preferences) Snapshot(ctx context.Context) (settingsport.Snapshot, error
 		return settingsport.Snapshot{}, err
 	}
 	return settingsport.Snapshot{
-		ContinueExisting: current.ContinueExisting, ScreenEnabled: current.ScreenEnabled, ScreenCaptureLimitKiB: current.ScreenCaptureLimitKiB,
+		ContinueExisting: current.ContinueExisting, ScreenEnabled: current.ScreenEnabled, ScreenCaptureLimitKiB: current.ScreenCaptureLimitKiB, ScreenImageProfile: string(current.Effective().ScreenImageProfile),
 		CardDetail: string(current.CardDetail), CardPageLimit: current.CardPageLimit, ShowTechnicalActions: current.ShowTechnicalActions,
 		TechnicalOutputLines:      current.TechnicalOutputLines,
 		TechnicalCommandLines:     current.TechnicalCommandLines,
@@ -78,6 +79,18 @@ func (p Preferences) CycleScreenCaptureLimit(ctx context.Context) error {
 			current.ScreenCaptureLimitKiB = 86
 		default:
 			current.ScreenCaptureLimitKiB = 48
+		}
+	})
+}
+func (p Preferences) CycleScreenImageProfile(ctx context.Context) error {
+	return p.update(ctx, func(current *settings.Settings) {
+		switch current.Effective().ScreenImageProfile {
+		case settings.ScreenImageProfileFull8:
+			current.ScreenImageProfile = settings.ScreenImageProfileCompact8
+		case settings.ScreenImageProfileCompact8:
+			current.ScreenImageProfile = settings.ScreenImageProfileCurrent
+		default:
+			current.ScreenImageProfile = settings.ScreenImageProfileFull8
 		}
 	})
 }

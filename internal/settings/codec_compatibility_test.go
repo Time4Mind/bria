@@ -57,7 +57,7 @@ func TestCodecCompatibilityMigratesEveryVersionAndPersistsApprovalChoice(t *test
 					t.Fatalf("migration = %+v, %v", before, err)
 				}
 				want := settings.Settings{
-					Version: settings.FormatVersion, ContinueExisting: false, ScreenEnabled: true, ScreenCaptureLimitKiB: 48,
+					Version: settings.FormatVersion, ContinueExisting: false, ScreenEnabled: true, ScreenCaptureLimitKiB: 48, ScreenImageProfile: settings.ScreenImageProfileFull8,
 					CardDetail: settings.CardDetailCompact, CardPageLimit: 64, ShowTechnicalActions: false, TechnicalOutputLines: 10, TechnicalCommandLines: 10,
 					NotifyBackgroundQuestions: true, NotifyBackgroundErrors: false, SessionLifetime: settings.Lifetime48Hours,
 					QueueLimit: 41, VoiceRecognition: settings.VoiceParakeet, RetryUndeliveredFiles: true,

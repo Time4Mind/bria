@@ -35,6 +35,10 @@ func TestHiddenDirectoriesPublicAdapterPreservesSemanticAndSettingsSurface(t *te
 	testPublicSettingsAdapter(t, "settings_hidden_directories")
 }
 
+func TestScreenImageProfilePublicAdapterPreservesSemanticAndSettingsSurface(t *testing.T) {
+	testPublicSettingsAdapter(t, "settings_screen_image_profile")
+}
+
 func testPublicSettingsAdapter(t *testing.T, name string) {
 	t.Helper()
 	action := telegramui.Action(name)

@@ -1350,8 +1350,12 @@ var packagePolicies = map[string]packagePolicy{
 	},
 	"internal/nativerender": {
 		responsibility:     "rasterize bounded native ANSI captures independently of runtime and transport",
-		allowedImports:     []string{"internal/nativecapture"},
+		allowedImports:     []string{"internal/nativecapture", "internal/pngprofile"},
 		maxProductionLines: 550,
+	},
+	"internal/pngprofile": {
+		responsibility:     "apply deterministic bounded palette and geometry profiles to rendered PNG images",
+		maxProductionLines: 250,
 	},
 	"internal/nativescreencache": {
 		responsibility:     "prepare current immutable screenshot delivery and lifecycle invalidation",
@@ -1375,7 +1379,7 @@ var packagePolicies = map[string]packagePolicy{
 	"internal/telegramcallbackview": {
 		responsibility:     "present callback buttons and map authenticated callback fields into UI semantics",
 		allowedImports:     []string{"internal/callbacktoken", "internal/telegramui"},
-		maxProductionLines: 525,
+		maxProductionLines: 550,
 	},
 	"internal/telegramhistory": {
 		responsibility:     "transform typed card history without persistence or I/O",
@@ -2041,12 +2045,12 @@ var packagePolicies = map[string]packagePolicy{
 	"internal/settings": {
 		responsibility:     "persist and validate user settings",
 		allowedImports:     []string{"internal/settingscodec", "internal/settingsport"},
-		maxProductionLines: 800,
+		maxProductionLines: 825,
 	},
 	"internal/settingscomposition": {
 		responsibility:     "compose neutral Telegram settings ports with canonical local settings and configuration stores",
 		allowedImports:     []string{"internal/domain", "internal/providerpreferences", "internal/settings", "internal/settingsport"},
-		maxProductionLines: 225,
+		maxProductionLines: 250,
 	},
 	"internal/settingsport": {
 		responsibility:     "define the storage-neutral preferences boundary used by Telegram control surfaces",
@@ -2259,7 +2263,7 @@ var packagePolicies = map[string]packagePolicy{
 	"internal/telegramsettingsview": {
 		responsibility:     "render escaped grouped settings tables through neutral preferences ports",
 		allowedImports:     []string{"internal/domain", "internal/settingsport"},
-		maxProductionLines: 325,
+		maxProductionLines: 350,
 	},
 	"internal/telegramstatus": {
 		responsibility:     "render read-only provider quota summaries for Telegram status surfaces",

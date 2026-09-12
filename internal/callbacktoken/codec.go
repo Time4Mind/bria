@@ -137,6 +137,7 @@ const (
 	ActionSettingsPreprocessingPerSession      Action = 92
 	ActionSettingsRenameNode                   Action = 93
 	ActionSettingsAutoApproveCommands          Action = 94
+	ActionSettingsScreenImageProfile           Action = 95
 )
 
 // Fields is the semantic callback payload. SessionID identifies the selected
@@ -266,7 +267,7 @@ func validAction(action Action) bool {
 		ActionMenuSettings, ActionMenuBack, ActionCreateSelectCodex, ActionCreateSelectClaude,
 		ActionCreateWorkdir, ActionCreateConfirm, ActionCreateCodex, ActionCreateClaude,
 		ActionSettingsCategory, ActionMenuNodes, ActionSelectNode,
-		ActionSettingsScreen, ActionSettingsScreenCaptureLimit, ActionSettingsDetail, ActionSettingsPageLimit, ActionSettingsContinueExisting,
+		ActionSettingsScreen, ActionSettingsScreenCaptureLimit, ActionSettingsScreenImageProfile, ActionSettingsDetail, ActionSettingsPageLimit, ActionSettingsContinueExisting,
 		ActionSettingsTechnicalActions, ActionSettingsTechnicalOutputLines, ActionSettingsTechnicalCommandLines, ActionSettingsBackgroundQuestions, ActionSettingsBackgroundErrors,
 		ActionSettingsArchiveRecommendations, ActionSettingsHiddenDirectories,
 		ActionSettingsDefaultProvider, ActionSettingsDefaultWorkdir, ActionSettingsClearCreationDefaults,
@@ -319,7 +320,7 @@ func validTarget(action Action, target int) bool {
 		ActionMenuSessions, ActionMenuNew, ActionMenuStatus, ActionRefreshStatus,
 		ActionMenuSettings, ActionMenuBack, ActionCreateSelectCodex, ActionCreateSelectClaude,
 		ActionCreateWorkdir, ActionCreateConfirm, ActionCreateCodex, ActionCreateClaude,
-		ActionSettingsScreen, ActionSettingsScreenCaptureLimit, ActionSettingsDetail, ActionSettingsPageLimit, ActionSettingsContinueExisting,
+		ActionSettingsScreen, ActionSettingsScreenCaptureLimit, ActionSettingsScreenImageProfile, ActionSettingsDetail, ActionSettingsPageLimit, ActionSettingsContinueExisting,
 		ActionSettingsTechnicalActions, ActionSettingsTechnicalOutputLines, ActionSettingsTechnicalCommandLines, ActionSettingsBackgroundQuestions, ActionSettingsBackgroundErrors,
 		ActionSettingsArchiveRecommendations, ActionSettingsHiddenDirectories,
 		ActionSettingsDefaultProvider, ActionSettingsDefaultWorkdir, ActionSettingsClearCreationDefaults,

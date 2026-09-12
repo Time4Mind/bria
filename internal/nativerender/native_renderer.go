@@ -33,6 +33,9 @@ type nativeLimits struct {
 }
 
 func nativeLimitsFor(options NativeOptions) (nativeLimits, error) {
+	if !options.ImageProfile.Valid() {
+		return nativeLimits{}, ErrInvalidNativeOptions
+	}
 	captureKiB := options.CaptureKiB
 	if captureKiB == 0 {
 		captureKiB = DefaultNativeCaptureKiB

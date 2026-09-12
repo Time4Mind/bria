@@ -59,7 +59,7 @@ func TestNativeScreenIsOptInActiveOnlyAndUsesFullNativeCapture(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want, err := screen.RenderNative(context.Background(), runtime.snapshot.FullText)
+	want, err := screen.RenderNativeWithOptions(context.Background(), runtime.snapshot.FullText, screen.NativeOptions{ImageProfile: screen.ImageProfileFull8})
 	if err != nil || !bytes.Equal(png, want) {
 		t.Fatal("render did not use exact full native screen")
 	}
@@ -72,6 +72,37 @@ func TestNativeScreenIsOptInActiveOnlyAndUsesFullNativeCapture(t *testing.T) {
 	selected.switchAfterRead = true
 	if png, err := source.ScreenPNG(context.Background(), "active"); err != nil || len(png) != 0 {
 		t.Fatal("switch during snapshot leaked prior terminal")
+	}
+}
+
+func TestNativeScreenAppliesEveryPersistedImageProfile(t *testing.T) {
+	preferences := settings.NewMemoryStore()
+	selected := &selectedScreen{id: "active"}
+	runtime := &nativeScreens{available: true, snapshot: sessionruntime.NativeSnapshot{FullText: "same terminal screenshot", Hash: "same-hash"}}
+	source, err := screenproduction.NewNativeSource(preferences, selected, runtime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		setting settings.ScreenImageProfile
+		render  screen.ImageProfile
+	}{
+		{settings.ScreenImageProfileCurrent, screen.ImageProfileCurrent},
+		{settings.ScreenImageProfileFull8, screen.ImageProfileFull8},
+		{settings.ScreenImageProfileCompact8, screen.ImageProfileCompact8},
+	} {
+		if err := preferences.Update(context.Background(), func(current *settings.Settings) error {
+			current.ScreenEnabled = true
+			current.ScreenImageProfile = test.setting
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		got, err := source.ScreenPNG(context.Background(), "active")
+		want, renderErr := screen.RenderNativeWithOptions(context.Background(), runtime.snapshot.FullText, screen.NativeOptions{ImageProfile: test.render})
+		if err != nil || renderErr != nil || !bytes.Equal(got, want) {
+			t.Fatalf("profile %q did not reach renderer: screen=%v render=%v", test.setting, err, renderErr)
+		}
 	}
 }
 

@@ -63,6 +63,7 @@ const (
 	ActionSettingsCategory                     Action = "settings_category"
 	ActionSettingsScreen                       Action = "settings_screen"
 	ActionSettingsScreenCaptureLimit           Action = "settings_screen_capture_limit"
+	ActionSettingsScreenImageProfile           Action = "settings_screen_image_profile"
 	ActionSettingsAutoApproveCommands          Action = "settings_auto_approve_commands"
 	ActionSettingsDetail                       Action = "settings_detail"
 	ActionSettingsPageLimit                    Action = "settings_page_limit"
@@ -125,7 +126,7 @@ func IsGlobalAction(action Action) bool {
 		ActionCreateWorkdir, ActionCreateConfirm, ActionCreateCodex, ActionCreateClaude,
 		ActionCreateChoice, ActionCreatePrevious, ActionCreateFirst, ActionCreateNext,
 		ActionCreateUp, ActionCreatePick, ActionCreateDirectoryNew, ActionCreateBack, ActionCreateFresh,
-		ActionSettingsCategory, ActionSettingsScreen, ActionSettingsScreenCaptureLimit, ActionSettingsAutoApproveCommands, ActionSettingsDetail, ActionSettingsPageLimit, ActionSettingsContinueExisting,
+		ActionSettingsCategory, ActionSettingsScreen, ActionSettingsScreenCaptureLimit, ActionSettingsScreenImageProfile, ActionSettingsAutoApproveCommands, ActionSettingsDetail, ActionSettingsPageLimit, ActionSettingsContinueExisting,
 		ActionSettingsTechnicalActions, ActionSettingsTechnicalOutputLines, ActionSettingsTechnicalCommandLines, ActionSettingsBackgroundQuestions, ActionSettingsBackgroundErrors,
 		ActionSettingsArchiveRecommendations, ActionSettingsHiddenDirectories,
 		ActionSettingsDefaultProvider, ActionSettingsDefaultWorkdir, ActionSettingsClearCreationDefaults,

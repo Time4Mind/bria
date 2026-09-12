@@ -1,8 +1,22 @@
 # Handoff: статус и следующий план
 
-> Текущий запрос A52 - выпущенная iteration 2 (`b27b57de`) всё ещё воспринимается
-> медленной: пять live `select_session` заняли `357-805 ms` внутри Bria/Telegram,
-> а с доставкой клиенту остались выше секунды. Iteration 3 (`8b77f45`) убрала три
+> Текущий запрос A53 - добавить три глобальных профиля terminal screenshot:
+> `как сейчас` (100%, полная палитра), `100% / 8 цветов` и `75% / 8 цветов`.
+> Дефолт и миграция settings без нового поля - `100% / 8 цветов`; capture KiB и
+> содержимое терминала не меняются. Нужны typed settings/UI, PNG renderer, cache identity,
+> RED/GREEN, полный release и postflight. Договор и coverage:
+> [SCREENSHOT_IMAGE_PROFILES_TODO.md](SCREENSHOT_IMAGE_PROFILES_TODO.md).
+
+> Текущий запрос A52 - выпущенная v5 (`b94724c`) устранила startup circular wait,
+> TokenAudit автоматически вышла из approval и polling продолжился. Два новых
+> live `select_session` всё ещё не приняты по скорости: ingress -> Telegram
+> receipt `717/1086 ms`, но локальный pre-edit занимает только `76/82 ms`, а
+> Rich Markdown transport - `641/1003 ms`. После receipt durable commit занимает
+> ещё `64/65 ms` и не задерживает видимую карточку. Rate-limit/cooldown нет;
+> рендер видимого pane даёт PNG около `143 KB` за median `25 ms`, а оба первых
+> target после restart прошли через cold multipart upload, потому что screenshot
+> file-id cache только in-memory. Для окончательного выбора фикса нужны warm-cache
+> tap и/или payload-free HTTP trace. Предыдущая iteration 3 (`8b77f45`) убрала три
 > operation CAS до `select_session`/latest-page edit, добавила interactive
 > mutation priority и строгий parser Codex file-edit approval; полный gate, CI,
 > signed deploy и postflight GREEN. Live postflight выявил отдельный startup

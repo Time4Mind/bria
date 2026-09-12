@@ -44,6 +44,31 @@ func TestInspectRejectsDuplicateAndUnknownSatelliteFields(t *testing.T) {
 	}
 }
 
+func TestInspectAllowsOptionalScreenImageProfileAndRejectsDuplicateOrUnknownField(t *testing.T) {
+	const prefix = `{"version":6,"revision":1,"continue_existing":true,"screen_enabled":false,"card_detail":"standard","show_technical_actions":true,"notify_background_questions":false,"notify_background_errors":true,"session_lifetime":"12h","queue_limit":32,"voice_recognition":"parakeet","retry_undelivered_files":false,"archive_recommendations":false,"default_providers":{},"default_workdirs":{},"satellite_preprocessing_mode":"shared","preprocessing_instruction":"","session_naming_enabled":false`
+	for name, suffix := range map[string]string{
+		"legacy absence": `}`,
+		"present":        `,"screen_image_profile":"full_8"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := Inspect([]byte(prefix + suffix)); err != nil {
+				t.Fatalf("valid document rejected: %v", err)
+			}
+		})
+	}
+	for name, suffix := range map[string]string{
+		"duplicate":         `,"screen_image_profile":"full_8","screen_image_profile":"current"}`,
+		"escaped duplicate": `,"screen_image_profile":"full_8","screen_image_profil\u0065":"current"}`,
+		"unknown":           `,"screen_image_profiles":"full_8"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := Inspect([]byte(prefix + suffix)); err == nil {
+				t.Fatal("invalid screen image profile field accepted")
+			}
+		})
+	}
+}
+
 func cloneFields(source map[string]struct{}) map[string]struct{} {
 	result := make(map[string]struct{}, len(source))
 	for key := range source {

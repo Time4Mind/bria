@@ -13,6 +13,7 @@ type Snapshot struct {
 	ContinueExisting           bool
 	ScreenEnabled              bool
 	ScreenCaptureLimitKiB      int
+	ScreenImageProfile         string
 	CardDetail                 string
 	CardPageLimit              int
 	ShowTechnicalActions       bool
@@ -84,6 +85,7 @@ type StandbyPreferences interface {
 // Optional capability aliases preserve existing consumers.
 type AutoApprovalPreferences = settingscapability.AutoApprovalPreferences
 type ScreenCapturePreferences = settingscapability.ScreenCapturePreferences
+type ScreenImagePreferences = settingscapability.ScreenImagePreferences
 type TechnicalOutputPreferences = settingscapability.TechnicalOutputPreferences
 type TechnicalCommandPreferences = settingscapability.TechnicalCommandPreferences
 type HiddenDirectoryPreferences = settingscapability.HiddenDirectoryPreferences

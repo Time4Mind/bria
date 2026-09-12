@@ -34,6 +34,7 @@
 | A52.7 | Убрать оставшиеся callback commits до edit и приоритизировать пользовательский tap | implemented; full gate and independent re-review GREEN | `select_session` и переход на актуальную страницу сохраняют сразу replay-safe `Prepared`, выполняют edit без `SendUnknown`, затем фиксируют receipt/commit. Previous/next теперь используют подписанную абсолютную страницу, но сохраняют полный durable flow. Card/native/global retry проверяет revision, presentation owner и active session до Telegram. Routine mutation не стартует во время активного interactive lease; heavy serialization, rate limits, cancellation и supersession сохранены. |
 | A52.8 | Восстановить автоподтверждение зависшей живой CLI-сессии | partial; parser released, startup acceptance failed | `Awaiting Recovery` TokenAudit вызван не падением: Codex жив и ждёт меню `Would you like to make the following edits?`. Строгий file-edit parser выпущен в `8b77f45`; exact production pane распознаётся, настройка `auto_approve_commands=true`, но после restart меню осталось открытым. Parser корректен, automatic startup flow ещё не был завершён. |
 | A52.9 | Убрать circular wait approval и startup recovery | implemented; focused RED/GREEN, race, full gate and independent review GREEN | Live v4 восстановила три сессии, затем оставила TokenAudit `running` с живым `Action Required`: `RecoverStartup` ждал принятого turn, а `StartNativeObserver` вызывался только после возврата recovery. Observer перенесён после binding всех output consumers, но до блокирующего recovery. Поведенческий regression до исправления блокировался; после исправления профильные пакеты, affected race и полный `VERSION=20260912-session-switch-latency-v5 make check-full` GREEN. Reviewer подтвердил teardown, nil-capability и no-supervision границы без открытых findings. |
+| A52.10 | Разложить непринятую задержку v5 после restart | diagnosed; product decision pending | Два live `select_session` дали ingress -> transport receipt `717/1086 ms`: локальный pre-edit `76/82 ms`, Rich Markdown edit `641/1003 ms`, post-edit durable commit ещё `64/65 ms`. Rate-limit/cooldown отсутствуют. Видимый pane рендерится за median `25 ms` в PNG около `143 KB`; после restart in-memory screenshot/file-id cache пуст, поэтому оба первых target были multipart uploads. Точный HTTP остаток внутри transport требует payload-free httptrace либо повторного warm-cache tap. |
 
 ## Проверенная причина
 
@@ -43,6 +44,20 @@ coordinator outbound checkpoint и generic status operation. Параллель�
 projection трижды перечитывал общий `state.json` размером 2.8 MB. Предыдущий
 фикс убрал только N+1 чтения standby-сессий и поэтому не мог заметно изменить
 весь пользовательский latency.
+
+## Свежий live v5 после restart
+
+- Tap 1: `76 ms` до edit, `641 ms` transport, server-visible receipt через
+  `717 ms`; post-receipt commit завершился через `781 ms` от ingress.
+- Tap 2: `82 ms` до edit, `1003 ms` transport, server-visible receipt через
+  `1086 ms`; post-receipt commit завершился через `1151 ms` от ingress.
+- В pre-edit входят запись выбранной сессии (`32-35 ms`), projection
+  (`9-12 ms`), Prepared output (`20-22 ms`) и запуск callback acknowledgement
+  (`13 ms`). Go-render видимого pane отдельно занимает median `25 ms` и создаёт
+  PNG около `143 KB`; он входит в transport interval.
+- Scheduler не был в cooldown/rate-limit, service delay events отсутствуют.
+  Неизмеряемые по Bot API границы - телефон -> Telegram -> `getUpdates` до
+  ingress и Telegram -> телефон после подтверждённого edit.
 
 ## Реализованная граница
 

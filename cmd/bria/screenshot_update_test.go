@@ -128,7 +128,7 @@ func TestCurrentNativeScreenshotAppearsInSameRichUpdateFromFirstFrame(t *testing
 		native.mu.Lock()
 		native.text, native.hash = text, text
 		native.mu.Unlock()
-		expected, err = screen.RenderNative(ctx, text)
+		expected, err = screen.RenderNativeWithOptions(ctx, text, screen.NativeOptions{ImageProfile: screen.ImageProfileFull8})
 		if err != nil {
 			t.Fatal(err)
 		}

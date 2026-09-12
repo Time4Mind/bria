@@ -144,6 +144,7 @@ const (
 	SemanticSettingsCategory                 = telegramsemantic.SemanticSettingsCategory
 	SemanticSettingsScreen                   = telegramsemantic.SemanticSettingsScreen
 	SemanticSettingsScreenCaptureLimit       = telegramsemantic.SemanticSettingsScreenCaptureLimit
+	SemanticSettingsScreenImageProfile       = telegramsemantic.SemanticSettingsScreenImageProfile
 	SemanticSettingsAutoApproveCommands      = telegramsemantic.SemanticSettingsAutoApproveCommands
 	SemanticSettingsDetail                   = telegramsemantic.SemanticSettingsDetail
 	SemanticSettingsPageLimit                = telegramsemantic.SemanticSettingsPageLimit
@@ -523,7 +524,7 @@ func (controller *Controller) handleGlobalSemanticAction(ctx context.Context, ac
 			return SemanticActionResult{Surface: unavailableNewSessionSurface()}, nil
 		}
 		return controller.confirmCreateDraft(ctx, action.UpdateID)
-	case SemanticSettingsScreen, SemanticSettingsScreenCaptureLimit, SemanticSettingsDetail, SemanticSettingsPageLimit, SemanticSettingsContinueExisting, SemanticSettingsTechnicalActions,
+	case SemanticSettingsScreen, SemanticSettingsScreenCaptureLimit, SemanticSettingsScreenImageProfile, SemanticSettingsDetail, SemanticSettingsPageLimit, SemanticSettingsContinueExisting, SemanticSettingsTechnicalActions,
 		SemanticSettingsTechnicalOutputLines, SemanticSettingsTechnicalCommandLines,
 		SemanticSettingsBackgroundQuestions, SemanticSettingsBackgroundErrors,
 		SemanticSettingsArchiveRecommendations, SemanticSettingsSessionNaming, SemanticSettingsStandby, SemanticSettingsHiddenDirectories,

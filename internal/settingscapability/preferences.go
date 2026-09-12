@@ -14,6 +14,11 @@ type ScreenCapturePreferences interface {
 	CycleScreenCaptureLimit(context.Context) error
 }
 
+// ScreenImagePreferences controls the terminal screenshot image profile.
+type ScreenImagePreferences interface {
+	CycleScreenImageProfile(context.Context) error
+}
+
 // TechnicalOutputPreferences controls the post-wrap technical output budget.
 type TechnicalOutputPreferences interface {
 	CycleTechnicalOutputLines(context.Context) error

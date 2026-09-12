@@ -265,7 +265,7 @@ func (f *refreshCadenceFixture) send(text string, delay time.Duration) {
 	ctx := context.Background()
 	f.sequence++
 	f.native.text = text
-	wantPNG, err := screen.RenderNative(ctx, text)
+	wantPNG, err := screen.RenderNativeWithOptions(ctx, text, screen.NativeOptions{ImageProfile: screen.ImageProfileFull8})
 	if err != nil {
 		f.t.Fatal(err)
 	}

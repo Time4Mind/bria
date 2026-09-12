@@ -9,12 +9,16 @@ import (
 const (
 	DefaultNativeCaptureKiB = nativerender.DefaultNativeCaptureKiB
 	NativeMaxPNGBytes       = nativerender.NativeMaxPNGBytes
+	ImageProfileCurrent     = nativerender.ImageProfileCurrent
+	ImageProfileFull8       = nativerender.ImageProfileFull8
+	ImageProfileCompact8    = nativerender.ImageProfileCompact8
 )
 
 var ErrInvalidNativeOptions = nativerender.ErrInvalidNativeOptions
 
 // NativeOptions preserves the native screenshot API for screen consumers.
 type NativeOptions = nativerender.NativeOptions
+type ImageProfile = nativerender.ImageProfile
 
 // RenderNative rasterizes the selected terminal capture without accessing a PTY.
 func RenderNative(ctx context.Context, text string) ([]byte, error) {

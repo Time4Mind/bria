@@ -5,6 +5,7 @@ import (
 
 	"bria/internal/domain"
 	"bria/internal/nativescreencache"
+	"bria/internal/screen"
 	"bria/internal/sessionruntime"
 	"bria/internal/settings"
 )
@@ -38,6 +39,7 @@ func NewNativeSource(preferences settings.Store, sessions ActiveSessionReader, r
 			return nativescreencache.Preferences{
 				ScreenEnabled:         value.ScreenEnabled,
 				ScreenCaptureLimitKiB: value.ScreenCaptureLimitKiB,
+				ImageProfile:          nativeImageProfile(value.Effective().ScreenImageProfile),
 			}, err
 		},
 		ActiveSession: sessions.LoadActiveSession,
@@ -46,4 +48,15 @@ func NewNativeSource(preferences settings.Store, sessions ActiveSessionReader, r
 			return nativescreencache.Snapshot{FullText: value.FullText, Hash: value.Hash}, ok
 		},
 	})
+}
+
+func nativeImageProfile(profile settings.ScreenImageProfile) screen.ImageProfile {
+	switch profile {
+	case settings.ScreenImageProfileCurrent:
+		return screen.ImageProfileCurrent
+	case settings.ScreenImageProfileCompact8:
+		return screen.ImageProfileCompact8
+	default:
+		return screen.ImageProfileFull8
+	}
 }

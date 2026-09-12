@@ -37,6 +37,14 @@ type VoiceRecognition string
 
 const VoiceParakeet VoiceRecognition = "parakeet"
 
+type ScreenImageProfile string
+
+const (
+	ScreenImageProfileCurrent  ScreenImageProfile = "current"
+	ScreenImageProfileFull8    ScreenImageProfile = "full_8"
+	ScreenImageProfileCompact8 ScreenImageProfile = "compact_8"
+)
+
 type SatellitePreprocessingMode string
 
 const (
@@ -46,25 +54,26 @@ const (
 )
 
 type Settings struct {
-	Version                   int               `json:"version"`
-	ContinueExisting          bool              `json:"continue_existing"`
-	ScreenEnabled             bool              `json:"screen_enabled"`
-	ScreenCaptureLimitKiB     int               `json:"screen_capture_limit_kib"`
-	CardDetail                CardDetail        `json:"card_detail"`
-	CardPageLimit             int               `json:"card_page_limit"`
-	ShowTechnicalActions      bool              `json:"show_technical_actions"`
-	TechnicalOutputLines      int               `json:"technical_output_lines"`
-	TechnicalCommandLines     int               `json:"technical_command_lines"`
-	NotifyBackgroundQuestions bool              `json:"notify_background_questions"`
-	NotifyBackgroundErrors    bool              `json:"notify_background_errors"`
-	SessionLifetime           SessionLifetime   `json:"session_lifetime"`
-	QueueLimit                int               `json:"queue_limit"`
-	VoiceRecognition          VoiceRecognition  `json:"voice_recognition"`
-	RetryUndeliveredFiles     bool              `json:"retry_undelivered_files"`
-	ArchiveRecommendations    bool              `json:"archive_recommendations"`
-	ShowHiddenDirectories     bool              `json:"show_hidden_directories"`
-	DefaultProviders          map[string]string `json:"default_providers"`
-	DefaultWorkdirs           map[string]string `json:"default_workdirs"`
+	Version                   int                `json:"version"`
+	ContinueExisting          bool               `json:"continue_existing"`
+	ScreenEnabled             bool               `json:"screen_enabled"`
+	ScreenCaptureLimitKiB     int                `json:"screen_capture_limit_kib"`
+	ScreenImageProfile        ScreenImageProfile `json:"screen_image_profile"`
+	CardDetail                CardDetail         `json:"card_detail"`
+	CardPageLimit             int                `json:"card_page_limit"`
+	ShowTechnicalActions      bool               `json:"show_technical_actions"`
+	TechnicalOutputLines      int                `json:"technical_output_lines"`
+	TechnicalCommandLines     int                `json:"technical_command_lines"`
+	NotifyBackgroundQuestions bool               `json:"notify_background_questions"`
+	NotifyBackgroundErrors    bool               `json:"notify_background_errors"`
+	SessionLifetime           SessionLifetime    `json:"session_lifetime"`
+	QueueLimit                int                `json:"queue_limit"`
+	VoiceRecognition          VoiceRecognition   `json:"voice_recognition"`
+	RetryUndeliveredFiles     bool               `json:"retry_undelivered_files"`
+	ArchiveRecommendations    bool               `json:"archive_recommendations"`
+	ShowHiddenDirectories     bool               `json:"show_hidden_directories"`
+	DefaultProviders          map[string]string  `json:"default_providers"`
+	DefaultWorkdirs           map[string]string  `json:"default_workdirs"`
 	// PreprocessingEnabled is a compatibility projection for consumers being
 	// migrated to SatellitePreprocessingMode. The typed mode is authoritative.
 	PreprocessingEnabled       bool                       `json:"preprocessing_enabled"`
@@ -79,6 +88,7 @@ type Effective struct {
 	ContinueExisting           bool
 	ScreenEnabled              bool
 	ScreenCaptureLimitKiB      int
+	ScreenImageProfile         ScreenImageProfile
 	CardDetail                 CardDetail
 	CardPageLimit              int
 	ShowTechnicalActions       bool
@@ -104,7 +114,7 @@ type Effective struct {
 }
 
 func Default() Settings {
-	return Settings{Version: FormatVersion, ContinueExisting: true, ScreenEnabled: false, ScreenCaptureLimitKiB: DefaultScreenCaptureLimitKiB, CardDetail: CardDetailStandard, CardPageLimit: DefaultCardPages, ShowTechnicalActions: true, TechnicalOutputLines: DefaultTechnicalOutputLines, TechnicalCommandLines: DefaultTechnicalCommandLines, NotifyBackgroundQuestions: false, NotifyBackgroundErrors: true, SessionLifetime: Lifetime12Hours, QueueLimit: DefaultQueueLimit, VoiceRecognition: VoiceParakeet, RetryUndeliveredFiles: false, ArchiveRecommendations: false, DefaultProviders: map[string]string{}, DefaultWorkdirs: map[string]string{}, PreprocessingEnabled: true, SatellitePreprocessingMode: SatellitePreprocessingShared, AutoApproveCommands: true}
+	return Settings{Version: FormatVersion, ContinueExisting: true, ScreenEnabled: false, ScreenCaptureLimitKiB: DefaultScreenCaptureLimitKiB, ScreenImageProfile: ScreenImageProfileFull8, CardDetail: CardDetailStandard, CardPageLimit: DefaultCardPages, ShowTechnicalActions: true, TechnicalOutputLines: DefaultTechnicalOutputLines, TechnicalCommandLines: DefaultTechnicalCommandLines, NotifyBackgroundQuestions: false, NotifyBackgroundErrors: true, SessionLifetime: Lifetime12Hours, QueueLimit: DefaultQueueLimit, VoiceRecognition: VoiceParakeet, RetryUndeliveredFiles: false, ArchiveRecommendations: false, DefaultProviders: map[string]string{}, DefaultWorkdirs: map[string]string{}, PreprocessingEnabled: true, SatellitePreprocessingMode: SatellitePreprocessingShared, AutoApproveCommands: true}
 }
 
 func (s Settings) Effective() Effective {
@@ -112,6 +122,7 @@ func (s Settings) Effective() Effective {
 		ContinueExisting:           s.ContinueExisting,
 		ScreenEnabled:              s.ScreenEnabled,
 		ScreenCaptureLimitKiB:      s.ScreenCaptureLimitKiB,
+		ScreenImageProfile:         effectiveScreenImageProfile(s.ScreenImageProfile),
 		CardDetail:                 s.CardDetail,
 		CardPageLimit:              s.CardPageLimit,
 		ShowTechnicalActions:       s.ShowTechnicalActions,
@@ -155,6 +166,11 @@ func (s Settings) Validate() error {
 	if s.ScreenCaptureLimitKiB != 48 && s.ScreenCaptureLimitKiB != 64 && s.ScreenCaptureLimitKiB != 86 {
 		return errors.New("screen capture limit must be 48, 64, or 86 KiB")
 	}
+	switch s.ScreenImageProfile {
+	case "", ScreenImageProfileCurrent, ScreenImageProfileFull8, ScreenImageProfileCompact8:
+	default:
+		return fmt.Errorf("unsupported screen image profile %q", s.ScreenImageProfile)
+	}
 	switch s.SessionLifetime {
 	case LifetimeNever, Lifetime6Hours, Lifetime12Hours, Lifetime24Hours, Lifetime48Hours:
 	default:
@@ -186,6 +202,13 @@ func (s Settings) Validate() error {
 		return errors.New("preprocessing instruction must be trimmed and at most 16384 bytes")
 	}
 	return nil
+}
+
+func effectiveScreenImageProfile(profile ScreenImageProfile) ScreenImageProfile {
+	if profile == "" {
+		return ScreenImageProfileFull8
+	}
+	return profile
 }
 
 func cloneStringMap(source map[string]string) map[string]string {

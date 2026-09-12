@@ -30,6 +30,7 @@ type NativeImage struct {
 type nativeCacheEntry struct {
 	snapshotHash string
 	captureKiB   int
+	imageProfile nativerender.ImageProfile
 	image        NativeImage
 }
 
@@ -39,6 +40,7 @@ var ErrInvalidConfiguration = errors.New("screen production configuration is inv
 type Preferences struct {
 	ScreenEnabled         bool
 	ScreenCaptureLimitKiB int
+	ImageProfile          nativerender.ImageProfile
 }
 
 // Snapshot is the exact native terminal identity, independent of provider types.
@@ -212,10 +214,10 @@ func (source *Source) CurrentScreenDelivery(ctx context.Context, sessionID strin
 		return nil, "", "", nil
 	}
 	source.mu.Lock()
-	image, cached := source.cachedBySnapshotHash(id, snapshot.Hash, preferences.ScreenCaptureLimitKiB)
+	image, cached := source.cachedBySnapshotHash(id, snapshot.Hash, preferences.ScreenCaptureLimitKiB, preferences.ImageProfile)
 	source.mu.Unlock()
 	if !cached {
-		data, renderErr := nativerender.RenderNativeWithOptions(ctx, snapshot.FullText, nativerender.NativeOptions{CaptureKiB: preferences.ScreenCaptureLimitKiB})
+		data, renderErr := nativerender.RenderNativeWithOptions(ctx, snapshot.FullText, nativerender.NativeOptions{CaptureKiB: preferences.ScreenCaptureLimitKiB, ImageProfile: preferences.ImageProfile})
 		if renderErr != nil {
 			return nil, "", "", renderErr
 		}
@@ -232,7 +234,7 @@ func (source *Source) CurrentScreenDelivery(ctx context.Context, sessionID strin
 		return nil, "", "", err
 	}
 	currentPreferences, err := source.preferences(ctx)
-	if err != nil || !currentPreferences.ScreenEnabled || currentPreferences.ScreenCaptureLimitKiB != preferences.ScreenCaptureLimitKiB {
+	if err != nil || !currentPreferences.ScreenEnabled || currentPreferences.ScreenCaptureLimitKiB != preferences.ScreenCaptureLimitKiB || currentPreferences.ImageProfile != preferences.ImageProfile {
 		return nil, "", "", err
 	}
 	if err := ctx.Err(); err != nil {
@@ -247,7 +249,7 @@ func (source *Source) CurrentScreenDelivery(ctx context.Context, sessionID strin
 	if prior, ok := source.cachedByPNGHash(id, image.Hash); ok {
 		image.FileID = prior.FileID
 	}
-	source.remember(id, nativeCacheEntry{snapshotHash: snapshot.Hash, captureKiB: preferences.ScreenCaptureLimitKiB, image: image})
+	source.remember(id, nativeCacheEntry{snapshotHash: snapshot.Hash, captureKiB: preferences.ScreenCaptureLimitKiB, imageProfile: preferences.ImageProfile, image: image})
 	source.setCurrent(id, snapshot.Hash, image)
 	return append([]byte(nil), image.PNG...), image.Hash, image.FileID, nil
 }
@@ -258,9 +260,9 @@ func (source *Source) ScreenPNG(ctx context.Context, sessionID string) ([]byte, 
 	return png, err
 }
 
-func (source *Source) cachedBySnapshotHash(id domain.SessionID, hash string, captureKiB int) (NativeImage, bool) {
+func (source *Source) cachedBySnapshotHash(id domain.SessionID, hash string, captureKiB int, imageProfile nativerender.ImageProfile) (NativeImage, bool) {
 	for _, entry := range source.cache[id] {
-		if entry.snapshotHash == hash && entry.captureKiB == captureKiB && len(entry.image.PNG) != 0 {
+		if entry.snapshotHash == hash && entry.captureKiB == captureKiB && entry.imageProfile == imageProfile && len(entry.image.PNG) != 0 {
 			return entry.image, true
 		}
 	}
@@ -291,7 +293,7 @@ func (source *Source) remember(id domain.SessionID, entry nativeCacheEntry) {
 	filtered := make([]nativeCacheEntry, 0, maxCachedNativePNGsPerSession)
 	filtered = append(filtered, entry)
 	for _, cached := range entries {
-		if cached.snapshotHash == entry.snapshotHash && cached.captureKiB == entry.captureKiB || cached.image.Hash == entry.image.Hash {
+		if cached.snapshotHash == entry.snapshotHash && cached.captureKiB == entry.captureKiB && cached.imageProfile == entry.imageProfile || cached.image.Hash == entry.image.Hash {
 			continue
 		}
 		filtered = append(filtered, cached)

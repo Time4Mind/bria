@@ -113,8 +113,11 @@ func RenderCategory(ctx context.Context, preferences settingsport.Preferences, p
 		if captureLimit == 0 {
 			captureLimit = 48
 		}
-		fields = []Field{{"Screen", state(current.ScreenEnabled, false)}, {"Размер захвата", fmt.Sprintf("%d KiB", captureLimit)}}
+		fields = []Field{{"Screen", state(current.ScreenEnabled, false)}, {"Размер захвата", fmt.Sprintf("%d KiB", captureLimit)}, {"Изображение Screen", screenImageProfileLabel(current.ScreenImageProfile)}}
 		rows = onePerRow(Button{Label: "Screen", Action: "settings_screen"}, Button{Label: "Размер захвата", Action: "settings_screen_capture_limit"})
+		if _, ok := preferences.(settingsport.ScreenImagePreferences); ok {
+			rows = append(rows, []Button{{Label: "Изображение Screen", Action: "settings_screen_image_profile"}})
+		}
 	case CategoryVoice:
 		text = "🎙 Распознавание речи"
 		fields = []Field{{"Движок", current.VoiceRecognition}}
@@ -211,7 +214,7 @@ func CategoryForAction(action string) (Category, bool) {
 	switch action {
 	case "settings_detail", "settings_page_limit", "settings_technical_actions", "settings_technical_output_lines", "settings_technical_command_lines":
 		return CategoryCard, true
-	case "settings_screen", "settings_screen_capture_limit":
+	case "settings_screen", "settings_screen_capture_limit", "settings_screen_image_profile":
 		return CategorySessionButtons, true
 	case "settings_preprocessing", "settings_preprocessing_disabled", "settings_preprocessing_shared", "settings_preprocessing_per_session", "settings_preprocessing_instruction", "settings_preprocessing_reset":
 		return CategoryPreprocessing, true
@@ -225,6 +228,17 @@ func CategoryForAction(action string) (Category, bool) {
 		return CategoryProviders, true
 	default:
 		return 0, false
+	}
+}
+
+func screenImageProfileLabel(profile string) string {
+	switch profile {
+	case "current":
+		return "100%, полная палитра"
+	case "compact_8":
+		return "75%, 8 цветов"
+	default:
+		return "100%, 8 цветов"
 	}
 }
 

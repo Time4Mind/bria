@@ -21,6 +21,7 @@ type settingsDocument struct {
 	ContinueExisting           bool                       `json:"continue_existing"`
 	ScreenEnabled              bool                       `json:"screen_enabled"`
 	ScreenCaptureLimitKiB      int                        `json:"screen_capture_limit_kib,omitempty"`
+	ScreenImageProfile         ScreenImageProfile         `json:"screen_image_profile,omitempty"`
 	CardDetail                 CardDetail                 `json:"card_detail"`
 	CardPageLimit              int                        `json:"card_page_limit,omitempty"`
 	ShowTechnicalActions       bool                       `json:"show_technical_actions"`
@@ -126,6 +127,9 @@ func Decode(reader io.Reader) (Snapshot, error) {
 	if snapshot.Settings.ScreenCaptureLimitKiB == 0 {
 		snapshot.Settings.ScreenCaptureLimitKiB = DefaultScreenCaptureLimitKiB
 	}
+	if snapshot.Settings.ScreenImageProfile == "" {
+		snapshot.Settings.ScreenImageProfile = ScreenImageProfileFull8
+	}
 	if err := snapshot.Settings.Validate(); err != nil {
 		return Snapshot{}, fmt.Errorf("validate settings: %w", err)
 	}
@@ -136,7 +140,7 @@ func documentFromSnapshot(snapshot Snapshot) settingsDocument {
 	s := snapshot.Settings
 	return settingsDocument{
 		Version: s.Version, Revision: snapshot.Revision,
-		ContinueExisting: s.ContinueExisting, ScreenEnabled: s.ScreenEnabled, ScreenCaptureLimitKiB: s.ScreenCaptureLimitKiB,
+		ContinueExisting: s.ContinueExisting, ScreenEnabled: s.ScreenEnabled, ScreenCaptureLimitKiB: s.ScreenCaptureLimitKiB, ScreenImageProfile: effectiveScreenImageProfile(s.ScreenImageProfile),
 		CardDetail: s.CardDetail, CardPageLimit: s.CardPageLimit, ShowTechnicalActions: s.ShowTechnicalActions,
 		TechnicalOutputLines:      s.TechnicalOutputLines,
 		TechnicalCommandLines:     s.TechnicalCommandLines,
@@ -167,6 +171,7 @@ func (document settingsDocument) snapshot() Snapshot {
 		ContinueExisting:           document.ContinueExisting,
 		ScreenEnabled:              document.ScreenEnabled,
 		ScreenCaptureLimitKiB:      document.ScreenCaptureLimitKiB,
+		ScreenImageProfile:         effectiveScreenImageProfile(document.ScreenImageProfile),
 		CardDetail:                 document.CardDetail,
 		CardPageLimit:              document.CardPageLimit,
 		ShowTechnicalActions:       document.ShowTechnicalActions,

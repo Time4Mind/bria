@@ -9,8 +9,48 @@ import (
 	"testing"
 
 	"bria/internal/domain"
+	"bria/internal/nativerender"
 	"bria/internal/nativescreencache"
 )
+
+func TestCurrentSnapshotReencodesWhenImageProfileChanges(t *testing.T) {
+	profile := nativerender.ImageProfileFull8
+	source, err := nativescreencache.New(nativescreencache.Config{
+		Preferences: func(context.Context) (nativescreencache.Preferences, error) {
+			return nativescreencache.Preferences{ScreenEnabled: true, ScreenCaptureLimitKiB: 48, ImageProfile: profile}, nil
+		},
+		ActiveSession: func(context.Context) (domain.SessionID, error) { return "active", nil },
+		Snapshot: func(domain.SessionID) (nativescreencache.Snapshot, bool) {
+			return nativescreencache.Snapshot{FullText: "same terminal frame", Hash: "same-snapshot"}, true
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, hash, _, err := source.CurrentScreenDelivery(context.Background(), "active")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !source.RememberTelegramFileID("active", hash, "full-eight-receipt") {
+		t.Fatal("receipt rejected")
+	}
+	profile = nativerender.ImageProfileCompact8
+	second, nextHash, fileID, err := source.CurrentScreenDelivery(context.Background(), "active")
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := png.DecodeConfig(bytes.NewReader(first))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := png.DecodeConfig(bytes.NewReader(second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b.Width != a.Width*3/4 || b.Height != a.Height*3/4 || hash == nextHash || fileID != "" {
+		t.Fatalf("profile change reused stale PNG/receipt: full=%dx%d compact=%dx%d hashes_equal=%t file_id=%q", a.Width, a.Height, b.Width, b.Height, hash == nextHash, fileID)
+	}
+}
 
 func TestEveryChangedSnapshotCanRenderWithoutIndependentCadence(t *testing.T) {
 	frame := ""
