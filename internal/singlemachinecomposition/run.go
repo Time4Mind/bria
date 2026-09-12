@@ -709,7 +709,9 @@ func runTelegramController(
 	}
 	// Attach after consumers are bound: an accepted turn may already have a native final.
 	if supervision, ok := sessionRecoverer.(*supervisioncomposition.Manager); ok {
-		recovery, err = supervision.RecoverStartup(ctx)
+		// A recovered turn can already be blocked on a native Codex approval.
+		// The observer must be live while recovery waits for that provider turn.
+		recovery, err = recoverStartupWithNativeObserver(ctx, handler, supervision)
 		if err != nil {
 			return fmt.Errorf("recover persisted sessions: %w", err)
 		}
@@ -724,8 +726,9 @@ func runTelegramController(
 		for _, session := range currentSessions {
 			handler.RefreshRecoveryCard(ctx, session.ID())
 		}
+	} else {
+		handler.StartNativeObserver()
 	}
-	handler.StartNativeObserver()
 	handler.ScheduleStandby()
 	durableReporter := func(component, eventType string) func(error) {
 		return func(reportErr error) {
@@ -869,6 +872,16 @@ func validateRunnableRole(configuration config.Config) error {
 
 type contextRunner interface {
 	Run(context.Context) error
+}
+
+type startupNativeObserver interface{ StartNativeObserver() }
+type startupSessionRecoverer interface {
+	RecoverStartup(context.Context) (app.SessionRecoveryResult, error)
+}
+
+func recoverStartupWithNativeObserver(ctx context.Context, observer startupNativeObserver, recoverer startupSessionRecoverer) (app.SessionRecoveryResult, error) {
+	observer.StartNativeObserver()
+	return recoverer.RecoverStartup(ctx)
 }
 
 type idleRunner struct{}

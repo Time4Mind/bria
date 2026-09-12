@@ -2,18 +2,17 @@
 
 > Текущий запрос A52 - выпущенная iteration 2 (`b27b57de`) всё ещё воспринимается
 > медленной: пять live `select_session` заняли `357-805 ms` внутри Bria/Telegram,
-> а с доставкой клиенту остались выше секунды. Iteration 3 локально убирает три
-> operation CAS до `select_session`/latest-page edit и не ставит этот
-> replay-safe edit в `send_unknown`; carrier revision проверяется до Telegram.
-> Previous/next используют абсолютную подписанную страницу и полный durable
-> flow. Routine Telegram mutation не
-> стартует во время активного interactive lease. Параллельно точная проблемная
-> TokenAudit оказалась живой Codex-сессией на неподдержанном file-edit approval;
-> parser теперь распознаёт command/file-edit и только строгий bounded tail;
-> full/reflowed menu имеет один one-shot identity. Exact live screen probe и
-> full gate и два независимых re-review GREEN. Впереди
-> exact-SHA CI, signed release, restart, автоматическое продолжение TokenAudit и
-> новые реальные tap. Договор:
+> а с доставкой клиенту остались выше секунды. Iteration 3 (`8b77f45`) убрала три
+> operation CAS до `select_session`/latest-page edit, добавила interactive
+> mutation priority и строгий parser Codex file-edit approval; полный gate, CI,
+> signed deploy и postflight GREEN. Live postflight выявил отдельный startup
+> circular wait: три сессии recovered, затем `RecoverStartup` зависла на
+> TokenAudit с `Action Required`, а native observer запускался только после
+> возврата recovery. Локально observer перенесён после binding output consumers,
+> но до blocking recovery; точный source-order RED/GREEN, affected race и
+> полный `20260912-session-switch-latency-v5 make check-full` и независимый
+> review GREEN. Впереди новая exact-SHA release, проверка автоматического
+> продолжения TokenAudit и реальные tap. Договор:
 > [SESSION_SWITCH_LATENCY_TODO.md](SESSION_SWITCH_LATENCY_TODO.md).
 
 > Текущий запрос A51 - исправить потерю request custody активной сессии,
