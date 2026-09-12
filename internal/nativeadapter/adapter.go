@@ -33,12 +33,13 @@ type Config struct {
 	ScreenCaptureLimitKiB       int
 }
 type activeInput struct {
-	request   runtimeprotocol.ParentMessage
-	text      string
-	accepted  bool
-	turnID    string
-	completed bool
-	sent      time.Time
+	request           runtimeprotocol.ParentMessage
+	text              string
+	accepted          bool
+	turnID            string
+	provisionalTurnID string
+	completed         bool
+	sent              time.Time
 }
 type adapter struct {
 	mediaDir    string
@@ -409,11 +410,15 @@ func (a *adapter) poll(ctx context.Context) error {
 		return err
 	}
 	for _, p := range append([]*activeInput{a.active}, a.steers...) {
-		if p != nil && !p.accepted && time.Since(p.sent) > 20*time.Second {
+		if acceptanceTimedOut(p, time.Now()) {
 			return errors.New("native provider acceptance not confirmed")
 		}
 	}
 	return nil
+}
+
+func acceptanceTimedOut(input *activeInput, now time.Time) bool {
+	return input != nil && !input.accepted && input.provisionalTurnID == "" && now.Sub(input.sent) > 20*time.Second
 }
 
 func (a *adapter) consumeEvents(events []nativetranscript.Event) error {
@@ -426,22 +431,16 @@ func (a *adapter) consumeEvents(events []nativetranscript.Event) error {
 			break
 		}
 		switch event.Kind {
+		case nativetranscript.KindStarted:
+			if !a.active.accepted {
+				a.active.provisionalTurnID = event.TurnID
+			}
 		case nativetranscript.KindUser:
 			pending := append([]*activeInput{a.active}, a.steers...)
 			for _, p := range pending {
 				if !p.accepted && strings.TrimSpace(event.Text) == strings.TrimSpace(p.text) {
-					if event.TurnID == "" {
-						return errors.New("native input turn identity missing")
-					}
-					p.accepted = true
-					p.turnID = event.TurnID
-					if err = a.acceptReceipt(p.request.MessageID, event.TurnID); err != nil {
+					if err = a.acceptInput(p, event.TurnID); err != nil {
 						return err
-					}
-					if p.request.MessageID != "" {
-						if err = a.emit(runtimeprotocol.AdapterMessage{Type: runtimeprotocol.TypeAccepted, RequestID: p.request.RequestID, MessageID: p.request.MessageID}); err != nil {
-							return err
-						}
 					}
 					break
 				}
@@ -458,12 +457,14 @@ func (a *adapter) consumeEvents(events []nativetranscript.Event) error {
 				a.finalOwner = owner.request.RequestID
 			}
 		case nativetranscript.KindComplete:
+			a.endProvisionalTurn(event.TurnID)
 			if a.modelEventOwner(event.TurnID) != nil {
 				if err = a.complete(event.TurnID); err != nil {
 					return err
 				}
 			}
 		case nativetranscript.KindInterrupted:
+			a.endProvisionalTurn(event.TurnID)
 			if a.modelEventOwner(event.TurnID) != nil {
 				id := a.active.request.RequestID
 				for _, p := range append([]*activeInput{a.active}, a.steers...) {
@@ -485,6 +486,31 @@ func (a *adapter) consumeEvents(events []nativetranscript.Event) error {
 		}
 	}
 	return nil
+}
+
+func (a *adapter) endProvisionalTurn(turnID string) {
+	if a.active != nil && !a.active.accepted && a.active.provisionalTurnID == turnID {
+		a.active.provisionalTurnID = ""
+		a.active.sent = time.Now()
+	}
+}
+
+func (a *adapter) acceptInput(input *activeInput, turnID string) error {
+	if turnID == "" {
+		return errors.New("native input turn identity missing")
+	}
+	input.accepted = true
+	input.turnID = turnID
+	input.provisionalTurnID = ""
+	if err := a.acceptReceipt(input.request.MessageID, turnID); err != nil {
+		input.accepted = false
+		input.turnID = ""
+		return err
+	}
+	if input.request.MessageID == "" {
+		return nil
+	}
+	return a.emit(runtimeprotocol.AdapterMessage{Type: runtimeprotocol.TypeAccepted, RequestID: input.request.RequestID, MessageID: input.request.MessageID})
 }
 
 func (a *adapter) modelEventOwner(turnID string) *activeInput {

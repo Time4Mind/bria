@@ -29,3 +29,25 @@ func TestStandbyUsesNewGlobalWireIDAndNoTarget(t *testing.T) {
 		t.Fatal("standby target accepted")
 	}
 }
+
+func TestLateSettingsActionsUseDistinctGlobalWireIDs(t *testing.T) {
+	if ActionSettingsRenameNode != 93 || ActionSettingsAutoApproveCommands != 94 {
+		t.Fatalf("late settings wire IDs = rename:%d autoapprove:%d", ActionSettingsRenameNode, ActionSettingsAutoApproveCommands)
+	}
+	now := time.Unix(1_800_000_000, 0).UTC()
+	codec, err := New(bytes.Repeat([]byte{0x42}, 32), bytes.NewReader(bytes.Repeat([]byte{1}, 256)), func() time.Time { return now })
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, action := range []Action{ActionSettingsRenameNode, ActionSettingsAutoApproveCommands} {
+		fields := Fields{Action: action, SessionID: "00000000-0000-0000-0000-000000000001", ExpiresAt: now.Add(time.Minute)}
+		token, err := codec.Encode(fields)
+		if err != nil {
+			t.Fatalf("encode action %d: %v", action, err)
+		}
+		got, err := codec.Decode(token)
+		if err != nil || got != fields {
+			t.Fatalf("action %d fields=%#v error=%v", action, got, err)
+		}
+	}
+}

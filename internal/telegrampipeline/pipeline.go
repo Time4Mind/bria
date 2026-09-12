@@ -516,7 +516,7 @@ func PlanAcceptedCallback(callback AcceptedCallback) (CallbackPlan, error) {
 		telegramui.ActionSettingsLifetime24Hours, telegramui.ActionSettingsLifetime48Hours,
 		telegramui.ActionSettingsProviderCodex, telegramui.ActionSettingsProviderClaude,
 		telegramui.ActionSettingsPreprocessing, telegramui.ActionSettingsPreprocessingDisabled, telegramui.ActionSettingsPreprocessingShared, telegramui.ActionSettingsPreprocessingPerSession,
-		telegramui.ActionSettingsPreprocessingInstruction, telegramui.ActionSettingsPreprocessingReset, telegramui.ActionSettingsSessionNaming, telegramui.ActionSettingsStandby:
+		telegramui.ActionSettingsPreprocessingInstruction, telegramui.ActionSettingsPreprocessingReset, telegramui.ActionSettingsSessionNaming, telegramui.ActionSettingsStandby, telegramui.ActionSettingsRenameNode:
 		effect = EffectChangeSettings
 	case telegramui.ActionAuthorizeCodex:
 		effect = EffectAuthorizeCodex

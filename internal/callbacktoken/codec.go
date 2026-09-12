@@ -135,6 +135,8 @@ const (
 	ActionSettingsPreprocessingDisabled        Action = 90
 	ActionSettingsPreprocessingShared          Action = 91
 	ActionSettingsPreprocessingPerSession      Action = 92
+	ActionSettingsRenameNode                   Action = 93
+	ActionSettingsAutoApproveCommands          Action = 94
 )
 
 // Fields is the semantic callback payload. SessionID identifies the selected
@@ -272,7 +274,7 @@ func validAction(action Action) bool {
 		ActionSettingsLifetime24Hours, ActionSettingsLifetime48Hours,
 		ActionSettingsProviderCodex, ActionSettingsProviderClaude, ActionAuthorizeCodex, ActionAuthorizeClaude,
 		ActionSettingsPreprocessing, ActionSettingsPreprocessingDisabled, ActionSettingsPreprocessingShared, ActionSettingsPreprocessingPerSession,
-		ActionSettingsPreprocessingInstruction, ActionSettingsPreprocessingReset, ActionSettingsSessionNaming, ActionSettingsStandby:
+		ActionSettingsPreprocessingInstruction, ActionSettingsPreprocessingReset, ActionSettingsSessionNaming, ActionSettingsStandby, ActionSettingsRenameNode, ActionSettingsAutoApproveCommands:
 		return true
 	case ActionCreateChoice, ActionCreatePrevious, ActionCreateFirst, ActionCreateNext,
 		ActionCreateUp, ActionCreatePick, ActionCreateDirectoryNew, ActionCreateBack, ActionCreateFresh:
@@ -326,7 +328,7 @@ func validTarget(action Action, target int) bool {
 		ActionSettingsProviderCodex, ActionSettingsProviderClaude, ActionAuthorizeCodex, ActionAuthorizeClaude:
 		return target == 0
 	case ActionSettingsPreprocessing, ActionSettingsPreprocessingDisabled, ActionSettingsPreprocessingShared, ActionSettingsPreprocessingPerSession,
-		ActionSettingsPreprocessingInstruction, ActionSettingsPreprocessingReset, ActionSettingsSessionNaming, ActionSettingsStandby:
+		ActionSettingsPreprocessingInstruction, ActionSettingsPreprocessingReset, ActionSettingsSessionNaming, ActionSettingsStandby, ActionSettingsRenameNode, ActionSettingsAutoApproveCommands:
 		return target == 0
 	case ActionCreatePrevious, ActionCreateFirst, ActionCreateNext,
 		ActionCreateUp, ActionCreatePick, ActionCreateDirectoryNew, ActionCreateBack, ActionCreateFresh:

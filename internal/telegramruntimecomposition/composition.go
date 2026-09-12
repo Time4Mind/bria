@@ -235,6 +235,8 @@ func semanticActionFromPlan(plan telegrampipeline.CallbackPlan) (telegramcontrol
 		kind = telegramcontroller.SemanticSettingsSessionNaming
 	case telegramui.ActionSettingsStandby:
 		kind = telegramcontroller.SemanticSettingsStandby
+	case telegramui.ActionSettingsRenameNode:
+		kind = telegramcontroller.SemanticSettingsRenameNode
 	case telegramui.ActionAuthorizeCodex:
 		kind = telegramcontroller.SemanticAuthorizeCodex
 	case telegramui.ActionAuthorizeClaude:
@@ -326,7 +328,7 @@ func callbackEffectForAction(action telegramui.Action) telegrampipeline.Callback
 		telegramui.ActionSettingsLifetime24Hours, telegramui.ActionSettingsLifetime48Hours,
 		telegramui.ActionSettingsProviderCodex, telegramui.ActionSettingsProviderClaude,
 		telegramui.ActionSettingsPreprocessing, telegramui.ActionSettingsPreprocessingDisabled, telegramui.ActionSettingsPreprocessingShared, telegramui.ActionSettingsPreprocessingPerSession,
-		telegramui.ActionSettingsPreprocessingInstruction, telegramui.ActionSettingsPreprocessingReset, telegramui.ActionSettingsSessionNaming, telegramui.ActionSettingsStandby:
+		telegramui.ActionSettingsPreprocessingInstruction, telegramui.ActionSettingsPreprocessingReset, telegramui.ActionSettingsSessionNaming, telegramui.ActionSettingsStandby, telegramui.ActionSettingsRenameNode:
 		return telegrampipeline.EffectChangeSettings
 	case telegramui.ActionAuthorizeCodex:
 		return telegrampipeline.EffectAuthorizeCodex
@@ -393,7 +395,7 @@ func projectSemanticSurface(surface telegramcontroller.SemanticSurface) (*telegr
 			if err != nil {
 				return nil, err
 			}
-			button := telegramui.Button{Action: action}
+			button := telegramui.Button{Action: action, Label: semantic.Label}
 			switch action {
 			case telegramui.ActionSettingsCategory, telegramui.ActionMenuSettings, telegramui.ActionSelectNode,
 				telegramui.ActionSettingsPreprocessingDisabled, telegramui.ActionSettingsPreprocessingShared, telegramui.ActionSettingsPreprocessingPerSession,
@@ -557,6 +559,8 @@ func telegramUIAction(action telegramcontroller.SemanticActionKind) (telegramui.
 		return telegramui.ActionSettingsSessionNaming, nil
 	case telegramcontroller.SemanticSettingsStandby:
 		return telegramui.ActionSettingsStandby, nil
+	case telegramcontroller.SemanticSettingsRenameNode:
+		return telegramui.ActionSettingsRenameNode, nil
 	case telegramcontroller.SemanticAuthorizeCodex:
 		return telegramui.ActionAuthorizeCodex, nil
 	case telegramcontroller.SemanticAuthorizeClaude:

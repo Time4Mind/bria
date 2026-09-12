@@ -2,6 +2,7 @@ package nativeadapter
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -14,10 +15,59 @@ import (
 	"time"
 
 	"bria/internal/domain"
+	"bria/internal/nativetranscript"
 	"bria/internal/runtimeprotocol"
 )
 
 const fixtureSession = "11111111-2222-4333-8444-555555555555"
+
+func TestCodexTaskStartDefersExactAcceptanceWithoutTimingOut(t *testing.T) {
+	var output bytes.Buffer
+	a := &adapter{
+		config:   Config{StateDir: filepath.Join(t.TempDir(), "private")},
+		id:       fixtureSession,
+		output:   &output,
+		receipts: make(map[string]string),
+		turnIDs:  make(map[string]string),
+		active: &activeInput{request: runtimeprotocol.ParentMessage{
+			RequestID: "request", MessageID: "message",
+		}, text: "prompt", sent: time.Now().Add(-time.Minute)},
+	}
+	if err := a.consumeEvents([]nativetranscript.Event{{Kind: nativetranscript.Kind("started"), TurnID: "turn"}}); err != nil {
+		t.Fatal(err)
+	}
+	if a.active.accepted || a.active.provisionalTurnID != "turn" || len(a.receipts) != 0 || output.Len() != 0 {
+		t.Fatalf("task start claimed exact acceptance: active=%+v receipts=%+v output=%q", a.active, a.receipts, output.String())
+	}
+	if acceptanceTimedOut(a.active, time.Now()) {
+		t.Fatal("provisional task start retained the false fixed timeout")
+	}
+	if err := a.consumeEvents([]nativetranscript.Event{{Kind: nativetranscript.KindComplete, TurnID: "turn"}}); err != nil {
+		t.Fatal(err)
+	}
+	if a.active.provisionalTurnID != "" || acceptanceTimedOut(a.active, time.Now()) || !acceptanceTimedOut(a.active, a.active.sent.Add(20*time.Second+time.Nanosecond)) {
+		t.Fatal("unconfirmed provisional completion did not restart a bounded acceptance window")
+	}
+	if err := a.consumeEvents([]nativetranscript.Event{{Kind: nativetranscript.KindStarted, TurnID: "next-turn"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.consumeEvents([]nativetranscript.Event{{Kind: nativetranscript.KindUser, TurnID: "foreign", Text: "other"}}); err != nil {
+		t.Fatal(err)
+	}
+	if a.active.accepted || len(a.receipts) != 0 || output.Len() != 0 {
+		t.Fatal("mismatched user transcript claimed acceptance")
+	}
+	if err := a.consumeEvents([]nativetranscript.Event{{Kind: nativetranscript.KindUser, TurnID: "exact", Text: "prompt"}}); err != nil {
+		t.Fatal(err)
+	}
+	if !a.active.accepted || a.active.turnID != "exact" || a.active.provisionalTurnID != "" || a.receipts["message"] != "unknown" || a.turnIDs["message"] != "exact" {
+		t.Fatalf("matching user transcript did not seal acceptance: active=%+v receipts=%+v turns=%+v", a.active, a.receipts, a.turnIDs)
+	}
+	message, err := runtimeprotocol.DecodeAdapterLine(bytes.TrimSpace(output.Bytes()), runtimeprotocol.Limits{})
+	if err != nil || message.Type != runtimeprotocol.TypeAccepted || message.RequestID != "request" || message.MessageID != "message" {
+		t.Fatalf("acceptance frame = %+v, %v", message, err)
+	}
+}
 
 func TestMain(m *testing.M) {
 	if os.Getenv("NATIVE_ADAPTER_BRIDGE") == "1" {

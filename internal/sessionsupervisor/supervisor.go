@@ -52,6 +52,7 @@ type AcceptedTurnReconciler = sessionattachment.AcceptedTurnReconciler
 type InputRecovery interface {
 	BeginInputRecovery(context.Context, string, string, bool) (bool, error)
 	CommitInputRecoverySkip(context.Context, string, string) error
+	CommitInputRecoveryAttach(context.Context, string, string) error
 }
 
 type Options struct {
@@ -300,6 +301,16 @@ func (supervisor *Supervisor) commitInputRecovery(ctx context.Context, sessionID
 		return errors.New("input recovery boundary is unavailable")
 	}
 	return supervisor.inputRecovery.CommitInputRecoverySkip(context.WithoutCancel(ctx), string(sessionID), token)
+}
+
+func (supervisor *Supervisor) commitAttachedInputRecovery(ctx context.Context, sessionID domain.SessionID, token string, active bool) error {
+	if !active {
+		return nil
+	}
+	if supervisor.inputRecovery == nil || token == "" {
+		return errors.New("input recovery boundary is unavailable")
+	}
+	return supervisor.inputRecovery.CommitInputRecoveryAttach(context.WithoutCancel(ctx), string(sessionID), token)
 }
 
 func inputRecoveryToken(awaiting domain.Session, prior domain.ProviderBinding) string {

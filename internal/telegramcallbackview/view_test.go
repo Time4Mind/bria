@@ -43,6 +43,14 @@ func TestButtonPresentationAndAuthenticatedFieldProjection(t *testing.T) {
 			button: telegramui.Button{Action: telegramui.ActionCallbackSendRetryPossibleDuplicate},
 			label:  "Повторить отправку (риск дубля)", action: callbacktoken.ActionCallbackSendRetryPossibleDuplicate,
 		},
+		{
+			name: "auto approval settings round trip", button: telegramui.Button{Action: telegramui.ActionSettingsAutoApproveCommands, Label: "Автоподтверждение Codex"},
+			label: "Автоподтверждение Codex", action: callbacktoken.ActionSettingsAutoApproveCommands,
+		},
+		{
+			name: "rename node settings round trip", button: telegramui.Button{Action: telegramui.ActionSettingsRenameNode, Label: "Переименовать ноду"},
+			label: "Переименовать ноду", action: callbacktoken.ActionSettingsRenameNode,
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

@@ -365,6 +365,10 @@ func (store *SessionStore) List(ctx context.Context) ([]domain.Session, error) {
 	if err := store.reload(); err != nil {
 		return nil, err
 	}
+	return store.listLoadedSessions(), nil
+}
+
+func (store *SessionStore) listLoadedSessions() []domain.Session {
 	intentIDs := make([]domain.IntentID, 0, len(store.byIntent))
 	for intentID := range store.byIntent {
 		intentIDs = append(intentIDs, intentID)
@@ -376,7 +380,7 @@ func (store *SessionStore) List(ctx context.Context) ([]domain.Session, error) {
 	for _, intentID := range intentIDs {
 		sessions = append(sessions, store.byIntent[intentID])
 	}
-	return sessions, nil
+	return sessions
 }
 
 // ImportArchived atomically adds a complete batch of externally discovered

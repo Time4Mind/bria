@@ -18,6 +18,31 @@ func (store *SessionStore) HasEmptyCloseEligibility(ctx context.Context, id doma
 	return ok && card.EmptyCloseEligible && len(card.History) == 0, nil
 }
 
+// ListWithEmptyCloseEligibility returns sessions and advisory empty-card
+// evidence from one durable snapshot. Card projection uses it to avoid a full
+// state-file read for the list followed by one read per standby session.
+func (store *SessionStore) ListWithEmptyCloseEligibility(ctx context.Context) ([]domain.Session, map[domain.SessionID]bool, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if err := store.reload(); err != nil {
+		return nil, nil, err
+	}
+	sessions := store.listLoadedSessions()
+	result := make(map[domain.SessionID]bool)
+	if store.telegramUI == nil {
+		return sessions, result, nil
+	}
+	for id, card := range store.telegramUI.Cards {
+		if card.EmptyCloseEligible && len(card.History) == 0 {
+			result[id] = true
+		}
+	}
+	return sessions, result, nil
+}
+
 // DeleteEmptyClosing must only be called after the exact provider process exit
 // has been confirmed. Unknown or any recorded content means retain/archive.
 // Session, UI card, and selection references are removed in one durable write.

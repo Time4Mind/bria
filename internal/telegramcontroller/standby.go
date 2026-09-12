@@ -16,6 +16,10 @@ type emptyStandbyReader interface {
 	HasEmptyCloseEligibility(context.Context, domain.SessionID) (bool, error)
 }
 
+type standbyProjectionReader interface {
+	ListWithEmptyCloseEligibility(context.Context) ([]domain.Session, map[domain.SessionID]bool, error)
+}
+
 type emptyStandbyRetirer interface {
 	DeleteEmptyAwaitingRecovery(context.Context, domain.Session) (bool, error)
 }
@@ -271,4 +275,37 @@ func (controller *Controller) standbyLabel(ctx context.Context, session domain.S
 		return session.Name()
 	}
 	return "default"
+}
+
+func standbyLabelsFromEvidence(sessions []domain.Session, empty map[domain.SessionID]bool) map[domain.SessionID]string {
+	labels := make(map[domain.SessionID]string)
+	for _, session := range sessions {
+		if !empty[session.ID()] || !strings.HasPrefix(string(session.IntentID()), standbyIntentPrefix) {
+			continue
+		}
+		label := session.Name()
+		if label == "" {
+			label = "default"
+		}
+		labels[session.ID()] = label
+	}
+	return labels
+}
+
+func (controller *Controller) sessionProjection(ctx context.Context) ([]domain.Session, map[domain.SessionID]string, error) {
+	if reader, ok := controller.sessions.(standbyProjectionReader); ok {
+		sessions, empty, err := reader.ListWithEmptyCloseEligibility(ctx)
+		return sessions, standbyLabelsFromEvidence(sessions, empty), err
+	}
+	sessions, err := controller.sessions.List(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	labels := make(map[domain.SessionID]string)
+	for _, session := range sessions {
+		if label := controller.standbyLabel(ctx, session); label != "" {
+			labels[session.ID()] = label
+		}
+	}
+	return sessions, labels, nil
 }

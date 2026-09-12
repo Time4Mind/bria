@@ -43,6 +43,7 @@ var (
 type Kind string
 
 const (
+	KindStarted     Kind = "started"
 	KindUser        Kind = "user"
 	KindCommentary  Kind = "commentary"
 	KindFinal       Kind = "final"

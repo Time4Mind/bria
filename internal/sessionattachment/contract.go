@@ -67,7 +67,8 @@ type Options struct {
 	ShouldContinueAcceptedTurns       func(context.Context, domain.Session, domain.ProviderBinding, AcceptedTurnReconciliation) (bool, error)
 	ContinueAcceptedTurns             func(context.Context, domain.Session, domain.ProviderBinding, AcceptedTurnReconciliation) error
 	ContinueAcceptedTurnsWithRecovery func(context.Context, domain.Session, domain.ProviderBinding, AcceptedTurnReconciliation, func(context.Context) error) error
-	CommitInputRecovery               func(context.Context) error
+	CommitInputRecoverySkip           func(context.Context) error
+	CommitInputRecoveryAttach         func(context.Context) error
 	Conflict                          func(context.Context, domain.Session, error) (Result, error)
 	Archive                           func(domain.Session, time.Time) (domain.Session, error)
 }

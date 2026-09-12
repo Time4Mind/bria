@@ -51,6 +51,7 @@ type inputRecoveryPhase string
 const (
 	inputRecoveryOpen      inputRecoveryPhase = "open"
 	inputRecoveryCommitted inputRecoveryPhase = "committed"
+	inputRecoveryAttached  inputRecoveryPhase = "attached"
 )
 
 type inputRecoveryRecord struct {
@@ -338,7 +339,7 @@ func validateSession(session sessionRecord, limits Limits) error {
 			return errors.New("input recovery boundary is invalid")
 		}
 		switch session.Recovery.Phase {
-		case inputRecoveryOpen, inputRecoveryCommitted:
+		case inputRecoveryOpen, inputRecoveryCommitted, inputRecoveryAttached:
 		default:
 			return errors.New("input recovery phase is invalid")
 		}
@@ -352,6 +353,18 @@ func validateSession(session sessionRecord, limits Limits) error {
 			case InputCompleted, InputTerminalFailed, InputSkipped:
 			default:
 				return errors.New("committed input recovery retains unresolved input")
+			}
+		}
+	}
+	if session.Recovery != nil && session.Recovery.Phase == inputRecoveryAttached {
+		for _, input := range session.Inputs {
+			if input.Sequence > session.Recovery.ThroughSequence {
+				break
+			}
+			switch input.Phase {
+			case InputPending, InputAccepted, InputCompleted, InputTerminalFailed, InputSkipped:
+			default:
+				return errors.New("attached input recovery retains ambiguous input")
 			}
 		}
 	}

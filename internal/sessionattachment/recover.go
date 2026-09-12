@@ -19,8 +19,8 @@ func Recover(ctx context.Context, awaiting domain.Session, prior domain.Provider
 	binding, err := options.Attacher.Attach(ctx, request)
 	if err != nil {
 		if errors.Is(err, providerattachport.ErrTerminalUnavailable) {
-			if options.CommitInputRecovery != nil {
-				if commitErr := options.CommitInputRecovery(context.WithoutCancel(ctx)); commitErr != nil {
+			if options.CommitInputRecoverySkip != nil {
+				if commitErr := options.CommitInputRecoverySkip(context.WithoutCancel(ctx)); commitErr != nil {
 					return result, fmt.Errorf("commit unavailable input recovery: %w", commitErr)
 				}
 			}
@@ -64,7 +64,7 @@ func Recover(ctx context.Context, awaiting domain.Session, prior domain.Provider
 	}
 	result.Reconciliation, err = options.AcceptedTurns.ReconcileAcceptedTurns(ctx, awaiting.ID(), prior)
 	var stableBarrier interface{ StableRecoveryBarrierRevision() string }
-	capturedUnknown := options.CommitInputRecovery != nil && errors.As(err, &stableBarrier) && stableBarrier.StableRecoveryBarrierRevision() != ""
+	capturedUnknown := options.CommitInputRecoveryAttach != nil && errors.As(err, &stableBarrier) && stableBarrier.StableRecoveryBarrierRevision() != ""
 	if err != nil && !capturedUnknown {
 		return result, errors.Join(ErrReconciliationRequired, err)
 	}
@@ -75,12 +75,6 @@ func Recover(ctx context.Context, awaiting domain.Session, prior domain.Provider
 	for _, turn := range result.Reconciliation.Turns {
 		active = active || turn.Outcome == AcceptedTurnUnknown
 	}
-	if active && options.CommitInputRecovery != nil {
-		// A durable recovery cutoff means the user has chosen to abandon every
-		// unresolved request captured by the proven total failure, regardless
-		// of its former acceptance phase. Do not resurrect or observe it.
-		active = false
-	}
 	if active && options.ShouldContinueAcceptedTurns != nil {
 		active, err = options.ShouldContinueAcceptedTurns(ctx, recovered, prior, result.Reconciliation)
 		if err != nil {
@@ -90,7 +84,7 @@ func Recover(ctx context.Context, awaiting domain.Session, prior domain.Provider
 	if active && options.ContinueAcceptedTurns == nil && options.ContinueAcceptedTurnsWithRecovery == nil {
 		return result, ErrReconciliationRequired
 	}
-	if active && options.CommitInputRecovery != nil && options.ContinueAcceptedTurnsWithRecovery == nil {
+	if active && options.CommitInputRecoveryAttach != nil && options.ContinueAcceptedTurnsWithRecovery == nil {
 		return result, ErrReconciliationRequired
 	}
 	if active && recovered.Status() == domain.SessionClosing {
@@ -113,8 +107,8 @@ func Recover(ctx context.Context, awaiting domain.Session, prior domain.Provider
 	if err := ctx.Err(); err != nil {
 		return result, err
 	}
-	if !active && options.CommitInputRecovery != nil {
-		if err = options.CommitInputRecovery(context.WithoutCancel(ctx)); err != nil {
+	if !active && options.CommitInputRecoveryAttach != nil {
+		if err = options.CommitInputRecoveryAttach(context.WithoutCancel(ctx)); err != nil {
 			return result, fmt.Errorf("commit attached input recovery: %w", err)
 		}
 	}
@@ -138,7 +132,7 @@ func Recover(ctx context.Context, awaiting domain.Session, prior domain.Provider
 	}
 	if active {
 		if options.ContinueAcceptedTurnsWithRecovery != nil {
-			err = options.ContinueAcceptedTurnsWithRecovery(ctx, recovered, prior, result.Reconciliation, options.CommitInputRecovery)
+			err = options.ContinueAcceptedTurnsWithRecovery(ctx, recovered, prior, result.Reconciliation, options.CommitInputRecoveryAttach)
 		} else {
 			err = options.ContinueAcceptedTurns(ctx, recovered, prior, result.Reconciliation)
 		}

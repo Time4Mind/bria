@@ -692,7 +692,7 @@ func unavailableNewSessionSurface() *SemanticSurface {
 	return &SemanticSurface{Text: "Создание новой сессии недоступно: нет настроенной и включенной CLI.", Rows: [][]SemanticButton{{{Label: "Меню", Action: SemanticMenuBack}}}}
 }
 func (controller *Controller) sessionListSemanticResult(ctx context.Context) (SemanticActionResult, error) {
-	sessions, err := controller.sessions.List(ctx)
+	sessions, standbyLabels, err := controller.sessionProjection(ctx)
 	if err != nil {
 		return SemanticActionResult{}, err
 	}
@@ -701,10 +701,8 @@ func (controller *Controller) sessionListSemanticResult(ctx context.Context) (Se
 	text.WriteString("Сессии")
 	currentNode := controller.currentNodeID()
 	labelsByID := telegramsessions.Labels(sessions, currentNode)
-	for _, candidate := range sessions {
-		if label := controller.standbyLabel(ctx, candidate); label != "" {
-			labelsByID[candidate.ID()] = label
-		}
+	for id, label := range standbyLabels {
+		labelsByID[id] = label
 	}
 	rows := make([][]SemanticButton, 0, (len(sessions)+2)/3+2)
 	row := make([]SemanticButton, 0, 3)
@@ -1678,7 +1676,7 @@ func (controller *Controller) semanticCardForSession(ctx context.Context, sessio
 			return SemanticCard{}, err
 		}
 	}
-	sessions, err := controller.sessions.List(ctx)
+	sessions, standbyLabels, err := controller.sessionProjection(ctx)
 	if err != nil {
 		return SemanticCard{}, fmt.Errorf("list semantic card sessions: %w", err)
 	}
@@ -1686,11 +1684,9 @@ func (controller *Controller) semanticCardForSession(ctx context.Context, sessio
 	selectable := make([]domain.SessionID, 0, len(sessions))
 	labelsByID := telegramsessions.Labels(sessions, session.ComputerID())
 	emptyStandby := make(map[domain.SessionID]bool)
-	for _, candidate := range sessions {
-		if label := controller.standbyLabel(ctx, candidate); label != "" {
-			labelsByID[candidate.ID()] = label
-			emptyStandby[candidate.ID()] = true
-		}
+	for id, label := range standbyLabels {
+		labelsByID[id] = label
+		emptyStandby[id] = true
 	}
 	selectableLabels := make([]string, 0, len(sessions))
 	background := make([]string, 0, 5)

@@ -14,6 +14,7 @@ import (
 type inputRecoveryJournal interface {
 	BeginInputRecovery(context.Context, string, string, bool) (bool, error)
 	CommitInputRecoverySkip(context.Context, string, string) error
+	CommitInputRecoveryAttach(context.Context, string, string) error
 }
 
 func recoveryJournal(t *testing.T, journal *messagejournal.Journal) inputRecoveryJournal {
@@ -76,6 +77,37 @@ func TestInputRecoverySkipsOnlyCapturedUnresolvedPrefix(t *testing.T) {
 	next, err := reopened.LeaseNextInput(ctx, "s", "recovered-worker", time.Unix(101, 0), time.Minute)
 	if err != nil || next.MessageID != "pending-after" || next.Sequence != 7 {
 		t.Fatalf("post-recovery lease = %+v, %v", next, err)
+	}
+}
+
+func TestAttachedInputRecoveryPreservesAcceptedAndDefinitelyUnsentPending(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "journal.json")
+	document := `{"version":2,"sessions":[{"session_id":"s","next_sequence":3,"inputs":[` +
+		`{"message_id":"accepted","sequence":1,"payload":"YQ==","phase":"accepted","lease":{}},` +
+		`{"message_id":"unknown","sequence":2,"payload":"Yg==","phase":"unknown","lease":{}},` +
+		`{"message_id":"queued","sequence":3,"payload":"Yw==","phase":"pending","lease":{}}],"outputs":[]}]}`
+	if err := os.WriteFile(path, []byte(document), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	recovery := recoveryJournal(t, openJournal(t, path, testLimits()))
+	if active, err := recovery.BeginInputRecovery(ctx, "s", "exact-attach", false); err != nil || !active {
+		t.Fatalf("begin = %t, %v", active, err)
+	}
+	if err := recovery.CommitInputRecoveryAttach(ctx, "s", "exact-attach"); err != nil {
+		t.Fatal(err)
+	}
+	reopened := openJournal(t, path, testLimits())
+	if err := recoveryJournal(t, reopened).CommitInputRecoveryAttach(ctx, "s", "exact-attach"); err != nil {
+		t.Fatalf("replayed attach commit = %v", err)
+	}
+	inputs, err := reopened.Inputs(ctx, "s")
+	if err != nil || len(inputs) != 3 || inputs[0].Phase != messagejournal.InputAccepted || inputs[1].Phase != messagejournal.InputSkipped || inputs[2].Phase != messagejournal.InputPending {
+		t.Fatalf("attached phases = %+v, %v", inputs, err)
+	}
+	next, err := reopened.LeaseNextInput(ctx, "s", "worker", time.Unix(100, 0), time.Minute)
+	if err != nil || next.MessageID != "queued" {
+		t.Fatalf("queued successor = %+v, %v", next, err)
 	}
 }
 

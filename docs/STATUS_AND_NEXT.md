@@ -1,14 +1,18 @@
 # Handoff: статус и следующий план
 
-> Текущий диагностический запрос A51 - разобрать request flow активной сессии
-> `KidAccess` и причину, по которой второй запрос не дошёл до Codex. Проверено:
-> `783532031` был принят provider-ом и начал выполняться, `783532032` был только
-> сохранён и показан в карточке. После provider failure recovery generation
-> `9 -> 10` зафиксировал cutoff `through_sequence=315` и ошибочно перевёл оба
-> input в `skipped`: уже принятый sequence 308 и гарантированно неотправленный
-> sequence 311. Код подтверждает, что `CommitInputRecoverySkip` без различия
-> tombstone-ит все unresolved input до cutoff. Диагностика завершена; исправление
-> не входило в запрос и остаётся неавторизованным пунктом A51.F.
+> Текущий запрос A51 - исправить потерю request custody активной сессии,
+> ошибки открытия «CLI»/«Создание сессии» и задержку переключения. Проверено:
+> exact attach ошибочно применял destructive recovery skip к accepted и
+> definitely-unsent pending inputs. Свежий `783532061` Codex фактически принял
+> примерно за `0.5 s`, но во время compaction user transcript появился только
+> через `63.7 s`, поэтому adapter ложно завершал submit по таймауту `20 s`.
+> Локально реализованы раздельные attach/terminal-unavailable recovery commits,
+> `task_started.turn_id` как provisional liveness без receipt и exact user text
+> как единственный acceptance proof, полный callback wire
+> contract двух settings actions и один state snapshot вместо семи N+1 standby
+> reads. `VERSION=20260912-request-recovery-callback-latency make check-full`
+> GREEN, включая global race и executable trio; впереди exact-SHA CI, deploy и
+> live пользовательская проверка нового input/callback latency.
 > Договор и evidence:
 > [REQUEST_RECOVERY_FIFO_INCIDENT_TODO.md](REQUEST_RECOVERY_FIFO_INCIDENT_TODO.md).
 

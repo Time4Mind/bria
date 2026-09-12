@@ -181,6 +181,8 @@ func PresentButton(button telegramui.Button) (string, callbacktoken.Action, int,
 		return presentGlobalButton(button, "Screen", callbacktoken.ActionSettingsScreen)
 	case telegramui.ActionSettingsScreenCaptureLimit:
 		return presentGlobalButton(button, "Размер захвата", callbacktoken.ActionSettingsScreenCaptureLimit)
+	case telegramui.ActionSettingsAutoApproveCommands:
+		return presentGlobalButton(button, "Автоподтверждение Codex", callbacktoken.ActionSettingsAutoApproveCommands)
 	case telegramui.ActionSettingsDetail:
 		return presentGlobalButton(button, "Детализация", callbacktoken.ActionSettingsDetail)
 	case telegramui.ActionSettingsPageLimit:
@@ -237,6 +239,8 @@ func PresentButton(button telegramui.Button) (string, callbacktoken.Action, int,
 		return presentGlobalButton(button, "Автоимя", callbacktoken.ActionSettingsSessionNaming)
 	case telegramui.ActionSettingsStandby:
 		return presentGlobalButton(button, "Ожидающая сессия", callbacktoken.ActionSettingsStandby)
+	case telegramui.ActionSettingsRenameNode:
+		return presentGlobalButton(button, "Переименовать ноду", callbacktoken.ActionSettingsRenameNode)
 	case telegramui.ActionAuthorizeCodex:
 		return presentGlobalButton(button, "Авторизовать Codex", callbacktoken.ActionAuthorizeCodex)
 	case telegramui.ActionAuthorizeClaude:
@@ -407,6 +411,8 @@ func DecodeFields(fields callbacktoken.Fields) (telegramui.Action, telegramui.Bu
 		return telegramui.ActionSettingsScreen, telegramui.ButtonTarget{}, nil
 	case callbacktoken.ActionSettingsScreenCaptureLimit:
 		return telegramui.ActionSettingsScreenCaptureLimit, telegramui.ButtonTarget{}, nil
+	case callbacktoken.ActionSettingsAutoApproveCommands:
+		return telegramui.ActionSettingsAutoApproveCommands, telegramui.ButtonTarget{}, nil
 	case callbacktoken.ActionSettingsDetail:
 		return telegramui.ActionSettingsDetail, telegramui.ButtonTarget{}, nil
 	case callbacktoken.ActionSettingsPageLimit:
@@ -463,6 +469,8 @@ func DecodeFields(fields callbacktoken.Fields) (telegramui.Action, telegramui.Bu
 		return telegramui.ActionSettingsSessionNaming, telegramui.ButtonTarget{}, nil
 	case callbacktoken.ActionSettingsStandby:
 		return telegramui.ActionSettingsStandby, telegramui.ButtonTarget{}, nil
+	case callbacktoken.ActionSettingsRenameNode:
+		return telegramui.ActionSettingsRenameNode, telegramui.ButtonTarget{}, nil
 	case callbacktoken.ActionAuthorizeCodex:
 		return telegramui.ActionAuthorizeCodex, telegramui.ButtonTarget{}, nil
 	case callbacktoken.ActionAuthorizeClaude:

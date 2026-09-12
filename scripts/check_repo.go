@@ -1421,7 +1421,7 @@ var packagePolicies = map[string]packagePolicy{
 	"internal/nativeadapter": {
 		responsibility:     "bridge exact native CLI terminal sessions, validated photo attachments, transcripts and throttled unsolicited screen observations",
 		allowedImports:     []string{"internal/domain", "internal/nativeacceptance", "internal/nativeattachment", "internal/nativecapture", "internal/nativecli", "internal/nativeeventkind", "internal/nativeinputowner", "internal/nativephotostaging", "internal/nativereceiptstore", "internal/nativestartupdiagnostic", "internal/nativeterminal", "internal/nativetranscript", "internal/runtimediagnostic", "internal/runtimeprotocol"},
-		maxProductionLines: 850,
+		maxProductionLines: 875,
 	},
 	"internal/nativeeventkind": {
 		responsibility:     "project displayable native transcript kinds onto provider-neutral runtime event kinds",
@@ -1728,7 +1728,7 @@ var packagePolicies = map[string]packagePolicy{
 		// This budget includes the versioned attachment custody schema and its
 		// ordered input/output journal; execution remains in durableflow.
 		responsibility:     "persist ordered inbound and outbound messages and atomic recovery cutoffs",
-		maxProductionLines: 1725,
+		maxProductionLines: 1800,
 	},
 	"internal/multinodecomposition": {
 		responsibility:       "compose durable multi-computer coordinator roles and manual cutover",
@@ -2070,7 +2070,7 @@ var packagePolicies = map[string]packagePolicy{
 			"internal/statejson",
 			"internal/archiveimport", "internal/cardhistory", "internal/cardtranscript", "internal/coordinator", "internal/domain", "internal/sessionlabel", "internal/telegramhistory", "internal/telegramstate",
 		},
-		maxProductionLines: 1900,
+		maxProductionLines: 1950,
 	},
 	"internal/statecompatibility": {
 		responsibility:     "validate all durable runtime documents offline before update or rollback",
@@ -2158,7 +2158,7 @@ var packagePolicies = map[string]packagePolicy{
 			"internal/nativeapprovalflow",
 			"internal/app", "internal/cardtranscript", "internal/coordinator", "internal/domain", "internal/promptpreprocess", "internal/runtimeprotocol", "internal/sessioncreation", "internal/sessionruntime", "internal/settingsport", "internal/telegramcreationview", "internal/telegramnodes", "internal/telegramsettings", "internal/telegramsettingsview", "internal/telegramsessions", "internal/telegramstatus", "internal/turnfailure", "internal/turnprocessing",
 		},
-		maxProductionLines: 5800,
+		maxProductionLines: 5850,
 	},
 	"internal/telegramflow": {
 		responsibility: "join Telegram callback, presentation, current-global-surface fencing, durable card boundaries, and crash-safe coupled receipts",

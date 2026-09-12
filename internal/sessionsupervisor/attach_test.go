@@ -41,6 +41,11 @@ func (recovery orderedInputRecovery) CommitInputRecoverySkip(context.Context, st
 	return recovery.commitErr
 }
 
+func (recovery orderedInputRecovery) CommitInputRecoveryAttach(context.Context, string, string) error {
+	*recovery.events = append(*recovery.events, "commit")
+	return recovery.commitErr
+}
+
 type orderedRecoveryStore struct {
 	*memoryStore
 	events *[]string
@@ -72,6 +77,75 @@ func (stableUnknownReconciler) ReconcileAcceptedTurns(context.Context, domain.Se
 		{MessageID: "accepted-one", TurnID: "shared-turn", Outcome: sessionsupervisor.AcceptedTurnUnknown},
 		{MessageID: "accepted-two", TurnID: "shared-turn", Outcome: sessionsupervisor.AcceptedTurnUnknown},
 	}}, stableUnknownReceiptError{revision: "native-receipts-v1"}
+}
+
+type completingAcceptedReconciler struct {
+	journal   *messagejournal.Journal
+	sessionID string
+	messageID string
+	sequence  uint64
+}
+
+func (reconciler completingAcceptedReconciler) ReconcileAcceptedTurns(ctx context.Context, _ domain.SessionID, _ domain.ProviderBinding) (sessionsupervisor.AcceptedTurnReconciliation, error) {
+	if _, err := reconciler.journal.ResolveAcceptedInput(ctx, reconciler.sessionID, reconciler.messageID, reconciler.sequence, messagejournal.InputCompleted); err != nil {
+		return sessionsupervisor.AcceptedTurnReconciliation{}, err
+	}
+	return sessionsupervisor.AcceptedTurnReconciliation{Turns: []sessionsupervisor.ReconciledAcceptedTurn{{
+		MessageID: reconciler.messageID, TurnID: "provider-turn", Outcome: sessionsupervisor.AcceptedTurnCompleted,
+	}}}, nil
+}
+
+func TestSuccessfulExactAttachPreservesQueuedSuccessor(t *testing.T) {
+	ctx := context.Background()
+	journal, err := messagejournal.Open(filepath.Join(t.TempDir(), "journal.json"), messagejournal.DefaultLimits())
+	if err != nil {
+		t.Fatal(err)
+	}
+	const sessionID = "exact-attach-preserves-queue"
+	accepted, _, err := journal.EnqueueInput(ctx, sessionID, "accepted", []byte("first"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = journal.LeaseNextInput(ctx, sessionID, "worker", time.Unix(1, 0), time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = journal.MarkInputAccepted(ctx, sessionID, "accepted", "worker"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err = journal.EnqueueInput(ctx, sessionID, "queued", []byte("second")); err != nil {
+		t.Fatal(err)
+	}
+
+	ready := readySession(t, sessionID)
+	prior, _ := ready.Binding()
+	next := prior
+	next.Generation++
+	store := &memoryStore{session: ready}
+	runtime := &attachRuntime{binding: next}
+	supervisor, err := sessionsupervisor.New(store, waitFunc(func(context.Context, domain.SessionID, domain.ProviderBinding) error { return nil }), runtime, sessionsupervisor.Options{
+		MaxRestartAttempts: 1,
+		WaitBeforeRetry:    func(context.Context, int) error { return nil },
+		Now:                time.Now,
+		AcceptedTurns: completingAcceptedReconciler{
+			journal: journal, sessionID: sessionID, messageID: "accepted", sequence: accepted.Sequence,
+		},
+		InputRecovery: journal,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := supervisor.Watch(ctx, ready.ID(), prior)
+	if err != nil || !result.Recovered || store.session.Status() != domain.SessionReady {
+		t.Fatalf("exact attach = %+v, %v, status=%s", result, err, store.session.Status())
+	}
+	inputs, err := journal.Inputs(ctx, sessionID)
+	if err != nil || len(inputs) != 2 || inputs[0].Phase != messagejournal.InputCompleted || inputs[1].Phase != messagejournal.InputPending {
+		t.Fatalf("reconciled queue = %+v, %v", inputs, err)
+	}
+	nextInput, err := journal.LeaseNextInput(ctx, sessionID, "next-worker", time.Unix(100, 0), time.Minute)
+	if err != nil || nextInput.MessageID != "queued" {
+		t.Fatalf("queued successor = %+v, %v", nextInput, err)
+	}
 }
 
 func TestAttachedRecoveryCommitsCapturedInputsBeforePublishingReady(t *testing.T) {
@@ -118,7 +192,7 @@ func TestAttachedRecoveryCommitsCapturedInputsBeforePublishingReady(t *testing.T
 	}
 }
 
-func TestAttachedRecoveryRetrySkipsOnlyOriginalBoundaryAndDispatchesSuccessorOnce(t *testing.T) {
+func TestAttachedRecoveryRetrySkipsAmbiguousInputAndPreservesQueuedFIFO(t *testing.T) {
 	ctx := context.Background()
 	journal, err := messagejournal.Open(filepath.Join(t.TempDir(), "journal.json"), messagejournal.DefaultLimits())
 	if err != nil {
@@ -172,11 +246,11 @@ func TestAttachedRecoveryRetrySkipsOnlyOriginalBoundaryAndDispatchesSuccessorOnc
 		t.Fatalf("retried recovery = %+v, %v, status=%s", second, err, store.session.Status())
 	}
 	after, err := journal.Inputs(ctx, string(ready.ID()))
-	if err != nil || len(after) != 3 || after[0].Phase != messagejournal.InputSkipped || after[1].Phase != messagejournal.InputSkipped || after[2].Phase != messagejournal.InputPending {
+	if err != nil || len(after) != 3 || after[0].Phase != messagejournal.InputSkipped || after[1].Phase != messagejournal.InputPending || after[2].Phase != messagejournal.InputPending {
 		t.Fatalf("recovery cutoff result = %+v, %v", after, err)
 	}
 	nextInput, err := journal.LeaseNextInput(ctx, string(ready.ID()), "recovered", time.Unix(100, 0), time.Minute)
-	if err != nil || nextInput.MessageID != "after-boundary" || nextInput.Sequence != 3 {
+	if err != nil || nextInput.MessageID != "pending-old" || nextInput.Sequence != 2 {
 		t.Fatalf("successor lease = %+v, %v", nextInput, err)
 	}
 	if _, err := journal.LeaseNextInput(ctx, string(ready.ID()), "duplicate", time.Unix(101, 0), time.Minute); !errors.Is(err, messagejournal.ErrNoAvailable) {
@@ -184,7 +258,7 @@ func TestAttachedRecoveryRetrySkipsOnlyOriginalBoundaryAndDispatchesSuccessorOnc
 	}
 }
 
-func TestPersistedTotalFailureSkipsOldAcceptedTurnWithoutContinuation(t *testing.T) {
+func TestPersistedExactAttachContinuesOldAcceptedTurn(t *testing.T) {
 	ctx := context.Background()
 	journal, err := messagejournal.Open(filepath.Join(t.TempDir(), "journal.json"), messagejournal.DefaultLimits())
 	if err != nil {
@@ -217,9 +291,9 @@ func TestPersistedTotalFailureSkipsOldAcceptedTurnWithoutContinuation(t *testing
 	supervisor, err := sessionsupervisor.New(store, waitFunc(func(context.Context, domain.SessionID, domain.ProviderBinding) error { return nil }), runtime, sessionsupervisor.Options{
 		MaxRestartAttempts: 1, WaitBeforeRetry: func(context.Context, int) error { return nil }, Now: time.Now,
 		AcceptedTurns: &fakeReconciler{reconciliation: sessionsupervisor.AcceptedTurnReconciliation{Turns: []sessionsupervisor.ReconciledAcceptedTurn{{MessageID: "old-accepted", TurnID: "old-turn", Outcome: sessionsupervisor.AcceptedTurnUnknown}}}},
-		ContinueAcceptedTurns: func(context.Context, domain.Session, domain.ProviderBinding, sessionsupervisor.AcceptedTurnReconciliation) error {
+		ContinueAcceptedTurnsWithRecovery: func(ctx context.Context, _ domain.Session, _ domain.ProviderBinding, _ sessionsupervisor.AcceptedTurnReconciliation, commit func(context.Context) error) error {
 			continued = true
-			return nil
+			return commit(ctx)
 		},
 		InputRecovery: journal,
 	})
@@ -227,16 +301,16 @@ func TestPersistedTotalFailureSkipsOldAcceptedTurnWithoutContinuation(t *testing
 		t.Fatal(err)
 	}
 	result, err := supervisor.RecoverPersisted(ctx, awaiting.ID(), prior)
-	if err != nil || !result.Recovered || result.AwaitingRecovery || continued || store.session.Status() != domain.SessionReady {
-		t.Fatalf("accepted recovery skip = %+v err=%v continued=%t status=%s", result, err, continued, store.session.Status())
+	if err != nil || !result.Recovered || result.AwaitingRecovery || !continued || store.session.Status() != domain.SessionRunning {
+		t.Fatalf("accepted recovery continuation = %+v err=%v continued=%t status=%s", result, err, continued, store.session.Status())
 	}
 	inputs, err := journal.Inputs(ctx, string(awaiting.ID()))
-	if err != nil || len(inputs) != 1 || inputs[0].Phase != messagejournal.InputSkipped {
-		t.Fatalf("old accepted input was not skipped: %+v, %v", inputs, err)
+	if err != nil || len(inputs) != 1 || inputs[0].Phase != messagejournal.InputAccepted {
+		t.Fatalf("old accepted input was not preserved: %+v, %v", inputs, err)
 	}
 }
 
-func TestAttachedTotalFailureCommitsStableUnknownReceiptsAndPublishesReady(t *testing.T) {
+func TestAttachedStableUnknownReceiptsRemainObserved(t *testing.T) {
 	ctx := context.Background()
 	journal, err := messagejournal.Open(filepath.Join(t.TempDir(), "journal.json"), messagejournal.DefaultLimits())
 	if err != nil {
@@ -280,9 +354,9 @@ func TestAttachedTotalFailureCommitsStableUnknownReceiptsAndPublishesReady(t *te
 	supervisor, err := sessionsupervisor.New(store, waitFunc(func(context.Context, domain.SessionID, domain.ProviderBinding) error { return nil }), runtime, sessionsupervisor.Options{
 		MaxRestartAttempts: 1, WaitBeforeRetry: func(context.Context, int) error { return nil }, Now: time.Now,
 		AcceptedTurns: stableUnknownReconciler{},
-		ContinueAcceptedTurns: func(context.Context, domain.Session, domain.ProviderBinding, sessionsupervisor.AcceptedTurnReconciliation) error {
+		ContinueAcceptedTurnsWithRecovery: func(ctx context.Context, _ domain.Session, _ domain.ProviderBinding, _ sessionsupervisor.AcceptedTurnReconciliation, commit func(context.Context) error) error {
 			continued = true
-			return nil
+			return commit(ctx)
 		},
 		InputRecovery: journal,
 	})
@@ -290,7 +364,7 @@ func TestAttachedTotalFailureCommitsStableUnknownReceiptsAndPublishesReady(t *te
 		t.Fatal(err)
 	}
 	result, err := supervisor.Watch(ctx, running.ID(), prior)
-	if err != nil || !result.Recovered || result.AwaitingRecovery || continued || store.session.Status() != domain.SessionReady {
+	if err != nil || !result.Recovered || result.AwaitingRecovery || !continued || store.session.Status() != domain.SessionRunning {
 		t.Fatalf("stable unknown recovery = %+v err=%v continued=%t status=%s", result, err, continued, store.session.Status())
 	}
 	binding, bound := store.session.Binding()
@@ -301,10 +375,8 @@ func TestAttachedTotalFailureCommitsStableUnknownReceiptsAndPublishesReady(t *te
 	if err != nil || len(inputs) != 3 {
 		t.Fatalf("recovered inputs = %+v, %v", inputs, err)
 	}
-	for _, input := range inputs {
-		if input.Phase != messagejournal.InputSkipped {
-			t.Fatalf("captured input %q phase=%s, want skipped", input.MessageID, input.Phase)
-		}
+	if inputs[0].Phase != messagejournal.InputAccepted || inputs[1].Phase != messagejournal.InputAccepted || inputs[2].Phase != messagejournal.InputSkipped {
+		t.Fatalf("attached recovery phases = %+v", inputs)
 	}
 	open, err := journal.InputRecoveryOpen(ctx, string(running.ID()))
 	if err != nil || open {

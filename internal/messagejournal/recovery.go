@@ -221,6 +221,65 @@ func (journal *Journal) CommitInputRecoverySkip(ctx context.Context, sessionID, 
 	return err
 }
 
+// CommitInputRecoveryAttach closes a recovery boundary after the exact native
+// terminal was reattached and provider history was reconciled. Durable
+// acceptances remain fenced for observation, while definitely-unsent pending
+// inputs remain FIFO-dispatchable. Ambiguous handoffs are tombstoned.
+func (journal *Journal) CommitInputRecoveryAttach(ctx context.Context, sessionID, token string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := validateOpaqueID(sessionID, journal.limits.MaxIDBytes, "session id"); err != nil {
+		return err
+	}
+	if err := validateOpaqueID(token, journal.limits.MaxIDBytes, "input recovery token"); err != nil {
+		return err
+	}
+	err := journal.mutate(func(loaded *document) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		session, err := sessionAt(loaded, sessionID, false, journal.limits)
+		if err != nil || session.Recovery == nil {
+			return ErrNotFound
+		}
+		if session.Recovery.Token != token {
+			return ErrConflict
+		}
+		if session.Recovery.Phase == inputRecoveryAttached {
+			return errNoMutation
+		}
+		if session.Recovery.Phase != inputRecoveryOpen {
+			return ErrInvalidFormat
+		}
+		for index := range session.Inputs {
+			record := &session.Inputs[index]
+			if record.Sequence > session.Recovery.ThroughSequence {
+				break
+			}
+			switch record.Phase {
+			case InputPending:
+				if record.Lease.Owner != "" {
+					record.Phase = InputSkipped
+					record.Lease = leaseRecord{}
+				}
+			case InputAccepted, InputCompleted, InputTerminalFailed, InputSkipped:
+			case InputFailed, InputUnknown:
+				record.Phase = InputSkipped
+				record.Lease = leaseRecord{}
+			default:
+				return ErrInvalidFormat
+			}
+		}
+		session.Recovery.Phase = inputRecoveryAttached
+		return nil
+	})
+	if errors.Is(err, errNoMutation) {
+		return nil
+	}
+	return err
+}
+
 func hasUnresolvedInputs(inputs []inputRecord) bool {
 	for _, input := range inputs {
 		switch input.Phase {

@@ -115,6 +115,24 @@ func TestExactIncrementalCodexAndExplicitCompletion(t *testing.T) {
 	}
 }
 
+func TestCodexTaskStartedExposesExactTurnBeforeUserTranscript(t *testing.T) {
+	opts, _ := fixture(t, "codex", codexMeta()+
+		`{"type":"event_msg","payload":{"type":"task_started"}}`+"\n"+
+		`{"type":"event_msg","payload":{"type":"task_started","turn_id":"turn-before-user"}}`+"\n")
+	r, err := Open(context.Background(), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	events, err := r.Poll(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 || events[0].Kind != KindStarted || events[0].TurnID != "turn-before-user" || events[0].Text != "" {
+		t.Fatalf("events=%#v", events)
+	}
+}
+
 func appendFile(t *testing.T, path, text string) {
 	t.Helper()
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0600)

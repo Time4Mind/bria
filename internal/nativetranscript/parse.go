@@ -217,6 +217,9 @@ func (s *parseState) parse(line []byte, opts Options, offset int64) ([]Event, er
 			case "task_started":
 				s.lastFinal = ""
 				s.finalSource = ""
+				if p.TurnID != "" {
+					emit(KindStarted, "")
+				}
 			case "user_message":
 				s.lastFinal = ""
 				s.finalSource = ""
